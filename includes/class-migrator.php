@@ -34,7 +34,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrator' ) ) {
 
             $settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
 
-            if ( !isset( $settings ) ) {
+            if ( !isset( $settings ) || false === $settings ) {
                 // We have never tried to detect anything, so try to detect plugins.
                 $this->run_detection();
             }

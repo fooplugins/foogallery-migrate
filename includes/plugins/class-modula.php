@@ -33,7 +33,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
          * @return bool
          */
         function detect() {
-            return true;
+            return false;
         }
 
 //        abstract function get_galleries();
