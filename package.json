@@ -1,0 +1,11 @@
+{
+  "name": "foogallery-migrate",
+  "description": "FooGallery Migrate",
+  "version": "0.1",
+  "author": "Brad Vincent",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/fooplugins/foogallery-migrate"
+  },
+  "license": "GPLv2"
+}
