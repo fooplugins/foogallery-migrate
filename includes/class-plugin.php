@@ -14,49 +14,13 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugin' ) ) {
      *
      * @package FooPlugins\FooGalleryMigrate
      */
-    abstract class Plugin {
-
-        const KEY_PLUGINS_DETECTED = 'plugins_detected';
+    abstract class Plugin extends MigratorBase {
 
         /**
          * The name of the Plugin.
          * @return string
          */
         abstract function name();
-
-        /**
-         * Returns a setting for the migrator.
-         *
-         * @return mixed
-         */
-        private function get_migrator_setting( $name, $default = false ) {
-            $settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
-
-            if ( isset( $settings ) && is_array( $settings ) && array_key_exists( $name, $settings ) ) {
-                return $settings[ $name ];
-            }
-
-            return $default;
-        }
-
-        /**
-         * Sets a migrator setting.
-         *
-         * @param $name
-         * @param $value
-         * @return void
-         */
-        private function set_migrator_setting( $name, $value ) {
-            $settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
-
-            if ( !isset( $settings ) ) {
-                $settings = array();
-            }
-
-            $settings[ $name ] = $value;
-
-            update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $settings );
-        }
 
         /**
          * Returns true if the plugin has been detected before.
@@ -68,19 +32,23 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugin' ) ) {
             return array_key_exists( $this->name(), $detected_plugins ) && $detected_plugins[ $this->name() ];
         }
 
-        /**
-         * Stores that the plugin is detected.
-         *
-         * @return void
-         */
-        function set_detection( $is_detected ) {
-            if ( $this->is_detected() !== $is_detected ) {
-                $detected_plugins = $this->get_migrator_setting( self::KEY_PLUGINS_DETECTED, array() );
-                $detected_plugins[ $this->name() ] = $is_detected;
-
-                $this->set_migrator_setting( self::KEY_PLUGINS_DETECTED, $detected_plugins );
-            }
-        }
+//        protected function get_data() {
+//            return $this->get_migrator_setting( $this->name(), array( 'galleries' => false, 'albums' => false, 'content' => false ) );
+//        }
+//
+//        public function get_saved_galleries() {
+//            return $this->get_data()['galleries'];
+//        }
+//
+//        function find() {
+//            $existing_galleries = $this->get_saved_galleries();
+//            $found_galleries = $this->find_galleries();
+//
+//            //Merge the galleries together.
+//            $data = $this->get_data();
+//            $data['galleries'] = $found_galleries;
+//            $this->set_migrator_setting( $this->name(), $data );
+//        }
 
         /**
          * Detects data from the gallery plugin.
@@ -88,7 +56,12 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugin' ) ) {
          */
         abstract function detect();
 
-//        abstract function get_galleries();
+        /**
+         * Returns all galleries for the plugin.
+         *
+         * @return array<Gallery>
+         */
+        abstract function find_galleries();
 //
 //        abstract function get_albums();
 //

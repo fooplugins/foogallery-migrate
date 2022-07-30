@@ -1,15 +1,12 @@
 <?php
 $migrator = foogallery_migrate_migrator_instance();
-if ( isset( $_POST['foogallery_migrate_reset'] ) ) {
 
-	if ( check_admin_referer( 'foogallery_migrate_reset', 'foogallery_migrate_reset' ) ) {
-        $migrator->reset();
+if ( isset( $_POST['foogallery_migrate_action'] ) ) {
+	if ( check_admin_referer( 'foogallery_migrate', 'foogallery_migrate' ) ) {
+        if ( 'foogallery_migrate_cancel' === sanitize_key( $_POST['foogallery_migrate_action'] ) ) {
+            $migrator->cancel_migration();
+        }
 	}
-//} else if ( isset( $_POST['foogallery_nextgen_reset_album'] ) ) {
-//
-//	if ( check_admin_referer( 'foogallery_nextgen_album_reset', 'foogallery_nextgen_album_reset' ) ) {
-//		$nextgen->reset_album_import();
-//	}
 }
 ?>
 <style>
@@ -101,71 +98,6 @@ if ( isset( $_POST['foogallery_migrate_reset'] ) ) {
 </style>
 <script>
 	jQuery(function ($) {
-
-		function nextgen_ajax(action, success_callback) {
-			var data = jQuery("#foogallery_migrate_form").serialize();
-
-			$.ajax({
-				type: "POST",
-				url: ajaxurl,
-				data: data + "&action=" + action,
-				success: success_callback,
-				error: function() {
-					//something went wrong! Alert the user and reload the page
-					alert('<?php _e( 'Something went wrong with the import and the page will now reload. Once it has reloaded, click "Resume Import" to continue with the import.', 'foogallery-migrate' ); ?>');
-					location.reload();
-				}
-			});
-		}
-
-		function foogallery_migrate_continue(dont_check_progress) {
-			nextgen_ajax('foogallery_foogallery_migrate_refresh', function (data) {
-				$('#foogallery_migrate_form').html(data);
-
-				if (dont_check_progress != true) {
-					//check if we need to carry on polling
-					var percentage = parseInt($('#foogallery_migrate_progress').val());
-					if (percentage < 100) {
-						foogallery_migrate_continue();
-					} else {
-						foogallery_migrate_continue(true);
-					}
-				}
-			});
-		}
-
-		$('#foogallery_migrate_form').on('click', '.start_import', function (e) {
-			e.preventDefault();
-
-			//show the spinner
-			$('#foogallery_migrate_form .button').hide();
-			$('#import_spinner .spinner').addClass('is-active');
-
-			nextgen_ajax('foogallery_foogallery_migrate', function (data) {
-				$('#foogallery_migrate_form').html(data);
-				foogallery_migrate_continue();
-			});
-		});
-
-		$('#foogallery_migrate_form').on('click', '.continue_import', function (e) {
-			e.preventDefault();
-			foogallery_migrate_continue();
-		});
-
-		$('#foogallery_migrate_form').on('click', '.cancel_import', function (e) {
-			if (!confirm('<?php _e( 'Are you sure you want to cancel?', 'foogallery-migrate' ); ?>')) {
-				e.preventDefault();
-				return false;
-			}
-		});
-
-		$('#foogallery_migrate_form').on('click', '.reset_import', function (e) {
-			if (!confirm('<?php _e( 'Are you sure you want to reset all NextGen gallery import data? This may result in duplicate galleries and media attachments!', 'foogallery-migrate' ); ?>')) {
-				e.preventDefault();
-				return false;
-			}
-		});
-
 		$('#foogallery_migrate_album_form').on('click', '.reset_album_import', function (e) {
 			if (!confirm('<?php _e( 'Are you sure you want to reset all NextGen album import data? This may result in duplicate albums if you decide to import again!', 'foogallery-migrate' ); ?>')) {
 				e.preventDefault();

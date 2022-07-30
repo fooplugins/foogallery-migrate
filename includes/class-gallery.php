@@ -1,0 +1,168 @@
+<?php
+/**
+ * FooGallery Migrator Gallery Class
+ *
+ * @package FooPlugins\FooGalleryMigrate
+ */
+
+namespace FooPlugins\FooGalleryMigrate;
+
+if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Gallery' ) ) {
+
+    /**
+     * Class Init
+     *
+     * @package FooPlugins\FooGalleryMigrate
+     */
+    class Gallery extends \stdClass {
+
+        const PROGRESS_NOT_STARTED = 'not_started';
+        const PROGRESS_QUEUED = 'queued';
+        const PROGRESS_STARTED = 'started';
+        const PROGRESS_COMPLETED = 'completed';
+        const PROGRESS_ERROR = 'error';
+
+        function __construct() {
+            $this->migrated = false;
+            $this->source = '';
+            $this->ID = 0;
+            $this->data = null;
+            $this->title = '';
+            $this->foogallery_id = 0;
+            $this->foogallery_title = '';
+            $this->migration_status = self::PROGRESS_NOT_STARTED;
+            $this->image_count = 0;
+            $this->migrated_image_count = 0;
+            $this->images = array();
+            $this->progress = 0;
+            $this->part_of_migration = false;
+        }
+
+        /**
+         * The unique identifier for the gallery.
+         *
+         * @return string
+         */
+        function unique_identifier() {
+            return $this->source . '_' . $this->ID;
+        }
+
+        /**
+         * Migrate the gallery!
+         *
+         * @return void
+         */
+        function migrate() {
+            if ( !$this->migrated ) {
+
+                if ( $this->image_count === 0 ) {
+                    $this->migration_status = self::PROGRESS_ERROR;
+                } else {
+                    $this->migration_status = self::PROGRESS_STARTED;
+
+                    if ( $this->foogallery_id === 0 ) {
+                        // Create an empty foogallery
+                        $foogallery_args = array(
+                            'post_title' => $this->foogallery_title,
+                            'post_type' => FOOGALLERY_CPT_GALLERY,
+                            'post_status' => 'publish',
+                        );
+                        $this->foogallery_id = wp_insert_post( $foogallery_args );
+
+                        if ( is_wp_error( $this->foogallery_id ) ) {
+                            $this->migration_status = self::PROGRESS_ERROR;
+                        }
+
+                        //set a default gallery template
+                        add_post_meta( $this->foogallery_id, FOOGALLERY_META_TEMPLATE, foogallery_default_gallery_template(), true );
+
+                        //set default settings if there are any
+                        $default_gallery_id = foogallery_get_setting( 'default_gallery_settings' );
+                        if ( $default_gallery_id ) {
+                            $settings = get_post_meta( $default_gallery_id, FOOGALLERY_META_SETTINGS, true );
+                            add_post_meta( $this->foogallery_id, FOOGALLERY_META_SETTINGS, $settings, true );
+                        }
+                    }
+
+                    $this->migrate_next_image();
+                }
+            }
+        }
+
+        /**
+         * Migrate the next available image for the gallery.
+         *
+         * @return void
+         */
+        function migrate_next_image() {
+            if ( $this->migration_status !== self::PROGRESS_ERROR && $this->migrated_image_count < $this->image_count ) {
+                foreach ( $this->images as $image ) {
+                    if ( !$image->migrated && intval( $image->attachment_id ) === 0 ) {
+                        if ( $image->migrate() ) {
+                            $this->migrated_image_count++;
+                        }
+                        break;
+                    }
+                }
+            }
+            $this->calculate_progress();
+        }
+
+        /**
+         * Calculates the migration progress.
+         *
+         * @return void
+         */
+        function calculate_progress() {
+            if ( $this->migrated || $this->image_count === 0 ) {
+                // Nothing to migrate.
+                $this->progress = 100;
+                return;
+            }
+
+//            $this->migrated_image_count = 0;
+//            foreach ( $this->images as $image ) {
+//                if ( $image->migrated && !is_wp_error( $image->error ) ) {
+//                    $this->migrated_image_count++;
+//                }
+//            }
+
+            //update our percentage complete
+            if ( $this->migrated_image_count > 0 && $this->image_count > 0 ) {
+                $this->progress = $this->migrated_image_count / $this->image_count * 100;
+            }
+
+            if ( intval( $this->progress ) >= 100 ) {
+                $this->migration_status = self::PROGRESS_COMPLETED;
+                $this->migrated = true;
+            }
+        }
+
+        function friendly_migration_message () {
+            switch ( $this->migration_status ) {
+                case self::PROGRESS_NOT_STARTED:
+                    return __( 'Not migrated', 'foogallery-migrate' );
+                    break;
+                case self::PROGRESS_QUEUED:
+                    return __( 'Queued for migration', 'foogallery-migrate' );
+                    break;
+                case self::PROGRESS_STARTED:
+                    return sprintf( __( 'Imported %d of %d image(s)', 'foogallery-migrate' ),
+                        $this->migrated_image_count, $this->image_count );
+                    break;
+                case self::PROGRESS_COMPLETED:
+                    return sprintf( __( 'Done! %d image(s) migrated', 'foogallery-migrate' ), $this->migrated_image_count );
+                    break;
+                case self::PROGRESS_ERROR:
+                    if ( 0 === $this->import_count ) {
+                        return __( 'No images to migrate!', 'foogallery-migrate' );
+                    } else {
+                        return __( 'Error while migrating!', 'foogallery-migrate' );
+                    }
+                    break;
+            }
+
+            return __( 'Unknown status!', 'foogallery-migrate' );
+        }
+    }
+}

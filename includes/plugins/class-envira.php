@@ -36,6 +36,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Envira' ) ) {
             return false;
         }
 
+        function find_galleries() {
+            return array();
+        }
+
 //        abstract function get_galleries();
 //
 //        abstract function get_albums();
