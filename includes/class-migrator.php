@@ -175,7 +175,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrator' ) ) {
 
             $progress = 0;
             if ( $queued_count > 0 ) {
-                $progress = ( $completed_count + $error_count ) / $queued_count;
+                $progress = ( $completed_count + $error_count ) / $queued_count * 100;
             }
 
             $this->set_migrator_setting( self::KEY_CURRENT_MIGRATION_STATE, array(
@@ -236,6 +236,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrator' ) ) {
                 }
             }
 
+            $this->calculate_migration_state();
+
             // Save the state of the galleries.
             $this->set_migrator_setting( self::KEY_GALLERIES, $galleries );
         }
@@ -258,8 +260,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrator' ) ) {
                 $has_migrations = false;
                 $overall_progress = 0;
             } else {
-                $has_migrations = true;
                 $overall_progress = $migration_state['progress'];
+                $has_migrations = $overall_progress < 100;
             }
             $migrating = $has_migrations && defined( 'DOING_AJAX' ) && DOING_AJAX;
             $current_gallery_id = $this->get_current_gallery_being_migrated();
