@@ -85,6 +85,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Gallery' ) ) {
                     }
 
                     $this->migrate_next_image();
+
+                    $attachments = $this->build_attachment_array();
+
+                    update_post_meta( $this->foogallery_id, FOOGALLERY_META_ATTACHMENTS, $attachments );
                 }
             }
         }
@@ -106,6 +110,21 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Gallery' ) ) {
                 }
             }
             $this->calculate_progress();
+        }
+
+        /**
+         * Build up the attachment array for the gallery.
+         *
+         * @return array
+         */
+        function build_attachment_array() {
+            $attachments = array();
+            foreach ( $this->images as $image ) {
+                if ( $image->migrated && intval( $image->attachment_id ) > 0 ) {
+                    $attachments[] = $image->attachment_id;
+                }
+            }
+            return $attachments;
         }
 
         /**
