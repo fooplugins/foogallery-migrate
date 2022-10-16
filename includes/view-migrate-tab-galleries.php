@@ -69,6 +69,10 @@
             if (!confirm('<?php _e( 'Are you sure you want to cancel?', 'foogallery-migrate' ); ?>')) {
                 e.preventDefault();
                 return false;
+            } else {
+                foogallery_gallery_migration_ajax( 'foogallery_migrate_cancel', function (data) {
+                    $form.html(data);
+                } );
             }
         });
 
@@ -76,6 +80,10 @@
             if (!confirm('<?php _e( 'Are you sure you want to reset all migration data? This may result in duplicate galleries and media attachments!', 'foogallery-migrate' ); ?>')) {
                 e.preventDefault();
                 return false;
+            } else {
+                foogallery_gallery_migration_ajax( 'foogallery_migrate_reset', function (data) {
+                    $form.html(data);
+                } );
             }
         });
     });
