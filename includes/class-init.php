@@ -92,35 +92,45 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
         }
 
         function ajax_continue_migration() {
-            if ( check_admin_referer( 'foogallery_migrate_continue', 'foogallery_migrate_continue' ) ) {
+            if ( check_admin_referer( 'foogallery_migrate', 'foogallery_migrate' ) ) {
 
-                $migrator = foogallery_migrate_migrator_instance();
+                $action = isset( $_REQUEST[ 'action' ] ) ? $_REQUEST[ 'action' ] : '';
 
-                $migrator->migrate();
-
-                $migrator->render_gallery_form();
+                if ( 'foogallery_migrate_continue' === $action ) {
+                    $migrator = foogallery_migrate_migrator_instance();
+                    $migrator->migrate();
+                    $migrator->render_gallery_form();
+                }
 
                 die();
             }
         }
 
         function ajax_cancel_migration() {
-            if ( check_admin_referer( 'foogallery_migrate_cancel', 'foogallery_migrate_cancel' ) ) {
+            if ( check_admin_referer( 'foogallery_migrate', 'foogallery_migrate' ) ) {
 
-                $migrator = foogallery_migrate_migrator_instance();
+                $action = isset( $_REQUEST[ 'action' ] ) ? $_REQUEST[ 'action' ] : '';
 
-                $migrator->cancel_migration();
+                if ( 'foogallery_migrate_cancel' === $action ) {
+                    $migrator = foogallery_migrate_migrator_instance();
+                    $migrator->cancel_migration();
+                    $migrator->render_gallery_form();
+                }
 
             }
             die();
         }
 
-        function ajax_nextgen_reset_import() {
-            if ( check_admin_referer( 'foogallery_nextgen_reset', 'foogallery_nextgen_reset' ) ) {
+        function ajax_reset_migration() {
+            if ( check_admin_referer( 'foogallery_migrate', 'foogallery_migrate' ) ) {
 
-                $this->nextgen->reset_import();
+                $action = isset( $_REQUEST[ 'action' ] ) ? $_REQUEST[ 'action' ] : '';
 
-                $this->nextgen->render_import_form();
+                if ( 'foogallery_migrate_reset' === $action ) {
+                    $migrator = foogallery_migrate_migrator_instance();
+                    $migrator->reset_migration();
+                    $migrator->render_gallery_form();
+                }
 
             }
             die();
