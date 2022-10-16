@@ -46,6 +46,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
                 // Do some checks even if the plugin is not activated.
                 global $wpdb;
 
+                //TODO : first check if the ngg_gallery tables exists
+
                 $galleries = $wpdb->get_results('SELECT * FROM ' . $wpdb->prefix . 'ngg_gallery');
 
                 return count($galleries) > 0;
