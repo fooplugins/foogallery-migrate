@@ -7,6 +7,8 @@
 
 namespace FooPlugins\FooGalleryMigrate\Plugins;
 
+use FooPlugins\FooGalleryMigrate\Gallery;
+use FooPlugins\FooGalleryMigrate\Image;
 use FooPlugins\FooGalleryMigrate\Plugin;
 
 if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Envira' ) ) {
@@ -33,11 +35,38 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Envira' ) ) {
          * @return bool
          */
         function detect() {
-            return false;
+            return class_exists( 'Envira_Gallery_Lite' );
         }
 
         function find_galleries() {
-            return array();
+            // Get galleries
+            $instance = \Envira_Gallery_Lite::get_instance();
+            $envira_galleries = $instance->get_galleries( false, true, '' );
+            $galleries = array();
+
+            if ( count( $envira_galleries ) != 0 ) {
+                foreach ( $envira_galleries as $envira_gallery ) {
+                    $gallery = new Gallery( $this );
+                    $gallery->ID = $envira_gallery['id'];
+                    $gallery->title = $envira_gallery['config']['title'];
+                    $gallery->data = $envira_gallery;
+                    $gallery->images = array();
+                    if ( is_array( $envira_gallery['gallery'] ) ) {
+                        foreach ( $envira_gallery['gallery'] as $envira_image ) {
+                            $image = new Image();
+                            $image->data = $envira_image;
+                            $image->source_url = $envira_image['src'];
+                            $image->caption = $envira_image['caption'];
+                            $image->alt = $envira_image['alt'];
+                            $gallery->images[] = $image;
+                        }
+                    }
+                    $gallery->image_count = count( $gallery->images );
+                    $galleries[] = $gallery;
+                }
+            }
+
+            return $galleries;
         }
 
         function migrate_settings( $gallery ) {
