@@ -40,7 +40,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Image' ) ) {
         function check_image_already_uploaded() {
             $upload = wp_upload_dir();
 
-            $image_url = trailingslashit( $upload['path'] ) . basename( $this->source_url );
+            $image_url = trailingslashit( $upload['url'] ) . basename( $this->source_url );
 
             return attachment_url_to_postid( $image_url );
         }
