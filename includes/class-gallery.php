@@ -22,9 +22,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Gallery' ) ) {
         const PROGRESS_COMPLETED = 'completed';
         const PROGRESS_ERROR = 'error';
 
-        function __construct() {
+        function __construct( $plugin ) {
             $this->migrated = false;
-            $this->source = '';
+            $this->plugin = $plugin;
             $this->ID = 0;
             $this->data = null;
             $this->title = '';
@@ -44,7 +44,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Gallery' ) ) {
          * @return string
          */
         function unique_identifier() {
-            return $this->source . '_' . $this->ID;
+            return $this->plugin->name() . '_' . $this->ID;
         }
 
         /**
@@ -82,6 +82,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Gallery' ) ) {
                             $settings = get_post_meta( $default_gallery_id, FOOGALLERY_META_SETTINGS, true );
                             add_post_meta( $this->foogallery_id, FOOGALLERY_META_SETTINGS, $settings, true );
                         }
+
+                        //migrate settings
+                        $this->plugin->migrate_settings( $this );
                     }
 
                     $this->migrate_next_image();

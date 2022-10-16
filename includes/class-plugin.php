@@ -32,24 +32,6 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugin' ) ) {
             return array_key_exists( $this->name(), $detected_plugins ) && $detected_plugins[ $this->name() ];
         }
 
-//        protected function get_data() {
-//            return $this->get_migrator_setting( $this->name(), array( 'galleries' => false, 'albums' => false, 'content' => false ) );
-//        }
-//
-//        public function get_saved_galleries() {
-//            return $this->get_data()['galleries'];
-//        }
-//
-//        function find() {
-//            $existing_galleries = $this->get_saved_galleries();
-//            $found_galleries = $this->find_galleries();
-//
-//            //Merge the galleries together.
-//            $data = $this->get_data();
-//            $data['galleries'] = $found_galleries;
-//            $this->set_migrator_setting( $this->name(), $data );
-//        }
-
         /**
          * Detects data from the gallery plugin.
          * @return bool
@@ -62,6 +44,14 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugin' ) ) {
          * @return array<Gallery>
          */
         abstract function find_galleries();
+
+        /**
+         * Migrates any settings for the gallery.
+         *
+         * @param $gallery Gallery
+         * @return void
+         */
+        abstract function migrate_settings( $gallery );
 //
 //        abstract function get_albums();
 //

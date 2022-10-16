@@ -60,8 +60,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
 
             if ( count( $nextgen_galleries ) != 0 ) {
                 foreach ( $nextgen_galleries as $key => $nextgen_gallery ) {
-                    $gallery = new Gallery();
-                    $gallery->source = 'NextGen';
+                    $gallery = new Gallery( $this );
                     $gallery->ID = $nextgen_gallery->gid;
                     $gallery->title = $nextgen_gallery->title;
                     $gallery->data = $nextgen_gallery;
@@ -99,6 +98,17 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
             return $wpdb->get_results( "select * from {$gallery_table}" );
         }
 
+        private function get_nextgen_gallery_images( $id ) {
+            global $wpdb;
+            $picture_table = $wpdb->prefix . self::NEXTGEN_TABLE_PICTURES;
+
+            return $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$picture_table} WHERE galleryid = %d order by sortorder", $id ) );
+        }
+
+        function migrate_settings( $gallery ) {
+            //For NextGen, there are no settings to migrate across
+        }
+
         private function get_nextgen_albums() {
             global $wpdb;
             $album_table = $wpdb->prefix . self::NEXTGEN_TABLE_ALBUMS;
@@ -110,24 +120,6 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
             $album_table = $wpdb->prefix . self::NEXTGEN_TABLE_ALBUMS;
 
             return $wpdb->get_row( $wpdb->prepare( "select * from {$album_table} where id = %d", $id ) );
-        }
-
-        private function get_nextgen_gallery( $id ) {
-            global $wpdb;
-            $gallery_table = $wpdb->prefix . self::NEXTGEN_TABLE_GALLERY;
-            $picture_table = $wpdb->prefix . self::NEXTGEN_TABLE_PICTURES;
-
-            return $wpdb->get_row( $wpdb->prepare( "select gid, name, title, galdesc, path, author,
-(select count(*) from {$picture_table} where galleryid = gid) 'image_count'
-from {$gallery_table}
-where gid = %d", $id ) );
-        }
-
-        private function get_nextgen_gallery_images( $id ) {
-            global $wpdb;
-            $picture_table = $wpdb->prefix . self::NEXTGEN_TABLE_PICTURES;
-
-            return $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$picture_table} WHERE galleryid = %d order by sortorder", $id ) );
         }
     }
 }

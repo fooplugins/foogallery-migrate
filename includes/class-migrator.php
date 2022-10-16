@@ -355,7 +355,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrator' ) ) {
                             <?php echo ' ' . sprintf( __( '(%s images)', 'foogallery' ), $gallery->image_count ); ?>
                         </td>
                         <td>
-                            <?php echo $gallery->source; ?>
+                            <?php echo $gallery->plugin->name(); ?>
                         </td>
                         <td>
                             <?php if ( $foogallery ) {
