@@ -64,9 +64,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
                     $gallery->source = 'NextGen';
                     $gallery->ID = $nextgen_gallery->gid;
                     $gallery->title = $nextgen_gallery->title;
-                    $gallery->image_count = $nextgen_gallery->image_count;
                     $gallery->data = $nextgen_gallery;
                     $gallery->images = $this->find_images( $gallery->ID, $nextgen_gallery->path );
+                    $gallery->image_count = count( $gallery->images );
                     $galleries[] = $gallery;
                 }
             }
@@ -76,15 +76,20 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
 
         private function find_images( $gallery_id, $gallery_path ) {
             $nextgen_images = $this->get_nextgen_gallery_images( $gallery_id );
+
+            //TODO : sort the images based on the gallery sort order. If the gallery is "unsorted" then sort the images looking at $nextgen_image->sortorder
+            $sorted_images = $nextgen_images;
+
             $images = array();
-            foreach ( $nextgen_images as $nextgen_image ) {
+            foreach ( $sorted_images as $nextgen_image ) {
                 $image = new Image();
                 $image->source_url = trailingslashit( site_url() ) . trailingslashit( $gallery_path ) . $nextgen_image->filename;
                 $image->caption = $nextgen_image->description;
                 $image->alt = $nextgen_image->alttext;
                 $image->date = $nextgen_image->imagedate;
-                //TODO : use $nextgen_image->sortorder;
                 //TODO : check $nextgen_image->exclude;
+
+                $image->data = $nextgen_image;
                 $images[] = $image;
             }
             return $images;
@@ -93,12 +98,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
         private function get_nextgen_galleries() {
             global $wpdb;
             $gallery_table = $wpdb->prefix . self::NEXTGEN_TABLE_GALLERY;
-            $picture_table = $wpdb->prefix . self::NEXTGEN_TABLE_PICTURES;
-
-            return $wpdb->get_results( "select gal.gid, gal.name, gal.title, gal.galdesc, gal.path, count(pic.pid) 'image_count'
-from {$gallery_table} gal
-   join {$picture_table} pic on gal.gid = pic.galleryid
-group by gal.gid, gal.name, gal.title, gal.galdesc" );
+            return $wpdb->get_results( "select * from {$gallery_table}" );
         }
 
         private function get_nextgen_albums() {
@@ -129,7 +129,7 @@ where gid = %d", $id ) );
             global $wpdb;
             $picture_table = $wpdb->prefix . self::NEXTGEN_TABLE_PICTURES;
 
-            return $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$picture_table} WHERE galleryid = %d", $id ) );
+            return $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$picture_table} WHERE galleryid = %d order by sortorder", $id ) );
         }
     }
 }

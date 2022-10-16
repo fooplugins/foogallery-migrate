@@ -27,6 +27,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Image' ) ) {
             $this->source_url = null;
             $this->url = '';
             $this->error = false;
+            $this->data = null;
         }
 
         /**
