@@ -77,20 +77,18 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
         private function find_images( $gallery_id, $gallery_path ) {
             $nextgen_images = $this->get_nextgen_gallery_images( $gallery_id );
 
-            //TODO : sort the images based on the gallery sort order. If the gallery is "unsorted" then sort the images looking at $nextgen_image->sortorder
-            $sorted_images = $nextgen_images;
-
             $images = array();
-            foreach ( $sorted_images as $nextgen_image ) {
+            foreach ( $nextgen_images as $nextgen_image ) {
                 $image = new Image();
                 $image->source_url = trailingslashit( site_url() ) . trailingslashit( $gallery_path ) . $nextgen_image->filename;
                 $image->caption = $nextgen_image->description;
                 $image->alt = $nextgen_image->alttext;
                 $image->date = $nextgen_image->imagedate;
-                //TODO : check $nextgen_image->exclude;
-
                 $image->data = $nextgen_image;
-                $images[] = $image;
+
+                if ( '1' !== $nextgen_image->exclude ) {
+                    $images[] = $image;
+                }
             }
             return $images;
         }
