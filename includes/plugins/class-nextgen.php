@@ -46,14 +46,21 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
                 // Do some checks even if the plugin is not activated.
                 global $wpdb;
 
-                //TODO : first check if the ngg_gallery tables exists
-
+               // Check if plugin's table ngg_gallery exists in database
+               if ( !$wpdb->get_var( 'SHOW TABLES LIKE"%' . $wpdb->prefix . 'ngg_gallery%"' ) ) {
+                   return false;
+               }
                 $galleries = $wpdb->get_results('SELECT * FROM ' . $wpdb->prefix . 'ngg_gallery');
 
                 return count($galleries) > 0;
             }
         }
 
+        /**
+         * Find all galleries
+         *
+         * @return array
+         */
         function find_galleries() {
             $nextgen_galleries = $this->get_nextgen_galleries();
             $galleries = array();
@@ -73,6 +80,12 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
             return $galleries;
         }
 
+        /**
+         * Find all images by gallery id
+         * @param $gallery_id ID of the gallery
+         * @param $gallery_path Image gallery path
+         * @return bool
+         */
         private function find_images( $gallery_id, $gallery_path ) {
             $nextgen_images = $this->get_nextgen_gallery_images( $gallery_id );
 
@@ -92,12 +105,22 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
             return $images;
         }
 
+        /**
+         * Return all galleries object data.
+         *
+         * @return object Object of all galleries
+         */
         private function get_nextgen_galleries() {
             global $wpdb;
             $gallery_table = $wpdb->prefix . self::NEXTGEN_TABLE_GALLERY;
             return $wpdb->get_results( "select * from {$gallery_table}" );
         }
 
+        /**
+         * Return single gallery object data.
+         * @param $id ID of the gallery
+         * @return object Object of the gallery
+         */
         private function get_nextgen_gallery_images( $id ) {
             global $wpdb;
             $picture_table = $wpdb->prefix . self::NEXTGEN_TABLE_PICTURES;
@@ -105,16 +128,31 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
             return $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$picture_table} WHERE galleryid = %d order by sortorder", $id ) );
         }
 
+        /**
+         * Migrate gallery settings to foogalery.
+         * @param $gallery Object of gallery
+         * @return NULL
+         */
         function migrate_settings( $gallery ) {
             //For NextGen, there are no settings to migrate across
         }
 
+        /**
+         * Return all albums object data.
+         *
+         * @return object Object of all albums
+         */
         private function get_nextgen_albums() {
             global $wpdb;
             $album_table = $wpdb->prefix . self::NEXTGEN_TABLE_ALBUMS;
             return $wpdb->get_results(" select * from {$album_table}");
         }
 
+        /**
+         * Return single album object data.
+         * @param $id ID of the album
+         * @return object Object of the album
+         */
         private function get_nextgen_album( $id ) {
             global $wpdb;
             $album_table = $wpdb->prefix . self::NEXTGEN_TABLE_ALBUMS;
