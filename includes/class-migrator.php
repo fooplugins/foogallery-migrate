@@ -353,6 +353,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrator' ) ) {
                             <?php echo $gallery->ID . '. '; ?>
                             <strong><?php echo $gallery->title; ?></strong>
                             <?php echo ' ' . sprintf( __( '(%s images)', 'foogallery' ), $gallery->image_count ); ?>
+                            <?php if ( isset( $gallery->settings ) ) {
+                                echo '<br />';
+                                print_r( $gallery->settings );
+                            } ?>
                         </td>
                         <td>
                             <?php echo $gallery->plugin->name(); ?>
