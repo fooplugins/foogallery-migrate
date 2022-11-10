@@ -123,7 +123,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Gallery' ) ) {
         function build_attachment_array() {
             $attachments = array();
             foreach ( $this->images as $image ) {
-                if ( $image->migrated && intval( $image->attachment_id ) > 0 ) {
+                // Commented $image->migrated as it prevent to add attachment to save in gallery post meta field 'foogallery_attachments'
+                if ( /*$image->migrated &&*/ intval( $image->attachment_id ) > 0 ) {
                     $attachments[] = $image->attachment_id;
                 }
             }
