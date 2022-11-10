@@ -65,14 +65,15 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
                 // Get galleries
                 $modula_galleries = $this->get_galleries();
 
-                if ( count( $modula_galleries ) != 0 ) {
+                if ( is_array( $modula_galleries ) && count( $modula_galleries ) != 0 ) {
                     foreach ( $modula_galleries as $modula_gallery ) {
                         $gallery = new Gallery( $this );
                         $gallery->ID = (int) $modula_gallery->ID;
                         $gallery->title = $modula_gallery->post_title;
                         $gallery->data = $modula_gallery;
                         $gallery->images = $this->find_images( $gallery->ID );
-                        $gallery->image_count = count( $gallery->images );                       
+                        $gallery->image_count = count( $gallery->images );
+                        $gallery->settings = get_post_meta( $gallery->ID, 'modula-settings', true );
                         $galleries[] = $gallery;    
                     }
                 }
@@ -84,8 +85,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
 
         /**
          * Find all images by gallery id
-         * @param $gallery_id ID of the gallery
-         * @return bool
+         * @param $gallery_id int ID of the gallery
+         * @return array
          */
         private function find_images( $gallery_id ) {
             $images = array();
@@ -95,9 +96,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
                 foreach ( $modula_images as $modula_image ) {
                     $modula_image = ( object ) $modula_image;
                     $image = new Image();
+                    //$image->attachment_id = $modula_image->id;
                     $image_attributes = wp_get_attachment_image_src( $modula_image->id );
                     if ( is_array( $image_attributes ) && !empty ( $image_attributes ) ) {
-                        //$image->attachment_id = $modula_image['id'];
                         $image->source_url = $image_attributes[0];
                     }
                     $image->caption = $modula_image->description;
@@ -112,7 +113,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
         }
             
         /**
-         * Migrate gallery settings to foogalery.
+         * Migrate gallery settings to FooGallery.
          * @param $gallery Object of gallery
          * @return NULL
          */
@@ -123,63 +124,132 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
             // Get modula gallery settings from post meta
             $modula_settings = get_post_meta( $gallery->ID, 'modula-settings', true );
 
-            $gutter = $modula_settings['gutter'];
+            $type = $modula_settings['type'];
+            switch ( $type ) {
+                case 'custom-grid':
+                case 'grid':
+                    $gallery_template = 'masonry';
+                    break;
+                case 'creative-gallery':
+                default:
+                    $gallery_template = 'default';
+            }
+
+            //Set the FooGallery gallery template, to be closest to the Modula gallery layout.
+            add_post_meta( $gallery->foogallery_id, FOOGALLERY_META_TEMPLATE, $gallery_template, true );
+
             $grid_image_size = $modula_settings['grid_image_size'];
             $lightbox = $modula_settings['lightbox'];
             $show_navigation = $modula_settings['show_navigation'];
             $hide_title = $modula_settings['hide_title'];
             $hide_description = $modula_settings['hide_description'];
             $cursor = $modula_settings['cursor'];
+            $gutter = $modula_settings['gutter'];
+            $border_size = $modula_settings['borderSize'];
+            $border_radius = $modula_settings['borderRadius'];
 
-            if ( $grid_image_size == 'custom' ) {
+            if ( $grid_image_size === 'custom' ) {
                 $width = $modula_settings['grid_image_dimensions']['width'];
                 $height = $modula_settings['grid_image_dimensions']['height'];
+            } else if ( $grid_image_size === 'thumbnail' ) {
+                $width = get_option( 'thumbnail_size_w' );
+                $height = get_option( 'thumbnail_size_h' );
             }
-
-            //Set the FooGallery gallery template, to be closest to the Modula gallery layout.
-            //$gallery_template_closest_to_modula_gallery_layout = 'default';
-            //add_post_meta( $gallery->foogallery_id, FOOGALLERY_META_TEMPLATE, $gallery_template_closest_to_modula_gallery_layout, true );
 
             //Set the FooGallery gallery settings, based on the Modula gallery settings.
             $settings = array();
 
             if ( $width > 0 && $height > 0 ) {
-                $settings['default_thumbnail_dimensions'] = array(
+                $settings[ $gallery_template . '_thumbnail_dimensions'] = array(
                     'width'  => $width,
                     'height' => $height
                 );
             }
 
-            if ( $lightbox == 'fancybox' ) {
-                $settings['default_lightbox'] = 'foogallery';
-            } else {
-                $settings['default_lightbox'] = 'none';
+            $settings[$gallery_template . '_lightbox'] =  ($lightbox === 'fancybox') ? 'foobox' : '';
+            $settings[$gallery_template . '_lightbox_show_nav_buttons'] = ( $show_navigation === '1' ) ? 'yes' : 'no';
+            $settings[$gallery_template . '_caption_title_source'] = ( $hide_title === '1' ) ? 'none' : 'title';
+            $settings[$gallery_template . '_caption_desc_source'] = ( $hide_description === '1' ) ? 'none' : 'caption';
+            $settings[$gallery_template . '_hover_effect_icon'] = ( $cursor === 'zoom-in' ) ? 'fg-hover-zoom' : '';
+
+            switch ( $border_size ) {
+                case '1':
+                    $settings[$gallery_template . '_border_size'] = 'fg-border-thin';
+                    break;
+                case '2':
+                case '3':
+                case '4':
+                case '5':
+                    $settings[$gallery_template . '_border_size'] = 'fg-border-medium';
+                    break;
+                case '6':
+                case '7':
+                case '8':
+                case '9':
+                case '10':
+                    $settings[$gallery_template . '_border_size'] = 'fg-border-thick';
+                    break;
+                default :
+                    $settings[$gallery_template . '_spacing'] = 'fg-border-none';
             }
 
-            if ( $show_navigation == '1' ) {
-                $settings['default_lightbox_show_nav_buttons'] = 'yes';
-            } else {
-                $settings['default_lightbox_show_nav_buttons'] = 'no';
+            switch ( $border_radius ) {
+                case '1':
+                    $settings[$gallery_template . '_rounded_corners'] = 'fg-round-small';
+                    break;
+                case '2':
+                case '3':
+                case '4':
+                case '5':
+                    $settings[$gallery_template . '_rounded_corners'] = 'fg-round-medium';
+                    break;
+                case '6':
+                case '7':
+                case '8':
+                case '9':
+                case '10':
+                    $settings[$gallery_template . '_rounded_corners'] = 'fg-round-large';
+                    break;
+                default :
+                    $settings[$gallery_template . '_rounded_corners'] = '';
             }
 
-            if ( $hide_title == '1' ) {
-                $settings['default_caption_title_source'] = 'title';
-            } else {
-                $settings['default_caption_title_source'] = 'none';
+            //Set settings for specific gallery templates
+            if ( $gallery_template === 'default' ) {
+                switch ( $gutter ) {
+                    case '1':
+                    case '2':
+                    case '3':
+                    case '4':
+                    case '5':
+                        $settings[$gallery_template . '_spacing'] = 'fg-gutter-5';
+                        break;
+                    case '6':
+                    case '7':
+                    case '8':
+                    case '9':
+                    case '10':
+                        $settings[$gallery_template . '_spacing'] = 'fg-gutter-10';
+                        break;
+                    default :
+                        $settings[$gallery_template . '_spacing'] = 'fg-gutter-0';
+                }
+
+            } else if ( $gallery_template === 'masonry' ) {
+
+                $settings[$gallery_template . '_gutter_width'] =  $gutter;
+
+                $grid_type = isset( $modula_settings['grid_type'] ) ? $modula_settings['grid_type'] : '';
+                switch ( $grid_type ) {
+                    case '1':
+                    case 'automatic':
+                        $settings[$gallery_template . '_layout'] =  'fixed';
+                        break;
+                    default:
+                        $settings[$gallery_template . '_layout'] =  'col' . $grid_type;
+                }
             }
 
-            if ( $hide_description == '1' ) {
-                $settings['default_caption_desc_source'] = 'caption';
-            } else {
-                $settings['default_caption_desc_source'] = 'none';
-            }
-
-            if ( $cursor == 'zoom-in' ) {
-                $settings['default_hover_effect_icon'] = 'fg-hover-zoom';
-            } else {
-                $settings['default_hover_effect_icon'] = '';
-            }
-            
             add_post_meta( $gallery->foogallery_id, FOOGALLERY_META_SETTINGS, $settings, true );
         }
 
