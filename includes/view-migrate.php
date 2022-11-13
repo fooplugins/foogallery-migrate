@@ -95,6 +95,19 @@ if ( isset( $_POST['foogallery_migrate_action'] ) ) {
 		margin-bottom: 10px;
 	}
 
+    .foogallery-migrate-table th {
+        font-weight: 500;
+    }
+
+    .foogallery-migrate-table th, .foogallery-migrate-table td {
+        padding: 1px;
+        border: solid 1px #ddd;
+    }
+
+    .foogallery-migrate-table {
+        border-collapse: collapse;
+    }
+
 </style>
 <script>
 	jQuery(function ($) {

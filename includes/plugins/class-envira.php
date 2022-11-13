@@ -73,6 +73,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Envira' ) ) {
                         $gallery->data = $envira_gallery;
                         $gallery->images = $this->find_images( $gallery->ID );
                         $gallery->image_count = count( $gallery->images );
+                        $gallery->settings = get_post_meta( $gallery->ID, '_eg_gallery_data', true );
                         $galleries[] = $gallery;
                     }
                 }
@@ -83,29 +84,40 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Envira' ) ) {
         }
 
         /**
-         * Migrate gallery settings to foogalery.
-         * @param $gallery Object of gallery
-         * @return NULL
+         * Returns the gallery template.
+         *
+         * @param $gallery
+         * @return string
          */
-        function migrate_settings( $gallery ) {
-            //Migrate settings from the Envira gallery to the FooGallery.
-            // Get envira gallery settings from post meta
-            $eg_gallery_data = get_post_meta( $gallery->ID, '_eg_gallery_data', true );
-            $width = $eg_gallery_data['config']['crop_width'];
-            $height = $eg_gallery_data['config']['crop_height'];
+        function get_gallery_template( $gallery ) {
+            switch ( $gallery->settings['config']['gallery_theme'] ) {
+                case 'base':
+                    return 'default';
+            }
+            return 'default';
+        }
 
-            //Set the FooGallery gallery template, to be closest to the Envira gallery layout.
-            //$gallery_template_closest_to_envira_gallery_layout = 'default';
-            //add_post_meta( $gallery->foogallery_id, FOOGALLERY_META_TEMPLATE, $gallery_template_closest_to_envira_gallery_layout, true );
+        /**
+         * Gets the settings for the gallery.
+         *
+         * @param $gallery
+         * @param $settings
+         * @return array
+         */
+        function get_gallery_settings( $gallery, $settings ) {
+            $width = $gallery->settings['config']['crop_width'];
+            $height = $gallery->settings['config']['crop_height'];
 
-            //Set the FooGallery gallery settings, based on the envira gallery settings.
-            $settings = array(
-                'default_thumbnail_dimensions' => array(
+            $gallery_template = $this->get_gallery_template( $gallery );
+
+            if ( $width > 0 && $height > 0 ) {
+                $settings[ $gallery_template . '_thumbnail_dimensions'] = array(
                     'width'  => $width,
                     'height' => $height
-                )
-            );
-            add_post_meta( $gallery->foogallery_id, FOOGALLERY_META_SETTINGS, $settings, true );
+                );
+            }
+
+            return $settings;
         }
 
          /**

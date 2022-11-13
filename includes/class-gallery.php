@@ -71,10 +71,33 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Gallery' ) ) {
 
                         if ( is_wp_error( $this->foogallery_id ) ) {
                             $this->migration_status = self::PROGRESS_ERROR;
+                        } else {
+
+                            // Determine the best possible gallery template.
+                            $gallery_template = $this->plugin->get_gallery_template( $this );
+
+                            if ( empty( $gallery_template ) ) {
+                                $gallery_template = foogallery_default_gallery_template();
+                            }
+
+                            // Set the gallery template.
+                            add_post_meta( $this->foogallery_id, FOOGALLERY_META_TEMPLATE, $gallery_template, true );
+
+                            $gallery_settings = array();
+                            //set default settings if there are any
+                            $default_gallery_id = foogallery_get_setting( 'default_gallery_settings' );
+                            if ( !empty( $default_gallery_id ) ) {
+                                $gallery_settings = get_post_meta( $default_gallery_id, FOOGALLERY_META_SETTINGS, true );
+                            }
+
+                            // Determine the best possible settings for the gallery.
+                            $gallery_settings = $this->plugin->get_gallery_settings( $this, $gallery_settings );
+
+                            // Set the gallery settings.
+                            add_post_meta( $this->foogallery_id, FOOGALLERY_META_SETTINGS, $gallery_settings, true );
                         }
 
-                        //set a default gallery template
-                        add_post_meta( $this->foogallery_id, FOOGALLERY_META_TEMPLATE, foogallery_default_gallery_template(), true );
+
 
                         //set default settings if there are any
                         $default_gallery_id = foogallery_get_setting( 'default_gallery_settings' );
@@ -84,13 +107,12 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Gallery' ) ) {
                         }
 
                         //migrate settings
-                        $this->plugin->migrate_settings( $this );
+                        $this->plugin->get_gallery_template( $this );
                     }
 
                     $this->migrate_next_image();
 
                     $attachments = $this->build_attachment_array();
-
                     update_post_meta( $this->foogallery_id, FOOGALLERY_META_ATTACHMENTS, $attachments );
                 }
             }
@@ -123,8 +145,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Gallery' ) ) {
         function build_attachment_array() {
             $attachments = array();
             foreach ( $this->images as $image ) {
-                // Commented $image->migrated as it prevent to add attachment to save in gallery post meta field 'foogallery_attachments'
-                if ( /*$image->migrated &&*/ intval( $image->attachment_id ) > 0 ) {
+                if ( intval( $image->attachment_id ) > 0 ) {
                     $attachments[] = $image->attachment_id;
                 }
             }

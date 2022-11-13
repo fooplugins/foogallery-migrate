@@ -283,6 +283,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrator' ) ) {
                             <span><?php _e( 'Source', 'foogallery-migrate' ); ?></span>
                         </th>
                         <th scope="col" class="manage-column">
+                            <span><?php _e( 'Migration Data', 'foogallery-migrate' ); ?></span>
+                        </th>
+                        <th scope="col" class="manage-column">
                             <span><?php printf( __( '%s Name', 'foogallery-migrate' ), foogallery_plugin_name() ); ?></span>
                         </th>
                         <th scope="col" class="manage-column">
@@ -352,14 +355,25 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrator' ) ) {
                         <td>
                             <?php echo $gallery->ID . '. '; ?>
                             <strong><?php echo $gallery->title; ?></strong>
-                            <?php echo ' ' . sprintf( __( '(%s images)', 'foogallery' ), $gallery->image_count ); ?>
-                            <?php if ( isset( $gallery->settings ) ) {
-                                echo '<br />';
-                                print_r( $gallery->settings );
+                            <?php if ( foogallery_is_debug() && isset( $gallery->settings ) ) { ?>
+                                <br />
+                                <?php echo foogallery_migrate_array_to_table( $gallery->settings );
                             } ?>
                         </td>
                         <td>
                             <?php echo $gallery->plugin->name(); ?>
+                        </td>
+                        <td>
+                            <?php _e( 'Template : ', 'foogallery-migrate' ); ?>
+                            <?php echo $gallery->plugin->get_gallery_template( $gallery ); ?>
+                            <br />
+                            <?php _e( 'Images : ', 'foogallery-migrate' ); ?>
+                            <?php echo $gallery->image_count; ?>
+                            <?php if ( foogallery_is_debug() ) { ?>
+                            <br />
+                            <?php _e( 'Settings : ', 'foogallery-migrate' ); ?>
+                            <?php echo foogallery_migrate_array_to_table( $gallery->plugin->get_gallery_settings( $gallery, array() ) ); ?>
+                            <?php  } ?>
                         </td>
                         <td>
                             <?php if ( $foogallery ) {

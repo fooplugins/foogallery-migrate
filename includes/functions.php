@@ -66,3 +66,36 @@ function foogallery_migrate_migrator_instance() {
 
     return $foogallery_migrate_migrator_instance;
 }
+
+function foogallery_migrate_array_to_table($arr, $first=true, $sub_arr=false){
+    $width = ($sub_arr) ? 'width="100%"' : '' ;
+    $table = ($first) ? '<table class="foogallery-migrate-table" '.$width.'>' : '';
+    $rows = array();
+    foreach ( $arr as $key => $value ) {
+        $value_type = gettype($value);
+        switch ($value_type) {
+            case 'string':
+                $val = (in_array($value, array(""))) ? "&nbsp;" : $value;
+                $rows[] = "<tr><th>{$key}</th><td>{$val}</td></tr>";
+                break;
+            case 'integer':
+                $val = (in_array($value, array(""))) ? "&nbsp;" : $value;
+                $rows[] = "<tr><th>{$key}</th><td>{$value}</td></tr>";
+                break;
+            case 'array':
+                if (gettype($key) == "integer"):
+                    $rows[] = foogallery_migrate_array_to_table($value, false);
+                elseif (gettype($key) == "string"):
+                    $rows[] = "<tr><th>{$key}</th><td>" .
+                        foogallery_migrate_array_to_table($value, true, true) . "</td>";
+                endif;
+                break;
+            default:
+                # code...
+                break;
+        }
+    }
+    $ROWS = implode("\n", $rows);
+    $table .= ($first) ? $ROWS . '</table>' : $ROWS;
+    return $table;
+}

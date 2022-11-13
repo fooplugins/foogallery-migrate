@@ -46,12 +46,29 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugin' ) ) {
         abstract function find_galleries();
 
         /**
+         * Returns the closest possible gallery template
+         *
+         * @param $gallery Gallery
+         * @return string
+         */
+        abstract function get_gallery_template( $gallery );
+
+        /**
+         * Returns the closest possible gallery settings
+         *
+         * @param $gallery Gallery
+         * @param $default_settings array
+         * @return array
+         */
+        abstract function get_gallery_settings( $gallery, $default_settings );
+
+        /**
          * Migrates any settings for the gallery.
          *
          * @param $gallery Gallery
          * @return void
          */
-        abstract function migrate_settings( $gallery );
+        //abstract function migrate_settings( $gallery );
 //
 //        abstract function get_albums();
 //

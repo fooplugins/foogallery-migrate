@@ -129,12 +129,24 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
         }
 
         /**
-         * Migrate gallery settings to foogalery.
-         * @param $gallery Object of gallery
-         * @return NULL
+         * Returns the gallery template.
+         *
+         * @param $gallery
+         * @return string
          */
-        function migrate_settings( $gallery ) {
-            //For NextGen, there are no settings to migrate across
+        function get_gallery_template( $gallery ) {
+            return 'default';
+        }
+
+        /**
+         * Gets the settings for the gallery.
+         *
+         * @param $gallery
+         * @param $settings
+         * @return array
+         */
+        function get_gallery_settings( $gallery, $settings ) {
+            return $settings;
         }
 
         /**
