@@ -22,6 +22,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
 		 * Initialize the plugin
 		 */
 		public function __construct() {
+            add_action( 'admin_notices', array($this, 'foogallery_check') );
+
             add_action( 'foogallery_admin_menu_after', array( $this, 'add_menu' ) );
 
             // Ajax calls for importing galleries
@@ -30,6 +32,28 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             add_action( 'wp_ajax_foogallery_migrate_cancel', array( $this, 'ajax_cancel_migration' ) );
             add_action( 'wp_ajax_foogallery_migrate_reset', array( $this, 'ajax_reset_migration' ) );
 		}
+
+        /***
+         * Show an admin message if FooGallery is not installed.
+         *
+         * @return void
+         */
+        function foogallery_check() {
+            if ( !class_exists( 'FooGallery_Plugin' ) ) {
+
+                $url = admin_url( 'plugin-install.php?tab=search&s=foogallery&plugin-search-input=Search+Plugins' );
+
+                $link = sprintf( ' <a href="%s">%s</a>', $url, __( 'install FooGallery!', 'foogallery-migrate' ) );
+
+                $message = __( 'The FooGallery plugin is required for the FooGallery Migrate plugin to work. Activate it now if you have it installed, or ', 'foogallery-migrate' ) . $link;
+
+                ?>
+                <div class="error">
+                <h4><?php _e('FooGallery Migrate Error!', 'foogallery-custom-branding'); ?></h4>
+                <p><?php echo $message; ?></p>
+                </div><?php
+            }
+        }
 
         /**
          * Add an admin menu
