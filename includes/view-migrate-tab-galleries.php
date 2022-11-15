@@ -1,12 +1,5 @@
 <?php
     $migrator = foogallery_migrate_migrator_instance();
-
-    //Check if the reset button has been pressed.
-//    if ( isset( $_POST['foogallery_migrate_reset'] ) ) {
-//        if ( check_admin_referer('foogallery_migrate_reset', 'foogallery_migrate_reset' ) ) {
-//            $migrator->reset_migration();
-//        }
-//    }
 ?>
 <script>
     jQuery(function ($) {
