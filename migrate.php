@@ -4,7 +4,6 @@ Plugin Name: FooGallery Migrate
 Description: Migrate to FooGallery from Envira, NextGen, Modula and other gallery plugins.
 Version:     1.0
 Author:      FooPlugins
-Plugin URI:  https://fooplugins.com/
 Author URI:  https://fooplugins.com/
 Text Domain: foogallery-migrate
 License:     GPL-2.0+
