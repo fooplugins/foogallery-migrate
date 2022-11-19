@@ -90,7 +90,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
 
                 if ( array_key_exists( 'gallery-id', $_POST ) ) {
 
-                    $gallery_ids = $_POST['gallery-id'];
+                    $gallery_ids = map_deep( wp_unslash( $_POST['gallery-id'] ), 'sanitize_text_field' );
 
                     $migrations = array();
 
@@ -101,7 +101,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                             'current' => false,
                         );
                         if ( array_key_exists( 'foogallery-title-' . $gallery_id, $_POST ) ) {
-                            $migrations[$gallery_id]['title'] = stripslashes( $_POST[ 'foogallery-title-' . $gallery_id ] );
+                            $migrations[$gallery_id]['title'] = sanitize_text_field( wp_unslash( $_POST[ 'foogallery-title-' . $gallery_id ] ) );
                         }
                     }
 
@@ -118,12 +118,14 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
         function ajax_continue_migration() {
             if ( check_admin_referer( 'foogallery_migrate', 'foogallery_migrate' ) ) {
 
-                $action = isset( $_REQUEST[ 'action' ] ) ? $_REQUEST[ 'action' ] : '';
+                if ( array_key_exists( 'action', $_REQUEST ) ) {
+                    $action = sanitize_text_field( wp_unslash( $_REQUEST['action'] ) );
 
-                if ( 'foogallery_migrate_continue' === $action ) {
-                    $migrator = foogallery_migrate_migrator_instance();
-                    $migrator->migrate();
-                    $migrator->render_gallery_form();
+                    if ('foogallery_migrate_continue' === $action) {
+                        $migrator = foogallery_migrate_migrator_instance();
+                        $migrator->migrate();
+                        $migrator->render_gallery_form();
+                    }
                 }
 
                 die();
@@ -133,14 +135,15 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
         function ajax_cancel_migration() {
             if ( check_admin_referer( 'foogallery_migrate', 'foogallery_migrate' ) ) {
 
-                $action = isset( $_REQUEST[ 'action' ] ) ? $_REQUEST[ 'action' ] : '';
+                if ( array_key_exists( 'action', $_REQUEST ) ) {
+                    $action = sanitize_text_field(wp_unslash($_REQUEST['action']));
 
-                if ( 'foogallery_migrate_cancel' === $action ) {
-                    $migrator = foogallery_migrate_migrator_instance();
-                    $migrator->cancel_migration();
-                    $migrator->render_gallery_form();
+                    if ('foogallery_migrate_cancel' === $action) {
+                        $migrator = foogallery_migrate_migrator_instance();
+                        $migrator->cancel_migration();
+                        $migrator->render_gallery_form();
+                    }
                 }
-
             }
             die();
         }
@@ -148,14 +151,15 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
         function ajax_reset_migration() {
             if ( check_admin_referer( 'foogallery_migrate', 'foogallery_migrate' ) ) {
 
-                $action = isset( $_REQUEST[ 'action' ] ) ? $_REQUEST[ 'action' ] : '';
+                if ( array_key_exists( 'action', $_REQUEST ) ) {
+                    $action = sanitize_text_field(wp_unslash($_REQUEST['action']));
 
-                if ( 'foogallery_migrate_reset' === $action ) {
-                    $migrator = foogallery_migrate_migrator_instance();
-                    $migrator->reset_migration();
-                    $migrator->render_gallery_form();
+                    if ('foogallery_migrate_reset' === $action) {
+                        $migrator = foogallery_migrate_migrator_instance();
+                        $migrator->reset_migration();
+                        $migrator->render_gallery_form();
+                    }
                 }
-
             }
             die();
         }

@@ -2,7 +2,7 @@
     $migrator = foogallery_migrate_migrator_instance();
 
     //Check if the detect button has been pressed.
-    if ( isset( $_POST['foogallery_migrate_detect'] ) ) {
+    if ( array_key_exists( 'foogallery_migrate_detect', $_POST ) ) {
         if (check_admin_referer('foogallery_migrate_detect', 'foogallery_migrate_detect')) {
             $migrator->run_detection();
         }

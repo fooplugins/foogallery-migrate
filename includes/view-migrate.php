@@ -1,14 +1,3 @@
-<?php
-$migrator = foogallery_migrate_migrator_instance();
-
-if ( isset( $_POST['foogallery_migrate_action'] ) ) {
-	if ( check_admin_referer( 'foogallery_migrate', 'foogallery_migrate' ) ) {
-        if ( 'foogallery_migrate_cancel' === sanitize_key( $_POST['foogallery_migrate_action'] ) ) {
-            $migrator->cancel_migration();
-        }
-	}
-}
-?>
 <style>
 	.foo-nav-tabs a:focus {
 		-webkit-box-shadow: none;

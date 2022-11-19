@@ -301,17 +301,17 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrator' ) ) {
                 $url = add_query_arg( 'page', 'foogallery-migrate' );
                 $page = 1;
                 if ( defined( 'DOING_AJAX' ) ) {
-                    if ( isset( $_POST['foogallery_migrate_paged'] ) ) {
-                        $url = $_POST['foogallery_migrate_url'];
-                        $page = $_POST['foogallery_migrate_paged'];
+                    if ( array_key_exists( 'foogallery_migrate_paged', $_POST ) ) {
+                        $url = sanitize_url( $_POST['foogallery_migrate_url'] );
+                        $page = sanitize_text_field( $_POST['foogallery_migrate_paged'] );
                     } else {
                         $url = wp_get_referer();
                         $parts = parse_url($url);
                         parse_str( $parts['query'], $query );
                         $page = $query['paged'];
                     }
-                } else if ( isset( $_GET['paged'] ) ) {
-                    $page = $_GET['paged'];
+                } else if ( array_key_exists( 'paged', $_GET ) ) {
+                    $page = sanitize_text_field( $_GET['paged'] );
                 }
                 $url = add_query_arg( 'paged', $page, $url ) . '#galleries';
                 $gallery_count = count( $galleries );
