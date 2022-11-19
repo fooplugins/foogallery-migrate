@@ -336,15 +336,15 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrator' ) ) {
                     if ( $gallery->foogallery_id > 0 ) {
                         $foogallery = \FooGallery::get_by_id( $gallery->foogallery_id );
                         if ( $foogallery ) {
-                            $edit_link = '<a target="_blank" href="' . admin_url( 'post.php?post=' . $foogallery->ID . '&action=edit' ) . '">' . $foogallery->name . '</a>';
+                            $edit_link = '<a target="_blank" href="' . esc_url( admin_url( 'post.php?post=' . $foogallery->ID . '&action=edit' ) ) . '">' . esc_html( $foogallery->name ) . '</a>';
                         } else {
                             $done = false;
                         }
                     } ?>
-                    <tr class="<?php echo ($counter % 2 === 0) ? 'alternate' : ''; ?>">
+                    <tr class="<?php echo esc_attr( ($counter % 2 === 0) ? 'alternate' : '' ); ?>">
                         <?php if ( !$has_migrations && !$migrating && !$done ) { ?>
                             <th scope="row" class="column-cb check-column">
-                                <input name="gallery-id[]" type="checkbox" checked="checked" value="<?php echo $gallery->unique_identifier(); ?>">
+                                <input name="gallery-id[]" type="checkbox" checked="checked" value="<?php echo esc_attr( $gallery->unique_identifier() ); ?>">
                             </th>
                         <?php } else if ( $migrating && $gallery->unique_identifier() === $current_gallery_id ) { ?>
                             <th>
@@ -355,37 +355,37 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrator' ) ) {
                             </th>
                         <?php } ?>
                         <td>
-                            <?php echo $gallery->ID . '. '; ?>
-                            <strong><?php echo $gallery->title; ?></strong>
+                            <?php echo esc_html( $gallery->ID ) . '. '; ?>
+                            <strong><?php echo esc_html( $gallery->title ); ?></strong>
                             <?php if ( foogallery_is_debug() && isset( $gallery->settings ) ) { ?>
                                 <br />
-                                <?php echo foogallery_migrate_array_to_table( $gallery->settings );
+                                <?php echo wp_kses_post( foogallery_migrate_array_to_table( $gallery->settings ) );
                             } ?>
                         </td>
                         <td>
-                            <?php echo $gallery->plugin->name(); ?>
+                            <?php echo esc_html( $gallery->plugin->name() ); ?>
                         </td>
                         <td>
                             <?php _e( 'Template : ', 'foogallery-migrate' ); ?>
-                            <?php echo $gallery->plugin->get_gallery_template( $gallery ); ?>
+                            <?php echo esc_html( $gallery->plugin->get_gallery_template( $gallery ) ); ?>
                             <br />
                             <?php _e( 'Images : ', 'foogallery-migrate' ); ?>
-                            <?php echo $gallery->image_count; ?>
+                            <?php echo esc_html( $gallery->image_count ); ?>
                             <?php if ( foogallery_is_debug() ) { ?>
                             <br />
                             <?php _e( 'Settings : ', 'foogallery-migrate' ); ?>
-                            <?php echo foogallery_migrate_array_to_table( $gallery->plugin->get_gallery_settings( $gallery, array() ) ); ?>
+                            <?php echo wp_kses_post ( foogallery_migrate_array_to_table( $gallery->plugin->get_gallery_settings( $gallery, array() ) ) ); ?>
                             <?php  } ?>
                         </td>
                         <td>
                             <?php if ( $foogallery ) {
                                 echo $edit_link;
                             } else { ?>
-                                <input name="foogallery-title-<?php echo $gallery->unique_identifier(); ?>" value="<?php echo $gallery->title; ?>">
+                                <input name="foogallery-title-<?php echo esc_attr( $gallery->unique_identifier() ); ?>" value="<?php echo esc_attr( $gallery->title ); ?>">
                             <?php } ?>
                         </td>
-                        <td class="foogallery-migrate-progress foogallery-migrate-progress-<?php echo $gallery->migration_status; ?>">
-                            <?php echo $gallery->friendly_migration_message(); ?>
+                        <td class="foogallery-migrate-progress foogallery-migrate-progress-<?php echo esc_attr( $gallery->migration_status ); ?>">
+                            <?php echo esc_html( $gallery->friendly_migration_message() ); ?>
                         </td>
                     </tr>
                     <?php
@@ -404,7 +404,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrator' ) ) {
             echo '<input type="hidden" name="foogallery_migrate_paged" value="' . esc_attr( $page ) . '" />';
             echo '<input type="hidden" name="foogallery_migrate_url" value="' . esc_url( $url ) . '" />';
 
-            echo '<input type="hidden" class="migrate_progress" value="' . $overall_progress . '" />';
+            echo '<input type="hidden" class="migrate_progress" value="' . esc_attr( $overall_progress ) . '" />';
             wp_nonce_field( 'foogallery_migrate', 'foogallery_migrate', false );
             wp_nonce_field( 'foogallery_migrate_reset', 'foogallery_migrate_reset', false );
             if ( $has_migrations ) { ?>
@@ -424,9 +424,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrator' ) ) {
             </div>
             <?php if ( $migrating ) { ?>
                 <div class="foogallery-migrate-progressbar">
-                    <span style="width:<?php echo $overall_progress; ?>%"></span>
+                    <span style="width:<?php echo esc_attr( $overall_progress ); ?>%"></span>
                 </div>
-                <?php echo intval( $overall_progress ); ?>%
+                <?php echo esc_html( intval( $overall_progress ) ); ?>%
                 <div style="width:20px; display: inline-block;">
                     <span class="spinner shown"></span>
                 </div>

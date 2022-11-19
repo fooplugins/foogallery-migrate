@@ -97,7 +97,7 @@ if (!class_exists('FooPlugins\FooGalleryMigrate\Pagination')) {
 				$this->calculate();
 			}
 			if ( $echo ) {
-				echo $this->pagination;
+				echo wp_kses_post( $this->pagination );
 			} else {
 				return $this->pagination;
 			}

@@ -50,7 +50,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 ?>
                 <div class="error">
                 <h4><?php _e('FooGallery Migrate Error!', 'foogallery-custom-branding'); ?></h4>
-                <p><?php echo $message; ?></p>
+                <p><?php echo wp_kses_post( $message ); ?></p>
                 </div><?php
             }
         }

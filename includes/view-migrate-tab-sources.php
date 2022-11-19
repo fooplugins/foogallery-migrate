@@ -20,7 +20,7 @@
 <ul>
     <?php
     foreach ( $migrator->plugins as $plugin ) {
-        echo '<li>' . $plugin->name();
+        echo '<li>' . esc_html( $plugin->name() );
         echo $plugin->is_detected() ? '<span class="dashicons dashicons-yes-alt"></span>' : '<span class="dashicons dashicons-dismiss"></span>';
         echo '</li>';
     }
