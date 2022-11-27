@@ -34,6 +34,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrator' ) ) {
             $this->plugins[] = new Plugins\Envira();
             $this->plugins[] = new Plugins\Modula();
             $this->plugins[] = new Plugins\Nextgen();
+            $this->plugins[] = new Plugins\Robo();
+            $this->plugins[] = new Plugins\Photo();
 
             $settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
 
