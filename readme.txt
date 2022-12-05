@@ -12,13 +12,33 @@ Migrate to FooGallery from other gallery plugins like NextGen, Modula, Envira an
 
 == Description ==
 
-Tired of other gallery plugins? Now you can easily and effortlessly migrate to the best WordPress gallery plugin : FooGallery!
+Are you tired of other gallery plugins?
+Are you looking for a different gallery plugin to try out?
+Are you looking for the best gallery plugin with the most free features?
+
+Now you can easily and effortlessly migrate to the best WordPress gallery plugin : [FooGallery!](https://wordpress.org/plugins/foogallery)
 
 Migrate to FooGallery from other gallery plugins, including:
 
-*	Envira
-*	Modular
-*	NextGen
+*	Envira Gallery
+*	Modula Gallery
+*	NextGen Gallery
+*	Photo Gallery by 10Web
+*	Robo Gallery
+
+= Migrate Away From Envira =
+
+The lite version of Envira includes basic gallery features, like unlimited gallery creation with drag n drop reordering. There are a few setting to tweak within Envira, but to get the most out of it, you will need to upgrade to a paid version.
+OR, change to FooGallery! The free version of FooGallery has tons more features, including being able to choose different gallery layours, like masonry, image viewer, portfolio.
+
+= Migrate Away From Modula =
+
+Modula has 4 gallery layouts VS the 7 that come free with FooGallery. Modula also has a ton of settings to customize your galleries, but not as many as FooGallery offers.
+
+= Migrate Away From NextGen =
+
+NextGen has 3 gallery styles and a batch upload feature. More advanced features are only available with the paid versions of NextGen.
+FooGallery free has 7 gallery styles and a load of different settings to customize it to look perfect for your website and theme.
 
 == Installation ==
 
@@ -28,7 +48,8 @@ Migrate to FooGallery from other gallery plugins, including:
 
 == Screenshots ==
 
-1. Import
+1. Gallery Plugins Supported
+2. Gallery Migrate Page
 
 == Upgrade Notice ==
 
