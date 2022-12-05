@@ -51,11 +51,13 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
                 // Do some checks even if the plugin is not activated.
                 global $wpdb;
 
-                if ( !$wpdb->get_var( 'SELECT count(*) FROM ' . $wpdb->prefix .  self::FM_PHOTO_TABLE_GALLERY . '' ) ) {
+                // Check if plugin's table exists in database
+                if ( !$wpdb->get_var( 'SHOW TABLES LIKE"%' . $wpdb->prefix . self::FM_PHOTO_TABLE_GALLERY . '%"' ) ) {
                     return false;
-                } else {
-                    return true;
                 }
+                $galleries = $wpdb->get_results('SELECT * FROM ' . $wpdb->prefix . self::FM_PHOTO_TABLE_GALLERY );
+
+                return count($galleries) > 0;
             }
         }
 
