@@ -45,12 +45,12 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
                 // Do some checks even if the plugin is not activated.
                 global $wpdb;
 
-                if ( !$wpdb->query( 'SELECT count(*) FROM ' . $wpdb->prefix . 'posts WHERE `post_type` = "' . FM_MODULA_POST_TYPE .'"' ) ) {
-                    return false;
-                } else {
+                if ( $wpdb->get_var( 'SELECT count(*) FROM ' . $wpdb->prefix . 'posts WHERE `post_type` = "' . FM_MODULA_POST_TYPE .'"' ) ) {
                     return true;
                 }
             }
+
+            return false;
         }
 
         /**
