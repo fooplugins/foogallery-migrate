@@ -344,8 +344,8 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
             if ( is_array( $robo_images ) && !empty( $robo_images ) ) {
                 foreach ( $robo_images as $attachment_id) {                
                     $image = new Image();
-                    $image_attributes = wp_get_attachment_image_src( $attachment_id);
-                    if ( is_array( $image_attributes ) && !empty ( $image_attributes ) ) {
+                    $image_attributes = wp_get_attachment_image_src( $attachment_id );
+                    if ( is_array( $image_attributes ) && !empty( $image_attributes ) ) {
                         // $image->attachment_id = $attachment_id;
                         $image->source_url = $image_attributes[0];
                     }
