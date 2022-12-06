@@ -28,8 +28,8 @@ Migrate to FooGallery from other gallery plugins, including:
 
 = Migrate Away From Envira =
 
-The lite version of Envira includes basic gallery features, like unlimited gallery creation with drag n drop reordering. There are a few setting to tweak within Envira, but to get the most out of it, you will need to upgrade to a paid version.
-OR, change to FooGallery! The free version of FooGallery has tons more features, including being able to choose different gallery layours, like masonry, image viewer, portfolio.
+The lite version of Envira includes basic gallery features, like unlimited gallery creation with drag n drop reordering. There are a few settings to tweak within Envira, but to get the most out of it, you will need to upgrade to a paid version.
+OR, change to FooGallery! The free version of FooGallery has tons more features, including being able to choose different gallery layouts, like masonry, image viewer, portfolio.
 
 = Migrate Away From Modula =
 
