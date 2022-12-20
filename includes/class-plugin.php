@@ -70,7 +70,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugin' ) ) {
          */
         //abstract function migrate_settings( $gallery );
 //
-//        abstract function get_albums();
+       abstract function find_albums();
 //
 //        abstract function get_content();
     }

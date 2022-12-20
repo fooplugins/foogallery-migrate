@@ -9,6 +9,7 @@ namespace FooPlugins\FooGalleryMigrate\Plugins;
 
 use FooPlugins\FooGalleryMigrate\Gallery;
 use FooPlugins\FooGalleryMigrate\Image;
+use FooPlugins\FooGalleryMigrate\Album;
 use FooPlugins\FooGalleryMigrate\Plugin;
 
 if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
@@ -171,5 +172,25 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
 
             return $wpdb->get_row( $wpdb->prepare( "select * from {$album_table} where id = %d", $id ) );
         }
+
+
+        function find_albums() {
+            $nextgen_albums = $this->get_nextgen_albums();
+            $albums = array();
+
+            if ( count( $nextgen_albums ) != 0 ) {
+                foreach ( $nextgen_albums as $key => $nextgen_album ) {
+                    $album = new Album( $this );
+                    $album->ID = $nextgen_album->id;
+                    $album->title = $nextgen_album->name;
+                    $album->data = $nextgen_album;
+                    $album->galleries = array();
+                    $album->gallery_count = count( $album->galleries );
+                    $albums[] = $album;
+                }
+            }
+
+            return $albums;            
+        }        
     }
 }

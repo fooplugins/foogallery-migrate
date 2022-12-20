@@ -9,6 +9,7 @@ namespace FooPlugins\FooGalleryMigrate\Plugins;
 
 use FooPlugins\FooGalleryMigrate\Gallery;
 use FooPlugins\FooGalleryMigrate\Image;
+use FooPlugins\FooGalleryMigrate\Album;
 use FooPlugins\FooGalleryMigrate\Plugin;
 use stdClass;
 
@@ -160,6 +161,11 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Envira' ) ) {
             }
             return $images;
         }
+
+
+        function find_albums() {
+            return array();
+        }        
 //
 //        abstract function get_albums();
 //
