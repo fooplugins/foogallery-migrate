@@ -39,10 +39,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\AlbumMigrator' ) ) {
 
             $settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
             
-            // if ( !isset( $settings ) || false === $settings ) {
-                // We have never tried to detect anything, so try to detect plugins.
-                $this->run_detection();                
-            // }
+            $this->run_detection();                
         }
 
         /**
@@ -134,7 +131,6 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\AlbumMigrator' ) ) {
             $queued_album_count = 0;
             $updated_albums = array();
 
-
             foreach ( $albums as $album ) {
     
                 if ( array_key_exists( $album->unique_identifier(), $album_id_array ) ) {
@@ -153,17 +149,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\AlbumMigrator' ) ) {
                 }
             }
 
-            // echo "<pre>";
-            // print_r($updated_albums);
-            // echo "</pre>"; 
             $this->set_migrator_setting( self::KEY_ALBUMS, $updated_albums );
-            // exit;
 
             $this->calculate_migration_state($updated_albums);
-
-  
-            // Save the state of the albums.
-            // $this->set_migrator_setting( self::KEY_ALBUMS, $updated_albums );
 
             $this->set_migrator_setting( self::KEY_HAS_PREVIOUS_ALBUM_MIGRATION, true );
 
@@ -175,7 +163,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\AlbumMigrator' ) ) {
          * @return void
          */
         function calculate_migration_state($updated_albums) {
-            // $albums = $this->get_albums();
+            
             $queued_count = 0;
             $completed_count = 0;
             $error_count = 0;
@@ -225,7 +213,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\AlbumMigrator' ) ) {
         }
 
         /**
-         * Returns the current gallery that is being migrated.
+         * Returns the current album that is being migrated.
          *
          * @return int|string
          */
@@ -270,7 +258,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\AlbumMigrator' ) ) {
          * @return void
          */
         function render_album_form() {
-            $albums = $this->get_albums();        
+            $albums = $this->get_albums();  
 
             if ( count( $albums ) == 0 ) {
                 _e( 'No albums found!', 'foogallery-migrate' );
@@ -376,25 +364,19 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\AlbumMigrator' ) ) {
                         <?php } ?>
                         <td>
                             <?php echo esc_html( $album->ID ) . '. '; ?>
-                            <strong><?php echo esc_html( $album->title ); ?></strong>
-                            <?php //if ( foogallery_is_debug() && isset( $album->settings ) ) { ?>
-                                <br />
-                                <?php //echo wp_kses_post( foogallery_migrate_array_to_table( $album->settings ) );
-                            //} ?>
+                            <strong><?php echo esc_html( $album->title ); ?></strong>                           
                         </td>
                         <td>
                             <?php echo esc_html( $album->plugin->name() ); ?>
                         </td>
                         <td>
                             <?php _e( 'Template : ', 'foogallery-migrate' ); ?>
-                            <?php //echo esc_html( $album->plugin->get_gallery_template( $gallery ) ); ?>
+                            <?php echo $album->get_album_template(); ?>
                             <br />
                             <?php _e( 'Images : ', 'foogallery-migrate' ); ?>
-                            <?php echo esc_html( $album->gallery_count ); ?>
+                            <?php echo esc_html( $album->get_image_count() ); ?>
                             <?php if ( foogallery_is_debug() ) { ?>
                             <br />
-                            <?php _e( 'Settings : ', 'foogallery-migrate' ); ?>
-                            <?php echo wp_kses_post ( foogallery_migrate_array_to_table( $gallery->plugin->get_gallery_settings( $album, array() ) ) ); ?>
                             <?php  } ?>
                         </td>
                         <td>

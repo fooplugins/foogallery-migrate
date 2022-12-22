@@ -213,6 +213,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
                     $album->ID = $photo_album->id;
                     $album->title = $photo_album->name;
                     $album->data = $photo_album;
+                    $album->album_template = 'default';
                     // $album->fooalbum_id = photo_album->id;                        
                     $album->fooalbum_title = $photo_album->name;                        
 
