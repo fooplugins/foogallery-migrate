@@ -1,20 +1,20 @@
 <?php
 /**
- * FooGallery Migrator Class
+ * FooGallery GalleryMigrator Class
  *
  * @package FooPlugins\FooGalleryMigrate
  */
 
 namespace FooPlugins\FooGalleryMigrate;
 
-if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrator' ) ) {
+if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\GalleryMigrator' ) ) {
 
 	/**
 	 * Class Init
 	 *
 	 * @package FooPlugins\FooGalleryMigrate
 	 */
-	class Migrator extends MigratorBase {
+	class GalleryMigrator extends MigratorBase {
 
         protected const KEY_GALLERIES = 'galleries';
         protected const KEY_CURRENT_MIGRATION_STATE = 'current_migration_state';
@@ -28,7 +28,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrator' ) ) {
         public $plugins = array();
 
 		/**
-		 * Initialize the Migrator
+		 * Initialize the GalleryMigrator
 		 */
 		public function __construct() {
             $this->plugins[] = new Plugins\Envira();
@@ -40,8 +40,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrator' ) ) {
             $settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
 
             if ( !isset( $settings ) || false === $settings ) {
+
                 // We have never tried to detect anything, so try to detect plugins.
                 $this->run_detection();
+
             }
         }
 
@@ -104,7 +106,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrator' ) ) {
                 }
             }
 
-            $this->set_migrator_setting( self::KEY_GALLERIES, $galleries );
+            $this->set_migrator_setting( self::KEY_GALLERIES, $galleries );        
         }
 
         /**
@@ -231,6 +233,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrator' ) ) {
             $galleries = $this->get_galleries();
 
             foreach ( $galleries as $gallery ) {
+
                 // Check if the gallery is queued for migration, or has already started.
                 if ( $gallery->migration_status === $gallery::PROGRESS_QUEUED || $gallery->migration_status === $gallery::PROGRESS_STARTED ) {
                     $gallery->migrate();
@@ -313,7 +316,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrator' ) ) {
                 } else if ( array_key_exists( 'paged', $_GET ) ) {
                     $page = sanitize_text_field( $_GET['paged'] );
                 }
-                $url = add_query_arg( 'paged', $page, $url ) . '#galleries';
+                $url = add_query_arg( 'paged', $page, $url ) . '#a';
                 $gallery_count = count( $galleries );
                 $page_size = apply_filters( 'foogallery_migrate_page_size', 20);
 

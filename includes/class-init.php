@@ -31,6 +31,12 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             add_action( 'wp_ajax_foogallery_migrate_continue', array( $this, 'ajax_continue_migration' ) );
             add_action( 'wp_ajax_foogallery_migrate_cancel', array( $this, 'ajax_cancel_migration' ) );
             add_action( 'wp_ajax_foogallery_migrate_reset', array( $this, 'ajax_reset_migration' ) );
+
+            // Ajax calls for importing albums
+            add_action( 'wp_ajax_foogallery_album_migrate', array( $this, 'ajax_start_album_migration' ) );
+            add_action( 'wp_ajax_foogallery_album_migrate_continue', array( $this, 'ajax_continue_album_migration' ) );
+            add_action( 'wp_ajax_foogallery_album_migrate_cancel', array( $this, 'ajax_cancel_album_migration' ) );
+            add_action( 'wp_ajax_foogallery_album_migrate_reset', array( $this, 'ajax_reset_album_migration' ) );            
 		}
 
         /***
@@ -79,7 +85,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
         }
 
         /**
-         * Start the migration!
+         * Start the gallery migration!
          *
          * @return void
          */
@@ -163,5 +169,93 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             }
             die();
         }
+
+
+        /**
+         * Start the album migration!
+         *
+         * @return void
+         */
+        function ajax_start_album_migration() {
+            if ( check_admin_referer( 'foogallery_album_migrate', 'foogallery_album_migrate' ) ) {
+
+                $migrator = foogallery_migrate_albummigrator_instance();
+
+                if ( array_key_exists( 'album-id', $_POST ) ) {
+
+                    $album_ids = map_deep( wp_unslash( $_POST['album-id'] ), 'sanitize_text_field' );
+
+                    $migrations = array();
+
+                    foreach ( $album_ids as $album_id ) {
+                        $migrations[$album_id] = array(
+                            'id' => $album_id,
+                            'migrated' => false,
+                            'current' => false,
+                        );
+                        if ( array_key_exists( 'foogallery-album-title-' . $album_id, $_POST ) ) {
+                            $migrations[$album_id]['title'] = sanitize_text_field( wp_unslash( $_POST[ 'foogallery-album-title-' . $album_id ] ) );
+                        }
+                    }
+
+                    // Queue the albums for migration.
+                    $migrator->queue_albums_for_migration( $migrations );
+                }
+
+                $migrator->render_album_form();
+
+                die();
+            }
+        }
+
+        function ajax_continue_album_migration() {
+            if ( check_admin_referer( 'foogallery_album_migrate', 'foogallery_album_migrate' ) ) {
+
+                if ( array_key_exists( 'action', $_REQUEST ) ) {
+                    $action = sanitize_text_field( wp_unslash( $_REQUEST['action'] ) );
+
+                    if ('foogallery_album_migrate_continue' === $action) {
+                        $migrator = foogallery_migrate_albummigrator_instance();
+                        $migrator->migrate();
+                        $migrator->render_album_form();
+                    }
+                }
+
+                die();
+            }
+        }
+
+        function ajax_cancel_album_migration() {
+            if ( check_admin_referer( 'foogallery_album_migrate', 'foogallery_album_migrate' ) ) {
+
+                if ( array_key_exists( 'action', $_REQUEST ) ) {
+                    $action = sanitize_text_field(wp_unslash($_REQUEST['action']));
+
+                    if ('foogallery_album_migrate_cancel' === $action) {
+                        $migrator = foogallery_migrate_albummigrator_instance();
+                        $migrator->cancel_migration();
+                        $migrator->render_album_form();
+                    }
+                }
+            }
+            die();
+        }
+
+        function ajax_reset_album_migration() {
+            if ( check_admin_referer( 'foogallery_album_migrate', 'foogallery_album_migrate' ) ) {
+
+                if ( array_key_exists( 'action', $_REQUEST ) ) {
+                    $action = sanitize_text_field(wp_unslash($_REQUEST['action']));
+
+                    if ('foogallery_album_migrate_reset' === $action) {
+                        $migrator = foogallery_migrate_albummigrator_instance();
+                        $migrator->reset_migration();
+                        $migrator->render_album_form();
+                    }
+                }
+            }
+            die();
+        }
+
 	}
 }

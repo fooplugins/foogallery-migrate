@@ -3,7 +3,8 @@
  * Contains all the Global common functions used throughout the plugin
  */
 
-use FooPlugins\FooGalleryMigrate\Migrator;
+use FooPlugins\FooGalleryMigrate\GalleryMigrator;
+use FooPlugins\FooGalleryMigrate\AlbumMigrator;
 
 /**
  * Custom Autoloader used throughout FooGallery Migrate
@@ -55,16 +56,27 @@ function foogallery_migrate_uncamelize( $str ) {
 /**
  * Returns the singleton instance of the migrator.
  *
- * @return Migrator
+ * @return GalleryMigrator
  */
 function foogallery_migrate_migrator_instance() {
     global $foogallery_migrate_migrator_instance;
 
     if ( !isset( $foogallery_migrate_migrator_instance ) ) {
-        $foogallery_migrate_migrator_instance = new Migrator();
+        $foogallery_migrate_migrator_instance = new GalleryMigrator();
     }
 
     return $foogallery_migrate_migrator_instance;
+}
+
+
+function foogallery_migrate_albummigrator_instance() {
+    global $foogallery_migrate_albummigrator_instance;
+
+    if ( !isset( $foogallery_migrate_albummigrator_instance ) ) {
+        $foogallery_migrate_albummigrator_instance = new AlbumMigrator();
+    }
+
+    return $foogallery_migrate_albummigrator_instance;
 }
 
 function foogallery_migrate_array_to_table($arr, $first=true, $sub_arr=false){

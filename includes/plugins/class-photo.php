@@ -9,6 +9,7 @@ namespace FooPlugins\FooGalleryMigrate\Plugins;
 
 use FooPlugins\FooGalleryMigrate\Gallery;
 use FooPlugins\FooGalleryMigrate\Image;
+use FooPlugins\FooGalleryMigrate\Album;
 use FooPlugins\FooGalleryMigrate\Plugin;
 use stdClass;
 
@@ -29,6 +30,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
         const FM_PHOTO_TABLE_GALLERY  = 'bwg_gallery';
         const FM_PHOTO_IMAGE_TABLE = 'bwg_image';
         const FM_PHOTO_ALBUM_TABLE   = 'bwg_album';
+        const FM_PHOTO_ALBUM_GALLERY_TABLE = 'bwg_album_gallery';
 
         /**
          * Name of the plugin.
@@ -172,6 +174,22 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
             return $wpdb->get_results(" select * from {$album_table}");
         }
 
+
+        private function get_galleries_by_album( $album_id ) {
+            global $wpdb;
+            $album_gallery_table = $wpdb->prefix . self::FM_PHOTO_ALBUM_GALLERY_TABLE;
+            $galleries_by_album = $wpdb->get_results( "select * from {$album_gallery_table} WHERE album_id = $album_id" );
+
+            $galleries_id = array();
+            foreach( $galleries_by_album as $gallery_by_album ) {
+                $galleries_id[] = $gallery_by_album->alb_gal_id;
+            }
+
+            $galleries_id = implode(",", $galleries_id);
+            $gallery_table = $wpdb->prefix . self::FM_PHOTO_TABLE_GALLERY;
+            return $wpdb->get_results( "select * from {$gallery_table} WHERE published = 1 AND id IN($galleries_id)" );                        
+        }
+
         /**
          * Return single album object data.
          * @param $id ID of the album
@@ -183,5 +201,44 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
 
             return $wpdb->get_row( $wpdb->prepare( "select * from {$album_table} where id = %d", $id ) );
         }
+
+        function find_albums() {
+            $photo_albums = $this->get_photo_albums();
+
+            $albums = array();
+
+            if ( count( $photo_albums ) != 0 ) {
+                foreach ( $photo_albums as $key => $photo_album ) {
+                    $album = new Album( $this );
+                    $album->ID = $photo_album->id;
+                    $album->title = $photo_album->name;
+                    $album->data = $photo_album;
+                    $album->album_template = 'default';
+                    // $album->fooalbum_id = photo_album->id;                        
+                    $album->fooalbum_title = $photo_album->name;                        
+
+                    $galleries = array();
+                    $album_galleries = $this->get_galleries_by_album( $album->ID );
+
+                    foreach( $album_galleries as $album_gallery ) {
+                        $gallery = new Gallery( $this );
+                        $gallery->ID = $album_gallery->id;
+                        $gallery->title = $album_gallery->name;
+                        $gallery->foogallery_title = $album_gallery->name;                        
+                        $gallery->data = $album_gallery;
+                        $gallery->images = $this->find_images( $gallery->ID, '/wp-content/uploads/photo-gallery' );
+                        $gallery->image_count = count( $gallery->images );
+                        $gallery->settings = "";
+                        $galleries[] = $gallery;
+                    }
+
+                    $album->galleries = $galleries;
+                    $album->gallery_count = count( $album->galleries );
+                    $albums[] = $album;
+                }
+            }
+
+            return $albums;                            
+        }        
     }
 }

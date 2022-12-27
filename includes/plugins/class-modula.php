@@ -9,6 +9,7 @@ namespace FooPlugins\FooGalleryMigrate\Plugins;
 
 use FooPlugins\FooGalleryMigrate\Gallery;
 use FooPlugins\FooGalleryMigrate\Image;
+use FooPlugins\FooGalleryMigrate\Album;
 use FooPlugins\FooGalleryMigrate\Plugin;
 
 define( 'FM_MODULA_TABLE_GALLERY', 'posts' );
@@ -266,6 +267,11 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
  
             return $wpdb->get_results( "select * from {$gallery_table} WHERE post_type = '" . FM_MODULA_POST_TYPE . "' AND post_status = 'publish'" );
         }
+
+
+        function find_albums() {
+            return array();
+        }             
 //
 //        abstract function get_albums();
 //
