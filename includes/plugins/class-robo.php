@@ -7,11 +7,10 @@
 
 namespace FooPlugins\FooGalleryMigrate\Plugins;
 
-use FooPlugins\FooGalleryMigrate\Gallery;
-use FooPlugins\FooGalleryMigrate\Image;
-use FooPlugins\FooGalleryMigrate\Album;
-use FooPlugins\FooGalleryMigrate\Plugin;
-use stdClass;
+use FooPlugins\FooGalleryMigrate\Objects\Gallery;
+use FooPlugins\FooGalleryMigrate\Objects\Image;
+use FooPlugins\FooGalleryMigrate\Objects\Album;
+use FooPlugins\FooGalleryMigrate\Objects\Plugin;
 
 define( 'ROBO_TABLE_GALLERY', 'posts' );
 define( 'ROBO_POST_TYPE', 'robo_gallery_table' );
@@ -75,7 +74,6 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
                         $gallery->title = $robo_gallery->post_title;
                         $gallery->data = $robo_gallery;
                         $gallery->images = $this->find_images( $gallery->ID );
-                        $gallery->image_count = count( $gallery->images );
                         // To do fetch multiple data from other source and assign to setting member variable
                         $get_all_meta = $wpdb->get_results( "SELECT * FROM $meta_table WHERE post_id = $gallery->ID" );
                         foreach( $get_all_meta as $get_all_meta_data ) {

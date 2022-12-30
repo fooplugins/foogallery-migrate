@@ -7,11 +7,9 @@
 
 namespace FooPlugins\FooGalleryMigrate\Plugins;
 
-use FooPlugins\FooGalleryMigrate\Gallery;
-use FooPlugins\FooGalleryMigrate\Image;
-use FooPlugins\FooGalleryMigrate\Album;
-use FooPlugins\FooGalleryMigrate\Plugin;
-use stdClass;
+use FooPlugins\FooGalleryMigrate\Objects\Gallery;
+use FooPlugins\FooGalleryMigrate\Objects\Image;
+use FooPlugins\FooGalleryMigrate\Objects\Plugin;
 
 define( 'FM_ENVIRA_TABLE_GALLERY', 'posts' );
 define( 'FM_ENVIRA_POST_TYPE', 'envira' );
@@ -73,12 +71,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Envira' ) ) {
                         $gallery->title = $envira_gallery->post_title;
                         $gallery->data = $envira_gallery;
                         $gallery->images = $this->find_images( $gallery->ID );
-                        $gallery->image_count = count( $gallery->images );
                         $gallery->settings = get_post_meta( $gallery->ID, '_eg_gallery_data', true );
                         $galleries[] = $gallery;
                     }
                 }
-            
             }
 
             return $galleries;

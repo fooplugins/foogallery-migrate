@@ -5,9 +5,13 @@
  * @package FooPlugins\FooGalleryMigrate
  */
 
-namespace FooPlugins\FooGalleryMigrate;
+namespace FooPlugins\FooGalleryMigrate\Migrators;
 
-if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\GalleryMigrator' ) ) {
+use FooPlugins\FooGalleryMigrate\Objects\Gallery;
+use FooPlugins\FooGalleryMigrate\Objects\Migratable;
+use FooPlugins\FooGalleryMigrate\Pagination;
+
+if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) ) {
 
 	/**
 	 * Class Init
@@ -16,261 +20,34 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\GalleryMigrator' ) ) {
 	 */
 	class GalleryMigrator extends MigratorBase {
 
-        protected const KEY_GALLERIES = 'galleries';
-        protected const KEY_CURRENT_MIGRATION_STATE = 'current_migration_state';
-        protected const KEY_HAS_PREVIOUS_MIGRATION = 'previous_migration';
-
-        /**
-         * Internal list of all plugins.
-         *
-         * @var array<Plugin>
-         */
-        public $plugins = array();
-
-		/**
-		 * Initialize the GalleryMigrator
-		 */
-		public function __construct() {
-            $this->plugins[] = new Plugins\Envira();
-            $this->plugins[] = new Plugins\Modula();
-            $this->plugins[] = new Plugins\Nextgen();
-            $this->plugins[] = new Plugins\Robo();
-            $this->plugins[] = new Plugins\Photo();
-
-            $settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
-
-            if ( !isset( $settings ) || false === $settings ) {
-
-                // We have never tried to detect anything, so try to detect plugins.
-                $this->run_detection();
-
-            }
-        }
-
-        /**
-         * Runs detection for all plugins.
-         *
-         * @return void
-         */
-        public function run_detection() {
-            $detected_plugins = array();
-
-            foreach ( $this->plugins as $plugin ) {
-                $detected_plugins[ $plugin->name() ] = $plugin->detect();
-            }
-            $this->set_migrator_setting( self::KEY_PLUGINS_DETECTED, $detected_plugins );
-
-            $this->find_all();
-        }
-
-        /**
-         * Returns true if there are any detected plugins.
-         *
-         * @return bool
-         */
-        public function has_detected_plugins() {
-            return count( $this->get_detected_plugins() ) > 0;
-        }
-
-        /**
-         * Returns an array of plugin names that are detected.
-         *
-         * @return array
-         */
-        public function get_detected_plugins() {
-            $detected = array();
-            foreach ( $this->plugins as $plugin ) {
-                if ( $plugin->is_detected() ) {
-                    $detected[] = $plugin->name();
-                }
-            }
-
-            return $detected;
-        }
-
-        /**
-         * Find all galleries and albums.
-         *
-         * @return void
-         */
-        private function find_all() {
-            $galleries = array();
-
-            foreach ( $this->plugins as $plugin ) {
-                if ( $plugin->is_detected() ) {
-                    $plugin_galleries = $plugin->find_galleries();
-
-                    if ( is_array( $plugin_galleries ) ) {
-                        $galleries = array_merge( $galleries, $plugin_galleries );
-                    }
-                }
-            }
-
-            $this->set_migrator_setting( self::KEY_GALLERIES, $galleries );        
-        }
-
-        /**
-         * Returns an array of all galleries that can be migrated.
-         *
-         * @return array<Gallery>
-         */
-        public function get_galleries() {
-            return $this->get_migrator_setting( self::KEY_GALLERIES, array() );
-        }
-
-        /**
-         * Mark a specific gallery for migration.
-         *
-         * @param $gallery_id_array
-         * @return void
-         */
-        function queue_galleries_for_migration( $gallery_id_array ) {
-
-            $galleries = $this->get_galleries();
-            $queued_gallery_count = 0;
-
-            foreach ( $galleries as $gallery ) {
-                if ( array_key_exists( $gallery->unique_identifier(), $gallery_id_array ) ) {
-                    // Only queue a gallery if it has not been migrated previously.
-                    if ( !$gallery->migrated ) {
-                        $queued_gallery_count++;
-                        $gallery->part_of_migration = true;
-                        $gallery->migration_status = $gallery::PROGRESS_QUEUED;
-                        if ( 0 === $gallery->foogallery_id ) {
-                            $gallery->foogallery_title = $gallery_id_array[$gallery->unique_identifier()]['title'];
-                        }
-                    }
-                } else {
-                    $gallery->part_of_migration = false;
-                }
-            }
-
-            $this->calculate_migration_state();
-
-            // Save the state of the galleries.
-            $this->set_migrator_setting( self::KEY_GALLERIES, $galleries );
-
-            $this->set_migrator_setting( self::KEY_HAS_PREVIOUS_MIGRATION, true );
-        }
-
-        /**
-         * Calculates the state of the current migration.
-         *
-         * @return void
-         */
-        function calculate_migration_state() {
-            $galleries = $this->get_galleries();
-            $queued_count = 0;
-            $completed_count = 0;
-            $error_count = 0;
-
-            foreach ( $galleries as $gallery ) {
-                if ( $gallery->part_of_migration ) {
-                    $queued_count++;
-
-                    if ( $gallery->migrated ) {
-                        $completed_count++;
-                    }
-                    if ( $gallery->migration_status === $gallery::PROGRESS_ERROR ) {
-                        $error_count++;
-                    }
-                }
-            }
-
-            $progress = 0;
-            if ( $queued_count > 0 ) {
-                $progress = ( $completed_count + $error_count ) / $queued_count * 100;
-            }
-
-            $this->set_migrator_setting( self::KEY_CURRENT_MIGRATION_STATE, array(
-                'queued' => $queued_count,
-                'completed' => $completed_count,
-                'progress' => $progress
-            ) );
-        }
-
-        /**
-         * Resets all the previous migrations.
-         *
-         * @return void
-         */
-        function reset_migration() {
-            delete_option( FOOGALLERY_MIGRATE_OPTION_DATA );
-        }
-
-        /**
-         * Cancels the current migration.
-         *
-         * @return void
-         */
-        function cancel_migration() {
-            $this->set_migrator_setting( self::KEY_CURRENT_MIGRATION_STATE, false );
-        }
-
-        /**
-         * Returns the current gallery that is being migrated.
-         *
-         * @return int|string
-         */
-        function get_current_gallery_being_migrated() {
-            $galleries = $this->get_galleries();
-
-            foreach ( $galleries as $gallery ) {
-                // Check if the gallery is queued for migration.
-                if ( $gallery->migration_status === $gallery::PROGRESS_STARTED ) {
-                    return $gallery->unique_identifier();
-                }
-            }
-            return 0;
-        }
-
-        /**
-         * Continue migrating the gallery.
-         *
-         * @return void
-         */
-        function migrate() {
-            $galleries = $this->get_galleries();
-
-            foreach ( $galleries as $gallery ) {
-
-                // Check if the gallery is queued for migration, or has already started.
-                if ( $gallery->migration_status === $gallery::PROGRESS_QUEUED || $gallery->migration_status === $gallery::PROGRESS_STARTED ) {
-                    $gallery->migrate();
-                    break;
-                }
-            }
-
-            $this->calculate_migration_state();
-
-            // Save the state of the galleries.
-            $this->set_migrator_setting( self::KEY_GALLERIES, $galleries );
-        }
-
         /**
          * Render the gallery migration form.
          *
          * @return void
          */
         function render_gallery_form() {
-            $galleries = $this->get_galleries();
+            $galleries = $this->get_objects_to_migrate();
 
             if ( count( $galleries ) == 0 ) {
                 _e( 'No galleries found!', 'foogallery-migrate' );
                 return;
             }
 
-            $migration_state = $this->get_migrator_setting( self::KEY_CURRENT_MIGRATION_STATE, false );
+            $migration_state = $this->get_state();
             if ( false === $migration_state ) {
                 $has_migrations = false;
                 $overall_progress = 0;
             } else {
                 $overall_progress = $migration_state['progress'];
-                $has_migrations = $overall_progress < 100;
+                if ( $migration_state['queued'] > 0 ) {
+                    $has_migrations = $overall_progress < 100;
+                } else {
+                    $has_migrations = false; // There is nothing queued.
+                }
             }
             $migrating = $has_migrations && defined( 'DOING_AJAX' ) && DOING_AJAX;
-            $current_gallery_id = $this->get_current_gallery_being_migrated();
-            $has_previous_migrations = $this->get_migrator_setting( self::KEY_HAS_PREVIOUS_MIGRATION, false );
+            $current_gallery_id = $this->get_current_object_being_migrated();
+            $has_previous_migrations = $this->has_previous_migrations();
             ?>
             <table class="wp-list-table widefat fixed striped table-view-list pages">
                 <thead>
@@ -336,8 +113,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\GalleryMigrator' ) ) {
                     $done        = $gallery->migrated;
                     $edit_link	 = '';
                     $foogallery = false;
-                    if ( $gallery->foogallery_id > 0 ) {
-                        $foogallery = \FooGallery::get_by_id( $gallery->foogallery_id );
+                    if ( $gallery->migrated_id > 0 ) {
+                        $foogallery = \FooGallery::get_by_id( $gallery->migrated_id );
                         if ( $foogallery ) {
                             $edit_link = '<a target="_blank" href="' . esc_url( admin_url( 'post.php?post=' . $foogallery->ID . '&action=edit' ) ) . '">' . esc_html( $foogallery->name ) . '</a>';
                         } else {
@@ -373,7 +150,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\GalleryMigrator' ) ) {
                             <?php echo esc_html( $gallery->plugin->get_gallery_template( $gallery ) ); ?>
                             <br />
                             <?php _e( 'Images : ', 'foogallery-migrate' ); ?>
-                            <?php echo esc_html( $gallery->image_count ); ?>
+                            <?php echo esc_html( count( $gallery->images ) ); ?>
                             <?php if ( foogallery_is_debug() ) { ?>
                             <br />
                             <?php _e( 'Settings : ', 'foogallery-migrate' ); ?>

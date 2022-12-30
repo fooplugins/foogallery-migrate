@@ -82,5 +82,5 @@
     });
 </script>
 <form id="foogallery_migrate_gallery_form" method="POST">
-    <?php $migrator->render_gallery_form(); ?>
+    <?php $migrator->get_gallery_migrator()->render_gallery_form(); ?>
 </form>

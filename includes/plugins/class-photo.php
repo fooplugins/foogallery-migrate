@@ -7,11 +7,10 @@
 
 namespace FooPlugins\FooGalleryMigrate\Plugins;
 
-use FooPlugins\FooGalleryMigrate\Gallery;
-use FooPlugins\FooGalleryMigrate\Image;
-use FooPlugins\FooGalleryMigrate\Album;
-use FooPlugins\FooGalleryMigrate\Plugin;
-use stdClass;
+use FooPlugins\FooGalleryMigrate\Objects\Gallery;
+use FooPlugins\FooGalleryMigrate\Objects\Image;
+use FooPlugins\FooGalleryMigrate\Objects\Album;
+use FooPlugins\FooGalleryMigrate\Objects\Plugin;
 
 define( 'FM_PHOTO_TABLE_GALLERY', 'bwg_gallery' );
 define( 'FM_PHOTO_POST_TYPE', 'bwg_gallery' );
@@ -76,14 +75,12 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
                 $photo_galleries = $this->get_galleries();               
 
                 if ( count( $photo_galleries ) != 0 ) {
-                    foreach ( $photo_galleries as $photo_gallery ) {                    
+                    foreach ( $photo_galleries as $photo_gallery ) {
                         $gallery = new Gallery( $this );
                         $gallery->ID = $photo_gallery->id;
                         $gallery->title = $photo_gallery->name;
-                        $gallery->foogallery_title = $photo_gallery->name;                        
                         $gallery->data = $photo_gallery;
                         $gallery->images = $this->find_images( $gallery->ID, '/wp-content/uploads/photo-gallery' );
-                        $gallery->image_count = count( $gallery->images );
                         // To do fetch multiple data from other source and assign to setting member variable
                         $gallery->settings = "";
                         $galleries[] = $gallery;

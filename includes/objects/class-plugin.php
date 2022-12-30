@@ -5,32 +5,24 @@
  * @package FooPlugins\FooGalleryMigrate
  */
 
-namespace FooPlugins\FooGalleryMigrate;
+namespace FooPlugins\FooGalleryMigrate\Objects;
 
-if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugin' ) ) {
+if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugin\Objects' ) ) {
 
     /**
      * Class Plugin
      *
      * @package FooPlugins\FooGalleryMigrate
      */
-    abstract class Plugin extends MigratorBase {
+    abstract class Plugin {
+
+        public $is_detected = false;
 
         /**
          * The name of the Plugin.
          * @return string
          */
         abstract function name();
-
-        /**
-         * Returns true if the plugin has been detected before.
-         *
-         * @return bool
-         */
-        function is_detected() {
-            $detected_plugins = $this->get_migrator_setting( self::KEY_PLUGINS_DETECTED, array() );
-            return array_key_exists( $this->name(), $detected_plugins ) && $detected_plugins[ $this->name() ];
-        }
 
         /**
          * Detects data from the gallery plugin.
@@ -73,5 +65,12 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugin' ) ) {
        abstract function find_albums();
 //
 //        abstract function get_content();
+
+        function find_objects( $type ) {
+            if ( 'albums' === $type ) {
+                return $this->find_albums();
+            }
+            return $this->find_galleries();
+        }
     }
 }

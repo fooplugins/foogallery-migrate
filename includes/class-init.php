@@ -81,7 +81,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
          * @return void
          */
         function render_view() {
-            require_once 'view-migrate.php';
+            require_once 'views/view-migrate.php';
         }
 
         /**
@@ -112,10 +112,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                     }
 
                     // Queue the galleries for migration.
-                    $migrator->queue_galleries_for_migration( $migrations );
+                    $migrator->get_gallery_migrator()->queue_objects_for_migration( $migrations );
                 }
 
-                $migrator->render_gallery_form();
+                $migrator->get_gallery_migrator()->render_gallery_form();
 
                 die();
             }
@@ -129,8 +129,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
 
                     if ('foogallery_migrate_continue' === $action) {
                         $migrator = foogallery_migrate_migrator_instance();
-                        $migrator->migrate();
-                        $migrator->render_gallery_form();
+                        $migrator->get_gallery_migrator()->migrate();
+                        $migrator->get_gallery_migrator()->render_gallery_form();
                     }
                 }
 
@@ -146,8 +146,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
 
                     if ('foogallery_migrate_cancel' === $action) {
                         $migrator = foogallery_migrate_migrator_instance();
-                        $migrator->cancel_migration();
-                        $migrator->render_gallery_form();
+                        $migrator->get_gallery_migrator()->cancel_migration();
+                        $migrator->get_gallery_migrator()->render_gallery_form();
                     }
                 }
             }
@@ -162,8 +162,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
 
                     if ('foogallery_migrate_reset' === $action) {
                         $migrator = foogallery_migrate_migrator_instance();
-                        $migrator->reset_migration();
-                        $migrator->render_gallery_form();
+                        $migrator->get_gallery_migrator()->reset_migration();
+                        $migrator->get_gallery_migrator()->render_gallery_form();
                     }
                 }
             }

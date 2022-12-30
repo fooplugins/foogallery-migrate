@@ -7,10 +7,9 @@
 
 namespace FooPlugins\FooGalleryMigrate\Plugins;
 
-use FooPlugins\FooGalleryMigrate\Gallery;
-use FooPlugins\FooGalleryMigrate\Image;
-use FooPlugins\FooGalleryMigrate\Album;
-use FooPlugins\FooGalleryMigrate\Plugin;
+use FooPlugins\FooGalleryMigrate\Objects\Gallery;
+use FooPlugins\FooGalleryMigrate\Objects\Image;
+use FooPlugins\FooGalleryMigrate\Objects\Plugin;
 
 define( 'FM_MODULA_TABLE_GALLERY', 'posts' );
 define( 'FM_MODULA_POST_TYPE', 'modula-gallery' );
@@ -73,9 +72,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
                         $gallery->title = $modula_gallery->post_title;
                         $gallery->data = $modula_gallery;
                         $gallery->images = $this->find_images( $gallery->ID );
-                        $gallery->image_count = count( $gallery->images );
                         $gallery->settings = get_post_meta( $gallery->ID, 'modula-settings', true );
-                        $galleries[] = $gallery;    
+                        $galleries[] = $gallery;
                     }
                 }
             

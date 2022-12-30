@@ -224,9 +224,9 @@
         <?php require_once 'view-migrate-tab-galleries.php'; ?>
 	</div>
 	<div class="foogallery_migrate_container" id="foogallery_migrate_albums" style="display: none">
-        <?php require_once 'view-migrate-tab-albums.php'; ?>
+        <?php //require_once 'view-migrate-tab-albums.php'; ?>
 	</div>
 	<div class="foogallery_migrate_container" id="foogallery_migrate_content" style="display: none">
-        <?php require_once 'view-migrate-tab-content.php'; ?>
+        <?php //require_once 'view-migrate-tab-content.php'; ?>
 	</div>
 </div>

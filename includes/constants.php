@@ -4,7 +4,7 @@
  */
 
 //options
-define( 'FOOGALLERY_MIGRATE_OPTION_DATA', 'foogallery-migrate-settings' );
+define( 'FOOGALLERY_MIGRATE_OPTION_DATA', 'foogallery-migrate-data' );
 
 //meta
 define( 'FOOGALLERY_MIGRATE_META_DATA', '_foogallery_migrate' );

@@ -5,9 +5,9 @@
  * @package FooPlugins\FooGalleryMigrate
  */
 
-namespace FooPlugins\FooGalleryMigrate;
+namespace FooPlugins\FooGalleryMigrate\Objects;
 
-if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Image' ) ) {
+if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
 
     /**
      * Class Init
@@ -93,7 +93,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Image' ) ) {
             );
 
             // Include image.php so we can call wp_generate_attachment_metadata()
-            require_once( ABSPATH . 'wp-admin/includes/image.php' );
+            require_once(ABSPATH . 'wp-admin/includes/image.php');
 
             // Insert the attachment
             $this->attachment_id = wp_insert_attachment( $attachment, $file, 0 );

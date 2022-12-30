@@ -3,7 +3,7 @@
 
     //Check if the detect button has been pressed.
     if ( array_key_exists( 'foogallery_migrate_detect', $_POST ) ) {
-        if (check_admin_referer('foogallery_migrate_detect', 'foogallery_migrate_detect')) {
+        if ( check_admin_referer('foogallery_migrate_detect', 'foogallery_migrate_detect' ) ) {
             $migrator->run_detection();
         }
     }
@@ -19,9 +19,9 @@
     <?php } ?>
 <ul>
     <?php
-    foreach ( $migrator->plugins as $plugin ) {
+    foreach ( $migrator->get_plugins() as $plugin ) {
         echo '<li>' . esc_html( $plugin->name() );
-        echo $plugin->is_detected() ? '<span class="dashicons dashicons-yes-alt"></span>' : '<span class="dashicons dashicons-dismiss"></span>';
+        echo $plugin->is_detected ? '<span class="dashicons dashicons-yes-alt"></span>' : '<span class="dashicons dashicons-dismiss"></span>';
         echo '</li>';
     }
     ?>

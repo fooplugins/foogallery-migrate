@@ -7,10 +7,10 @@
 
 namespace FooPlugins\FooGalleryMigrate\Plugins;
 
-use FooPlugins\FooGalleryMigrate\Gallery;
-use FooPlugins\FooGalleryMigrate\Image;
-use FooPlugins\FooGalleryMigrate\Album;
-use FooPlugins\FooGalleryMigrate\Plugin;
+use FooPlugins\FooGalleryMigrate\Objects\Gallery;
+use FooPlugins\FooGalleryMigrate\Objects\Image;
+use FooPlugins\FooGalleryMigrate\Objects\Album;
+use FooPlugins\FooGalleryMigrate\Objects\Plugin;
 
 if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
 
@@ -73,7 +73,6 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
                     $gallery->title = $nextgen_gallery->title;
                     $gallery->data = $nextgen_gallery;
                     $gallery->images = $this->find_images( $gallery->ID, $nextgen_gallery->path );
-                    $gallery->image_count = count( $gallery->images );
                     $galleries[] = $gallery;
                 }
             }
