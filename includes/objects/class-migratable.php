@@ -83,9 +83,6 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
                     }
 
                     $this->migrate_next_child();
-
-                    $attachments = $this->build_attachment_array();
-                    update_post_meta( $this->foogallery_id, FOOGALLERY_META_ATTACHMENTS, $attachments );
                 }
             }
         }
