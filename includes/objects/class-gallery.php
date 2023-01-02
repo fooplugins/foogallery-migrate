@@ -103,7 +103,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Gallery' ) ) {
             $this->migrate_next_image();
 
             $attachments = $this->build_attachment_array();
-            update_post_meta( $this->foogallery_id, FOOGALLERY_META_ATTACHMENTS, $attachments );
+            update_post_meta( $this->migrated_id, FOOGALLERY_META_ATTACHMENTS, $attachments );
         }
 
         function get_children() {
