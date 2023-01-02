@@ -13,9 +13,17 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
 	 * Class Init
 	 *
 	 * @package FooPlugins\FooGalleryMigrate
+     *
+     * TODO : a lot of the functions can now be removed, as the logic will exist within MigratorBase.
+     *   Examples : queue_albums_for_migration, calculate_migration_state etc.
+     *   The only function that should be left is render_album_form
+     *
 	 */
 	class AlbumMigrator extends MigratorBase {
 
+        /**
+         * TODO : remove these constants
+         */
         protected const KEY_ALBUMS = 'albums';
         protected const KEY_CURRENT_ALBUM_MIGRATION_STATE = 'current_album_migration_state';
         protected const KEY_HAS_PREVIOUS_ALBUM_MIGRATION = 'previous_album_migration';

@@ -13,14 +13,20 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Album' ) ) {
      * Class Init
      *
      * @package FooPlugins\FooGalleryMigrate
+     *
+     * TODO : Album class to extend Migratable
      */
     class Album extends \stdClass {
 
+        /**
+         * TODO : progress constants to be removed
+         */
         const PROGRESS_NOT_STARTED = 'not_started';
         const PROGRESS_QUEUED = 'queued';
         const PROGRESS_STARTED = 'started';
         const PROGRESS_COMPLETED = 'completed';
         const PROGRESS_ERROR = 'error';
+
         const FOOGALLERY_ALBUM_GALLERIES = 'foogallery_album_galleries';
         const FOOGALLERY_ALBUM_TEMPLATE = 'foogallery_album_template';
 
@@ -52,6 +58,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Album' ) ) {
 
         /**
          * Migrate the album!
+         *
+         * TODO : there is a lot of duplicated logic that already exists in the gallery glass.
          *
          * @return void
          */
