@@ -35,9 +35,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
             $this->migration_status = self::PROGRESS_NOT_STARTED;
             $this->migrated_child_count = 0;
             $this->images = array();
+            $this->galleries = array();
             $this->progress = 0;
             $this->part_of_migration = false;
-
             $this->migrated_id = 0;
             $this->migrated_title = '';
         }
@@ -70,8 +70,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
          *
          * @return void
          */
-        function migrate() {
+        function migrate() { 
             if ( !$this->migrated ) {
+
+                echo $this->children_name() . " " . $this->get_children_count() . "<br/>";
 
                 if ( $this->get_children_count() === 0 ) {
                     $this->migration_status = self::PROGRESS_NOTHING;

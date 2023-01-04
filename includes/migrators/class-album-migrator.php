@@ -6,6 +6,9 @@
  */
 
 namespace FooPlugins\FooGalleryMigrate\Migrators;
+use FooPlugins\FooGalleryMigrate\Objects\Album;
+use FooPlugins\FooGalleryMigrate\Objects\Migratable;
+use FooPlugins\FooGalleryMigrate\Pagination;
 
 if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) {
 
@@ -20,214 +23,36 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
      *
 	 */
 	class AlbumMigrator extends MigratorBase {
-
-        /**
-         * TODO : remove these constants
-         */
-        protected const KEY_ALBUMS = 'albums';
-        protected const KEY_CURRENT_ALBUM_MIGRATION_STATE = 'current_album_migration_state';
-        protected const KEY_HAS_PREVIOUS_ALBUM_MIGRATION = 'previous_album_migration';
-
-		/**
-		 * Initialize the AlbumMigrator
-		 */
-		public function __construct() {
-
-        }
-
-        /**
-         * Find all galleries and albums.
-         *
-         * @return void
-         */
-        private function find_all() {
-            $albums = array();
-
-            $exist_albums = $this->get_albums();
-
-         
-            if(!$exist_albums) {
-
-                foreach ( $this->plugins as $plugin ) {
-                    if ( $plugin->is_detected() ) {
-                        $plugin_albums = $plugin->find_albums();
-
-                        if ( is_array( $plugin_albums ) ) {
-                            $albums = array_merge( $albums, $plugin_albums );
-                        }
-                    }
-                }
-
-                $this->set_migrator_setting( self::KEY_ALBUMS, $albums );                   
-            }            
-        }
-
-        /**
-         * Returns an array of all albums that can be migrated.
-         *
-         * @return array<Album>
-         */
-        public function get_albums() {
-            return $this->get_migrator_setting( self::KEY_ALBUMS, array() );
-        }
-
-        /**
-         * Mark a specific album for migration.
-         *
-         * @param $album_id_array
-         * @return void
-         */
-        function queue_albums_for_migration( $album_id_array ) {
-
-            $albums = $this->get_albums();
-            $queued_album_count = 0;
-            $updated_albums = array();
-
-            foreach ( $albums as $album ) {
-    
-                if ( array_key_exists( $album->unique_identifier(), $album_id_array ) ) {
-                    // Only queue a album if it has not been migrated previously.
-                    if ( !$album->migrated ) {
-                        $queued_album_count++;
-                        $album->part_of_migration = true;
-                        $album->migration_status = $album::PROGRESS_QUEUED;
-                        // if ( 0 === $album->fooalbum_id ) {
-                            $album->fooalbum_title = $album_id_array[$album->unique_identifier()]['title'];
-                        // }
-                        $updated_albums[] = $album;
-                    }
-                } else {
-                    $album->part_of_migration = false;
-                }
-            }
-
-            $this->set_migrator_setting( self::KEY_ALBUMS, $updated_albums );
-
-            $this->calculate_migration_state($updated_albums);
-
-            $this->set_migrator_setting( self::KEY_HAS_PREVIOUS_ALBUM_MIGRATION, true );
-
-        }
-
-        /**
-         * Calculates the state of the current migration.
-         *
-         * @return void
-         */
-        function calculate_migration_state($updated_albums) {
-            
-            $queued_count = 0;
-            $completed_count = 0;
-            $error_count = 0;
-
-            foreach ( $updated_albums as $album ) {
-                if ( $album->part_of_migration ) {
-                    $queued_count++;
-
-                    if ( $album->migrated ) {
-                        $completed_count++;
-                    }
-
-                    if ( $album->migration_status === $album::PROGRESS_ERROR ) {
-                        $error_count++;
-                    }
-                }
-            }
-
-            $progress = 0;
-            if ( $queued_count > 0 ) {
-                $progress = ( $completed_count + $error_count ) / $queued_count * 100;
-            }         
-
-            $this->set_migrator_setting( self::KEY_CURRENT_ALBUM_MIGRATION_STATE, array(
-                'queued' => $queued_count,
-                'completed' => $completed_count,
-                'progress' => $progress
-            ) );
-        }
-
-        /**
-         * Resets all the previous migrations.
-         *
-         * @return void
-         */
-        function reset_migration() {
-            delete_option( FOOGALLERY_MIGRATE_OPTION_DATA );
-        }
-
-        /**
-         * Cancels the current migration.
-         *
-         * @return void
-         */
-        function cancel_migration() {
-            $this->set_migrator_setting( self::KEY_CURRENT_ALBUM_MIGRATION_STATE, false );
-        }
-
-        /**
-         * Returns the current album that is being migrated.
-         *
-         * @return int|string
-         */
-        function get_current_album_being_migrated() {
-            $albums = $this->get_albums();
-
-            foreach ( $albums as $album ) {
-                // Check if the album is queued for migration.
-                if ( $album->migration_status === $album::PROGRESS_STARTED ) {
-                    return $album->unique_identifier();
-                }
-            }
-            return 0;
-        }
-
-        /**
-         * Continue migrating the album.
-         *
-         * @return void
-         */
-        function migrate() {
-            $albums = $this->get_albums();
-
-            foreach ( $albums as $album ) {
-                // Check if the album is queued for migration, or has already started.
-
-                if ( $album->migration_status === $album::PROGRESS_QUEUED || $album->migration_status === $album::PROGRESS_STARTED ) {
-                    $album->migrate();
-                    break;
-                }
-            }
-
-            $this->calculate_migration_state($albums);
-
-            // Save the state of the albums.
-            $this->set_migrator_setting( self::KEY_ALBUMS, $albums );
-        }
-
         /**
          * Render the album migration form.
          *
          * @return void
          */
         function render_album_form() {
-            $albums = $this->get_albums();  
+            $albums = $this->get_objects_to_migrate(); 
 
             if ( count( $albums ) == 0 ) {
                 _e( 'No albums found!', 'foogallery-migrate' );
                 return;
             }
 
-            $migration_state = $this->get_migrator_setting( self::KEY_CURRENT_ALBUM_MIGRATION_STATE, false );
+            $migration_state = $this->get_state();
+
             if ( false === $migration_state ) {
                 $has_migrations = false;
                 $overall_progress = 0;
             } else {
                 $overall_progress = $migration_state['progress'];
-                $has_migrations = $overall_progress < 100;
-            }
+                if ( $migration_state['queued'] > 0 ) {
+                    $has_migrations = $overall_progress < 100;
+                } else {
+                    $has_migrations = false; // There is nothing queued.
+                }
+            }            
             $migrating = $has_migrations && defined( 'DOING_AJAX' ) && DOING_AJAX;
-            $current_album_id = $this->get_current_album_being_migrated();
-            $has_previous_migrations = $this->get_migrator_setting( self::KEY_HAS_PREVIOUS_ALBUM_MIGRATION, false );
+            $current_album_id = $this->get_current_object_being_migrated();
+            // $has_previous_migrations = $this->get_migrator_setting( self::KEY_HAS_PREVIOUS_ALBUM_MIGRATION, false );
+            $has_previous_migrations = $this->has_previous_migrations();
             ?>
             <table class="wp-list-table widefat fixed striped table-view-list pages">
                 <thead>
@@ -293,8 +118,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                     $done        = $album->migrated;
                     $edit_link	 = '';
                     $fooalbum = false;
-                    if ( $album->fooalbum_id > 0 ) {
-                        $fooalbum = \FooGalleryAlbum::get_by_id( $album->fooalbum_id );
+                    if ( $album->migrated_id > 0 ) {
+                        $fooalbum = \FooGalleryAlbum::get_by_id( $album->migrated_id );
                         if ( $fooalbum ) {
                             $edit_link = '<a target="_blank" href="' . esc_url( admin_url( 'post.php?post=' . $fooalbum->ID . '&action=edit' ) ) . '">' . esc_html( $fooalbum->name ) . '</a>';
                         } else {
@@ -323,10 +148,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                         </td>
                         <td>
                             <?php _e( 'Template : ', 'foogallery-migrate' ); ?>
-                            <?php echo $album->get_album_template(); ?>
+                            <?php echo esc_html( $album->plugin->get_gallery_template( $album ) ); ?>                            
                             <br />
-                            <?php _e( 'Images : ', 'foogallery-migrate' ); ?>
-                            <?php echo esc_html( $album->get_image_count() ); ?>
+                            <?php _e( 'Galleries : ', 'foogallery-migrate' ); ?>
+                            <?php echo esc_html( $album->get_children_count() ); ?>
                             <?php if ( foogallery_is_debug() ) { ?>
                             <br />
                             <?php  } ?>

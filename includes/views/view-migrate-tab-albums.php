@@ -1,5 +1,5 @@
 <?php
-    $album_migrator = foogallery_migrate_albummigrator_instance();
+    $album_migrator = foogallery_migrate_migrator_instance();    
 ?>
 <script>
     jQuery(function ($) {
@@ -83,5 +83,5 @@
     });
 </script>
 <form id="foogallery_migrate_album_form" method="POST">
-    <?php $album_migrator->render_album_form(); ?>
+    <?php $migrator->get_album_migrator()->render_album_form(); ?>
 </form>
