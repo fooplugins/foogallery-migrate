@@ -17,37 +17,12 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Gallery' ) ) {
     class Gallery extends Migratable {
 
         /**
-         * Migrate the next available image for the gallery.
+         * The unique identifier for the gallery.
          *
-         * @return void
+         * @return string
          */
-        function migrate_next_image() {
-            if ( $this->migration_status !== self::PROGRESS_ERROR && $this->migrated_child_count < $this->get_children_count() ) {
-                foreach ( $this->images as $image ) {
-                    if ( !$image->migrated && intval( $image->attachment_id ) === 0 ) {
-                        if ( $image->migrate() ) {
-                            $this->migrated_child_count++;
-                        }
-                        break;
-                    }
-                }
-            }
-            $this->calculate_progress();
-        }
-
-        /**
-         * Build up the attachment array for the gallery.
-         *
-         * @return array
-         */
-        function build_attachment_array() {
-            $attachments = array();
-            foreach ( $this->images as $image ) {
-                if ( intval( $image->attachment_id ) > 0 ) {
-                    $attachments[] = $image->attachment_id;
-                }
-            }
-            return $attachments;
+        function unique_identifier() {
+            return 'gallery_' . parent::unique_identifier();
         }
 
         function has_children() {
@@ -94,20 +69,18 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Gallery' ) ) {
                 // Set the gallery settings.
                 add_post_meta( $this->migrated_id, FOOGALLERY_META_SETTINGS, $gallery_settings, true );
             }
-
-            //migrate settings
-            $this->plugin->get_gallery_template( $this );
         }
 
+        /**
+         * Migrate the next attachment.
+         *
+         * @return void
+         */
         function migrate_next_child() {
-            $this->migrate_next_image();
+            parent::migrate_next_child();
 
-            $attachments = $this->build_attachment_array();
+            $attachments = $this->build_child_migrated_id_array();
             update_post_meta( $this->migrated_id, FOOGALLERY_META_ATTACHMENTS, $attachments );
-        }
-
-        function get_children() {
-            return $this->images;
         }
     }
 }

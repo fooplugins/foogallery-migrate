@@ -14,11 +14,11 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
      *
      * @package FooPlugins\FooGalleryMigrate
      */
-    class Image extends \stdClass {
+    class Image extends Migratable {
 
         function __construct() {
             $this->migrated = false;
-            $this->attachment_id = 0;
+            $this->migrated_id = 0;
             $this->caption = '';
             $this->description = '';
             $this->slug = '';
@@ -31,39 +31,35 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
         }
 
         /**
+         * The unique identifier for the image.
+         *
+         * @return string
+         */
+        function unique_identifier() {
+            return $this->source_url;
+        }
+
+        /**
          * Checks if the image has already been uploaded to the media library.
-         * TODO : this will not find images that are uploaded in different months.
-         *   Eg if the image was originally migrated in 2022/06 and then again in 2022/07 it would not
-         *   be found and a duplicate would be uploaded, as the base upload folder would have changed.
          *
          * @return int
          */
         function check_image_already_uploaded() {
-            $upload = wp_upload_dir();
-
-            $image_url = trailingslashit( $upload['url'] ) . basename( $this->source_url );
-
-            return attachment_url_to_postid( $image_url );
+            return attachment_url_to_postid( $this->source_url );
         }
 
-        /**
-         * Migrate the image by uploading to the media library.
-         *
-         * @return bool
-         */
-        function migrate() {
-
+        function create_new_migrated_object() {
             // Check if we can get out early!
-            if ( $this->migrated && $this->attachment_id > 0 ) {
-                return true;
+            if ( $this->migrated && $this->migrated_id > 0 ) {
+                return;
             }
 
             // Check if the file has already been uploaded to the media library.
             $existing_attachment_id = $this->check_image_already_uploaded();
             if ( $existing_attachment_id !== 0 ) {
-                $this->attachment_id = $existing_attachment_id;
+                $this->migrated_id = $existing_attachment_id;
                 $this->migrated = true;
-                return true;
+                return;
             }
 
             // Get the contents of the picture
@@ -71,7 +67,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
             if ( is_wp_error( $response ) ) {
                 $this->error = $response;
                 $this->migrated = true;
-                return false;
+                return;
             }
             $contents = wp_remote_retrieve_body( $response );
 
@@ -96,19 +92,17 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
             require_once(ABSPATH . 'wp-admin/includes/image.php');
 
             // Insert the attachment
-            $this->attachment_id = wp_insert_attachment( $attachment, $file, 0 );
-            if ( is_wp_error( $this->attachment_id ) ) {
-                $this->error = $this->attachment_id;
+            $this->migrated_id = wp_insert_attachment( $attachment, $file, 0 );
+            if ( is_wp_error( $this->migrated_id ) ) {
+                $this->error = $this->migrated_id;
+                $this->migrated_id = 0;
                 $this->migrated = true;
-                return false;
             }
-            $attachment_data = wp_generate_attachment_metadata( $this->attachment_id, $file );
-            wp_update_attachment_metadata( $this->attachment_id, $attachment_data );
+            $attachment_data = wp_generate_attachment_metadata( $this->migrated_id, $file );
+            wp_update_attachment_metadata( $this->migrated_id, $attachment_data );
 
             // Save alt text in the post meta
-            update_post_meta( $this->attachment_id, '_wp_attachment_image_alt', $this->alt );
-
-            return true;
+            update_post_meta( $this->migrated_id, '_wp_attachment_image_alt', $this->alt );
         }
     }
 }

@@ -51,8 +51,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
             }            
             $migrating = $has_migrations && defined( 'DOING_AJAX' ) && DOING_AJAX;
             $current_album_id = $this->get_current_object_being_migrated();
-            // $has_previous_migrations = $this->get_migrator_setting( self::KEY_HAS_PREVIOUS_ALBUM_MIGRATION, false );
-            $has_previous_migrations = $this->has_previous_migrations();
+            $has_previous_migrations = true; //$this->has_previous_migrations();
             ?>
             <table class="wp-list-table widefat fixed striped table-view-list pages">
                 <thead>
@@ -147,14 +146,11 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                             <?php echo esc_html( $album->plugin->name() ); ?>
                         </td>
                         <td>
-                            <?php _e( 'Template : ', 'foogallery-migrate' ); ?>
-                            <?php echo esc_html( $album->plugin->get_gallery_template( $album ) ); ?>                            
-                            <br />
                             <?php _e( 'Galleries : ', 'foogallery-migrate' ); ?>
                             <?php echo esc_html( $album->get_children_count() ); ?>
-                            <?php if ( foogallery_is_debug() ) { ?>
                             <br />
-                            <?php  } ?>
+                            <?php _e( 'Images : ', 'foogallery-migrate' ); ?>
+                            <?php echo esc_html( $album->get_total_images() ); ?>
                         </td>
                         <td>
                             <?php

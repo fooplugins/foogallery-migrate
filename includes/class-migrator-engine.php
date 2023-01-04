@@ -7,6 +7,7 @@
 
 namespace FooPlugins\FooGalleryMigrate;
 
+use FooPlugins\FooGalleryMigrate\Objects\Migratable;
 use FooPlugins\FooGalleryMigrate\Objects\Plugin;
 
 if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
@@ -21,6 +22,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         protected const KEY_PLUGINS = 'plugins';
         protected const KEY_GALLERIES = 'galleries';
         protected const KEY_ALBUMS = 'albums';
+        protected const KEY_MIGRATED = 'migrated';
 
         /**
          * Returns a setting for the migrator.
@@ -137,6 +139,55 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          */
         public function get_album_migrator() {
             return new Migrators\AlbumMigrator( $this, self::KEY_ALBUMS );
+        }
+
+        /**
+         * Store a migrated object, so that it does not get migrated twice.
+         *
+         * @param $object Migratable
+         * @return void
+         */
+        public function add_migrated_object( $object ) {
+            $objects = $this->get_migrated_objects();
+            if ( !array_key_exists( $object->unique_identifier(), $objects ) ) {
+                $objects[$object->unique_identifier()] = $object;
+                $this->set_migrator_setting(self::KEY_MIGRATED, $objects);
+            }
+        }
+
+        /**
+         * Check if an object has been migrated previously.
+         *
+         * @param $unique_identifier
+         * @return bool
+         */
+        public function has_object_been_migrated( $unique_identifier ) {
+            return array_key_exists( $unique_identifier, $this->get_migrated_objects() );
+        }
+
+        /**
+         * Get all previously migrated objects.
+         *
+         * @return array<Migratable>
+         */
+        public function get_migrated_objects() {
+            $objects = $this->get_migrator_setting( self::KEY_MIGRATED );
+            if ( $objects === false ) {
+                $objects = array();
+            }
+            return $objects;
+        }
+
+        /**
+         * Get a previously migrated object.
+         *
+         * @return Migratable|bool
+         */
+        public function get_migrated_object( $unique_identifier ) {
+            if ( $this->has_object_been_migrated( $unique_identifier ) ) {
+                return $this->get_migrated_objects()[$unique_identifier];
+            }
+            return false;
         }
 	}
 }

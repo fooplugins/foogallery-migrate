@@ -246,7 +246,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
 
             foreach ( $objects as $object ) {
 
-                // Check if the gallery is queued for migration, or has already started.
+                // Check if the object is queued for migration, or has already started.
                 if ( $object->migration_status === Migratable::PROGRESS_QUEUED || $object->migration_status === Migratable::PROGRESS_STARTED ) {
                     $object->migrate();
                     break;

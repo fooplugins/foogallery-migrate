@@ -80,8 +80,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
                         $gallery->ID = $photo_gallery->id;
                         $gallery->title = $photo_gallery->name;
                         $gallery->data = $photo_gallery;
-                        $gallery->images = $this->find_images( $gallery->ID, '/wp-content/uploads/photo-gallery' );
-                        // To do fetch multiple data from other source and assign to setting member variable
+                        $gallery->children = $this->find_images( $gallery->ID, '/wp-content/uploads/photo-gallery' );
                         $gallery->settings = "";
                         $galleries[] = $gallery;
                     }
@@ -210,8 +209,6 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
                     $album->ID = $photo_album->id;
                     $album->title = $photo_album->name;
                     $album->data = $photo_album;
-                    $album->album_template = 'default';
-                    // $album->fooalbum_id = photo_album->id;                        
                     $album->fooalbum_title = $photo_album->name;                        
 
                     $galleries = array();
@@ -223,14 +220,12 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
                         $gallery->title = $album_gallery->name;
                         $gallery->foogallery_title = $album_gallery->name;                        
                         $gallery->data = $album_gallery;
-                        $gallery->images = $this->find_images( $gallery->ID, '/wp-content/uploads/photo-gallery' );
-                        $gallery->image_count = count( $gallery->images );
+                        $gallery->children = $this->find_images( $gallery->ID, '/wp-content/uploads/photo-gallery' );
                         $gallery->settings = "";
                         $galleries[] = $gallery;
                     }
 
-                    $album->galleries = $galleries;
-                    $album->gallery_count = count( $album->galleries );
+                    $album->children = $galleries;
                     $albums[] = $album;
                 }
             }

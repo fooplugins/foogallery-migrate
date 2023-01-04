@@ -73,7 +73,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
                         $gallery->ID = $robo_gallery->ID;
                         $gallery->title = $robo_gallery->post_title;
                         $gallery->data = $robo_gallery;
-                        $gallery->images = $this->find_images( $gallery->ID );
+                        $gallery->children = $this->find_images( $gallery->ID );
                         // To do fetch multiple data from other source and assign to setting member variable
                         $get_all_meta = $wpdb->get_results( "SELECT * FROM $meta_table WHERE post_id = $gallery->ID" );
                         foreach( $get_all_meta as $get_all_meta_data ) {
@@ -345,7 +345,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
                     $image = new Image();
                     $image_attributes = wp_get_attachment_image_src( $attachment_id );
                     if ( is_array( $image_attributes ) && !empty( $image_attributes ) ) {
-                        // $image->attachment_id = $attachment_id;
+                        // $image->migrated_id = $attachment_id;
                         $image->source_url = $image_attributes[0];
                     }
                     $image->caption = "";

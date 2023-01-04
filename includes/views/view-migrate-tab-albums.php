@@ -1,5 +1,6 @@
 <?php
-    $album_migrator = foogallery_migrate_migrator_instance();    
+    $migrator = foogallery_migrate_migrator_instance();
+    $albums_enabled = class_exists( 'FooGalleryAlbum' );
 ?>
 <script>
     jQuery(function ($) {
@@ -83,5 +84,14 @@
     });
 </script>
 <form id="foogallery_migrate_album_form" method="POST">
-    <?php $migrator->get_album_migrator()->render_album_form(); ?>
+    <?php
+    if ( $albums_enabled ) {
+        $migrator->get_album_migrator()->render_album_form();
+    } else {
+        echo '<h2>' . __( 'Album feature not enabled!', 'foogallery-migrate' ) . '</h2>';
+        echo '<p>';
+        _e( 'Please enable the Albums feature from FooGallery -> Features before you migrate any albums!', 'foogallery-migrate' );
+        echo '</p>';
+    }
+    ?>
 </form>

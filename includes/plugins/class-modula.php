@@ -71,7 +71,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
                         $gallery->ID = (int) $modula_gallery->ID;
                         $gallery->title = $modula_gallery->post_title;
                         $gallery->data = $modula_gallery;
-                        $gallery->images = $this->find_images( $gallery->ID );
+                        $gallery->children = $this->find_images( $gallery->ID );
                         $gallery->settings = get_post_meta( $gallery->ID, 'modula-settings', true );
                         $galleries[] = $gallery;
                     }
@@ -95,7 +95,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
                 foreach ( $modula_images as $modula_image ) {
                     $modula_image = ( object ) $modula_image;
                     $image = new Image();
-                    //$image->attachment_id = $modula_image->id;
+                    //$image->migrated_id = $modula_image->id;
                     $image_attributes = wp_get_attachment_image_src( $modula_image->id );
                     if ( is_array( $image_attributes ) && !empty ( $image_attributes ) ) {
                         $image->source_url = $image_attributes[0];

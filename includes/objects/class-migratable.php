@@ -34,26 +34,76 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
             $this->title = '';
             $this->migration_status = self::PROGRESS_NOT_STARTED;
             $this->migrated_child_count = 0;
-            $this->images = array();
-            $this->galleries = array();
             $this->progress = 0;
             $this->part_of_migration = false;
             $this->migrated_id = 0;
             $this->migrated_title = '';
+
+            $this->children = array();
         }
 
-        abstract function has_children();
+        /**
+         * Returns true if the object has children.
+         *
+         * @return bool
+         */
+        function has_children() {
+            return false;
+        }
 
-        abstract function children_name();
+        /**
+         * Returns the name of the children for the object.
+         *
+         * @return string
+         */
+        function children_name() {
+            return '';
+        }
 
-        abstract function create_new_migrated_object();
+        /**
+         * Creates the new migrated object and returns true if successful.
+         *
+         * @return bool
+         */
+        function create_new_migrated_object() {
+            return true;
+        }
 
-        abstract function migrate_next_child();
+        /**
+         * Migrates the next child. Returns true if successful.
+         *
+         * @return void
+         */
+        function migrate_next_child() {
+            if ( !$this->has_children() ) { return; }
+            if ( $this->migration_status !== self::PROGRESS_ERROR && $this->migrated_child_count < $this->get_children_count() ) {
+                foreach ( $this->get_children() as $child ) {
+                    if ( !$child->migrated ) {
+                        $child->migrate();
+                        if ( $child->migrated ) {
+                            $this->migrated_child_count++;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
 
-        abstract function get_children();
+        /**
+         * Returns an array of child migratable objects.
+         *
+         * @return array<Migratable>
+         */
+        function get_children() {
+            return $this->children;
+        }
 
         function get_children_count() {
-            return count( $this->get_children() );
+            $children = $this->get_children();
+            if ( is_array( $children ) ) {
+                return count( $children );
+            }
+            return 0;
         }
 
         /**
@@ -70,21 +120,42 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
          *
          * @return void
          */
-        function migrate() { 
+        function migrate() {
+            $migrated_object = foogallery_migrate_migrator_instance()->get_migrated_object( $this->unique_identifier() );
+            if ( false !== $migrated_object ) {
+                $this->migration_status = self::PROGRESS_COMPLETED;
+                $this->migrated = true;
+                $this->migrated_id = $migrated_object->migrated_id;
+                $this->migrated_title = $migrated_object->migrated_title;
+                if ( $this->has_children() ) {
+                    $this->migrated_child_count = $migrated_object->migrated_child_count;
+                }
+            }
+
             if ( !$this->migrated ) {
 
-                echo $this->children_name() . " " . $this->get_children_count() . "<br/>";
-
-                if ( $this->get_children_count() === 0 ) {
+                if ( $this->has_children() && $this->get_children_count() === 0 ) {
                     $this->migration_status = self::PROGRESS_NOTHING;
                 } else {
                     $this->migration_status = self::PROGRESS_STARTED;
 
+                    // First, make sure the object is migrated.
                     if ( $this->migrated_id === 0 ) {
                         $this->create_new_migrated_object();
                     }
 
-                    $this->migrate_next_child();
+                    // Then migrate the children.
+                    if ( $this->has_children() ) {
+                        $this->migrate_next_child();
+                    }
+
+                    // Always calculate the new progress, after an attempted migration.
+                    $progress = $this->calculate_progress();
+                    if ( $progress >= 100 ) {
+                        $this->migration_status = self::PROGRESS_COMPLETED;
+                        $this->migrated = true;
+                        foogallery_migrate_migrator_instance()->add_migrated_object( $this );
+                    }
                 }
             }
         }
@@ -92,24 +163,20 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
         /**
          * Calculates the migration progress.
          *
-         * @return void
+         * @return int
          */
         function calculate_progress() {
             if ( $this->migrated || $this->get_children_count() === 0 ) {
                 // Nothing to migrate.
                 $this->progress = 100;
-                return;
-            }
+            } else {
 
-            //update our percentage complete
-            if ( $this->migrated_child_count > 0 && $this->get_children_count() > 0 ) {
-                $this->progress = $this->migrated_child_count / $this->get_children_count() * 100;
+                //update our percentage complete
+                if ($this->migrated_child_count > 0 && $this->get_children_count() > 0) {
+                    $this->progress = $this->migrated_child_count / $this->get_children_count() * 100;
+                }
             }
-
-            if ( intval( $this->progress ) >= 100 ) {
-                $this->migration_status = self::PROGRESS_COMPLETED;
-                $this->migrated = true;
-            }
+            return $this->progress;
         }
 
         function friendly_migration_message () {
@@ -119,17 +186,46 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
                 case self::PROGRESS_QUEUED:
                     return __( 'Queued for migration', 'foogallery-migrate' );
                 case self::PROGRESS_STARTED:
-                    return sprintf( __( 'Migrated %d of %d %s', 'foogallery-migrate' ),
-                        $this->migrated_child_count, $this->get_children_count(), $this->children_name() );
+                    if ( $this->has_children() ) {
+                        return sprintf(__('Migrated %d of %d %s', 'foogallery-migrate'),
+                            $this->migrated_child_count, $this->get_children_count(), $this->children_name());
+                    } else {
+                        return __('Migrating...', 'foogallery-migrate');
+                    }
                 case self::PROGRESS_COMPLETED:
-                    return sprintf( __( 'Done! %d %s migrated', 'foogallery-migrate' ), $this->migrated_child_count, $this->children_name() );
+                    if ( $this->has_children() ) {
+                        return sprintf(__('Done! %d %s migrated', 'foogallery-migrate'), $this->migrated_child_count, $this->children_name());
+                    } else {
+                        return __('Done!', 'foogallery-migrate');
+                    }
                 case self::PROGRESS_NOTHING:
-                    return sprintf( __( 'No %s to migrate!', 'foogallery-migrate' ), $this->children_name() );
+                    if ( $this->has_children() ) {
+                        return sprintf(__('No %s to migrate!', 'foogallery-migrate'), $this->children_name());
+                    } else {
+                        return __('Nothing to migrate!', 'foogallery-migrate');
+                    }
                 case self::PROGRESS_ERROR:
                     return __( 'Error while migrating!', 'foogallery-migrate' );
             }
 
             return __( 'Unknown status!', 'foogallery-migrate' );
         }
+
+        /**
+         * Build up an array of the ID's of the migrated children.
+         *
+         * @return array
+         */
+        function build_child_migrated_id_array() {
+            $migrated_children = array();
+            foreach ( $this->get_children() as $child ) {
+                if ( intval( $child->migrated_id ) > 0 ) {
+                    $migrated_children[] = $child->migrated_id;
+                }
+            }
+            return $migrated_children;
+        }
+
+
     }
 }

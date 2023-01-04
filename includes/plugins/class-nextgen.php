@@ -72,7 +72,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
                     $gallery->ID = $nextgen_gallery->gid;
                     $gallery->title = $nextgen_gallery->title;
                     $gallery->data = $nextgen_gallery;
-                    $gallery->images = $this->find_images( $gallery->ID, $nextgen_gallery->path );
+                    $gallery->children = $this->find_images( $gallery->ID, $nextgen_gallery->path );
                     $galleries[] = $gallery;
                 }
             }
@@ -219,8 +219,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
                         $gallery->title = $album_gallery->name;
                         $gallery->foogallery_title = $album_gallery->name;                        
                         $gallery->data = $album_gallery;
-                        $gallery->images = $this->find_images( $gallery->ID, $album_gallery->path );
-                        $gallery->image_count = count( $gallery->images );
+                        $gallery->children = $this->find_images( $gallery->ID, $album_gallery->path );
                         $gallery->settings = "";
                         $galleries[] = $gallery;
                     }

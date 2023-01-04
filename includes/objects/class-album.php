@@ -17,37 +17,14 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Album' ) ) {
      */
     class Album extends Migratable {
 
-        const FOOGALLERY_ALBUM_GALLERIES = 'foogallery_album_galleries';
-        const FOOGALLERY_ALBUM_TEMPLATE = 'foogallery_album_template';
-
-        /**
-         * Migrate the next available gallery for the album.
-         *
-         * @return void
-         */
-        function migrate_next_gallery() {
-            if ( $this->migration_status !== self::PROGRESS_ERROR && $this->migrated_child_count < $this->get_children_count() ) {
-                foreach ( $this->galleries as $gallery ) {
-                    if ( !$gallery->migrated && intval( $gallery->migrated_id ) === 0 ) {
-                        if ( $gallery->migrate() ) {
-                            $this->migrated_child_count++;
-                        }
-                        break;
-                    }
-                }
-            }
-            $this->calculate_progress();
-        }        
-
         /**
          * The unique identifier for the album.
          *
          * @return string
          */
         function unique_identifier() {
-            return $this->plugin->name() . '_' . $this->ID;
+            return 'album_' . parent::unique_identifier();
         }
-
 
         function has_children() {
             return true;
@@ -55,6 +32,30 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Album' ) ) {
 
         function children_name() {
             return 'galleries';
+        }
+
+        function friendly_migration_message () {
+            if ( self::PROGRESS_STARTED === $this->migration_status ) {
+                return sprintf( __('Migrated %d of %d %s (%d of %d images) ', 'foogallery-migrate'),
+                    $this->migrated_child_count, $this->get_children_count(), $this->children_name(), $this->get_total_migrated_images(), $this->get_total_images() );
+            }
+            return parent::friendly_migration_message();
+        }
+
+        function get_total_images() {
+            $image_count = 0;
+            foreach ( $this->get_children() as $child ) {
+                $image_count += $child->get_children_count();
+            }
+            return $image_count;
+        }
+
+        function get_total_migrated_images() {
+            $image_count = 0;
+            foreach ( $this->get_children() as $child ) {
+                $image_count += $child->migrated_child_count;
+            }
+            return $image_count;
         }
 
         /**
@@ -186,52 +187,31 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Album' ) ) {
         function create_new_migrated_object() {
             // Create an album
             
-            if($this->migrated_id === 0) {
- 
-                $foogallery_args = array(
+            if ( $this->migrated_id === 0 ) {
+                $this->migrated_id = wp_insert_post( array(
                     'post_title' => $this->title,
                     'post_type' => FOOGALLERY_CPT_ALBUM,
                     'post_status' => 'publish',
-                );
-                $this->migrated_id = wp_insert_post( $foogallery_args );
-                
-            }            
+                ) );
 
-            update_post_meta($this->migrated_id, self::FOOGALLERY_ALBUM_TEMPLATE, 'default');
-
-            if ( is_wp_error( $this->migrated_id ) ) {
-                $this->migration_status = self::PROGRESS_ERROR;
-            } else {    
-
-                foreach( $this->galleries as $gallery ) {
-
-                    if(!$gallery->migrated) {
-                        if($gallery->migrate()) {
-                            $this->migrated_child_count++;
-                        }                        
-                    } else {
-                        $this->migrated_child_count++;
-                    }
-
-                    $added_galleries = get_post_meta( $this->migrated_id, self::FOOGALLERY_ALBUM_GALLERIES, true);
-                    if(empty($added_galleries)) {
-                        $added_galleries = array();
-                    }                                
-
-                    $additional_galleries = array( $gallery->migrated_id );
-                    $merge_all_galleries = array_merge( $additional_galleries, $added_galleries );
-
-                    update_post_meta( $this->migrated_id, self::FOOGALLERY_ALBUM_GALLERIES, $merge_all_galleries );
+                if ( is_wp_error( $this->migrated_id ) ) {
+                    $this->migration_status = self::PROGRESS_ERROR;
+                } else {
+                    update_post_meta( $this->migrated_id, FOOGALLERY_ALBUM_META_TEMPLATE, 'default' );
                 }
-            }        
-        }        
-
-        function migrate_next_child() {
-            $this->migrate_next_gallery();
+            }            
         }
 
-        function get_children() {
-            return $this->galleries;
-        }        
+        /**
+         * Migrate the next gallery.
+         *
+         * @return void
+         */
+        function migrate_next_child() {
+            parent::migrate_next_child();
+
+            $galleries = $this->build_child_migrated_id_array();
+            update_post_meta( $this->migrated_id, FOOGALLERY_ALBUM_META_GALLERIES, $galleries );
+        }
     }
 }

@@ -70,7 +70,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Envira' ) ) {
                         $gallery->ID = $envira_gallery->ID;
                         $gallery->title = $envira_gallery->post_title;
                         $gallery->data = $envira_gallery;
-                        $gallery->images = $this->find_images( $gallery->ID );
+                        $gallery->children = $this->find_images( $gallery->ID );
                         $gallery->settings = get_post_meta( $gallery->ID, '_eg_gallery_data', true );
                         $galleries[] = $gallery;
                     }
@@ -145,7 +145,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Envira' ) ) {
                     $image = new Image();
                     $image_attributes = wp_get_attachment_image_src( $envira_obj->id);
                     if ( is_array( $image_attributes ) && !empty ( $image_attributes ) ) {
-                        //$image->attachment_id = $envira_image['id'];
+                        //$image->migrated_id = $envira_image['id'];
                         $image->source_url = $image_attributes[0];
                     }
                     $image->caption = $envira_obj->caption;

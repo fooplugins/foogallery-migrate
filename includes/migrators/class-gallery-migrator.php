@@ -150,7 +150,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                             <?php echo esc_html( $gallery->plugin->get_gallery_template( $gallery ) ); ?>
                             <br />
                             <?php _e( 'Images : ', 'foogallery-migrate' ); ?>
-                            <?php echo esc_html( count( $gallery->images ) ); ?>
+                            <?php echo esc_html( $gallery->get_children_count() ); ?>
                             <?php if ( foogallery_is_debug() ) { ?>
                             <br />
                             <?php _e( 'Settings : ', 'foogallery-migrate' ); ?>
