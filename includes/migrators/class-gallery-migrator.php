@@ -195,6 +195,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
             <?php } else { ?>
                 <button name="foogallery_migrate_action" value="foogallery_migrate_start"
                         class="button button-primary start_migrate"><?php _e( 'Start Gallery Migration', 'foogallery-migrate' ); ?></button>
+                <button name="foogallery_migrate_action" value="foogallery_refresh_gallery"
+                        class="button button-primary refresh_gallery"><?php _e( 'Refresh Galleries', 'foogallery-migrate' ); ?></button>                        
             <?php }
             if ( $has_previous_migrations && !$migrating ) { ?>
                 <input type="submit" name="foogallery_foogallery_reset" class="button reset_migrate" value="<?php _e( 'Reset Migration', 'foogallery' ); ?>">

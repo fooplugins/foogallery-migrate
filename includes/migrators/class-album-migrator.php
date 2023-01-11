@@ -16,10 +16,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
 	 * Class Init
 	 *
 	 * @package FooPlugins\FooGalleryMigrate
-     *
-     * TODO : a lot of the functions can now be removed, as the logic will exist within MigratorBase.
-     *   Examples : queue_albums_for_migration, calculate_migration_state etc.
-     *   The only function that should be left is render_album_form
+     *     
      *
 	 */
 	class AlbumMigrator extends MigratorBase {
@@ -194,6 +191,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
             <?php } else { ?>
                 <button name="foogallery_migrate_action" value="foogallery_album_migrate_start"
                         class="button button-primary start_album_migrate"><?php _e( 'Start Album Migration', 'foogallery-migrate' ); ?></button>
+                <button name="foogallery_migrate_action" value="foogallery_refresh_albums"
+                        class="button button-primary refresh_albums"><?php _e( 'Refresh Albums', 'foogallery-migrate' ); ?></button>                           
             <?php }
             if ( $has_previous_migrations && !$migrating ) { ?>
                 <input type="submit" name="foogallery_foogallery_reset" class="button reset_album_migrate" value="<?php _e( 'Reset Migration', 'foogallery' ); ?>">

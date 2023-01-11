@@ -69,12 +69,10 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
 
                 if ( count( $robo_galleries ) != 0 ) {
                     foreach ( $robo_galleries as $robo_gallery ) {
-                        $gallery = new Gallery( $this );
-                        $gallery->ID = $robo_gallery->ID;
-                        $gallery->title = $robo_gallery->post_title;
-                        $gallery->data = $robo_gallery;
-                        $gallery->children = $this->find_images( $gallery->ID );
-                        // To do fetch multiple data from other source and assign to setting member variable
+
+                        $unique_identifier = 'gallery_' . $this->name() . '_' . $robo_gallery->ID;
+
+                        $settings = array();
                         $get_all_meta = $wpdb->get_results( "SELECT * FROM $meta_table WHERE post_id = $gallery->ID" );
                         foreach( $get_all_meta as $get_all_meta_data ) {
                             $current_meta_data = get_post_meta($gallery->ID, $get_all_meta_data->meta_key, true);
@@ -82,9 +80,22 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
                             if( $new_key_for_setting == 'rsg_gallery_type' ) {
                                 $new_key_for_setting = 'type';
                             }
-                            $gallery->settings[$new_key_for_setting] = $current_meta_data; 
+                            $settings[$new_key_for_setting] = $current_meta_data; 
                         }
-                        if( $gallery->settings['type'] != 'youtube' ) {
+                       
+                        $data = array(
+                            'unique_identifier' => $unique_identifier,
+                            'id' => $robo_gallery->ID,
+                            'title' => $robo_gallery->post_title,
+                            'foogallery_title' => $robo_gallery->post_title,
+                            'data' => $robo_gallery,
+                            'children' => $this->find_images( $robo_gallery->ID ),
+                            'settings' => $settings
+                        );
+                        
+                        $gallery = $this->get_gallery($data);                        
+
+                        if( $settings['type'] != 'youtube' ) {
                             $galleries[] = $gallery;
                         }                        
                     }
@@ -342,15 +353,23 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
             $robo_images = get_post_meta( $gallery_id, 'rsg_galleryImages', true );
             if ( is_array( $robo_images ) && !empty( $robo_images ) ) {
                 foreach ( $robo_images as $attachment_id) {                
-                    $image = new Image();
+
                     $image_attributes = wp_get_attachment_image_src( $attachment_id );
                     if ( is_array( $image_attributes ) && !empty( $image_attributes ) ) {
                         // $image->migrated_id = $attachment_id;
-                        $image->source_url = $image_attributes[0];
+                        $source_url = $image_attributes[0];
                     }
-                    $image->caption = "";
-                    $image->alt = "";
-                    $image->date = get_the_date( 'Y-m-d', $attachment_id ) . ' ' . get_the_time( 'H:i:s', $attachment_id );
+
+                    $data = array(
+                        'source_url' => $source_url,
+                        'caption' => "",
+                        'alt' => "",
+                        'date' => get_the_date( 'Y-m-d', $attachment_id ) . ' ' . get_the_time( 'H:i:s', $attachment_id ),
+                        'data' => ""
+                    );
+
+                    $image = $this->get_image($data);         
+
                     $images[] = $image;
                 }                
             }

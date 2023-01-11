@@ -67,12 +67,21 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
 
                 if ( is_array( $modula_galleries ) && count( $modula_galleries ) != 0 ) {
                     foreach ( $modula_galleries as $modula_gallery ) {
-                        $gallery = new Gallery( $this );
-                        $gallery->ID = (int) $modula_gallery->ID;
-                        $gallery->title = $modula_gallery->post_title;
-                        $gallery->data = $modula_gallery;
-                        $gallery->children = $this->find_images( $gallery->ID );
-                        $gallery->settings = get_post_meta( $gallery->ID, 'modula-settings', true );
+
+                        $unique_identifier = 'gallery_' . $this->name() . '_' . $modula_gallery->ID;
+
+                        $data = array(
+                            'unique_identifier' => $unique_identifier,
+                            'id' => (int) $modula_gallery->ID,
+                            'title' => $modula_gallery->post_title,
+                            'foogallery_title' => $modula_gallery->post_title,
+                            'data' => $modula_gallery,
+                            'children' => $this->find_images( $modula_gallery->ID),
+                            'settings' => get_post_meta( $modula_gallery->ID, 'modula-settings', true )
+                        );
+                        
+                        $gallery = $this->get_gallery($data);
+
                         $galleries[] = $gallery;
                     }
                 }
@@ -94,16 +103,22 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
             if ( is_array( $modula_images ) && !empty( $modula_images ) ) {
                 foreach ( $modula_images as $modula_image ) {
                     $modula_image = ( object ) $modula_image;
-                    $image = new Image();
-                    //$image->migrated_id = $modula_image->id;
+                    
                     $image_attributes = wp_get_attachment_image_src( $modula_image->id );
                     if ( is_array( $image_attributes ) && !empty ( $image_attributes ) ) {
-                        $image->source_url = $image_attributes[0];
+                        $source_url = $image_attributes[0];
                     }
-                    $image->caption = $modula_image->description;
-                    $image->alt = $modula_image->alt;
-                    $image->date = get_the_date( 'Y-m-d', $modula_image->id ) . ' ' . get_the_time( 'H:i:s', $modula_image->id );
-                    $image->data = $modula_image;
+
+                    $data = array(
+                        'source_url' => $source_url,
+                        'caption' => $modula_image->description,
+                        'alt' => $modula_image->alt,
+                        'date' => get_the_date( 'Y-m-d', $modula_image->id ) . ' ' . get_the_time( 'H:i:s', $modula_image->id ),
+                        'data' => $modula_image
+                    );
+
+                    $image = $this->get_image($data);
+
                     $images[] = $image;
                     
                 }                

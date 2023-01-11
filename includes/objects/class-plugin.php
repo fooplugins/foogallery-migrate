@@ -6,8 +6,11 @@
  */
 
 namespace FooPlugins\FooGalleryMigrate\Objects;
+use FooPlugins\FooGalleryMigrate\Objects\Gallery;
+use FooPlugins\FooGalleryMigrate\Objects\Image;
+use FooPlugins\FooGalleryMigrate\Objects\Album;
 
-if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugin\Objects' ) ) {
+if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Plugin' ) ) {
 
     /**
      * Class Plugin
@@ -71,6 +74,61 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugin\Objects' ) ) {
                 return $this->find_albums();
             }
             return $this->find_galleries();
+        }
+
+        function get_gallery( $data = array() ) {
+
+            $migrated_object = foogallery_migrate_migrator_instance()->has_object_been_migrated( $data['unique_identifier'] );
+            if($migrated_object) {                           
+                $gallery = foogallery_migrate_migrator_instance()->get_migrated_objects()[$data['unique_identifier']];
+            } else {
+  
+                $gallery = new Gallery( $this );
+                $gallery->ID = $data['id'];
+                $gallery->title = $data['title'];
+                $gallery->foogallery_title = $data['title'];
+                $gallery->data = $data['data'];
+                $gallery->children = $data['children'];
+                $gallery->settings = $data['settings'];
+            }   
+
+            return $gallery;         
+        }
+
+        function get_album( $data = array() ) {
+
+            $migrated_object = foogallery_migrate_migrator_instance()->has_object_been_migrated( $data['unique_identifier'] );
+            if($migrated_object) {                           
+                $album = foogallery_migrate_migrator_instance()->get_migrated_objects()[$data['unique_identifier']];
+            } else {
+  
+                $album = new Album( $this );
+                $album->ID = $data['ID'];
+                $album->title = $data['title'];
+                $album->data = $data['data'];
+                $album->fooalbum_title = $data['fooalbum_title'];
+            }   
+
+            return $album;         
+        }        
+
+        function get_image( $data = array() ) {
+
+            // $migrated_object = foogallery_migrate_migrator_instance()->has_object_been_migrated( $data['unique_identifier'] );
+            // if($migrated_object) {                           
+            //     $image = foogallery_migrate_migrator_instance()->get_migrated_objects()[$data['unique_identifier']];
+            // } else {
+                $image = new Image();
+                $image->source_url = $data['source_url'];
+                $image->caption = $data['caption'];
+                $image->alt = $data['alt'];
+                $image->date = $data['date'];
+                $image->data = $data['data'];
+
+            // }   
+
+            return $image; 
+
         }
     }
 }

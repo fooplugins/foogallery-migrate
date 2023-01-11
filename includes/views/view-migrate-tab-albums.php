@@ -81,6 +81,14 @@
                 } );
             }
         });
+
+        $form.on('click', '.refresh_albums', function (e) {
+            e.preventDefault();
+            foogallery_album_migration_ajax( 'foogallery_album_migrate_refresh', function (data) {
+                $form.html(data);
+            } );            
+        });
+
     });
 </script>
 <form id="foogallery_migrate_album_form" method="POST">

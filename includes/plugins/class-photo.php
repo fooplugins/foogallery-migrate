@@ -76,12 +76,21 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
 
                 if ( count( $photo_galleries ) != 0 ) {
                     foreach ( $photo_galleries as $photo_gallery ) {
-                        $gallery = new Gallery( $this );
-                        $gallery->ID = $photo_gallery->id;
-                        $gallery->title = $photo_gallery->name;
-                        $gallery->data = $photo_gallery;
-                        $gallery->children = $this->find_images( $gallery->ID, '/wp-content/uploads/photo-gallery' );
-                        $gallery->settings = "";
+
+                        $unique_identifier = 'gallery_' . $this->name() . '_' . $photo_gallery->id;
+
+                        $data = array(
+                            'unique_identifier' => $unique_identifier,
+                            'id' => $photo_gallery->id,
+                            'title' => $photo_gallery->name,
+                            'foogallery_title' => $photo_gallery->name,
+                            'data' => $photo_gallery,
+                            'children' => $this->find_images( $photo_gallery->id, '/wp-content/uploads/photo-gallery' ),
+                            'settings' => ''
+                        );
+                        
+                        $gallery = $this->get_gallery($data);
+
                         $galleries[] = $gallery;
                     }
                 }
@@ -145,12 +154,18 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
 
             $images = array();
             foreach ( $photo_images as $photo_image ) {
-                $image = new Image();
-                $image->source_url = trailingslashit( site_url() ) . trailingslashit( $gallery_path ) . $photo_image->image_url;
-                $image->caption = $photo_image->description;
-                $image->alt = $photo_image->alt;
-                $image->date = $photo_image->date;
-                $image->data = $photo_image;
+
+                $source_url = trailingslashit( site_url() ) . trailingslashit( $gallery_path ) . $photo_image->image_url;
+
+                $data = array(
+                    'source_url' => $source_url,
+                    'caption' => $photo_image->description,
+                    'alt' => $photo_image->alt,
+                    'date' => $photo_image->date,
+                    'data' => $photo_image
+                );
+
+                $image = $this->get_image($data);                
 
                 if ( '1' == $photo_image->published ) {
                     $images[] = $image;
@@ -199,29 +214,54 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
         }
 
         function find_albums() {
-            $photo_albums = $this->get_photo_albums();
-
+            $photo_albums = $this->get_photo_albums();            
             $albums = array();
 
             if ( count( $photo_albums ) != 0 ) {
                 foreach ( $photo_albums as $key => $photo_album ) {
-                    $album = new Album( $this );
-                    $album->ID = $photo_album->id;
-                    $album->title = $photo_album->name;
-                    $album->data = $photo_album;
-                    $album->fooalbum_title = $photo_album->name;                        
+
+                    $unique_identifier = 'album_' . $this->name() . '_' . $photo_album->id;
+                    $migrated_object = foogallery_migrate_migrator_instance()->has_object_been_migrated( $unique_identifier );
+                    if($migrated_object) {
+
+                        $album = foogallery_migrate_migrator_instance()->get_migrated_objects()[$unique_identifier];
+                    } else {
+                        $album = new Album( $this );
+                        $album->ID = $photo_album->id;
+                        $album->title = $photo_album->name;
+                        $album->data = $photo_album;
+                        $album->fooalbum_title = $photo_album->name;                                                
+                    }
+
+                    $data = array(
+                        'unique_identifier' => $unique_identifier,
+                        'ID' => $photo_album->id,
+                        'title' => $photo_album->name,
+                        'data' => $photo_album,
+                        'fooalbum_title' => $photo_album->name,
+                    );                    
+
+                    $album = $this->get_album($data);                    
 
                     $galleries = array();
                     $album_galleries = $this->get_galleries_by_album( $album->ID );
 
                     foreach( $album_galleries as $album_gallery ) {
-                        $gallery = new Gallery( $this );
-                        $gallery->ID = $album_gallery->id;
-                        $gallery->title = $album_gallery->name;
-                        $gallery->foogallery_title = $album_gallery->name;                        
-                        $gallery->data = $album_gallery;
-                        $gallery->children = $this->find_images( $gallery->ID, '/wp-content/uploads/photo-gallery' );
-                        $gallery->settings = "";
+
+                        $unique_identifier1 = 'gallery_' . $this->name() . '_' . $album_gallery->id;
+
+                        $data = array(
+                            'unique_identifier' => $unique_identifier1,
+                            'id' => $album_gallery->id,
+                            'title' => $album_gallery->name,
+                            'foogallery_title' => $album_gallery->name,
+                            'data' => $album_gallery,
+                            'children' => $this->find_images( $album_gallery->id, '/wp-content/uploads/photo-gallery' ),
+                            'settings' => ''
+                        );
+                        
+                        $gallery = $this->get_gallery($data);
+
                         $galleries[] = $gallery;
                     }
 

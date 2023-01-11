@@ -38,7 +38,6 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
             $this->part_of_migration = false;
             $this->migrated_id = 0;
             $this->migrated_title = '';
-
             $this->children = array();
         }
 
@@ -78,6 +77,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
             if ( !$this->has_children() ) { return; }
             if ( $this->migration_status !== self::PROGRESS_ERROR && $this->migrated_child_count < $this->get_children_count() ) {
                 foreach ( $this->get_children() as $child ) {
+                    if($this->children_name() == 'galleries' && $this->get_total_images() == $this->get_total_migrated_images()) {
+                        $this->migrated_child_count++;
+                    }                      
                     if ( !$child->migrated ) {
                         $child->migrate();
                         if ( $child->migrated ) {
@@ -86,7 +88,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
                         break;
                     }
                 }
-            }
+            } 
         }
 
         /**
@@ -151,6 +153,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
 
                     // Always calculate the new progress, after an attempted migration.
                     $progress = $this->calculate_progress();
+
                     if ( $progress >= 100 ) {
                         $this->migration_status = self::PROGRESS_COMPLETED;
                         $this->migrated = true;
