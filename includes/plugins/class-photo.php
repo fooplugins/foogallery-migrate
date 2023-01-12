@@ -221,17 +221,6 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
                 foreach ( $photo_albums as $key => $photo_album ) {
 
                     $unique_identifier = 'album_' . $this->name() . '_' . $photo_album->id;
-                    $migrated_object = foogallery_migrate_migrator_instance()->has_object_been_migrated( $unique_identifier );
-                    if($migrated_object) {
-
-                        $album = foogallery_migrate_migrator_instance()->get_migrated_objects()[$unique_identifier];
-                    } else {
-                        $album = new Album( $this );
-                        $album->ID = $photo_album->id;
-                        $album->title = $photo_album->name;
-                        $album->data = $photo_album;
-                        $album->fooalbum_title = $photo_album->name;                                                
-                    }
 
                     $data = array(
                         'unique_identifier' => $unique_identifier,
