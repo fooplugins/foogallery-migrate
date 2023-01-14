@@ -79,6 +79,13 @@
                 } );
             }
         });
+
+        $form.on('click', '.refresh_gallery', function (e) {
+                e.preventDefault();
+                foogallery_gallery_migration_ajax( 'foogallery_migrate_refresh', function (data) {
+                    $form.html(data);
+                } );
+        });        
     });
 </script>
 <form id="foogallery_migrate_gallery_form" method="POST">

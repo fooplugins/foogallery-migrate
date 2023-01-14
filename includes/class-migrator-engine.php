@@ -59,6 +59,18 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         }
 
         /**
+         * Clear a migrator setting.
+         *
+         * @param $name
+         * @param $value
+         * @return void
+         */
+        public function clear_migrator_setting() {
+            $settings = array();
+            update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $settings );
+        }
+
+        /**
          * Returns true if we have any saved migrator settings.
          *
          * @return bool

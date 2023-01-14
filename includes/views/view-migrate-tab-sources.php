@@ -1,10 +1,30 @@
 <?php
-    $migrator = foogallery_migrate_migrator_instance();
-
-    //Check if the detect button has been pressed.
+    $migrator = foogallery_migrate_migrator_instance();    
+?>
+<script>
+    jQuery(function ($) {
+        var $form = $('#foogallery_migrate_source_form');
+        $form.on('click', '.clear_migration_history', function(e) {
+            if (!confirm('<?php _e( 'Are you sure you want to clear migration histories? This may result in duplicate album/galleries and media attachments!', 'foogallery-migrate' ); ?>')) {
+                e.preventDefault();
+                return false;
+            } else {
+                $form.submit();
+            }             
+        });
+    });
+    </script>
+<?php
+    //Check if the detect button has been pressed.   
     if ( array_key_exists( 'foogallery_migrate_detect', $_POST ) ) {
-        if ( check_admin_referer('foogallery_migrate_detect', 'foogallery_migrate_detect' ) ) {
-            $migrator->run_detection();
+        if(isset($_POST['clear_migration_history'])) {
+            if ( check_admin_referer('foogallery_migrate_detect', 'foogallery_migrate_detect' ) ) {
+                $migrator->clear_migrator_setting();
+            }
+        } else {
+            if ( check_admin_referer('foogallery_migrate_detect', 'foogallery_migrate_detect' ) ) {
+                $migrator->run_detection();
+            }            
         }
     }
 
@@ -26,7 +46,10 @@
     }
     ?>
 </ul>
-<form method="POST">
+<form method="POST" id="foogallery_migrate_source_form">
     <?php wp_nonce_field( 'foogallery_migrate_detect', 'foogallery_migrate_detect', false ); ?>
     <input type="submit" class="button" value="<?php _e( 'Run Detection Again', 'foogallery-migrate' ); ?>">
+    <?php if(count($migrator->get_migrated_objects()) > 0) { ?>
+    <input type="submit" class="button clear_migration_history" name="clear_migration_history" value="<?php _e( 'Clear Migration History', 'foogallery-migrate' ); ?>">
+    <?php } ?>
 </form>

@@ -68,11 +68,20 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
 
             if ( count( $nextgen_galleries ) != 0 ) {
                 foreach ( $nextgen_galleries as $key => $nextgen_gallery ) {
-                    $gallery = new Gallery( $this );
-                    $gallery->ID = $nextgen_gallery->gid;
-                    $gallery->title = $nextgen_gallery->title;
-                    $gallery->data = $nextgen_gallery;
-                    $gallery->children = $this->find_images( $gallery->ID, $nextgen_gallery->path );
+
+                        $unique_identifier = 'gallery_' . $this->name() . '_' . $nextgen_gallery->gid;
+                        $data = array(
+                            'unique_identifier' => $unique_identifier,
+                            'id' => $nextgen_gallery->gid,
+                            'title' => $nextgen_gallery->title,
+                            'foogallery_title' => $nextgen_gallery->title,
+                            'data' => $nextgen_gallery,
+                            'children' => $this->find_images( $nextgen_gallery->gid, $nextgen_gallery->path ),
+                            'settings' => ''
+                        );
+                        
+                        $gallery = $this->get_gallery($data);
+                        
                     $galleries[] = $gallery;
                 }
             }
@@ -91,12 +100,17 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
 
             $images = array();
             foreach ( $nextgen_images as $nextgen_image ) {
-                $image = new Image();
-                $image->source_url = trailingslashit( site_url() ) . trailingslashit( $gallery_path ) . $nextgen_image->filename;
-                $image->caption = $nextgen_image->description;
-                $image->alt = $nextgen_image->alttext;
-                $image->date = $nextgen_image->imagedate;
-                $image->data = $nextgen_image;
+                $source_url = trailingslashit( site_url() ) . trailingslashit( $gallery_path ) . $nextgen_image->filename;
+
+                $data = array(
+                    'source_url' => $source_url,
+                    'caption' => $nextgen_image->description,
+                    'alt' => $nextgen_image->alttext,
+                    'date' => $nextgen_image->imagedate,
+                    'data' => $nextgen_image
+                );
+
+                $image = $this->get_image($data);                
 
                 if ( 0 == $nextgen_image->exclude ) {
                     $images[] = $image;
@@ -112,7 +126,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
          */
         private function get_nextgen_galleries() {
             global $wpdb;
-            $gallery_table = $wpdb->prefix . self::NEXTGEN_TABLE_GALLERY;
+            $gallery_table = $wpdb->prefix . self::NEXTGEN_TABLE_GALLERY;  
             return $wpdb->get_results( "select * from {$gallery_table}" );
         }
 
@@ -186,46 +200,48 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
             return $get_galleries_data;
         }
 
-        /**
-         * Return single album object data.
-         * @param $id ID of the album
-         * @return object Object of the album
-         */
-        private function get_nextgen_album( $id ) {
-            global $wpdb;
-            $album_table = $wpdb->prefix . self::NEXTGEN_TABLE_ALBUMS;
-
-            return $wpdb->get_row( $wpdb->prepare( "select * from {$album_table} where id = %d", $id ) );
-        }
-
-
         function find_albums() {
             $nextgen_albums = $this->get_nextgen_albums();
             $albums = array();
 
             if ( count( $nextgen_albums ) != 0 ) {
                 foreach ( $nextgen_albums as $key => $nextgen_album ) {
-                    $album = new Album( $this );
-                    $album->ID = $nextgen_album->id;
-                    $album->title = $nextgen_album->name;
-                    $album->data = $nextgen_album;
+
+                    $unique_identifier = 'album_' . $this->name() . '_' . $nextgen_album->id;
+
+                    $data = array(
+                        'unique_identifier' => $unique_identifier,
+                        'ID' => $nextgen_album->id,
+                        'title' => $nextgen_album->name,
+                        'data' => $nextgen_album,
+                        'fooalbum_title' => $nextgen_album->name,
+                    );                    
+
+                    $album = $this->get_album($data);
 
                     $galleries = array();
                     $album_galleries = $this->get_galleries_by_album( $nextgen_album->id );
 
                     foreach( $album_galleries as $album_gallery ) {
-                        $gallery = new Gallery( $this );
-                        $gallery->ID = $album_gallery->gid;
-                        $gallery->title = $album_gallery->name;
-                        $gallery->foogallery_title = $album_gallery->name;                        
-                        $gallery->data = $album_gallery;
-                        $gallery->children = $this->find_images( $gallery->ID, $album_gallery->path );
-                        $gallery->settings = "";
+
+                        $unique_identifier1 = 'gallery_' . $this->name() . '_' . $album_gallery->gid;
+
+                        $data = array(
+                            'unique_identifier' => $unique_identifier1,
+                            'id' => $album_gallery->gid,
+                            'title' => $album_gallery->title,
+                            'foogallery_title' => $album_gallery->title,
+                            'data' => $album_gallery,
+                            'children' => $this->find_images( $album_gallery->gid, $album_gallery->path ),
+                            'settings' => ''
+                        );
+
+                        $gallery = $this->get_gallery($data);
+
                         $galleries[] = $gallery;
                     }
 
-                    $album->galleries = $galleries;
-                    $album->gallery_count = count( $album->galleries );
+                    $album->children = $galleries;
 
                     $albums[] = $album;
                 }
