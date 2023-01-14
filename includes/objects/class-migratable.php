@@ -77,9 +77,6 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
             if ( !$this->has_children() ) { return; }
             if ( $this->migration_status !== self::PROGRESS_ERROR && $this->migrated_child_count < $this->get_children_count() ) {
                 foreach ( $this->get_children() as $child ) {
-                    if($this->children_name() == 'galleries' && $this->get_total_images() == $this->get_total_migrated_images()) {
-                        $this->migrated_child_count++;
-                    }                      
                     if ( !$child->migrated ) {
                         $child->migrate();
                         if ( $child->migrated ) {
@@ -101,9 +98,11 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
         }
 
         function get_children_count() {
-            $children = $this->get_children();
-            if ( is_array( $children ) ) {
-                return count( $children );
+            if ( $this->has_children() ) {
+                $children = $this->get_children();
+                if ( is_array( $children ) ) {
+                    return count( $children );
+                }
             }
             return 0;
         }
@@ -173,10 +172,19 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
                 // Nothing to migrate.
                 $this->progress = 100;
             } else {
+                // Make sure we have the latest migrated count.
+                if ( $this->has_children() && $this->get_children_count() > 0 ) {
+                    $this->migrated_child_count = 0;
+                    foreach ( $this->get_children() as $child ) {
+                        if ( $child->migrated ) {
+                            $this->migrated_child_count++;
+                        }
+                    }
 
-                //update our percentage complete
-                if ($this->migrated_child_count > 0 && $this->get_children_count() > 0) {
-                    $this->progress = $this->migrated_child_count / $this->get_children_count() * 100;
+                    //update our percentage complete
+                    if ($this->migrated_child_count > 0 && $this->get_children_count() > 0) {
+                        $this->progress = $this->migrated_child_count / $this->get_children_count() * 100;
+                    }
                 }
             }
             return $this->progress;
