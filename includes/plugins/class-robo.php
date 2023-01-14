@@ -12,9 +12,6 @@ use FooPlugins\FooGalleryMigrate\Objects\Image;
 use FooPlugins\FooGalleryMigrate\Objects\Album;
 use FooPlugins\FooGalleryMigrate\Objects\Plugin;
 
-define( 'ROBO_TABLE_GALLERY', 'posts' );
-define( 'ROBO_POST_TYPE', 'robo_gallery_table' );
-
 if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
 
     /**
@@ -65,19 +62,18 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
 
                 // Get galleries
                 $robo_galleries = $this->get_galleries();   
-                $meta_table = $wpdb->prefix . "postmeta";            
 
-                if ( count( $robo_galleries ) != 0 ) {
+                if ( count( $robo_galleries ) > 0 ) {
                     foreach ( $robo_galleries as $robo_gallery ) {
 
                         $unique_identifier = 'gallery_' . $this->name() . '_' . $robo_gallery->ID;
 
                         $settings = array();
-                        $get_all_meta = $wpdb->get_results( "SELECT * FROM $meta_table WHERE post_id = $gallery->ID" );
-                        foreach( $get_all_meta as $get_all_meta_data ) {
-                            $current_meta_data = get_post_meta($gallery->ID, $get_all_meta_data->meta_key, true);
-                            $new_key_for_setting = str_replace("-", "_", $get_all_meta_data->meta_key);
-                            if( $new_key_for_setting == 'rsg_gallery_type' ) {
+                        $get_all_meta = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM $wpdb->postmeta WHERE post_id = %d", $robo_gallery->ID ) );
+                        foreach ( $get_all_meta as $get_all_meta_data ) {
+                            $current_meta_data = get_post_meta( $robo_gallery->ID, $get_all_meta_data->meta_key, true );
+                            $new_key_for_setting = str_replace("-", "_", $get_all_meta_data->meta_key );
+                            if ( $new_key_for_setting === 'rsg_gallery_type' ) {
                                 $new_key_for_setting = 'type';
                             }
                             $settings[$new_key_for_setting] = $current_meta_data; 
@@ -93,7 +89,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
                             'settings' => $settings
                         );
                         
-                        $gallery = $this->get_gallery($data);                        
+                        $gallery = $this->get_gallery( $data );
 
                         if( $settings['type'] != 'youtube' ) {
                             $galleries[] = $gallery;
@@ -111,17 +107,20 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
          * @return string
          */
         function get_gallery_template( $gallery ) {
-            switch ( $gallery->settings['type'] ) {
-                case 'masonry':
-                case 'grid':
-                case 'mosaic':
-                case 'polaroid':                
-                    return 'masonry';
-                case 'slider':
-                case 'youtube':
-                default:
-                    return 'default';
+            if ( isset( $gallery ) && isset( $gallery->settings ) && array_key_exists( 'type', $gallery->settings ) ) {
+                switch ($gallery->settings['type']) {
+                    case 'masonry':
+                    case 'grid':
+                    case 'mosaic':
+                    case 'polaroid':
+                        return 'masonry';
+                    case 'slider':
+                    case 'youtube':
+                    default:
+                        return 'default';
+                }
             }
+            return 'default';
         }        
 
         /**
@@ -337,9 +336,8 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
          */
         private function get_galleries() {
             global $wpdb;
-            $gallery_table = $wpdb->prefix . ROBO_TABLE_GALLERY;
- 
-            return $wpdb->get_results( "select * from {$gallery_table} WHERE post_type = '" . ROBO_POST_TYPE . "' AND post_status = 'publish'" );
+            $query = "select * from $wpdb->posts WHERE post_type = %s AND post_status = %s";
+            return $wpdb->get_results( $wpdb->prepare( $query, 'robo_gallery_table', 'publish' ) );
         }
 
         /**
