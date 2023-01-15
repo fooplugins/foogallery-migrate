@@ -19,6 +19,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
         function __construct() {
             $this->migrated = false;
             $this->migrated_id = 0;
+            $this->migrated_title = '';
             $this->caption = '';
             $this->description = '';
             $this->slug = '';

@@ -158,8 +158,8 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
 
             $border_radius = $gallery->settings['rsg_radius'];
             $border_size = $gallery->settings['rsg_border_options']['width'];
-            $cursor = $gallery->settings['rsg_zoomIcon']['enabled'];
-            $hide_title = $gallery->settings['rsg_showTitle']['enabled'];
+            $cursor = isset( $gallery->settings['rsg_zoomIcon'] ) && isset( $gallery->settings['rsg_zoomIcon']['enabled'] ) && $gallery->settings['rsg_zoomIcon']['enabled'];
+            $hide_title = isset( $gallery->settings['rsg_showTitle'] ) && isset( $gallery->settings['rsg_showTitle']['enabled'] ) && $gallery->settings['rsg_showTitle']['enabled'];
             $lightbox = $gallery->settings['rsg_lightboxTitle'];
 
             if( $gallery->settings['type'] == 'grid' ) {
