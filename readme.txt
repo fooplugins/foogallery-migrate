@@ -65,3 +65,6 @@ Update now to get all the latest features, bug fixes and improvements!
 
 = 1.0 =
 * Initial Release. First version.
+
+= 1.1 =
+* Introduced album migrations. (Supports NextGen Albums & Photo Gallery Groups)
