@@ -121,8 +121,6 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
 
             // Save the objects to migrate.
             $this->set_setting( $this->type, $objects );
-
-            $this->set_previous_migration( true );
         }
 
         /**
@@ -162,17 +160,6 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
         }
 
         /**
-         * Resets all the previous gallery migrations.
-         *
-         * @return void
-         */
-        function reset_migration() {
-            $this->set_setting( $this->type, false );
-            $this->set_previous_migration( false );
-            $this->set_state( false );
-        }
-
-        /**
          * Cancels the current gallery migration.
          *
          * @return void
@@ -196,25 +183,6 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
                 }
             }
             return 0;
-        }
-
-        /**
-         * Set if there was a previous migration.
-         *
-         * @param $value
-         * @return void
-         */
-        protected function set_previous_migration( $value ) {
-            $this->set_setting( $this->type . '-has-previous', $value );
-        }
-
-        /**
-         * Gets if there was a previous migration.
-         *
-         * @return false|mixed
-         */
-        function has_previous_migrations() {
-            return $this->get_setting( $this->type . '-has-previous', false );
         }
 
         /**

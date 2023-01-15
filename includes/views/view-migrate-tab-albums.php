@@ -72,25 +72,12 @@
             }
         });
 
-        $form.on('click', '.reset_album_migrate', function (e) {
-            e.preventDefault();
-
-            if (!confirm('<?php _e( 'Are you sure you want to reset all migration data? This may result in duplicate album/galleries and media attachments!', 'foogallery-migrate' ); ?>')) {
-                return false;
-            } else {
-                foogallery_album_migration_ajax( 'foogallery_album_migrate_reset', function (data) {
-                    $form.html(data);
-                } );
-            }
-        });
-
         $form.on('click', '.refresh_albums', function (e) {
             e.preventDefault();
             foogallery_album_migration_ajax( 'foogallery_album_migrate_refresh', function (data) {
                 $form.html(data);
             } );            
         });
-
     });
 </script>
 <form id="foogallery_migrate_album_form" method="POST">

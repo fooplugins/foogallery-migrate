@@ -158,22 +158,6 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             die();
         }
 
-        function ajax_reset_migration() {
-            if ( check_admin_referer( 'foogallery_migrate', 'foogallery_migrate' ) ) {
-
-                if ( array_key_exists( 'action', $_REQUEST ) ) {
-                    $action = sanitize_text_field(wp_unslash($_REQUEST['action']));
-
-                    if ('foogallery_migrate_reset' === $action) {
-                        $migrator = foogallery_migrate_migrator_instance();
-                        $migrator->get_gallery_migrator()->reset_migration();
-                        $migrator->get_gallery_migrator()->render_gallery_form();
-                    }
-                }
-            }
-            die();
-        }
-
         function ajax_refresh_migration() {
             if ( check_admin_referer( 'foogallery_migrate', 'foogallery_migrate' ) ) {
 
@@ -189,7 +173,6 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             }
             die();
         }                
-
 
         /**
          * Start the album migration!
@@ -254,22 +237,6 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                     if ('foogallery_album_migrate_cancel' === $action) {
                         $migrator = foogallery_migrate_migrator_instance();
                         $migrator->get_album_migrator()->cancel_migration();
-                        $migrator->get_album_migrator()->render_album_form();
-                    }
-                }
-            }
-            die();
-        }
-
-        function ajax_reset_album_migration() {
-            if ( check_admin_referer( 'foogallery_album_migrate', 'foogallery_album_migrate' ) ) {
-
-                if ( array_key_exists( 'action', $_REQUEST ) ) {
-                    $action = sanitize_text_field(wp_unslash($_REQUEST['action']));
-
-                    if ('foogallery_album_migrate_reset' === $action) {
-                        $migrator = foogallery_migrate_migrator_instance();
-                        $migrator->get_album_migrator()->reset_migration();
                         $migrator->get_album_migrator()->render_album_form();
                     }
                 }

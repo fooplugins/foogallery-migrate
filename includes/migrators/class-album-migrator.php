@@ -48,7 +48,6 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
             }            
             $migrating = $has_migrations && defined( 'DOING_AJAX' ) && DOING_AJAX;
             $current_album_id = $this->get_current_object_being_migrated();
-            $has_previous_migrations = $this->has_previous_migrations();
             ?>
             <table class="wp-list-table widefat fixed striped table-view-list pages">
                 <thead>
@@ -193,9 +192,6 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                         class="button button-primary start_album_migrate"><?php _e( 'Start Album Migration', 'foogallery-migrate' ); ?></button>
                 <button name="foogallery_migrate_action" value="foogallery_refresh_albums"
                         class="button refresh_albums"><?php _e( 'Refresh Albums', 'foogallery-migrate' ); ?></button>
-            <?php }
-            if ( $has_previous_migrations && !$migrating ) { ?>
-                <input type="submit" name="foogallery_foogallery_reset" class="button reset_album_migrate" value="<?php _e( 'Reset Migration', 'foogallery' ); ?>">
             <?php }
             ?><div id="foogallery_migrate_album_spinner" style="width:20px">
                 <span class="spinner"></span>
