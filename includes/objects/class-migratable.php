@@ -42,6 +42,13 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
         }
 
         /**
+         * Returns the type of object.
+         *
+         * @return string
+         */
+        abstract function type();
+
+        /**
          * Returns true if the object has children.
          *
          * @return bool
@@ -113,7 +120,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
          * @return string
          */
         function unique_identifier() {
-            return $this->plugin->name() . '_' . $this->ID;
+            return $this->type() . '_' . $this->plugin->name() . '_' . $this->ID;
         }
 
         /**

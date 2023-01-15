@@ -17,13 +17,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Album' ) ) {
      */
     class Album extends Migratable {
 
-        /**
-         * The unique identifier for the album.
-         *
-         * @return string
-         */
-        function unique_identifier() {
-            return 'album_' . parent::unique_identifier();
+        function type() {
+            return 'album';
         }
 
         function has_children() {

@@ -16,13 +16,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Gallery' ) ) {
      */
     class Gallery extends Migratable {
 
-        /**
-         * The unique identifier for the gallery.
-         *
-         * @return string
-         */
-        function unique_identifier() {
-            return 'gallery_' . parent::unique_identifier();
+        function type() {
+            return 'gallery';
         }
 
         function has_children() {

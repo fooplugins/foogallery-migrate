@@ -31,6 +31,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
             $this->data = null;
         }
 
+        function type() {
+            return 'image';
+        }
+
         /**
          * The unique identifier for the image.
          *
