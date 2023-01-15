@@ -61,12 +61,10 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
             if ( $this->detect() ) {
 
                 // Get galleries
-                $robo_galleries = $this->get_galleries();   
+                $robo_galleries = $this->get_robo_galleries();
 
                 if ( count( $robo_galleries ) > 0 ) {
                     foreach ( $robo_galleries as $robo_gallery ) {
-
-                        $unique_identifier = 'gallery_' . $this->name() . '_' . $robo_gallery->ID;
 
                         $settings = array();
                         $get_all_meta = $wpdb->get_results( $wpdb->prepare( "SELECT * FROM $wpdb->postmeta WHERE post_id = %d", $robo_gallery->ID ) );
@@ -80,8 +78,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
                         }
                        
                         $data = array(
-                            'unique_identifier' => $unique_identifier,
-                            'id' => $robo_gallery->ID,
+                            'ID' => $robo_gallery->ID,
                             'title' => $robo_gallery->post_title,
                             'foogallery_title' => $robo_gallery->post_title,
                             'data' => $robo_gallery,
@@ -91,7 +88,8 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
                         
                         $gallery = $this->get_gallery( $data );
 
-                        if( $settings['type'] != 'youtube' ) {
+                        //TODO : we should also import youtube galleries in future.
+                        if ( $settings['type'] !== 'youtube' ) {
                             $galleries[] = $gallery;
                         }                        
                     }
@@ -155,9 +153,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
 
                     $width = get_option( 'thumbnail_size_w' ); 
                     $height = get_option( 'thumbnail_size_h' ); 
-
                 }
-
             }
 
             $border_radius = $gallery->settings['rsg_radius'];
@@ -176,8 +172,6 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
 
             }
 
-
-            
             $gutter = $gallery->settings['rsg_horizontalSpaceBetweenBoxes'];
 
             $gallery_template = $this->get_gallery_template( $gallery );            
@@ -334,7 +328,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
          *
          * @return object Object of all galleries
          */
-        private function get_galleries() {
+        private function get_robo_galleries() {
             global $wpdb;
             $query = "select * from $wpdb->posts WHERE post_type = %s AND post_status = %s";
             return $wpdb->get_results( $wpdb->prepare( $query, 'robo_gallery_table', 'publish' ) );
@@ -366,7 +360,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
                         'data' => ""
                     );
 
-                    $image = $this->get_image($data);         
+                    $image = $this->get_image( $data );
 
                     $images[] = $image;
                 }                
@@ -378,9 +372,5 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
         function find_albums() {
             return array();
         }        
-//
-//        abstract function get_albums();
-//
-//        abstract function get_content();
     }
 }

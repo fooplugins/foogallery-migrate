@@ -69,10 +69,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
             if ( count( $nextgen_galleries ) != 0 ) {
                 foreach ( $nextgen_galleries as $key => $nextgen_gallery ) {
 
-                        $unique_identifier = 'gallery_' . $this->name() . '_' . $nextgen_gallery->gid;
                         $data = array(
-                            'unique_identifier' => $unique_identifier,
-                            'id' => $nextgen_gallery->gid,
+                            'ID' => $nextgen_gallery->gid,
                             'title' => $nextgen_gallery->title,
                             'foogallery_title' => $nextgen_gallery->title,
                             'data' => $nextgen_gallery,
@@ -80,7 +78,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
                             'settings' => ''
                         );
                         
-                        $gallery = $this->get_gallery($data);
+                        $gallery = $this->get_gallery( $data );
                         
                     $galleries[] = $gallery;
                 }
@@ -110,7 +108,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
                     'data' => $nextgen_image
                 );
 
-                $image = $this->get_image($data);                
+                $image = $this->get_image( $data );
 
                 if ( 0 == $nextgen_image->exclude ) {
                     $images[] = $image;
@@ -182,17 +180,16 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
          */
         private function get_galleries_by_album( $album_id ) {
             global $wpdb;
-            $get_galleries_data;
             $album_table = $wpdb->prefix . self::NEXTGEN_TABLE_ALBUMS;
             $gallery_table = $wpdb->prefix . self::NEXTGEN_TABLE_GALLERY;
             $get_galleries_data = $wpdb->get_row("SELECT sortorder FROM $album_table WHERE id = $album_id");
-            if($get_galleries_data->sortorder != '') {
+            if ( $get_galleries_data->sortorder !== '' ) {
                 $galleries_id = base64_decode($get_galleries_data->sortorder);
                 $galleries_id = str_replace("[", "", $galleries_id);
                 $galleries_id = str_replace("]", "", $galleries_id);
                 $galleries_id = str_replace('"', '', $galleries_id);
 
-                if($galleries_id != '') {                    
+                if ( $galleries_id !== '' ) {
                     $get_galleries_data = $wpdb->get_results("SELECT * FROM {$gallery_table} WHERE gid IN ($galleries_id)");                    
                 }
             } 
@@ -204,31 +201,25 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
             $nextgen_albums = $this->get_nextgen_albums();
             $albums = array();
 
-            if ( count( $nextgen_albums ) != 0 ) {
+            if ( count( $nextgen_albums ) !== 0 ) {
                 foreach ( $nextgen_albums as $key => $nextgen_album ) {
 
-                    $unique_identifier = 'album_' . $this->name() . '_' . $nextgen_album->id;
-
                     $data = array(
-                        'unique_identifier' => $unique_identifier,
                         'ID' => $nextgen_album->id,
                         'title' => $nextgen_album->name,
                         'data' => $nextgen_album,
                         'fooalbum_title' => $nextgen_album->name,
                     );                    
 
-                    $album = $this->get_album($data);
+                    $album = $this->get_album( $data );
 
                     $galleries = array();
                     $album_galleries = $this->get_galleries_by_album( $nextgen_album->id );
 
                     foreach( $album_galleries as $album_gallery ) {
 
-                        $unique_identifier1 = 'gallery_' . $this->name() . '_' . $album_gallery->gid;
-
                         $data = array(
-                            'unique_identifier' => $unique_identifier1,
-                            'id' => $album_gallery->gid,
+                            'ID' => $album_gallery->gid,
                             'title' => $album_gallery->title,
                             'foogallery_title' => $album_gallery->title,
                             'data' => $album_gallery,
@@ -236,7 +227,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
                             'settings' => ''
                         );
 
-                        $gallery = $this->get_gallery($data);
+                        $gallery = $this->get_gallery( $data );
 
                         $galleries[] = $gallery;
                     }

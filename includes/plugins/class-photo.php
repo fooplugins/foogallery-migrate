@@ -72,16 +72,13 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
             if ( $this->detect() ) {
 
                 // Get galleries
-                $photo_galleries = $this->get_galleries();               
+                $photo_galleries = $this->get_photo_galleries();
 
                 if ( count( $photo_galleries ) != 0 ) {
                     foreach ( $photo_galleries as $photo_gallery ) {
 
-                        $unique_identifier = 'gallery_' . $this->name() . '_' . $photo_gallery->id;
-
                         $data = array(
-                            'unique_identifier' => $unique_identifier,
-                            'id' => $photo_gallery->id,
+                            'ID' => $photo_gallery->id,
                             'title' => $photo_gallery->name,
                             'foogallery_title' => $photo_gallery->name,
                             'data' => $photo_gallery,
@@ -89,7 +86,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
                             'settings' => ''
                         );
                         
-                        $gallery = $this->get_gallery($data);
+                        $gallery = $this->get_gallery( $data );
 
                         $galleries[] = $gallery;
                     }
@@ -125,7 +122,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
          *
          * @return object Object of all galleries
          */
-        private function get_galleries() {
+        private function get_photo_galleries() {
             global $wpdb;
             $gallery_table = $wpdb->prefix . self::FM_PHOTO_TABLE_GALLERY;
             return $wpdb->get_results( "select * from {$gallery_table} WHERE published = 1" );
@@ -201,18 +198,6 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
             return $wpdb->get_results( "select * from {$gallery_table} WHERE published = 1 AND id IN($galleries_id)" );                        
         }
 
-        /**
-         * Return single album object data.
-         * @param $id ID of the album
-         * @return object Object of the album
-         */
-        private function get_photo_album( $id ) {
-            global $wpdb;
-            $album_table = $wpdb->prefix . self::FM_PHOTO_ALBUM_TABLE;
-
-            return $wpdb->get_row( $wpdb->prepare( "select * from {$album_table} where id = %d", $id ) );
-        }
-
         function find_albums() {
             $photo_albums = $this->get_photo_albums();            
             $albums = array();
@@ -220,10 +205,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
             if ( count( $photo_albums ) != 0 ) {
                 foreach ( $photo_albums as $key => $photo_album ) {
 
-                    $unique_identifier = 'album_' . $this->name() . '_' . $photo_album->id;
-
                     $data = array(
-                        'unique_identifier' => $unique_identifier,
                         'ID' => $photo_album->id,
                         'title' => $photo_album->name,
                         'data' => $photo_album,
@@ -237,11 +219,8 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
 
                     foreach( $album_galleries as $album_gallery ) {
 
-                        $unique_identifier1 = 'gallery_' . $this->name() . '_' . $album_gallery->id;
-
                         $data = array(
-                            'unique_identifier' => $unique_identifier1,
-                            'id' => $album_gallery->id,
+                            'ID' => $album_gallery->id,
                             'title' => $album_gallery->name,
                             'foogallery_title' => $album_gallery->name,
                             'data' => $album_gallery,

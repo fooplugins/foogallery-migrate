@@ -62,20 +62,16 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Envira' ) ) {
             if ( $this->detect() ) {
 
                 // Get galleries
-                $envira_galleries = $this->get_galleries();               
+                $envira_galleries = $this->get_nextgen_galleries();
 
                 if ( count( $envira_galleries ) != 0 ) {
                     foreach ( $envira_galleries as $envira_gallery ) {
-
-                        $unique_identifier = 'gallery_' . $this->name() . '_' . $envira_gallery->ID;
-
                         $data = array(
-                            'unique_identifier' => $unique_identifier,
-                            'id' => $envira_gallery->ID,
+                            'ID' => $envira_gallery->ID,
                             'title' => $envira_gallery->post_title,
                             'foogallery_title' => $envira_gallery->post_title,
                             'data' => $envira_gallery,
-                            'children' => $this->find_images( $envira_gallery->ID),
+                            'children' => $this->find_images( $envira_gallery->ID ),
                             'settings' => get_post_meta( $envira_gallery->ID, '_eg_gallery_data', true )
                         );
                         
@@ -131,7 +127,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Envira' ) ) {
          *
          * @return object Object of all galleries
          */
-        private function get_galleries() {
+        private function get_nextgen_galleries() {
             global $wpdb;
             $gallery_table = $wpdb->prefix . FM_ENVIRA_TABLE_GALLERY;
  
@@ -153,7 +149,6 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Envira' ) ) {
                     $envira_obj->id = $attachment_id;                                   
                     $image_attributes = wp_get_attachment_image_src( $envira_obj->id);
                     if ( is_array( $image_attributes ) && !empty ( $image_attributes ) ) {
-                        //$image->migrated_id = $envira_image['id'];
                         $source_url = $image_attributes[0];
                     }
 
@@ -176,9 +171,5 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Envira' ) ) {
         function find_albums() {
             return array();
         }        
-//
-//        abstract function get_albums();
-//
-//        abstract function get_content();
     }
 }

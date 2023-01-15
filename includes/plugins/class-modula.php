@@ -63,16 +63,13 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
             if ( $this->detect() ) {
 
                 // Get galleries
-                $modula_galleries = $this->get_galleries();
+                $modula_galleries = $this->get_modula_galleries();
 
                 if ( is_array( $modula_galleries ) && count( $modula_galleries ) != 0 ) {
                     foreach ( $modula_galleries as $modula_gallery ) {
 
-                        $unique_identifier = 'gallery_' . $this->name() . '_' . $modula_gallery->ID;
-
                         $data = array(
-                            'unique_identifier' => $unique_identifier,
-                            'id' => (int) $modula_gallery->ID,
+                            'ID' => (int) $modula_gallery->ID,
                             'title' => $modula_gallery->post_title,
                             'foogallery_title' => $modula_gallery->post_title,
                             'data' => $modula_gallery,
@@ -80,7 +77,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
                             'settings' => get_post_meta( $modula_gallery->ID, 'modula-settings', true )
                         );
                         
-                        $gallery = $this->get_gallery($data);
+                        $gallery = $this->get_gallery( $data );
 
                         $galleries[] = $gallery;
                     }
@@ -117,7 +114,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
                         'data' => $modula_image
                     );
 
-                    $image = $this->get_image($data);
+                    $image = $this->get_image( $data );
 
                     $images[] = $image;
                     
@@ -274,7 +271,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
          *
          * @return object Object of all galleries
          */
-        private function get_galleries() {
+        private function get_modula_galleries() {
             global $wpdb;
             $gallery_table = $wpdb->prefix . FM_MODULA_TABLE_GALLERY;
  
@@ -285,9 +282,5 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
         function find_albums() {
             return array();
         }             
-//
-//        abstract function get_albums();
-//
-//        abstract function get_content();
     }
 }

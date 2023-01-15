@@ -57,17 +57,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Plugin' ) ) {
          */
         abstract function get_gallery_settings( $gallery, $default_settings );
 
-        /**
-         * Migrates any settings for the gallery.
-         *
-         * @param $gallery Gallery
-         * @return void
-         */
-        //abstract function migrate_settings( $gallery );
-//
-       abstract function find_albums();
-//
-//        abstract function get_content();
+        abstract function find_albums();
 
         function find_objects( $type ) {
             if ( 'albums' === $type ) {
@@ -82,14 +72,13 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Plugin' ) ) {
          * @return $gallery
          */
         function get_gallery( $data = array() ) {
+            $gallery = new Gallery( $this );
+            $gallery->ID = $data['ID'];
 
-            $migrated_object = foogallery_migrate_migrator_instance()->has_object_been_migrated( $data['unique_identifier'] );
-            if($migrated_object) {                           
-                $gallery = foogallery_migrate_migrator_instance()->get_migrated_objects()[$data['unique_identifier']];
+            $migrated_object = foogallery_migrate_migrator_instance()->has_object_been_migrated( $gallery->unique_identifier() );
+            if ( $migrated_object ) {
+                $gallery = foogallery_migrate_migrator_instance()->get_migrated_objects()[$gallery->unique_identifier()];
             } else {
-  
-                $gallery = new Gallery( $this );
-                $gallery->ID = $data['id'];
                 $gallery->title = $data['title'];
                 $gallery->foogallery_title = $data['title'];
                 $gallery->data = $data['data'];
@@ -107,18 +96,17 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Plugin' ) ) {
          * @return $album
          */
         function get_album( $data = array() ) {
+            $album = new Album( $this );
+            $album->ID = $data['ID'];
 
-            $migrated_object = foogallery_migrate_migrator_instance()->has_object_been_migrated( $data['unique_identifier'] );
-            if($migrated_object) {                           
-                $album = foogallery_migrate_migrator_instance()->get_migrated_objects()[$data['unique_identifier']];
+            $migrated_object = foogallery_migrate_migrator_instance()->has_object_been_migrated( $album->unique_identifier() );
+            if ( $migrated_object ) {
+                $album = foogallery_migrate_migrator_instance()->get_migrated_objects()[$album->unique_identifier()];
             } else {
-  
-                $album = new Album( $this );
-                $album->ID = $data['ID'];
                 $album->title = $data['title'];
                 $album->data = $data['data'];
                 $album->fooalbum_title = $data['fooalbum_title'];
-            }   
+            }
 
             return $album;         
         }        
@@ -130,14 +118,19 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Plugin' ) ) {
          */
         function get_image( $data = array() ) {
 
-            $image = new Image();
-            $image->source_url = $data['source_url'];
-            $image->caption = $data['caption'];
-            $image->alt = $data['alt'];
-            $image->date = $data['date'];
-            $image->data = $data['data'];
-            return $image; 
+            $migrated_object = foogallery_migrate_migrator_instance()->has_object_been_migrated( $data['source_url'] );
+            if ( $migrated_object ) {
+                $image = foogallery_migrate_migrator_instance()->get_migrated_objects()[$data['source_url']];
+            } else {
+                $image = new Image();
+                $image->source_url = $data['source_url'];
+                $image->caption = $data['caption'];
+                $image->alt = $data['alt'];
+                $image->date = $data['date'];
+                $image->data = $data['data'];
+            }
 
+            return $image;
         }
     }
 }

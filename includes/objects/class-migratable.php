@@ -236,7 +236,5 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
             }
             return $migrated_children;
         }
-
-
     }
 }
