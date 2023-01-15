@@ -49,7 +49,22 @@
 <form method="POST" id="foogallery_migrate_source_form">
     <?php wp_nonce_field( 'foogallery_migrate_detect', 'foogallery_migrate_detect', false ); ?>
     <input type="submit" class="button" value="<?php _e( 'Run Detection Again', 'foogallery-migrate' ); ?>">
-    <?php if(count($migrator->get_migrated_objects()) > 0) { ?>
+<?php
+if ( $migrator->has_migrated_objects() ) {
+    $summary = $migrator->get_migrated_objects_summary()
+    ?><h3><?php _e('Migration Stats', 'foogallery-migrate'); ?></h3>
+    <p>
+        <?php _e( 'Albums : ', 'foogallery-migrate' ); ?>
+        <?php echo $summary['album']; ?>
+    </p>
+    <p>
+        <?php _e( 'Galleries : ', 'foogallery-migrate' ); ?>
+        <?php echo $summary['gallery']; ?>
+    </p>
+    <p>
+        <?php _e( 'Images : ', 'foogallery-migrate' ); ?>
+        <?php echo $summary['image']; ?>
+    </p>
     <input type="submit" class="button clear_migration_history" name="clear_migration_history" value="<?php _e( 'Clear Migration History', 'foogallery-migrate' ); ?>">
-    <?php } ?>
+<?php } ?>
 </form>

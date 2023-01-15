@@ -201,5 +201,35 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
             }
             return false;
         }
+
+        /**
+         * Returns true if any objects have been migrated.
+         *
+         * @return bool
+         */
+        public function has_migrated_objects() {
+            return count ( $this->get_migrated_objects() ) > 0;
+        }
+
+        /**
+         * Returns a summary of migrated objects.
+         *
+         * @return array
+         */
+        public function get_migrated_objects_summary() {
+            $summary = array(
+                'album' => 0,
+                'gallery' => 0,
+                'image' => 0
+            );
+            foreach( $this->get_migrated_objects() as $object ) {
+                if ( !array_key_exists( $object->type(), $summary ) ) {
+                    $summary[$object->type()] = 0;
+                }
+
+                $summary[$object->type()]++;
+            }
+            return $summary;
+        }
 	}
 }
