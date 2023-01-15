@@ -48,7 +48,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
             }            
             $migrating = $has_migrations && defined( 'DOING_AJAX' ) && DOING_AJAX;
             $current_album_id = $this->get_current_object_being_migrated();
-            $has_previous_migrations = true; //$this->has_previous_migrations();
+            $has_previous_migrations = $this->has_previous_migrations();
             ?>
             <table class="wp-list-table widefat fixed striped table-view-list pages">
                 <thead>
@@ -187,12 +187,12 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                 <button name="foogallery_migrate_action" value="foogallery_album_migrate_continue"
                         class="button button-primary continue_album_migrate"><?php _e( 'Resume Migration', 'foogallery-migrate' ); ?></button>
                 <button name="foogallery_migrate_action" value="foogallery_album_migrate_cancel"
-                        class="button button-primary cancel_album_migrate"><?php _e( 'Stop Migration', 'foogallery-migrate' ); ?></button>
+                        class="button cancel_album_migrate"><?php _e( 'Stop Migration', 'foogallery-migrate' ); ?></button>
             <?php } else { ?>
                 <button name="foogallery_migrate_action" value="foogallery_album_migrate_start"
                         class="button button-primary start_album_migrate"><?php _e( 'Start Album Migration', 'foogallery-migrate' ); ?></button>
                 <button name="foogallery_migrate_action" value="foogallery_refresh_albums"
-                        class="button button-primary refresh_albums"><?php _e( 'Refresh Albums', 'foogallery-migrate' ); ?></button>                           
+                        class="button refresh_albums"><?php _e( 'Refresh Albums', 'foogallery-migrate' ); ?></button>
             <?php }
             if ( $has_previous_migrations && !$migrating ) { ?>
                 <input type="submit" name="foogallery_foogallery_reset" class="button reset_album_migrate" value="<?php _e( 'Reset Migration', 'foogallery' ); ?>">

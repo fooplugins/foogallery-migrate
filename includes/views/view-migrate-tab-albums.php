@@ -10,6 +10,12 @@
         function foogallery_album_migration_ajax(action, success_callback) {
             var data = $form.serialize();
 
+            // Hide all buttons.
+            $form.find('.button').hide();
+
+            // show the spinner.
+            $('#foogallery_migrate_album_spinner .spinner').addClass('is-active');
+
             $.ajax({
                 type: "POST",
                 url: ajaxurl,
@@ -19,7 +25,7 @@
                     //something went wrong! Alert the user and reload the page
                     console.log(thrownError);
                     alert('<?php _e( 'Something went wrong with the migration and the page will now reload. Once it has reloaded, click "Resume Migration" to continue with the migration.', 'foogallery-migrate' ); ?>');
-                    // location.reload();
+                    location.reload();
                 }
             });
         }
@@ -43,12 +49,6 @@
         $form.on('click', '.start_album_migrate', function (e) {
             e.preventDefault();
 
-            // Hide all buttons.
-            $form.find('.button').hide();
-
-            // show the spinner.
-            $('#foogallery_migrate_album_spinner .spinner').addClass('is-active');
-
             foogallery_album_migration_ajax( 'foogallery_album_migrate', function (data) {
                 $form.html(data);
                 foogallery_album_migration_continue();
@@ -61,8 +61,9 @@
         });
 
         $form.on('click', '.cancel_album_migrate', function (e) {
+            e.preventDefault();
+
             if (!confirm('<?php _e( 'Are you sure you want to cancel?', 'foogallery-migrate' ); ?>')) {
-                e.preventDefault();
                 return false;
             } else {
                 foogallery_album_migration_ajax( 'foogallery_album_migrate_cancel', function (data) {
@@ -72,8 +73,9 @@
         });
 
         $form.on('click', '.reset_album_migrate', function (e) {
+            e.preventDefault();
+
             if (!confirm('<?php _e( 'Are you sure you want to reset all migration data? This may result in duplicate album/galleries and media attachments!', 'foogallery-migrate' ); ?>')) {
-                e.preventDefault();
                 return false;
             } else {
                 foogallery_album_migration_ajax( 'foogallery_album_migrate_reset', function (data) {

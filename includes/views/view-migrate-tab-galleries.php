@@ -9,6 +9,12 @@
         function foogallery_gallery_migration_ajax(action, success_callback) {
             var data = $form.serialize();
 
+            // Hide all buttons.
+            $form.find('.button').hide();
+
+            // show the spinner.
+            $('#foogallery_migrate_gallery_spinner .spinner').addClass('is-active');
+
             $.ajax({
                 type: "POST",
                 url: ajaxurl,
@@ -41,12 +47,6 @@
         $form.on('click', '.start_migrate', function (e) {
             e.preventDefault();
 
-            // Hide all buttons.
-            $form.find('.button').hide();
-
-            // show the spinner.
-            $('#foogallery_migrate_gallery_spinner .spinner').addClass('is-active');
-
             foogallery_gallery_migration_ajax( 'foogallery_migrate', function (data) {
                 $form.html(data);
                 foogallery_gallery_migration_continue();
@@ -59,8 +59,8 @@
         });
 
         $form.on('click', '.cancel_migrate', function (e) {
+            e.preventDefault();
             if (!confirm('<?php _e( 'Are you sure you want to cancel?', 'foogallery-migrate' ); ?>')) {
-                e.preventDefault();
                 return false;
             } else {
                 foogallery_gallery_migration_ajax( 'foogallery_migrate_cancel', function (data) {
@@ -70,8 +70,9 @@
         });
 
         $form.on('click', '.reset_migrate', function (e) {
+            e.preventDefault();
+
             if (!confirm('<?php _e( 'Are you sure you want to reset all migration data? This may result in duplicate galleries and media attachments!', 'foogallery-migrate' ); ?>')) {
-                e.preventDefault();
                 return false;
             } else {
                 foogallery_gallery_migration_ajax( 'foogallery_migrate_reset', function (data) {
@@ -81,10 +82,10 @@
         });
 
         $form.on('click', '.refresh_gallery', function (e) {
-                e.preventDefault();
-                foogallery_gallery_migration_ajax( 'foogallery_migrate_refresh', function (data) {
-                    $form.html(data);
-                } );
+            e.preventDefault();
+            foogallery_gallery_migration_ajax( 'foogallery_migrate_refresh', function (data) {
+                $form.html(data);
+            } );
         });        
     });
 </script>
