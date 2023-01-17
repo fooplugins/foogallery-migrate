@@ -77,6 +77,9 @@ function foogallery_migrate_migrator_instance() {
 }
 
 function foogallery_migrate_array_to_table($arr, $first=true, $sub_arr=false){
+    if ( !is_array( $arr ) ) {
+        return '';
+    }
     $width = ($sub_arr) ? 'width="100%"' : '' ;
     $table = ($first) ? '<table class="foogallery-migrate-table" '.$width.'>' : '';
     $rows = array();

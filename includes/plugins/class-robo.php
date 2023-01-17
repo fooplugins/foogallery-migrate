@@ -113,6 +113,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
                     case 'polaroid':
                         return 'masonry';
                     case 'slider':
+                        return 'carousel';
                     case 'youtube':
                     default:
                         return 'default';
