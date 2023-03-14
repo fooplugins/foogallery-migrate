@@ -347,14 +347,8 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
             if ( is_array( $robo_images ) && !empty( $robo_images ) ) {
                 foreach ( $robo_images as $attachment_id) {                
 
-                    $image_attributes = wp_get_attachment_image_src( $attachment_id );
-                    if ( is_array( $image_attributes ) && !empty( $image_attributes ) ) {
-                        // $image->migrated_id = $attachment_id;
-                        $source_url = $image_attributes[0];
-                    }
-
                     $data = array(
-                        'source_url' => $source_url,
+                        'source_url' => wp_get_attachment_url( $attachment_id ),
                         'caption' => "",
                         'alt' => "",
                         'date' => get_the_date( 'Y-m-d', $attachment_id ) . ' ' . get_the_time( 'H:i:s', $attachment_id ),
