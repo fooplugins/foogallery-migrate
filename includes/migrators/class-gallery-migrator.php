@@ -96,7 +96,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                     }
                     $url = add_query_arg( 'paged', $page, $url ) . '#galleries';
                     $gallery_count = count( $galleries );
-                    $page_size = apply_filters( 'foogallery_migrate_page_size', 5);
+                    $page_size = apply_filters( 'foogallery_migrate_page_size', 20);
 
                     $pagination = new Pagination();
                     $pagination->items( $gallery_count );
