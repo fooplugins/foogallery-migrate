@@ -100,14 +100,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
             if ( is_array( $modula_images ) && !empty( $modula_images ) ) {
                 foreach ( $modula_images as $modula_image ) {
                     $modula_image = ( object ) $modula_image;
-                    
-                    $image_attributes = wp_get_attachment_image_src( $modula_image->id );
-                    if ( is_array( $image_attributes ) && !empty ( $image_attributes ) ) {
-                        $source_url = $image_attributes[0];
-                    }
 
                     $data = array(
-                        'source_url' => $source_url,
+                        'source_url' => wp_get_attachment_url( $modula_image->id ),
                         'caption' => $modula_image->description,
                         'alt' => $modula_image->alt,
                         'date' => get_the_date( 'Y-m-d', $modula_image->id ) . ' ' . get_the_time( 'H:i:s', $modula_image->id ),

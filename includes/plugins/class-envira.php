@@ -146,14 +146,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Envira' ) ) {
             if ( is_array( $envira_images ) && !empty( $envira_images ) ) {
                 foreach ( $envira_images['gallery'] as $attachment_id => $envira_image ) {
                     $envira_obj = ( object ) $envira_image;
-                    $envira_obj->id = $attachment_id;                                   
-                    $image_attributes = wp_get_attachment_image_src( $envira_obj->id);
-                    if ( is_array( $image_attributes ) && !empty ( $image_attributes ) ) {
-                        $source_url = $image_attributes[0];
-                    }
-
+                    $envira_obj->id = $attachment_id;
                     $data = array(
-                        'source_url' => $source_url,
+                        'source_url' => wp_get_attachment_url( $envira_obj->id ),
                         'caption' => $envira_obj->caption,
                         'alt' => $envira_obj->alt,
                         'date' => get_the_date( 'Y-m-d', $envira_obj->id ) . ' ' . get_the_time( 'H:i:s', $envira_obj->id ),
