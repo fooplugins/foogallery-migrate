@@ -2,9 +2,9 @@
 Contributors: bradvin
 Tags: gallery, image gallery, photo gallery, wordpress gallery plugin, migrate
 Requires at least: 6.0
-Tested up to: 6.1
+Tested up to: 6.4
 Requires PHP: 5.4
-Stable tag: 1.2
+Stable tag: 1.3
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -63,11 +63,14 @@ Update now to get all the latest features, bug fixes and improvements!
 
 == Changelog ==
 
-= 1.0 =
-* Initial Release. First version.
+= 1.3 =
+* Fixed bug where NextGen image captions were not being migrated
+
+= 1.2 =
+* Fixed bug where Envira / Modula / Robo galleries were importing thumbnails
 
 = 1.1 =
 * Introduced album migrations. (Supports NextGen Albums & Photo Gallery Groups)
 
-= 1.2 =
-* Fixed bug where Envira / Modula / Robo galleries were importing thumbnails
+= 1.0 =
+* Initial Release. First version.
