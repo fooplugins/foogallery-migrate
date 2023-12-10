@@ -91,7 +91,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
          * Find all images by gallery id
          * @param $gallery_id ID of the gallery
          * @param $gallery_path Image gallery path
-         * @return bool
+         * @return array
          */
         private function find_images( $gallery_id, $gallery_path ) {
             $nextgen_images = $this->get_nextgen_gallery_images( $gallery_id );

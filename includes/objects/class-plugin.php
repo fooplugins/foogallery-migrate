@@ -124,7 +124,12 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Plugin' ) ) {
             } else {
                 $image = new Image();
                 $image->source_url = $data['source_url'];
-                $image->caption = $data['caption'];
+                if ( array_key_exists( 'caption', $data ) ) {
+                    $image->caption = $data['caption'];
+                }
+                if ( array_key_exists( 'description', $data ) ) {
+                    $image->description = $data['description'];
+                }
                 $image->alt = $data['alt'];
                 $image->date = $data['date'];
                 $image->data = $data['data'];

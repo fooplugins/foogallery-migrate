@@ -87,7 +87,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
                 'ID'             => 0,
                 'guid'           => $guid,
                 'post_title'     => $this->slug,
-                'post_excerpt'   => $this->description,
+                'post_excerpt'   => $this->caption,
                 'post_content'   => $this->description,
                 'post_date'      => $this->date,
                 'post_mime_type' => $file_type['type'],
