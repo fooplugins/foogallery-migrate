@@ -124,6 +124,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Plugin' ) ) {
             } else {
                 $image = new Image();
                 $image->source_url = $data['source_url'];
+                if ( array_key_exists( 'slug', $data ) ) {
+                    $image->slug = $data['slug'];
+                }
                 if ( array_key_exists( 'caption', $data ) ) {
                     $image->caption = $data['caption'];
                 }

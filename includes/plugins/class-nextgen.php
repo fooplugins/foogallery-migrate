@@ -102,8 +102,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
 
                 $data = array(
                     'source_url' => $source_url,
-                    'caption' => $nextgen_image->description,
-                    'alt' => $nextgen_image->alttext,
+                    'slug' => $nextgen_image->filename,
+                    'caption' => $nextgen_image->alttext,
+                    'description' => $nextgen_image->description,
+                    'alt' => '',
                     'date' => $nextgen_image->imagedate,
                     'data' => $nextgen_image
                 );
