@@ -115,3 +115,5 @@ gulp.task( 'zip', function() {
 gulp.task( 'composer-install-deploy', shell.task( [ 'composer install --prefer-dist --optimize-autoloader --no-dev' ] ) );
 
 gulp.task( 'default', gulp.series( 'translate', 'zip' ) );
+
+gulp.task( 'deploy', gulp.series( 'composer-install-deploy', 'translate', 'zip' ) );

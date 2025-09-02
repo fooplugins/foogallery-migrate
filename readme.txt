@@ -1,5 +1,5 @@
 === FooGallery Migrate ===
-Contributors: bradvin
+Contributors: fooplugins,bradvin,elviiso
 Tags: gallery, image gallery, photo gallery, wordpress gallery plugin, migrate
 Requires at least: 6.0
 Tested up to: 6.8
