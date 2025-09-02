@@ -20,6 +20,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
             $this->migrated = false;
             $this->migrated_id = 0;
             $this->migrated_title = '';
+            $this->title = '';
             $this->caption = '';
             $this->description = '';
             $this->slug = '';
@@ -86,7 +87,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
             $attachment = array(
                 'ID'             => 0,
                 'guid'           => $guid,
-                'post_title'     => $this->slug,
+                'post_title'     => $this->title,
                 'post_excerpt'   => $this->caption,
                 'post_content'   => $this->description,
                 'post_date'      => $this->date,

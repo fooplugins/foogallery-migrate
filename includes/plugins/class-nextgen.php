@@ -100,10 +100,15 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
             foreach ( $nextgen_images as $nextgen_image ) {
                 $source_url = trailingslashit( site_url() ) . trailingslashit( $gallery_path ) . $nextgen_image->filename;
 
+                // Use alttext for both title and alt, but fallback to empty string if not set
+                $alt_text = !empty($nextgen_image->alttext) ? $nextgen_image->alttext : '';
+                
                 $data = array(
                     'source_url' => $source_url,
-                    'caption' => $nextgen_image->description,
-                    'alt' => $nextgen_image->alttext,
+                    'slug' => $nextgen_image->filename,
+                    'title' => $alt_text,
+                    'alt' => $alt_text,
+                    'description' => $nextgen_image->description,
                     'date' => $nextgen_image->imagedate,
                     'data' => $nextgen_image
                 );
@@ -158,6 +163,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
          * @return array
          */
         function get_gallery_settings( $gallery, $settings ) {
+            $gallery_template = $this->get_gallery_template( $gallery );
+            $settings[$gallery_template . '_caption_title_source'] = 'title';
             return $settings;
         }
 
