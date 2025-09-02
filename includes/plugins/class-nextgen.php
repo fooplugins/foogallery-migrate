@@ -100,12 +100,15 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
             foreach ( $nextgen_images as $nextgen_image ) {
                 $source_url = trailingslashit( site_url() ) . trailingslashit( $gallery_path ) . $nextgen_image->filename;
 
+                // Use alttext for both title and alt, but fallback to empty string if not set
+                $alt_text = !empty($nextgen_image->alttext) ? $nextgen_image->alttext : '';
+                
                 $data = array(
                     'source_url' => $source_url,
                     'slug' => $nextgen_image->filename,
-                    'caption' => $nextgen_image->alttext,
+                    'title' => $alt_text,
+                    'alt' => $alt_text,
                     'description' => $nextgen_image->description,
-                    'alt' => '',
                     'date' => $nextgen_image->imagedate,
                     'data' => $nextgen_image
                 );
