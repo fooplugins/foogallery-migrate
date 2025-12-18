@@ -22,6 +22,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         protected const KEY_PLUGINS = 'plugins';
         protected const KEY_GALLERIES = 'galleries';
         protected const KEY_ALBUMS = 'albums';
+        protected const KEY_CONTENT = 'block-shortcode';
         protected const KEY_MIGRATED = 'migrated';
 
         /**
@@ -151,6 +152,15 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          */
         public function get_album_migrator() {
             return new Migrators\AlbumMigrator( $this, self::KEY_ALBUMS );
+        }
+
+        /**
+         * Returns the Content Migrator
+         *
+         * @return Migrators\ContentMigrator
+         */
+        public function get_content_migrator() {
+            return new Migrators\ContentMigrator( $this, self::KEY_CONTENT );
         }
 
         /**

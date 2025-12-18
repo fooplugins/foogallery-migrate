@@ -247,5 +247,32 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
 
             return $albums;            
         }        
+       /**
+         * Returns shortcode regex patterns for NextGen.
+         *
+         * @return array Array of regex patterns
+         */
+        function get_shortcode_patterns() {
+            return array(
+                '/\[nggallery\s+id=["\']?(\d+)["\']?(?:\s+[^\]]*)?\]/i',
+                '/\[ngg[^\]]*ids=["\']?(\d+)["\']?[^\]]*\]/i',
+                '/\[ngg\s+id=["\']?(\d+)["\']?(?:\s+[^\]]*)?\]/i',
+                '/\[ngg_images[^\]]*gallery_ids=["\']?(\d+)["\']?[^\]]*\]/i',
+                '/\[imagely\s+id=["\']?(\d+)["\']?(?:\s+[^\]]*)?\]/i',
+            );
+        }
+
+        /**
+         * Returns Gutenberg block patterns for NextGen.
+         *
+         * @return array Associative array of block names
+         */
+        function get_block_patterns() {
+            return array(
+                'nextgen-gallery/gallery' => array(),
+                'imagely/nextgen-gallery' => array(),
+                'imagely/main-block' => array(),
+            );
+        }              
     }
 }

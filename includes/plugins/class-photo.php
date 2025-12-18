@@ -30,6 +30,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
         const FM_PHOTO_IMAGE_TABLE = 'bwg_image';
         const FM_PHOTO_ALBUM_TABLE   = 'bwg_album';
         const FM_PHOTO_ALBUM_GALLERY_TABLE = 'bwg_album_gallery';
+        const FM_PHOTO_TABLE_SHORTCODE = 'bwg_shortcode';
 
         /**
          * Name of the plugin.
@@ -239,6 +240,30 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
             }
 
             return $albums;                            
+        }        
+       /**
+         * Returns shortcode regex patterns for 10Web Photo Gallery.
+         *
+         * @return array Array of regex patterns
+         */
+        function get_shortcode_patterns() {
+            return array(
+                '/\[Best_Wordpress_Gallery\s+id=["\']?(\d+)["\']?(?:\s+[^\]]*)?\]/i',
+                '/\[Best_Wordpress_Gallery\s+gallery_id=["\']?(\d+)["\']?(?:\s+[^\]]*)?\]/i',
+                '/\[bwg\s+id=["\']?(\d+)["\']?(?:\s+[^\]]*)?\]/i',
+            );
+        }
+
+        /**
+         * Returns Gutenberg block patterns for 10Web Photo Gallery.
+         *
+         * @return array Associative array of block names
+         */
+        function get_block_patterns() {
+            return array(
+                'bwg/gallery' => array(),
+                'tw/bwg' => array(),
+            );
         }        
     }
 }

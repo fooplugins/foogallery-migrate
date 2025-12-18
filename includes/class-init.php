@@ -39,7 +39,11 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             add_action( 'wp_ajax_foogallery_album_migrate_continue', array( $this, 'ajax_continue_album_migration' ) );
             add_action( 'wp_ajax_foogallery_album_migrate_cancel', array( $this, 'ajax_cancel_album_migration' ) );
             add_action( 'wp_ajax_foogallery_album_migrate_reset', array( $this, 'ajax_reset_album_migration' ) );  
-            add_action( 'wp_ajax_foogallery_album_migrate_refresh', array( $this, 'ajax_refresh_album_migration' ) );  
+            add_action( 'wp_ajax_foogallery_album_migrate_refresh', array( $this, 'ajax_refresh_album_migration' ) );
+
+            // Ajax calls for content migration
+            add_action( 'wp_ajax_foogallery_content_replace', array( $this, 'ajax_replace_content' ) );
+            add_action( 'wp_ajax_foogallery_content_refresh', array( $this, 'ajax_refresh_content' ) );  
                       
 		}
 
@@ -258,7 +262,66 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 }
             }
             die();
-        }        
+        } 
+
+        /**
+         * Replace content shortcodes/blocks.
+         *
+         * @return void
+         */
+        function ajax_replace_content() {
+            if ( check_admin_referer( 'foogallery_content_migrate', 'foogallery_content_migrate' ) ) {
+
+                $migrator = foogallery_migrate_migrator_instance();
+                $content_migrator = $migrator->get_content_migrator();
+
+                $selected_items = array();
+                if ( array_key_exists( 'content-item', $_POST ) ) {
+                    $selected_items = map_deep( wp_unslash( $_POST['content-item'] ), 'sanitize_text_field' );
+                }
+
+                $result = $content_migrator->replace_content( $selected_items );
+
+                // Show success/error messages
+                if ( $result['success'] > 0 ) {
+                    echo '<div class="notice notice-success"><p>';
+                    printf(
+                        esc_html__( 'Successfully replaced %d shortcode(s)/block(s).', 'foogallery-migrate' ),
+                        absint( $result['success'] )
+                    );
+                    echo '</p></div>';
+                }
+
+                if ( ! empty( $result['errors'] ) ) {
+                    echo '<div class="notice notice-error"><p><strong>' . esc_html__( 'Errors:', 'foogallery-migrate' ) . '</strong></p><ul>';
+                    foreach ( $result['errors'] as $error ) {
+                        echo '<li>' . esc_html( $error ) . '</li>';
+                    }
+                    echo '</ul></div>';
+                }
+
+                $content_migrator->render_content_form();
+
+                die();
+            }
+        }
+
+        /**
+         * Refresh content scan.
+         *
+         * @return void
+         */
+        function ajax_refresh_content() {
+            if ( check_admin_referer( 'foogallery_content_migrate', 'foogallery_content_migrate' ) ) {
+
+                $migrator = foogallery_migrate_migrator_instance();
+                $content_migrator = $migrator->get_content_migrator();
+                $content_migrator->scan_content( true );
+                $content_migrator->render_content_form();
+
+                die();
+            }
+        }          
     
 	}
 }

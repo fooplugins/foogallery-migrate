@@ -143,5 +143,27 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Plugin' ) ) {
 
             return $image;
         }
+
+        /**
+         * Returns shortcode regex patterns for this plugin.
+         * Should return an array of regex patterns that match shortcodes.
+         * Example: array( '/\[envira\s+id=["\']?(\d+)["\']?/i' )
+         *
+         * @return array Array of regex patterns
+         */
+        function get_shortcode_patterns() {
+            return array();
+        }
+
+        /**
+         * Returns Gutenberg block patterns for this plugin.
+         * Should return an associative array of block names.
+         * Example: array( 'envira/gallery' => array() )
+         *
+         * @return array Associative array of block names
+         */
+        function get_block_patterns() {
+            return array();
+        }
     }
 }
