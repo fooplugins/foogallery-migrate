@@ -30,7 +30,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
             wp_nonce_field( 'foogallery_migrate', 'foogallery_migrate', false );
 
             if ( count( $galleries ) === 0 ) {
-                echo '<p>' . __( 'No galleries found!', 'foogallery-migrate' ) . '</p>';
+                echo '<p>' . esc_html__( 'No galleries found!', 'foogallery-migrate' ) . '</p>';
                 $show_refresh = true;
                 $migrating = false;
             } else {
@@ -55,24 +55,24 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                         <tr>
                             <td id="cb" class="manage-column column-cb check-column">
                                 <?php if ( ! $migrating ) { ?>
-                                    <label class="screen-reader-text" for="cb-select-all-1"><?php _e( 'Select All', 'foogallery-migrate' ); ?></label>
+                                    <label class="screen-reader-text" for="cb-select-all-1"><?php esc_html_e( 'Select All', 'foogallery-migrate' ); ?></label>
                                     <input id="cb-select-all-1" type="checkbox" <?php echo $migrating ? 'disabled="disabled"' : ''; ?> checked="checked" />
                                 <?php } ?>
                             </td>
                             <th scope="col" class="manage-column">
-                                <span><?php _e( 'Gallery', 'foogallery-migrate' ); ?></span>
+                                <span><?php esc_html_e( 'Gallery', 'foogallery-migrate' ); ?></span>
                             </th>
                             <th scope="col" class="manage-column">
-                                <span><?php _e( 'Source', 'foogallery-migrate' ); ?></span>
+                                <span><?php esc_html_e( 'Source', 'foogallery-migrate' ); ?></span>
                             </th>
                             <th scope="col" class="manage-column">
-                                <span><?php _e( 'Migration Data', 'foogallery-migrate' ); ?></span>
+                                <span><?php esc_html_e( 'Migration Data', 'foogallery-migrate' ); ?></span>
                             </th>
                             <th scope="col" class="manage-column">
-                                <span><?php printf( __( '%s Name', 'foogallery-migrate' ), foogallery_plugin_name() ); ?></span>
+                                <span><?php printf( esc_html__( '%s Name', 'foogallery-migrate' ), esc_html( foogallery_plugin_name() ) ); ?></span>
                             </th>
                             <th scope="col" class="manage-column">
-                                <span><?php _e( 'Migration Progress', 'foogallery' ); ?></span>
+                                <span><?php esc_html_e( 'Migration Progress', 'foogallery' ); ?></span>
                             </th>
                         </tr>
                     </thead>
@@ -147,20 +147,20 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                                 <?php echo esc_html( $gallery->plugin->name() ); ?>
                             </td>
                             <td>
-                                <?php _e( 'Template : ', 'foogallery-migrate' ); ?>
+                                <?php esc_html_e( 'Template : ', 'foogallery-migrate' ); ?>
                                 <?php echo esc_html( $gallery->plugin->get_gallery_template( $gallery ) ); ?>
                                 <br />
-                                <?php _e( 'Images : ', 'foogallery-migrate' ); ?>
+                                <?php esc_html_e( 'Images : ', 'foogallery-migrate' ); ?>
                                 <?php echo esc_html( $gallery->get_children_count() ); ?>
                                 <?php if ( foogallery_is_debug() ) { ?>
                                 <br />
-                                <?php _e( 'Settings : ', 'foogallery-migrate' ); ?>
+                                <?php esc_html_e( 'Settings : ', 'foogallery-migrate' ); ?>
                                 <?php echo wp_kses_post ( foogallery_migrate_array_to_table( $gallery->plugin->get_gallery_settings( $gallery, array() ) ) ); ?>
                                 <?php  } ?>
                             </td>
                             <td>
                                 <?php if ( $foogallery ) {
-                                    echo $edit_link;
+                                    echo wp_kses_post( $edit_link );
                                 } else { ?>
                                     <input name="foogallery-title-<?php echo esc_attr( $gallery->unique_identifier() ); ?>" value="<?php echo esc_attr( $gallery->title ); ?>">
                                 <?php } ?>
@@ -176,7 +176,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                 </table>
                 <div class="tablenav bottom">
                     <div class="tablenav-pages">
-                        <?php echo $pagination->render(); ?>
+                        <?php echo wp_kses_post( $pagination->render() ); ?>
                     </div>
                 </div>
 
@@ -188,18 +188,18 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
 
                 if ( $has_migrations ) { ?>
                     <button name="foogallery_migrate_action" value="foogallery_migrate_continue"
-                            class="button button-primary continue_migrate"><?php _e( 'Resume Migration', 'foogallery-migrate' ); ?></button>
+                            class="button button-primary continue_migrate"><?php esc_html_e( 'Resume Migration', 'foogallery-migrate' ); ?></button>
                     <button name="foogallery_migrate_action" value="foogallery_migrate_cancel"
-                            class="button cancel_migrate"><?php _e( 'Stop Migration', 'foogallery-migrate' ); ?></button>
+                            class="button cancel_migrate"><?php esc_html_e( 'Stop Migration', 'foogallery-migrate' ); ?></button>
                 <?php } else { ?>
                     <button name="foogallery_migrate_action" value="foogallery_migrate_start"
-                            class="button button-primary start_migrate"><?php _e( 'Start Gallery Migration', 'foogallery-migrate' ); ?></button>
+                            class="button button-primary start_migrate"><?php esc_html_e( 'Start Gallery Migration', 'foogallery-migrate' ); ?></button>
                 <?php
                 }
             }
             if ( $show_refresh ) { ?>
                 <button name="foogallery_migrate_action" value="foogallery_refresh_gallery"
-                        class="button refresh_gallery"><?php _e( 'Refresh Galleries', 'foogallery-migrate' ); ?></button>
+                        class="button refresh_gallery"><?php esc_html_e( 'Refresh Galleries', 'foogallery-migrate' ); ?></button>
             <?php }
             ?><div id="foogallery_migrate_gallery_spinner" style="width:20px">
                 <span class="spinner"></span>
