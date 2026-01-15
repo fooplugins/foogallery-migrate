@@ -68,19 +68,110 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
                 return;
             }
 
-            // Get the contents of the picture
-            $response = wp_remote_get( $this->source_url );
-            if ( is_wp_error( $response ) ) {
-                $this->error = $response;
-                $this->migrated = true;
-                return;
-            }
-            $contents = wp_remote_retrieve_body( $response );
+			@set_time_limit(0);
+			wp_raise_memory_limit( 'image' );
 
-            // Upload and get file data
-            $upload    = wp_upload_bits( basename( $this->source_url ), null, $contents );
-            $guid      = $upload['url'];
-            $file      = $upload['file'];
+            // Use local file paths where possible to avoid HTTP and memory spikes.
+            require_once( ABSPATH . 'wp-admin/includes/file.php' );
+
+            $file = '';
+            $guid = '';
+            $source_parts = wp_parse_url( $this->source_url );
+
+            if ( $source_parts && ! empty( $source_parts['path'] ) ) {
+                $source_path = $source_parts['path'];
+                $source_host = isset( $source_parts['host'] ) ? $source_parts['host'] : '';
+                $candidate_paths = array();
+
+                $uploads = wp_get_upload_dir();
+                $uploads_parts = wp_parse_url( $uploads['baseurl'] );
+                $uploads_parts = $uploads_parts ? $uploads_parts : array();
+                $uploads_host = isset( $uploads_parts['host'] ) ? $uploads_parts['host'] : '';
+                $uploads_path = isset( $uploads_parts['path'] ) ? $uploads_parts['path'] : '';
+
+                $site_parts = wp_parse_url( home_url( '/' ) );
+                $site_parts = $site_parts ? $site_parts : array();
+                $site_host = isset( $site_parts['host'] ) ? $site_parts['host'] : '';
+                $site_path = isset( $site_parts['path'] ) ? untrailingslashit( $site_parts['path'] ) : '';
+
+                if ( ( '' === $source_host || $source_host === $uploads_host ) && $uploads_path && 0 === strpos( $source_path, $uploads_path ) ) {
+                    $relative = substr( $source_path, strlen( $uploads_path ) );
+                    $candidate_paths[] = wp_normalize_path( trailingslashit( $uploads['basedir'] ) . ltrim( $relative, '/' ) );
+                }
+
+                if ( '' === $source_host || $source_host === $site_host ) {
+                    if ( $site_path && '/' !== $site_path && 0 === strpos( $source_path, $site_path . '/' ) ) {
+                        $relative = substr( $source_path, strlen( $site_path ) );
+                        $candidate_paths[] = wp_normalize_path( trailingslashit( ABSPATH ) . ltrim( $relative, '/' ) );
+                    } else {
+                        $candidate_paths[] = wp_normalize_path( trailingslashit( ABSPATH ) . ltrim( $source_path, '/' ) );
+                    }
+                }
+
+                foreach ( $candidate_paths as $candidate_path ) {
+                    if ( is_readable( $candidate_path ) && ! is_dir( $candidate_path ) ) {
+                        $file = $candidate_path;
+                        $guid = $this->source_url;
+                        break;
+                    }
+                }
+            }
+
+            if ( empty( $file ) ) {
+                $tmp = download_url( $this->source_url, 60 );
+                if ( is_wp_error( $tmp ) ) {
+                    $this->error = $tmp;
+                    $this->migrated = true;
+                    return;
+                }
+
+                $file_array = array(
+                    'name'     => basename( $this->source_url ),
+                    'tmp_name' => $tmp,
+                );
+
+                $sideload = wp_handle_sideload( $file_array, array( 'test_form' => false ) );
+                if ( ! empty( $sideload['error'] ) ) {
+                    @unlink( $tmp );
+                    $this->error = new \WP_Error( 'foogallery_migrate_sideload_failed', $sideload['error'] );
+                    $this->migrated = true;
+                    return;
+                }
+
+                $guid = $sideload['url'];
+                $file = $sideload['file'];
+            } else {
+                $uploads = isset( $uploads ) ? $uploads : wp_get_upload_dir();
+                $uploads_basedir = wp_normalize_path( trailingslashit( $uploads['basedir'] ) );
+                if ( 0 !== strpos( wp_normalize_path( $file ), $uploads_basedir ) ) {
+                    $tmp = wp_tempnam( $file );
+                    if ( ! $tmp || ! @copy( $file, $tmp ) ) {
+                        if ( $tmp ) {
+                            @unlink( $tmp );
+                        }
+                        $this->error = new \WP_Error( 'foogallery_migrate_local_copy_failed', __( 'Unable to copy local image for migration.', 'foogallery-migrate' ) );
+                        $this->migrated = true;
+                        return;
+                    }
+
+                    $file_array = array(
+                        'name'     => basename( $file ),
+                        'tmp_name' => $tmp,
+                    );
+
+                    $sideload = wp_handle_sideload( $file_array, array( 'test_form' => false ) );
+                    if ( ! empty( $sideload['error'] ) ) {
+                        @unlink( $tmp );
+                        $this->error = new \WP_Error( 'foogallery_migrate_sideload_failed', $sideload['error'] );
+                        $this->migrated = true;
+                        return;
+                    }
+
+                    $guid = $sideload['url'];
+                    $file = $sideload['file'];
+                }
+            }
+
             $file_type = wp_check_filetype( basename( $file ), null );
 
             // Create attachment
