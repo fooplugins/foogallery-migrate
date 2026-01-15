@@ -100,8 +100,13 @@
 </style>
 <script>
 	jQuery(function ($) {
+		var resetAlbumMessage = <?php echo wp_json_encode( __( 'Are you sure you want to reset all NextGen album import data? This may result in duplicate albums if you decide to import again!', 'foogallery-migrate' ) ); ?>;
+		var albumImportErrorMessage = <?php echo wp_json_encode( __( 'Something went wrong with the import and the page will now reload.', 'foogallery-migrate' ) ); ?>;
+		var findShortcodesErrorMessage = <?php echo wp_json_encode( __( 'Something went wrong with finding shortcodes, so the page will now reload.', 'foogallery-migrate' ) ); ?>;
+		var replaceShortcodesErrorMessage = <?php echo wp_json_encode( __( 'Something went wrong with replacing shortcodes, so the page will now reload.', 'foogallery-migrate' ) ); ?>;
+
 		$('#foogallery_migrate_album_form').on('click', '.reset_album_import', function (e) {
-			if (!confirm('<?php _e( 'Are you sure you want to reset all NextGen album import data? This may result in duplicate albums if you decide to import again!', 'foogallery-migrate' ); ?>')) {
+			if (!window.confirm(resetAlbumMessage)) {
 				e.preventDefault();
 				return false;
 			}
@@ -131,7 +136,7 @@
 				},
 				error: function() {
 					//something went wrong! Alert the user and reload the page
-					alert('<?php _e( 'Something went wrong with the import and the page will now reload.', 'foogallery-migrate' ); ?>');
+					window.alert(albumImportErrorMessage);
 					location.reload();
 				}
 			});
@@ -160,7 +165,7 @@
 				},
 				error: function() {
 					//something went wrong! Alert the user and reload the page
-					alert('<?php _e( 'Something went wrong with finding shortcodes, so the page will now reload.', 'foogallery-migrate' ); ?>');
+					window.alert(findShortcodesErrorMessage);
 					location.reload();
 				}
 			});
@@ -189,7 +194,7 @@
 				},
 				error: function() {
 					//something went wrong! Alert the user and reload the page
-					alert('<?php _e( 'Something went wrong with replacing shortcodes, so the page will now reload.', 'foogallery-migrate' ); ?>');
+					window.alert(replaceShortcodesErrorMessage);
 					location.reload();
 				}
 			});
@@ -209,13 +214,13 @@
 	});
 </script>
 <div class="wrap">
-	<h2><?php _e( 'FooGallery Migrate!', 'foogallery-migrate' ); ?></h2>
+	<h2><?php esc_html_e( 'FooGallery Migrate!', 'foogallery-migrate' ); ?></h2>
 
 	<h2 class="foo-nav-tabs nav-tab-wrapper">
-        <a href="#sources" data-tab="foogallery_migrate_sources" class="nav-tab nav-tab-active"><?php _e('Plugins', 'foogallery-migrate'); ?></a>
-		<a href="#galleries" data-tab="foogallery_migrate_galleries" class="nav-tab"><?php _e('Galleries', 'foogallery-migrate'); ?></a>
-		<a href="#albums" data-tab="foogallery_migrate_albums" class="nav-tab"><?php _e('Albums', 'foogallery-migrate'); ?></a>
-		<a href="#shortcodes" data-tab="foogallery_migrate_content" class="nav-tab"><?php _e('Blocks / Shortcodes', 'foogallery-migrate'); ?></a>
+        <a href="#sources" data-tab="foogallery_migrate_sources" class="nav-tab nav-tab-active"><?php esc_html_e( 'Plugins', 'foogallery-migrate' ); ?></a>
+		<a href="#galleries" data-tab="foogallery_migrate_galleries" class="nav-tab"><?php esc_html_e( 'Galleries', 'foogallery-migrate' ); ?></a>
+		<a href="#albums" data-tab="foogallery_migrate_albums" class="nav-tab"><?php esc_html_e( 'Albums', 'foogallery-migrate' ); ?></a>
+		<a href="#shortcodes" data-tab="foogallery_migrate_content" class="nav-tab"><?php esc_html_e( 'Blocks / Shortcodes', 'foogallery-migrate' ); ?></a>
 	</h2>
     <div class="foogallery_migrate_container" id="foogallery_migrate_sources">
         <?php require_once 'view-migrate-tab-sources.php'; ?>

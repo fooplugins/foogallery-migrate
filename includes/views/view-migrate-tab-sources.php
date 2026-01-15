@@ -4,13 +4,14 @@
 <script>
     jQuery(function ($) {
         var $form = $('#foogallery_migrate_source_form');
+        var confirmMessage = <?php echo wp_json_encode( __( 'Are you sure you want to clear migration histories? This may result in duplicate album/galleries and media attachments!', 'foogallery-migrate' ) ); ?>;
         $form.on('click', '.clear_migration_history', function(e) {
-            if (!confirm('<?php _e( 'Are you sure you want to clear migration histories? This may result in duplicate album/galleries and media attachments!', 'foogallery-migrate' ); ?>')) {
+            if (!window.confirm(confirmMessage)) {
                 e.preventDefault();
                 return false;
             } else {
                 $form.submit();
-            }             
+            }
         });
     });
     </script>
@@ -30,11 +31,11 @@
 
     if ( !$migrator->has_detected_plugins() ) { ?>
 <p>
-    <?php _e( 'No other gallery plugins have been detected, so there is nothing to migrate!', 'foogallery-migrate' ); ?>
+    <?php esc_html_e( 'No other gallery plugins have been detected, so there is nothing to migrate!', 'foogallery-migrate' ); ?>
 </p>
     <?php } else { ?>
 <p>
-    <?php _e( 'We detected the following gallery plugins to migrate:', 'foogallery-migrate' ); ?>
+    <?php esc_html_e( 'We detected the following gallery plugins to migrate:', 'foogallery-migrate' ); ?>
 </p>
     <?php } ?>
 <ul>
@@ -48,23 +49,34 @@
 </ul>
 <form method="POST" id="foogallery_migrate_source_form">
     <?php wp_nonce_field( 'foogallery_migrate_detect', 'foogallery_migrate_detect', false ); ?>
-    <input type="submit" class="button" value="<?php _e( 'Run Detection Again', 'foogallery-migrate' ); ?>">
+    <input type="submit" class="button" value="<?php esc_attr_e( 'Run Detection Again', 'foogallery-migrate' ); ?>">
 <?php
 if ( $migrator->has_migrated_objects() ) {
-    $summary = $migrator->get_migrated_objects_summary()
-    ?><h3><?php _e('Migration Stats', 'foogallery-migrate'); ?></h3>
+    $summary = $migrator->get_migrated_objects_summary();
+    ?><h3><?php esc_html_e( 'Migration Stats', 'foogallery-migrate' ); ?></h3>
+	<?php if ( array_key_exists( 'album', $summary ) ) { ?>
     <p>
-        <?php _e( 'Albums : ', 'foogallery-migrate' ); ?>
-        <?php echo $summary['album']; ?>
+        <?php esc_html_e( 'Albums : ', 'foogallery-migrate' ); ?>
+        <?php echo intval( $summary['album']['count'] ); ?>
     </p>
+    <?php } ?>
+	
+    <?php if ( array_key_exists( 'gallery', $summary ) ) { ?>
     <p>
-        <?php _e( 'Galleries : ', 'foogallery-migrate' ); ?>
-        <?php echo $summary['gallery']; ?>
+        <?php esc_html_e( 'Galleries : ', 'foogallery-migrate' ); ?>
+        <?php echo intval( $summary['gallery']['count'] ); ?>
     </p>
+    <?php } ?>
+	
+    <?php if ( array_key_exists( 'image', $summary ) ) { ?>
     <p>
-        <?php _e( 'Images : ', 'foogallery-migrate' ); ?>
-        <?php echo $summary['image']; ?>
+        <?php esc_html_e( 'Images : ', 'foogallery-migrate' ); ?>
+        <?php echo intval( $summary['image']['count'] ); ?>
+		<?php if ( $summary['image']['errors'] > 0 ) { ?>
+			<span class="foogallery-migrate-progress-error"><?php printf( esc_html__( ' (%s errors)', 'foogallery-migrate' ), intval( $summary['image']['errors'] ) ); ?></span>
+		<?php } ?>
     </p>
-    <input type="submit" class="button clear_migration_history" name="clear_migration_history" value="<?php _e( 'Clear Migration History', 'foogallery-migrate' ); ?>">
+	<?php } ?>
+    <input type="submit" class="button clear_migration_history" name="clear_migration_history" value="<?php esc_attr_e( 'Clear Migration History', 'foogallery-migrate' ); ?>">
 <?php } ?>
 </form>

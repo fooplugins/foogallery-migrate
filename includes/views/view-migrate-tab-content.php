@@ -3,6 +3,9 @@
 ?>
 <script>
     jQuery(function ($) {
+        var contentErrorMessage = <?php echo wp_json_encode( __( 'Something went wrong with the content migration and the page will now reload.', 'foogallery-migrate' ) ); ?>;
+        var selectItemMessage = <?php echo wp_json_encode( __( 'Please select at least one item to replace.', 'foogallery-migrate' ) ); ?>;
+        var replaceConfirmMessage = <?php echo wp_json_encode( __( 'Are you sure you want to replace the selected shortcodes/blocks? This will update your post/page content.', 'foogallery-migrate' ) ); ?>;
 
         var $form = $('#foogallery_migrate_content_form');
 
@@ -19,7 +22,7 @@
                 data: data + "&action=" + action,
                 success: success_callback,
                 error: function(xhr, ajaxOptions, thrownError) {
-                    alert('<?php echo esc_js( __( 'Something went wrong with the content migration and the page will now reload.', 'foogallery-migrate' ) ); ?>');
+                    window.alert(contentErrorMessage);
                     location.reload();
                 },
                 complete: function() {
@@ -34,11 +37,11 @@
 
             var checked = $form.find('input[name="content-item[]"]:checked').length;
             if (checked === 0) {
-                alert('<?php echo esc_js( __( 'Please select at least one item to replace.', 'foogallery-migrate' ) ); ?>');
+                window.alert(selectItemMessage);
                 return false;
             }
 
-            if (!confirm('<?php echo esc_js( __( 'Are you sure you want to replace the selected shortcodes/blocks? This will update your post/page content.', 'foogallery-migrate' ) ); ?>')) {
+            if (!window.confirm(replaceConfirmMessage)) {
                 return false;
             }
 

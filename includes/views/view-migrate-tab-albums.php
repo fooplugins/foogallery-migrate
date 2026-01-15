@@ -4,6 +4,8 @@
 ?>
 <script>
     jQuery(function ($) {
+        var migrationErrorMessage = <?php echo wp_json_encode( __( 'Something went wrong with the migration and the page will now reload. Once it has reloaded, click "Resume Migration" to continue with the migration.', 'foogallery-migrate' ) ); ?>;
+        var cancelConfirmMessage = <?php echo wp_json_encode( __( 'Are you sure you want to cancel?', 'foogallery-migrate' ) ); ?>;
 
         var $form = $('#foogallery_migrate_album_form');
 
@@ -24,7 +26,7 @@
                 error: function(xhr, ajaxOptions, thrownError) {
                     //something went wrong! Alert the user and reload the page
                     console.log(thrownError);
-                    alert('<?php _e( 'Something went wrong with the migration and the page will now reload. Once it has reloaded, click "Resume Migration" to continue with the migration.', 'foogallery-migrate' ); ?>');
+                    window.alert(migrationErrorMessage);
                     location.reload();
                 }
             });
@@ -63,7 +65,7 @@
         $form.on('click', '.cancel_album_migrate', function (e) {
             e.preventDefault();
 
-            if (!confirm('<?php _e( 'Are you sure you want to cancel?', 'foogallery-migrate' ); ?>')) {
+            if (!window.confirm(cancelConfirmMessage)) {
                 return false;
             } else {
                 foogallery_album_migration_ajax( 'foogallery_album_migrate_cancel', function (data) {
@@ -85,9 +87,9 @@
     if ( $albums_enabled ) {
         $migrator->get_album_migrator()->render_album_form();
     } else {
-        echo '<h2>' . __( 'Album feature not enabled!', 'foogallery-migrate' ) . '</h2>';
+        echo '<h2>' . esc_html__( 'Album feature not enabled!', 'foogallery-migrate' ) . '</h2>';
         echo '<p>';
-        _e( 'Please enable the Albums feature from FooGallery -> Features before you migrate any albums!', 'foogallery-migrate' );
+        esc_html_e( 'Please enable the Albums feature from FooGallery -> Features before you migrate any albums!', 'foogallery-migrate' );
         echo '</p>';
     }
     ?>
