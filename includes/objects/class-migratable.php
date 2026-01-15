@@ -7,6 +7,8 @@
 
 namespace FooPlugins\FooGalleryMigrate\Objects;
 
+use WP_Error;
+
 if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
 
     /**
@@ -243,5 +245,45 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
             }
             return $migrated_children;
         }
+
+		function get_children_errors() {
+			$errors = array();
+
+			if ( !$this->has_children() ) {
+				return $errors;
+			}
+
+			foreach ( $this->get_children() as $child ) {
+                if ( $child->has_error() ) {
+                    $errors[] = $child->get_error_message();
+                }
+            }
+
+			return $errors;
+		}
+
+		function has_error() {
+			return self::PROGRESS_ERROR === $this->migration_status;
+		}
+
+		function get_error() {
+			if ( isset( $this->error ) ) {
+				return $this->error;
+			}
+
+			return false;
+		}
+
+		function get_error_message() {
+			$error = $this->get_error();
+
+			if ( is_wp_error( $error ) ) {
+				return $error->get_error_message();
+			} else if ( is_string( $error ) ) {
+				return $error;
+			}
+			
+			return __( 'Unknown Error', 'foogallery-migrate' );
+		}
     }
 }

@@ -227,17 +227,20 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array
          */
         public function get_migrated_objects_summary() {
-            $summary = array(
-                'album' => 0,
-                'gallery' => 0,
-                'image' => 0
-            );
+			$summary = array();
+			
             foreach( $this->get_migrated_objects() as $object ) {
                 if ( !array_key_exists( $object->type(), $summary ) ) {
-                    $summary[$object->type()] = 0;
+                    $summary[$object->type()] = array(
+						'count' => 0,
+						'errors' => 0,
+					);
                 }
 
-                $summary[$object->type()]++;
+                $summary[$object->type()]['count']++;
+				if ( Migratable::PROGRESS_ERROR === $object->migration_status  ) {
+					$summary[$object->type()]['errors']++;
+				}
             }
             return $summary;
         }
