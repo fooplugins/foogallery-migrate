@@ -2,7 +2,7 @@
 Contributors: fooplugins,bradvin,elviiso
 Tags: gallery, image gallery, photo gallery, wordpress gallery plugin, migrate
 Requires at least: 6.0
-Tested up to: 6.8
+Tested up to: 6.9
 Requires PHP: 5.4
 Stable tag: 1.4
 License: GPLv2 or later
@@ -63,10 +63,19 @@ Update now to get all the latest features, bug fixes and improvements!
 
 == Changelog ==
 
+= 1.5 =
+* Added new Log tab to see all migrated information.
+* Added new debug tab to see migrated info (shown when FooGallery Debug mode is on)
+* Added "Migrate" button for each gallery so you can migrate 1 gallery at a time.
+* Added a "Check for migration errors" button which checks all attachments after a migration.
+* Added a "Check" button for each migrated gallery to check for errors.
+* Added error info for attachments on gallery tab under migration progress.
+* Made the attachment import more resilient to large files.
+
 = 1.4 =
-* Complete NextGen metadata migration improvements
-- Fix NextGen alt text mapping to properly populate FooGallery title and alt fields
-- Configure FooGallery galleries to display image titles as caption titles
+* Updated NextGen metadata migration improvements
+* Fix NextGen alt text mapping to properly populate FooGallery title and alt fields
+* Configure FooGallery galleries to display image titles as caption titles
 
 = 1.3 =
 * Fixed bug where NextGen image captions were not being migrated

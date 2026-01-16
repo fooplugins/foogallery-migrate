@@ -277,5 +277,27 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
         function find_albums() {
             return array();
         }             
+        /**
+         * Returns shortcode regex patterns for Modula.
+         *
+         * @return array Array of regex patterns
+         */
+        function get_shortcode_patterns() {
+            return array(
+                '/\[modula\s+id=["\']?(\d+)["\']?\s*\]/i',
+                '/\[modula-gallery\s+id=["\']?(\d+)["\']?\s*\]/i',
+            );
+        }
+
+        /**
+         * Returns Gutenberg block patterns for Modula.
+         *
+         * @return array Associative array of block names
+         */
+        function get_block_patterns() {
+            return array(
+                'modula/gallery' => array(),
+            );
+        }      
     }
 }

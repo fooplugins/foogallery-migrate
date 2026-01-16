@@ -367,5 +367,28 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
         function find_albums() {
             return array();
         }        
+        /**
+         * Returns shortcode regex patterns for Robo Gallery.
+         *
+         * @return array Array of regex patterns
+         */
+        function get_shortcode_patterns() {
+            return array(
+                '/\[robo-gallery\s+id=["\']?(\d+)["\']?\s*\]/i',
+                '/\[robo_gallery\s+id=["\']?(\d+)["\']?\s*\]/i',
+            );
+        }
+
+        /**
+         * Returns Gutenberg block patterns for Robo Gallery.
+         *
+         * @return array Associative array of block names
+         */
+        function get_block_patterns() {
+            return array(
+                'robo-gallery/gallery' => array(),
+                'robo/block-robo-gallery' => array(),
+            );
+        }   
     }
 }

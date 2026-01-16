@@ -3,6 +3,8 @@
 ?>
 <script>
     jQuery(function ($) {
+        var migrationErrorMessage = <?php echo wp_json_encode( __( 'Something went wrong with the migration and the page will now reload. Once it has reloaded, click "Resume Migration" to continue with the migration.', 'foogallery-migrate' ) ); ?>;
+        var cancelConfirmMessage = <?php echo wp_json_encode( __( 'Are you sure you want to cancel?', 'foogallery-migrate' ) ); ?>;
 
         var $form = $('#foogallery_migrate_gallery_form');
 
@@ -22,7 +24,7 @@
                 success: success_callback,
                 error: function(xhr, ajaxOptions, thrownError) {
                     //something went wrong! Alert the user and reload the page
-                    alert('<?php echo esc_js( __( 'Something went wrong with the migration and the page will now reload. Once it has reloaded, click "Resume Migration" to continue with the migration.', 'foogallery-migrate' ) ); ?>');
+                    window.alert(migrationErrorMessage);
                     location.reload();
                 }
             });
@@ -60,7 +62,7 @@
 
         $form.on('click', '.cancel_migrate', function (e) {
             e.preventDefault();
-            if (!confirm('<?php echo esc_js( __( 'Are you sure you want to cancel?', 'foogallery-migrate' ) ); ?>')) {
+            if (!window.confirm(cancelConfirmMessage)) {
                 return false;
             } else {
                 foogallery_gallery_migration_ajax( 'foogallery_migrate_cancel', function (data) {
@@ -74,7 +76,26 @@
             foogallery_gallery_migration_ajax( 'foogallery_migrate_refresh', function (data) {
                 $form.html(data);
             } );
-        });        
+        });
+
+        $form.on('click', '.retry_migrate_gallery', function (e) {
+            e.preventDefault();
+            var galleryId = $(this).data('galleryId');
+            $form.find('input[name="foogallery_migrate_retry_gallery_id"]').val(galleryId);
+            foogallery_gallery_migration_ajax( 'foogallery_migrate_retry_gallery', function (data) {
+                $form.html(data);
+                foogallery_gallery_migration_continue();
+            } );
+        });
+
+        $form.on('click', '.check_migrate_gallery', function (e) {
+            e.preventDefault();
+            var galleryId = $(this).data('galleryId');
+            $form.find('input[name="foogallery_migrate_check_gallery_id"]').val(galleryId);
+            foogallery_gallery_migration_ajax( 'foogallery_migrate_check_gallery_errors', function (data) {
+                $form.html(data);
+            } );
+        });
     });
 </script>
 <form id="foogallery_migrate_gallery_form" method="POST">

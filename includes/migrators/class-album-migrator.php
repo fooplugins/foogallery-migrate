@@ -85,24 +85,25 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                     $page = 1;
                     if ( defined( 'DOING_AJAX' ) ) {
                         if ( array_key_exists( 'foogallery_album_migrate_paged', $_POST ) ) {
-                            $url = sanitize_url( $_POST['foogallery_album_migrate_url'] );
-                            $page = sanitize_text_field( $_POST['foogallery_album_migrate_paged'] );
+                            $url = esc_url_raw( wp_unslash( $_POST['foogallery_album_migrate_url'] ) );
+                            $page = absint( wp_unslash( $_POST['foogallery_album_migrate_paged'] ) );
                         } else {
                             $url = wp_get_referer();
                             $parts = parse_url($url);
                             parse_str( $parts['query'], $query );
-                            $page = $query['paged'];
+                            $page = isset( $query['album_paged'] ) ? absint( $query['album_paged'] ) : 1;
                         }
-                    } else if ( array_key_exists( 'paged', $_GET ) ) {
-                        $page = sanitize_text_field( $_GET['paged'] );
+                    } else if ( array_key_exists( 'album_paged', $_GET ) ) {
+                        $page = absint( wp_unslash( $_GET['album_paged'] ) );
                     }
-                    $url = add_query_arg( 'paged', $page, $url ) . '#albums';
+                    $url = add_query_arg( 'album_paged', $page, $url ) . '#albums';
                     $albums_count = count( $albums );
                     $page_size = apply_filters( 'foogallery_migrate_page_size', 20);
 
                     $pagination = new Pagination();
                     $pagination->items( $albums_count );
                     $pagination->limit( $page_size ); // Limit entries per page
+                    $pagination->parameterName( 'album_paged' );
                     $pagination->url = $url;
                     $pagination->currentPage( $page );
                     $pagination->calculate();
@@ -114,7 +115,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                         $album = $albums[$counter];
                         $progress    = $album->progress;
                         $done        = $album->migrated;
-                        $edit_link   = '';
+                        $edit_link	 = '';
                         $fooalbum = false;
                         if ( $album->migrated_id > 0 ) {
                             $fooalbum = \FooGalleryAlbum::get_by_id( $album->migrated_id );
@@ -154,7 +155,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                             <td>
                                 <?php
                                  if ( $fooalbum ) {
-                                    echo wp_kses_post( $edit_link );
+                                    echo $edit_link;
                                 } else {
                                     ?>
                                     <input name="foogallery-album-title-<?php echo esc_attr( $album->unique_identifier() ); ?>" value="<?php echo esc_attr( $album->title ); ?>">
@@ -173,7 +174,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                 </table>
                 <div class="tablenav bottom">
                     <div class="tablenav-pages">
-                        <?php echo wp_kses_post( $pagination->render( false ) ); ?>
+                        <?php echo wp_kses_post( $pagination->render() ); ?>
                     </div>
                 </div>
 

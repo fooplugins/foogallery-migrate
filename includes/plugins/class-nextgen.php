@@ -69,16 +69,16 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
             if ( count( $nextgen_galleries ) != 0 ) {
                 foreach ( $nextgen_galleries as $key => $nextgen_gallery ) {
 
-                        $data = array(
-                            'ID' => $nextgen_gallery->gid,
-                            'title' => $nextgen_gallery->title,
-                            'foogallery_title' => $nextgen_gallery->title,
-                            'data' => $nextgen_gallery,
-                            'children' => $this->find_images( $nextgen_gallery->gid, $nextgen_gallery->path ),
-                            'settings' => ''
-                        );
-                        
-                        $gallery = $this->get_gallery( $data );
+					$data = array(
+						'ID' => $nextgen_gallery->gid,
+						'title' => $nextgen_gallery->title,
+						'foogallery_title' => $nextgen_gallery->title,
+						'data' => $nextgen_gallery,
+						'children' => $this->find_images( $nextgen_gallery->gid, $nextgen_gallery->path ),
+						'settings' => ''
+					);
+					
+					$gallery = $this->get_gallery( $data );
                         
                     $galleries[] = $gallery;
                 }
@@ -102,6 +102,11 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
 
                 // Use alttext for both title and alt, but fallback to empty string if not set
                 $alt_text = !empty($nextgen_image->alttext) ? $nextgen_image->alttext : '';
+
+				// remove meta_data blob
+				if ( isset( $nextgen_image->meta_data ) ) {
+					unset( $nextgen_image->meta_data );
+				}
                 
                 $data = array(
                     'source_url' => $source_url,
@@ -247,5 +252,32 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
 
             return $albums;            
         }        
+       /**
+         * Returns shortcode regex patterns for NextGen.
+         *
+         * @return array Array of regex patterns
+         */
+        function get_shortcode_patterns() {
+            return array(
+                '/\[nggallery\s+id=["\']?(\d+)["\']?(?:\s+[^\]]*)?\]/i',
+                '/\[ngg[^\]]*ids=["\']?(\d+)["\']?[^\]]*\]/i',
+                '/\[ngg\s+id=["\']?(\d+)["\']?(?:\s+[^\]]*)?\]/i',
+                '/\[ngg_images[^\]]*gallery_ids=["\']?(\d+)["\']?[^\]]*\]/i',
+                '/\[imagely\s+id=["\']?(\d+)["\']?(?:\s+[^\]]*)?\]/i',
+            );
+        }
+
+        /**
+         * Returns Gutenberg block patterns for NextGen.
+         *
+         * @return array Associative array of block names
+         */
+        function get_block_patterns() {
+            return array(
+                'nextgen-gallery/gallery' => array(),
+                'imagely/nextgen-gallery' => array(),
+                'imagely/main-block' => array(),
+            );
+        }              
     }
 }

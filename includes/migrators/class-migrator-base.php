@@ -101,7 +101,9 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
             foreach ( $objects as $object ) {
                 if ( array_key_exists( $object->unique_identifier(), $id_array ) ) {
                     // Only queue an object if it has not been migrated previously.
-                    if ( !$object->migrated ) {
+					$must_migrate = !$object->migrated;
+
+                    if ( $must_migrate ) {
                         $queued_object_count++;
                         $object->part_of_migration = true;
                         $object->migration_status = Migratable::PROGRESS_QUEUED;

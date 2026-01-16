@@ -7,6 +7,8 @@
 
 namespace FooPlugins\FooGalleryMigrate\Objects;
 
+use WP_Error;
+
 if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
 
     /**
@@ -82,7 +84,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
          */
         function migrate_next_child() {
             if ( !$this->has_children() ) { return; }
-            if ( $this->migration_status !== self::PROGRESS_ERROR && $this->migrated_child_count < $this->get_children_count() ) {
+            if ( $this->migrated_child_count < $this->get_children_count() && $this->migrated_id > 0 ) {
                 foreach ( $this->get_children() as $child ) {
                     if ( !$child->migrated ) {
                         $child->migrate();
@@ -131,13 +133,13 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
         function migrate() {
             $migrated_object = foogallery_migrate_migrator_instance()->get_migrated_object( $this->unique_identifier() );
             if ( false !== $migrated_object ) {
-                $this->migration_status = self::PROGRESS_COMPLETED;
-                $this->migrated = true;
+				$this->migration_status = self::PROGRESS_COMPLETED;
+				$this->migrated = true;
                 $this->migrated_id = $migrated_object->migrated_id;
                 $this->migrated_title = $migrated_object->migrated_title;
-                if ( $this->has_children() ) {
-                    $this->migrated_child_count = $migrated_object->migrated_child_count;
-                }
+				if ( $this->has_children() ) {
+					$this->migrated_child_count = $migrated_object->migrated_child_count;
+				}
             }
 
             if ( !$this->migrated ) {
@@ -161,8 +163,16 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
                     $progress = $this->calculate_progress();
 
                     if ( $progress >= 100 ) {
-                        $this->migration_status = self::PROGRESS_COMPLETED;
+                        $has_error = ( self::PROGRESS_ERROR === $this->migration_status );
+                        if ( ! $has_error && $this->has_error() ) {
+                            $has_error = true;
+                        }
+                        if ( ! $has_error && $this->has_children() ) {
+                            $has_error = ! empty( $this->get_children_errors() );
+                        }
+
                         $this->migrated = true;
+                        $this->migration_status = $has_error ? self::PROGRESS_ERROR : self::PROGRESS_COMPLETED;
                         foogallery_migrate_migrator_instance()->add_migrated_object( $this );
                     }
                 }
@@ -243,5 +253,45 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
             }
             return $migrated_children;
         }
+
+		function get_children_errors() {
+			$errors = array();
+
+			if ( !$this->has_children() ) {
+				return $errors;
+			}
+
+			foreach ( $this->get_children() as $child ) {
+                if ( $child->has_error() ) {
+                    $errors[] = $child->get_error_message();
+                }
+            }
+
+			return $errors;
+		}
+
+		function has_error() {
+			return $this->get_error() !== false;
+		}
+
+		function get_error() {
+			if ( isset( $this->error ) ) {
+				return $this->error;
+			}
+
+			return false;
+		}
+
+		function get_error_message() {
+			$error = $this->get_error();
+
+			if ( is_wp_error( $error ) ) {
+				return $error->get_error_message();
+			} else if ( is_string( $error ) ) {
+				return $error;
+			}
+			
+			return __( 'Unknown Error', 'foogallery-migrate' );
+		}
     }
 }

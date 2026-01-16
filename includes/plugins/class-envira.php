@@ -165,6 +165,30 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Envira' ) ) {
 
         function find_albums() {
             return array();
+        }      
+        
+        /**
+         * Returns shortcode regex patterns for Envira.
+         *
+         * @return array Array of regex patterns
+         */
+        function get_shortcode_patterns() {
+            return array(
+                '/\[envira-gallery\s+id=["\']?(\d+)["\']?\s*\]/i',
+                '/\[envira\s+id=["\']?(\d+)["\']?\s*\]/i',
+            );
+        }
+
+        /**
+         * Returns Gutenberg block patterns for Envira.
+         *
+         * @return array Associative array of block names
+         */
+        function get_block_patterns() {
+            return array(
+                'envira/gallery' => array(),
+                'envira/envira-gallery' => array(),
+            );
         }        
     }
 }
