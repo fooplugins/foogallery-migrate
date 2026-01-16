@@ -54,6 +54,12 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
             return attachment_url_to_postid( $this->source_url );
         }
 
+        protected function mark_error( $error ) {
+            $this->error = $error;
+            $this->migration_status = self::PROGRESS_ERROR;
+            $this->migrated = true;
+        }
+
         function create_new_migrated_object() {
             // Check if we can get out early!
             if ( $this->migrated && $this->migrated_id > 0 ) {
@@ -67,6 +73,12 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
                 $this->migrated = true;
                 return;
             }
+
+			// Used for testing errors.
+			// if ( wp_rand( 1, 100 ) <= 50 ) {
+			// 	$this->mark_error( new \WP_Error( 'foogallery_migrate_forced_error', __( 'Forced migration error for testing.', 'foogallery-migrate' ) ) );
+			// 	return;
+			// }
 
 			@set_time_limit(0);
 			wp_raise_memory_limit( 'image' );
@@ -118,10 +130,15 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
             }
 
             if ( empty( $file ) ) {
-                $tmp = download_url( $this->source_url, 60 );
+                $validated_url = wp_http_validate_url( $this->source_url );
+                if ( ! $validated_url ) {
+                    $this->mark_error( new \WP_Error( 'foogallery_migrate_invalid_source_url', __( 'Invalid source URL for migration.', 'foogallery-migrate' ) ) );
+                    return;
+                }
+
+                $tmp = download_url( $validated_url, 60 );
                 if ( is_wp_error( $tmp ) ) {
-                    $this->error = $tmp;
-                    $this->migrated = true;
+                    $this->mark_error( $tmp );
                     return;
                 }
 
@@ -133,8 +150,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
                 $sideload = wp_handle_sideload( $file_array, array( 'test_form' => false ) );
                 if ( ! empty( $sideload['error'] ) ) {
                     @unlink( $tmp );
-                    $this->error = new \WP_Error( 'foogallery_migrate_sideload_failed', $sideload['error'] );
-                    $this->migrated = true;
+                    $this->mark_error( new \WP_Error( 'foogallery_migrate_sideload_failed', $sideload['error'] ) );
                     return;
                 }
 
@@ -149,8 +165,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
                         if ( $tmp ) {
                             @unlink( $tmp );
                         }
-                        $this->error = new \WP_Error( 'foogallery_migrate_local_copy_failed', __( 'Unable to copy local image for migration.', 'foogallery-migrate' ) );
-                        $this->migrated = true;
+                        $this->mark_error( new \WP_Error( 'foogallery_migrate_local_copy_failed', __( 'Unable to copy local image for migration.', 'foogallery-migrate' ) ) );
                         return;
                     }
 
@@ -162,8 +177,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
                     $sideload = wp_handle_sideload( $file_array, array( 'test_form' => false ) );
                     if ( ! empty( $sideload['error'] ) ) {
                         @unlink( $tmp );
-                        $this->error = new \WP_Error( 'foogallery_migrate_sideload_failed', $sideload['error'] );
-                        $this->migrated = true;
+                        $this->mark_error( new \WP_Error( 'foogallery_migrate_sideload_failed', $sideload['error'] ) );
                         return;
                     }
 
@@ -191,15 +205,22 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
             // Insert the attachment
             $this->migrated_id = wp_insert_attachment( $attachment, $file, 0 );
             if ( is_wp_error( $this->migrated_id ) ) {
-                $this->error = $this->migrated_id;
+                $error = $this->migrated_id;
                 $this->migrated_id = 0;
-                $this->migrated = true;
+                $this->mark_error( $error );
+                return;
             }
             $attachment_data = wp_generate_attachment_metadata( $this->migrated_id, $file );
             wp_update_attachment_metadata( $this->migrated_id, $attachment_data );
 
             // Save alt text in the post meta
             update_post_meta( $this->migrated_id, '_wp_attachment_image_alt', $this->alt );
+
+            $attachment_path = get_attached_file( $this->migrated_id );
+            if ( empty( $attachment_path ) || ! file_exists( $attachment_path ) ) {
+                $this->mark_error( new \WP_Error( 'foogallery_migrate_missing_file', __( 'Attachment file is missing after migration.', 'foogallery-migrate' ) ) );
+                return;
+            }
         }
     }
 }

@@ -76,7 +76,26 @@
             foogallery_gallery_migration_ajax( 'foogallery_migrate_refresh', function (data) {
                 $form.html(data);
             } );
-        });        
+        });
+
+        $form.on('click', '.retry_migrate_gallery', function (e) {
+            e.preventDefault();
+            var galleryId = $(this).data('galleryId');
+            $form.find('input[name="foogallery_migrate_retry_gallery_id"]').val(galleryId);
+            foogallery_gallery_migration_ajax( 'foogallery_migrate_retry_gallery', function (data) {
+                $form.html(data);
+                foogallery_gallery_migration_continue();
+            } );
+        });
+
+        $form.on('click', '.check_migrate_gallery', function (e) {
+            e.preventDefault();
+            var galleryId = $(this).data('galleryId');
+            $form.find('input[name="foogallery_migrate_check_gallery_id"]').val(galleryId);
+            foogallery_gallery_migration_ajax( 'foogallery_migrate_check_gallery_errors', function (data) {
+                $form.html(data);
+            } );
+        });
     });
 </script>
 <form id="foogallery_migrate_gallery_form" method="POST">

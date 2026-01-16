@@ -18,14 +18,22 @@
 <?php
     //Check if the detect button has been pressed.   
     if ( array_key_exists( 'foogallery_migrate_detect', $_POST ) ) {
-        if(isset($_POST['clear_migration_history'])) {
-            if ( check_admin_referer('foogallery_migrate_detect', 'foogallery_migrate_detect' ) ) {
+        if ( ! current_user_can( 'manage_options' ) ) {
+            wp_die( esc_html__( 'Unauthorized.', 'foogallery-migrate' ) );
+        }
+        if ( isset( $_POST['clear_migration_history'] ) ) {
+            if ( check_admin_referer( 'foogallery_migrate_detect', 'foogallery_migrate_detect' ) ) {
                 $migrator->clear_migrator_setting();
             }
+        } else if ( isset( $_POST['check_migration_errors'] ) ) {
+            if ( check_admin_referer( 'foogallery_migrate_detect', 'foogallery_migrate_detect' ) ) {
+                $migrator->check_for_migration_errors();
+				$migrator->get_gallery_migrator()->get_objects_to_migrate(true);
+            }
         } else {
-            if ( check_admin_referer('foogallery_migrate_detect', 'foogallery_migrate_detect' ) ) {
+            if ( check_admin_referer( 'foogallery_migrate_detect', 'foogallery_migrate_detect' ) ) {
                 $migrator->run_detection();
-            }            
+            }
         }
     }
 
@@ -50,33 +58,8 @@
 <form method="POST" id="foogallery_migrate_source_form">
     <?php wp_nonce_field( 'foogallery_migrate_detect', 'foogallery_migrate_detect', false ); ?>
     <input type="submit" class="button" value="<?php esc_attr_e( 'Run Detection Again', 'foogallery-migrate' ); ?>">
-<?php
-if ( $migrator->has_migrated_objects() ) {
-    $summary = $migrator->get_migrated_objects_summary();
-    ?><h3><?php esc_html_e( 'Migration Stats', 'foogallery-migrate' ); ?></h3>
-	<?php if ( array_key_exists( 'album', $summary ) ) { ?>
-    <p>
-        <?php esc_html_e( 'Albums : ', 'foogallery-migrate' ); ?>
-        <?php echo intval( $summary['album']['count'] ); ?>
-    </p>
-    <?php } ?>
-	
-    <?php if ( array_key_exists( 'gallery', $summary ) ) { ?>
-    <p>
-        <?php esc_html_e( 'Galleries : ', 'foogallery-migrate' ); ?>
-        <?php echo intval( $summary['gallery']['count'] ); ?>
-    </p>
-    <?php } ?>
-	
-    <?php if ( array_key_exists( 'image', $summary ) ) { ?>
-    <p>
-        <?php esc_html_e( 'Images : ', 'foogallery-migrate' ); ?>
-        <?php echo intval( $summary['image']['count'] ); ?>
-		<?php if ( $summary['image']['errors'] > 0 ) { ?>
-			<span class="foogallery-migrate-progress-error"><?php printf( esc_html__( ' (%s errors)', 'foogallery-migrate' ), intval( $summary['image']['errors'] ) ); ?></span>
-		<?php } ?>
-    </p>
+	<?php if ( $migrator->has_migrated_objects() ) { ?>
+		<input type="submit" class="button clear_migration_history" name="clear_migration_history" value="<?php esc_attr_e( 'Clear Migration History', 'foogallery-migrate' ); ?>">
+		<input type="submit" class="button" name="check_migration_errors" value="<?php esc_attr_e( 'Check For Migration Errors', 'foogallery-migrate' ); ?>">
 	<?php } ?>
-    <input type="submit" class="button clear_migration_history" name="clear_migration_history" value="<?php esc_attr_e( 'Clear Migration History', 'foogallery-migrate' ); ?>">
-<?php } ?>
 </form>

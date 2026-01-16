@@ -687,38 +687,39 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				echo '<li>' . esc_html__( 'Try clicking "Refresh Scan" button to force a new scan', 'foogallery-migrate' ) . '</li>';
 				echo '</ul></div>';
 			} else {
-				$url = add_query_arg( 'page', 'foogallery-migrate' );
-				$page = 1;
-				if ( defined( 'DOING_AJAX' ) ) {
-					if ( array_key_exists( 'foogallery_content_migrate_paged', $_POST ) ) {
-						$url = sanitize_url( $_POST['foogallery_content_migrate_url'] );
-						$page = (int) sanitize_text_field( $_POST['foogallery_content_migrate_paged'] );
-					} else {
-						$url = wp_get_referer();
-						if ( $url ) {
-							$parts = parse_url( $url );
-							if ( isset( $parts['query'] ) ) {
-								parse_str( $parts['query'], $query );
-								if ( isset( $query['paged'] ) ) {
-									$page = (int) $query['paged'];
+					$url = add_query_arg( 'page', 'foogallery-migrate' );
+					$page = 1;
+					if ( defined( 'DOING_AJAX' ) ) {
+						if ( array_key_exists( 'foogallery_content_migrate_paged', $_POST ) ) {
+							$url = esc_url_raw( wp_unslash( $_POST['foogallery_content_migrate_url'] ) );
+							$page = absint( wp_unslash( $_POST['foogallery_content_migrate_paged'] ) );
+						} else {
+							$url = wp_get_referer();
+							if ( $url ) {
+								$parts = parse_url( $url );
+								if ( isset( $parts['query'] ) ) {
+									parse_str( $parts['query'], $query );
+									if ( isset( $query['content_paged'] ) ) {
+										$page = absint( $query['content_paged'] );
+									}
 								}
 							}
 						}
+					} elseif ( array_key_exists( 'content_paged', $_GET ) ) {
+						$page = absint( wp_unslash( $_GET['content_paged'] ) );
 					}
-				} elseif ( array_key_exists( 'paged', $_GET ) ) {
-					$page = (int) sanitize_text_field( $_GET['paged'] );
-				}
-				if ( $page < 1 ) {
-					$page = 1;
-				}
-				$url = add_query_arg( 'paged', $page, $url ) . '#shortcodes';
+					if ( $page < 1 ) {
+						$page = 1;
+					}
+					$url = add_query_arg( 'content_paged', $page, $url ) . '#shortcodes';
 				
 				$content_items_count = count( $content_items );
-				$page_size = apply_filters( 'foogallery_migrate_page_size', 5 );
+				$page_size = apply_filters( 'foogallery_migrate_page_size', 50 );
 				
 				$pagination = new Pagination();
 				$pagination->items( $content_items_count );
 				$pagination->limit( $page_size );
+				$pagination->parameterName( 'content_paged' );
 				$pagination->url = $url;
 				$pagination->currentPage( $page );
 				$pagination->calculate();
