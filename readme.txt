@@ -2,9 +2,9 @@
 Contributors: fooplugins,bradvin,elviiso
 Tags: gallery, image gallery, photo gallery, wordpress gallery plugin, migrate
 Requires at least: 6.0
-Tested up to: 6.9
+Tested up to: 7.0
 Requires PHP: 5.4
-Stable tag: 1.4
+Stable tag: 1.5
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -25,6 +25,17 @@ Migrate to FooGallery from other gallery plugins, including:
 *	NextGen Gallery
 *	Photo Gallery by 10Web
 *	Robo Gallery
+
+Features:
+
+* Migrate images and galleries
+* Migrate albums
+* Migrate blocks / shortcodes in post & page content
+
+= Test It First =
+
+Spin up a demo site with FooGallery Migrate and all supported galleries, so you can see how it works:
+[Try Migrate Demo](https://app.instawp.io/launch?s=foogallery-migrate&d=v2)
 
 = Migrate Away From Envira =
 
@@ -64,6 +75,7 @@ Update now to get all the latest features, bug fixes and improvements!
 == Changelog ==
 
 = 1.5 =
+* Added new feature : block / shortcode migration!
 * Added new Log tab to see all migrated information.
 * Added new debug tab to see migrated info (shown when FooGallery Debug mode is on)
 * Added "Migrate" button for each gallery so you can migrate 1 gallery at a time.
