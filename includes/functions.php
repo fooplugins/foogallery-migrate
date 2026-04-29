@@ -120,6 +120,7 @@ function foogallery_migrate_get_available_plugins() {
     $plugins[] = new \FooPlugins\FooGalleryMigrate\Plugins\Nextgen();
     $plugins[] = new \FooPlugins\FooGalleryMigrate\Plugins\Robo();
     $plugins[] = new \FooPlugins\FooGalleryMigrate\Plugins\Photo();
+    $plugins[] = new \FooPlugins\FooGalleryMigrate\Plugins\Aigpl();
 
     return $plugins;
 }

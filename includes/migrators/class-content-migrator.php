@@ -226,16 +226,25 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * @return array
 		 */
 		private function create_content_item( $post, $plugin, $gallery_id, $type, $original_content, $match_offset = 0, $block_name = '' ) {
+			$object_type = 'gallery';
+			if ( is_object( $plugin ) && method_exists( $plugin, 'get_content_object_type' ) ) {
+				$object_type = $plugin->get_content_object_type( $original_content, $block_name );
+			}
+			if ( 'album' !== $object_type ) {
+				$object_type = 'gallery';
+			}
+
 			$item = array(
 				'post_id' => (int) $post->ID,
 				'post_title' => $post->post_title,
 				'post_type' => $post->post_type,
 				'plugin_name' => $plugin->name(),
 				'gallery_id' => (int) $gallery_id,
+				'object_type' => $object_type,
 				'type' => $type,
 				'original_content' => $original_content,
-				'migrated' => $this->is_gallery_migrated( $plugin, $gallery_id ),
-				'migrated_foogallery_id' => $this->get_migrated_foogallery_id( $plugin, $gallery_id ),
+				'migrated' => $this->is_gallery_migrated( $plugin, $gallery_id, $object_type ),
+				'migrated_foogallery_id' => $this->get_migrated_foogallery_id( $plugin, $gallery_id, $object_type ),
 			);
 
 			if ( $type === 'block' && $block_name ) {
@@ -258,12 +267,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 */
 		private function extract_gallery_id_from_match( $match, $plugin ) {
 			$extracted_id = false;
-			
-			if ( isset( $match[1] ) && is_array( $match[1] ) && isset( $match[1][0] ) ) {
-				$id = $match[1][0];
-				if ( is_numeric( $id ) ) {
-					$extracted_id = (int) $id;
-				}
+
+			$id = $this->get_first_numeric_match( $match );
+			if ( false !== $id ) {
+				$extracted_id = $id;
 			}
 
 			if ( ! $extracted_id && isset( $match[0] ) && is_array( $match[0] ) && isset( $match[0][0] ) ) {
@@ -308,9 +315,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 						return (int) $matches[1];
 					}
 				}
-				if ( preg_match( '/\[(?:nggallery|ngg|ngg_images)[^\]]*id=["\']?(\d+)["\']?/', $content, $matches ) ) {
-					if ( isset( $matches[1] ) && is_numeric( $matches[1] ) ) {
-						return (int) $matches[1];
+				if ( preg_match( '/\[(?:nggallery|ngg|ngg_images)[^\]]*id\s*=\s*(?:"(\d+)"|\'(\d+)\'|(\d+)(?=[\s\]]))/', $content, $matches ) ) {
+					$id = $this->get_first_numeric_match( $matches );
+					if ( false !== $id ) {
+						return $id;
 					}
 				}
 
@@ -322,12 +330,34 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 					return $temp_id;
 				}
 
-				if ( preg_match( '/(?:data-)?(?:gallery-)?id=["\']?(\d+)["\']?/', $content, $matches ) ) {
-					if ( isset( $matches[1] ) && is_numeric( $matches[1] ) ) {
-						return (int) $matches[1];
+				if ( preg_match( '/(?:data-)?(?:gallery-)?id\s*=\s*(?:"(\d+)"|\'(\d+)\'|(\d+)(?=[\s\]]))/', $content, $matches ) ) {
+					$id = $this->get_first_numeric_match( $matches );
+					if ( false !== $id ) {
+						return $id;
 					}
 				}
 			}
+			return false;
+		}
+
+		/**
+		 * Return the first numeric capture from preg_match or preg_match_all data.
+		 *
+		 * @param array $matches Regex match data.
+		 * @return int|false
+		 */
+		private function get_first_numeric_match( $matches ) {
+			foreach ( $matches as $index => $match ) {
+				if ( 0 === $index ) {
+					continue;
+				}
+
+				$value = is_array( $match ) && isset( $match[0] ) ? $match[0] : $match;
+				if ( is_numeric( $value ) ) {
+					return (int) $value;
+				}
+			}
+
 			return false;
 		}
 
@@ -439,9 +469,17 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			if ( function_exists( 'serialize_block' ) ) {
 				$serialized = serialize_block( $block );
 				
-				if ( preg_match( '/["\']?(?:id|galleryId|galleryID|galleryid|gallery_id|gid)["\']?\s*:\s*["\']?(\d+)["\']?/', $serialized, $matches ) ) {
+				if ( preg_match( '/["\']?(?:id|galleryId|galleryID|galleryid|gallery_id|gid)["\']?\s*:\s*(?:"(\d+)"|\'(\d+)\'|(\d+)(?=[,\}\]]))/', $serialized, $matches ) ) {
+					$id = 0;
 					if ( isset( $matches[1] ) && is_numeric( $matches[1] ) ) {
-						return (int) $matches[1];
+						$id = (int) $matches[1];
+					} else if ( isset( $matches[2] ) && is_numeric( $matches[2] ) ) {
+						$id = (int) $matches[2];
+					} else if ( isset( $matches[3] ) && is_numeric( $matches[3] ) ) {
+						$id = (int) $matches[3];
+					}
+					if ( $id > 0 ) {
+						return $id;
 					}
 				}
 
@@ -449,9 +487,17 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				if ( $extracted_id ) {
 					return $extracted_id;
 				}
-				if ( preg_match( '/["\']?shortcode_id["\']?\s*:\s*["\']?(\d+)["\']?/', $serialized, $matches ) ) {
+				if ( preg_match( '/["\']?shortcode_id["\']?\s*:\s*(?:"(\d+)"|\'(\d+)\'|(\d+)(?=[,\}\]]))/', $serialized, $matches ) ) {
+					$id = 0;
 					if ( isset( $matches[1] ) && is_numeric( $matches[1] ) ) {
-						return (int) $matches[1];
+						$id = (int) $matches[1];
+					} else if ( isset( $matches[2] ) && is_numeric( $matches[2] ) ) {
+						$id = (int) $matches[2];
+					} else if ( isset( $matches[3] ) && is_numeric( $matches[3] ) ) {
+						$id = (int) $matches[3];
+					}
+					if ( $id > 0 ) {
+						return $id;
 					}
 				}
 			}
@@ -495,13 +541,14 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * @param int $gallery_id Gallery ID
 		 * @return object|false Migrated object or false if not found
 		 */
-		private function find_migrated_object( $plugin, $gallery_id ) {
+		private function find_migrated_object( $plugin, $gallery_id, $object_type = 'gallery' ) {
 			$migrated_objects = $this->migrator_engine->get_migrated_objects();
 			$gallery_id = (int) $gallery_id;
 			$plugin_name = $plugin->name();
+			$object_type = ( 'album' === $object_type ) ? 'album' : 'gallery';
 
 			foreach ( $migrated_objects as $migrated_object ) {
-				if ( $migrated_object->type() !== 'gallery' && $migrated_object->type() !== 'album' ) {
+				if ( $migrated_object->type() !== $object_type ) {
 					continue;
 				}
 				
@@ -541,8 +588,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * @param int $gallery_id Gallery ID
 		 * @return bool
 		 */
-		private function is_gallery_migrated( $plugin, $gallery_id ) {
-			return $this->find_migrated_object( $plugin, $gallery_id ) !== false;
+		private function is_gallery_migrated( $plugin, $gallery_id, $object_type = 'gallery' ) {
+			return $this->find_migrated_object( $plugin, $gallery_id, $object_type ) !== false;
 		}
 
 		/**
@@ -552,8 +599,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * @param int $gallery_id Gallery ID
 		 * @return int|false
 		 */
-		private function get_migrated_foogallery_id( $plugin, $gallery_id ) {
-			$migrated_object = $this->find_migrated_object( $plugin, $gallery_id );
+		private function get_migrated_foogallery_id( $plugin, $gallery_id, $object_type = 'gallery' ) {
+			$migrated_object = $this->find_migrated_object( $plugin, $gallery_id, $object_type );
 			return $migrated_object ? (int) $migrated_object->migrated_id : false;
 		}
 
@@ -576,10 +623,12 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				}
 
 				$item = $content_items[ $item_key ];
+				$object_type = isset( $item['object_type'] ) && 'album' === $item['object_type'] ? 'album' : 'gallery';
 
 				if ( ! $item['migrated'] || ! $item['migrated_foogallery_id'] ) {
 					$errors[] = sprintf(
-						__( 'Gallery %d from %s in post "%s" has not been migrated yet.', 'foogallery-migrate' ),
+						__( '%1$s %2$d from %3$s in post "%4$s" has not been migrated yet.', 'foogallery-migrate' ),
+						ucfirst( $object_type ),
 						$item['gallery_id'],
 						$item['plugin_name'],
 						$item['post_title']
@@ -606,9 +655,17 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 
 				$new_content = '';
 				if ( $item['type'] === 'shortcode' ) {
-					$new_content = '[foogallery id="' . $item['migrated_foogallery_id'] . '"]';
+					if ( 'album' === $object_type ) {
+						$new_content = '[foogallery-album id="' . $item['migrated_foogallery_id'] . '"]';
+					} else {
+						$new_content = '[foogallery id="' . $item['migrated_foogallery_id'] . '"]';
+					}
 				} else if ( $item['type'] === 'block' ) {
-					$new_content = '<!-- wp:fooplugins/foogallery {"id":' . $item['migrated_foogallery_id'] . '} /-->';
+					if ( 'album' === $object_type ) {
+						$new_content = '<!-- wp:shortcode -->[foogallery-album id="' . $item['migrated_foogallery_id'] . '"]<!-- /wp:shortcode -->';
+					} else {
+						$new_content = '<!-- wp:fooplugins/foogallery {"id":' . $item['migrated_foogallery_id'] . '} /-->';
+					}
 				}
 
 				if ( $new_content ) {
@@ -762,7 +819,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 								<span><?php esc_html_e( 'Source Plugin', 'foogallery-migrate' ); ?></span>
 							</th>
 							<th scope="col" class="manage-column">
-								<span><?php esc_html_e( 'Gallery ID', 'foogallery-migrate' ); ?></span>
+								<span><?php esc_html_e( 'Source ID', 'foogallery-migrate' ); ?></span>
 							</th>
 							<th scope="col" class="manage-column">
 								<span><?php esc_html_e( 'Type', 'foogallery-migrate' ); ?></span>
@@ -811,7 +868,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 								<?php echo esc_html( $item['gallery_id'] ); ?>
 							</td>
 							<td>
-								<?php echo esc_html( ucfirst( $item['type'] ) ); ?>
+								<?php
+								$object_type = isset( $item['object_type'] ) && 'album' === $item['object_type'] ? 'album' : 'gallery';
+								echo esc_html( ucfirst( $item['type'] ) . ' / ' . ucfirst( $object_type ) );
+								?>
 							</td>
 							<td>
 								<?php if ( $item['migrated_foogallery_id'] ) { ?>

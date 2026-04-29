@@ -1,11 +1,18 @@
 {
   "name": "foogallery-migrate",
   "description": "FooGallery Migrate",
-  "version": "1.5",
+  "version": "1.6",
   "author": "Brad Vincent",
   "repository": {
     "type": "git",
     "url": "https://github.com/fooplugins/foogallery-migrate"
+  },
+  "scripts": {
+    "build": "gulp",
+    "deploy": "gulp deploy",
+    "deploy-wp": "bash ./bin/deploy-wp.sh",
+    "gulp": "gulp",
+    "package": "gulp"
   },
   "devDependencies": {
     "@babel/core": "^7.17.9",

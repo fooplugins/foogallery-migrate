@@ -165,5 +165,16 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Plugin' ) ) {
         function get_block_patterns() {
             return array();
         }
+
+        /**
+         * Returns the migrated object type for a detected shortcode/block.
+         *
+         * @param string $original_content Original shortcode or serialized block content.
+         * @param string $block_name Block name, if the detected content is a block.
+         * @return string
+         */
+        function get_content_object_type( $original_content, $block_name = '' ) {
+            return 'gallery';
+        }
     }
 }

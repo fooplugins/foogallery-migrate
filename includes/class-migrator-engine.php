@@ -50,7 +50,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         public function set_migrator_setting( $name, $value ) {
             $settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
 
-            if ( !isset( $settings ) ) {
+            if ( !isset( $settings ) || ! is_array( $settings ) ) {
                 $settings = array();
             }
 

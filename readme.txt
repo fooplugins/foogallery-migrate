@@ -4,7 +4,7 @@ Tags: gallery, image gallery, photo gallery, wordpress gallery plugin, migrate
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 5.4
-Stable tag: 1.5
+Stable tag: 1.6
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -25,6 +25,7 @@ Migrate to FooGallery from other gallery plugins, including:
 *	NextGen Gallery
 *	Photo Gallery by 10Web
 *	Robo Gallery
+*	Album and Image Gallery Plus Lightbox (plugin was closed Apr 2026 due to being compromised)
 
 Features:
 
@@ -51,6 +52,10 @@ Modula has 4 gallery layouts VS the 7 that come free with FooGallery. Modula als
 NextGen has 3 gallery styles and a batch upload feature. More advanced features are only available with the paid versions of NextGen.
 FooGallery free has 7 gallery styles and a load of different settings to customize it to look perfect for your website and theme.
 
+= Migrate Away From "Album and Image Gallery Plus Lightbox" =
+
+FooGallery Migrate can detect "Album and Image Gallery Plus Lightbox" galleries directly from WordPress database records, so the source plugin does not need to be active or loaded during migration.
+
 == Installation ==
 
 1. Upload the zip file to the `/wp-content/plugins/` folder and then unzip.
@@ -73,6 +78,9 @@ Update now to get all the latest features, bug fixes and improvements!
 [Contact us](https://fooplugins.com/support/) and we will build an importer to help you migrate to FooGallery.
 
 == Changelog ==
+
+= 1.6 =
+* Added support for migrating Album and Image Gallery Plus Lightbox galleries, albums, blocks and shortcodes without loading the source plugin.
 
 = 1.5 =
 * Added new feature : block / shortcode migration!
