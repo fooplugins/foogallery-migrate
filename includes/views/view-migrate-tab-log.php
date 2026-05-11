@@ -262,7 +262,7 @@ $paginated_objects = array_slice( $filtered_objects, $pagination->start, $pagina
 </table>
 <div class="tablenav bottom">
 	<div class="tablenav-pages">
-		<?php echo wp_kses_post( $pagination->render() ); ?>
+		<?php echo wp_kses_post( $pagination->render( false ) ); ?>
 	</div>
 </div>
 <script>
