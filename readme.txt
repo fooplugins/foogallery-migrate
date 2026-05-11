@@ -4,7 +4,7 @@ Tags: gallery, image gallery, photo gallery, wordpress gallery plugin, migrate
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 5.4
-Stable tag: 1.6
+Stable tag: 1.7
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -78,6 +78,12 @@ Update now to get all the latest features, bug fixes and improvements!
 [Contact us](https://fooplugins.com/support/) and we will build an importer to help you migrate to FooGallery.
 
 == Changelog ==
+
+= 1.7 =
+* Added a Settings tab to the migration Page.
+* Override the gallery layout for all migrated galleries using the Override Gallery Layout setting.
+* Disable migration pagination by setting Page Size setting to 0.
+* Fixed PHP warnings when Modula image metadata does not include description or alt values.
 
 = 1.6 =
 * Added support for migrating Album and Image Gallery Plus Lightbox galleries, albums, blocks and shortcodes without loading the source plugin.
