@@ -175,7 +175,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
 
             $gutter = $gallery->settings['rsg_horizontalSpaceBetweenBoxes'];
 
-            $gallery_template = $this->get_gallery_template( $gallery );            
+            $gallery_template = $this->get_migration_gallery_template( $gallery );
 
             if ( $width > 0 && $height > 0 ) {
                 $settings[ $gallery_template . '_thumbnail_dimensions'] = array(

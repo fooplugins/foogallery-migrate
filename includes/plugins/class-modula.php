@@ -164,7 +164,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
                 $height = get_option( 'thumbnail_size_h' );
             }
 
-            $gallery_template = $this->get_gallery_template( $gallery );
+            $gallery_template = $this->get_migration_gallery_template( $gallery );
 
             if ( $width > 0 && $height > 0 ) {
                 $settings[ $gallery_template . '_thumbnail_dimensions'] = array(

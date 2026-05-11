@@ -98,17 +98,25 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                     }
                     $url = add_query_arg( 'album_paged', $page, $url ) . '#albums';
                     $albums_count = count( $albums );
-                    $page_size = apply_filters( 'foogallery_migrate_page_size', 20);
+                    $page_size = $this->migrator_engine->get_page_size();
+                    $show_pagination = $page_size > 0;
 
-                    $pagination = new Pagination();
-                    $pagination->items( $albums_count );
-                    $pagination->limit( $page_size ); // Limit entries per page
-                    $pagination->parameterName( 'album_paged' );
-                    $pagination->url = $url;
-                    $pagination->currentPage( $page );
-                    $pagination->calculate();
+                    if ( $show_pagination ) {
+                        $pagination = new Pagination();
+                        $pagination->items( $albums_count );
+                        $pagination->limit( $page_size ); // Limit entries per page
+                        $pagination->parameterName( 'album_paged' );
+                        $pagination->url = $url;
+                        $pagination->currentPage( $page );
+                        $pagination->calculate();
+                        $start = $pagination->start;
+                        $end = $pagination->end;
+                    } else {
+                        $start = 0;
+                        $end = $albums_count - 1;
+                    }
 
-                    for ($counter = $pagination->start; $counter <= $pagination->end; $counter++ ) {
+                    for ($counter = $start; $counter <= $end; $counter++ ) {
                         if ( $counter >= $albums_count ) {
                             break;
                         }
@@ -174,7 +182,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                 </table>
                 <div class="tablenav bottom">
                     <div class="tablenav-pages">
-                        <?php echo wp_kses_post( $pagination->render() ); ?>
+                        <?php if ( $show_pagination ) { echo wp_kses_post( $pagination->render( false ) ); } ?>
                     </div>
                 </div>
 

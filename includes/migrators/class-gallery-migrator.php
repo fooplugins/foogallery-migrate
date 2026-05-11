@@ -96,17 +96,25 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                     }
                     $url = add_query_arg( 'gallery_paged', $page, $url ) . '#galleries';
                     $gallery_count = count( $galleries );
-                    $page_size = apply_filters( 'foogallery_migrate_page_size', 20);
+                    $page_size = $this->migrator_engine->get_page_size();
+                    $show_pagination = $page_size > 0;
 
-                    $pagination = new Pagination();
-                    $pagination->items( $gallery_count );
-                    $pagination->limit( $page_size ); // Limit entries per page
-                    $pagination->parameterName( 'gallery_paged' );
-                    $pagination->url = $url;
-                    $pagination->currentPage( $page );
-                    $pagination->calculate();
+                    if ( $show_pagination ) {
+                        $pagination = new Pagination();
+                        $pagination->items( $gallery_count );
+                        $pagination->limit( $page_size ); // Limit entries per page
+                        $pagination->parameterName( 'gallery_paged' );
+                        $pagination->url = $url;
+                        $pagination->currentPage( $page );
+                        $pagination->calculate();
+                        $start = $pagination->start;
+                        $end = $pagination->end;
+                    } else {
+                        $start = 0;
+                        $end = $gallery_count - 1;
+                    }
 
-                    for ($counter = $pagination->start; $counter <= $pagination->end; $counter++ ) {
+                    for ($counter = $start; $counter <= $end; $counter++ ) {
                         if ( $counter >= $gallery_count ) {
                             break;
                         }
@@ -141,7 +149,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                             <td>
                                 <?php echo esc_html( $gallery->ID ) . '. '; ?>
                                 <strong><?php echo esc_html( $gallery->title ); ?></strong>
-                                <?php if ( foogallery_is_debug() && isset( $gallery->settings ) ) { ?>
+                                <?php if ( $this->migrator_engine->is_debug_enabled() && isset( $gallery->settings ) ) { ?>
                                     <br />
                                     <?php echo wp_kses_post( foogallery_migrate_array_to_table( $gallery->settings ) );
                                 } ?>
@@ -151,11 +159,11 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                             </td>
                             <td>
                                 <?php esc_html_e( 'Template : ', 'foogallery-migrate' ); ?>
-                                <?php echo esc_html( $gallery->plugin->get_gallery_template( $gallery ) ); ?>
+                                <?php echo esc_html( $gallery->plugin->get_migration_gallery_template( $gallery ) ); ?>
                                 <br />
                                 <?php esc_html_e( 'Images : ', 'foogallery-migrate' ); ?>
                                 <?php echo esc_html( $gallery->get_children_count() ); ?>
-                                <?php if ( foogallery_is_debug() ) { ?>
+                                <?php if ( $this->migrator_engine->is_debug_enabled() ) { ?>
                                 <br />
                                 <?php esc_html_e( 'Settings : ', 'foogallery-migrate' ); ?>
                                 <?php echo wp_kses_post ( foogallery_migrate_array_to_table( $gallery->plugin->get_gallery_settings( $gallery, array() ) ) ); ?>
@@ -245,7 +253,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                 </table>
                 <div class="tablenav bottom">
                     <div class="tablenav-pages">
-                        <?php echo wp_kses_post( $pagination->render() ); ?>
+                        <?php if ( $show_pagination ) { echo wp_kses_post( $pagination->render( false ) ); } ?>
                     </div>
                 </div>
 

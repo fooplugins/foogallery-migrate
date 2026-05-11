@@ -24,6 +24,9 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         protected const KEY_ALBUMS = 'albums';
         protected const KEY_CONTENT = 'block-shortcode';
         protected const KEY_MIGRATED = 'migrated';
+        protected const SETTING_OVERRIDE_GALLERY_LAYOUT = 'override_gallery_layout';
+        protected const SETTING_PAGE_SIZE = 'page_size';
+        protected const SETTING_DEBUG_ENABLED = 'debug_enabled';
 
         /**
          * Returns a setting for the migrator.
@@ -57,6 +60,132 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
             $settings[ $name ] = $value;
 
             update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $settings, false );
+        }
+
+        /**
+         * Returns the saved user settings for the migrator.
+         *
+         * @return array
+         */
+        public function get_settings() {
+            $defaults = array(
+                self::SETTING_OVERRIDE_GALLERY_LAYOUT => '',
+                self::SETTING_PAGE_SIZE => 20,
+                self::SETTING_DEBUG_ENABLED => function_exists( 'foogallery_is_debug' ) && foogallery_is_debug(),
+            );
+
+            $settings = get_option( FOOGALLERY_MIGRATE_OPTION_SETTINGS, array() );
+
+            if ( ! is_array( $settings ) ) {
+                $settings = array();
+            }
+
+            $settings = array_merge( $defaults, $settings );
+            $settings[ self::SETTING_OVERRIDE_GALLERY_LAYOUT ] = $this->sanitize_override_gallery_layout( $settings[ self::SETTING_OVERRIDE_GALLERY_LAYOUT ] );
+            $settings[ self::SETTING_PAGE_SIZE ] = is_scalar( $settings[ self::SETTING_PAGE_SIZE ] ) ? absint( $settings[ self::SETTING_PAGE_SIZE ] ) : $defaults[ self::SETTING_PAGE_SIZE ];
+            $settings[ self::SETTING_DEBUG_ENABLED ] = ! empty( $settings[ self::SETTING_DEBUG_ENABLED ] );
+
+            return $settings;
+        }
+
+        /**
+         * Saves the user settings for the migrator.
+         *
+         * @param array $settings Settings to save.
+         * @return void
+         */
+        public function save_settings( $settings ) {
+            $current_settings = $this->get_settings();
+
+            if ( ! is_array( $settings ) ) {
+                $settings = array();
+            }
+
+            $settings = array_merge( $current_settings, $settings );
+            $settings[ self::SETTING_OVERRIDE_GALLERY_LAYOUT ] = $this->sanitize_override_gallery_layout( $settings[ self::SETTING_OVERRIDE_GALLERY_LAYOUT ] );
+            $settings[ self::SETTING_PAGE_SIZE ] = is_scalar( $settings[ self::SETTING_PAGE_SIZE ] ) ? absint( $settings[ self::SETTING_PAGE_SIZE ] ) : $current_settings[ self::SETTING_PAGE_SIZE ];
+            $settings[ self::SETTING_DEBUG_ENABLED ] = ! empty( $settings[ self::SETTING_DEBUG_ENABLED ] );
+
+            update_option( FOOGALLERY_MIGRATE_OPTION_SETTINGS, $settings, false );
+        }
+
+        /**
+         * Gets all available FooGallery gallery templates.
+         *
+         * @return array
+         */
+        public function get_available_gallery_templates() {
+            $templates = array();
+
+            if ( ! function_exists( 'foogallery_gallery_templates' ) ) {
+                return $templates;
+            }
+
+            foreach ( foogallery_gallery_templates() as $template ) {
+                if ( ! is_array( $template ) || empty( $template['slug'] ) ) {
+                    continue;
+                }
+
+                $slug = (string) $template['slug'];
+                $templates[ $slug ] = isset( $template['name'] ) ? (string) $template['name'] : $slug;
+            }
+
+            return $templates;
+        }
+
+        /**
+         * Gets the selected gallery layout override.
+         *
+         * @return string
+         */
+        public function get_override_gallery_template() {
+            $settings = $this->get_settings();
+
+            return $settings[ self::SETTING_OVERRIDE_GALLERY_LAYOUT ];
+        }
+
+        /**
+         * Gets the saved migration page size.
+         *
+         * @return int
+         */
+        public function get_page_size() {
+            $settings = $this->get_settings();
+
+            return absint( apply_filters( 'foogallery_migrate_page_size', $settings[ self::SETTING_PAGE_SIZE ] ) );
+        }
+
+        /**
+         * Returns true if migration debug output is enabled.
+         *
+         * @return bool
+         */
+        public function is_debug_enabled() {
+            $settings = $this->get_settings();
+
+            return ! empty( $settings[ self::SETTING_DEBUG_ENABLED ] );
+        }
+
+        /**
+         * Sanitizes the selected gallery layout override.
+         *
+         * @param string $value Gallery template slug.
+         * @return string
+         */
+        protected function sanitize_override_gallery_layout( $value ) {
+            if ( ! is_scalar( $value ) ) {
+                return '';
+            }
+
+            $value = sanitize_key( (string) $value );
+
+            if ( '' === $value ) {
+                return '';
+            }
+
+            $templates = $this->get_available_gallery_templates();
+
+            return array_key_exists( $value, $templates ) ? $value : '';
         }
 
         /**

@@ -110,7 +110,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Envira' ) ) {
             $width = $gallery->settings['config']['crop_width'];
             $height = $gallery->settings['config']['crop_height'];
 
-            $gallery_template = $this->get_gallery_template( $gallery );
+            $gallery_template = $this->get_migration_gallery_template( $gallery );
 
             if ( $width > 0 && $height > 0 ) {
                 $settings[ $gallery_template . '_thumbnail_dimensions'] = array(

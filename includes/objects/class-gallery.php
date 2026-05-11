@@ -42,7 +42,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Gallery' ) ) {
             } else {
 
                 // Determine the best possible gallery template.
-                $gallery_template = $this->plugin->get_gallery_template( $this );
+                $gallery_template = $this->plugin->get_migration_gallery_template( $this );
 
                 if ( empty( $gallery_template ) ) {
                     $gallery_template = foogallery_default_gallery_template();

@@ -50,6 +50,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             // Ajax calls for log updates
             add_action( 'wp_ajax_foogallery_migrate_update_status', array( $this, 'ajax_update_migrated_status' ) );
             add_action( 'wp_ajax_foogallery_migrate_delete_object', array( $this, 'ajax_delete_migrated_object' ) );
+
+            add_action( 'admin_post_foogallery_migrate_save_settings', array( $this, 'save_settings' ) );
                       
 		}
 
@@ -96,6 +98,55 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
          */
         function render_view() {
             require_once 'views/view-migrate.php';
+        }
+
+        /**
+         * Save FooGallery Migrate settings.
+         *
+         * @return void
+         */
+        function save_settings() {
+            if ( ! current_user_can( 'manage_options' ) ) {
+                wp_die( esc_html__( 'Unauthorized.', 'foogallery-migrate' ) );
+            }
+
+            check_admin_referer( 'foogallery_migrate_settings', 'foogallery_migrate_settings' );
+
+            $settings = array(
+                'override_gallery_layout' => '',
+                'page_size' => 20,
+                'debug_enabled' => false,
+            );
+
+            if ( array_key_exists( 'override_gallery_layout', $_POST ) ) {
+                $override_gallery_layout = wp_unslash( $_POST['override_gallery_layout'] );
+                if ( is_scalar( $override_gallery_layout ) ) {
+                    $settings['override_gallery_layout'] = sanitize_key( $override_gallery_layout );
+                }
+            }
+
+            if ( array_key_exists( 'page_size', $_POST ) ) {
+                $page_size = wp_unslash( $_POST['page_size'] );
+                if ( is_scalar( $page_size ) ) {
+                    $settings['page_size'] = absint( $page_size );
+                }
+            }
+
+            $settings['debug_enabled'] = array_key_exists( 'debug_enabled', $_POST );
+
+            $migrator = foogallery_migrate_migrator_instance();
+            $migrator->save_settings( $settings );
+
+            $redirect_url = add_query_arg(
+                array(
+                    'page' => 'foogallery-migrate',
+                    'settings-updated' => 'true',
+                ),
+                admin_url( 'admin.php' )
+            );
+
+            wp_safe_redirect( $redirect_url . '#settings' );
+            exit;
         }
 
         /**

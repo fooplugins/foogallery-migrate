@@ -49,6 +49,22 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Plugin' ) ) {
         abstract function get_gallery_template( $gallery );
 
         /**
+         * Returns the gallery template that should be used during migration.
+         *
+         * @param $gallery Gallery
+         * @return string
+         */
+        function get_migration_gallery_template( $gallery ) {
+            $override_gallery_template = foogallery_migrate_migrator_instance()->get_override_gallery_template();
+
+            if ( ! empty( $override_gallery_template ) ) {
+                return $override_gallery_template;
+            }
+
+            return $this->get_gallery_template( $gallery );
+        }
+
+        /**
          * Returns the closest possible gallery settings
          *
          * @param $gallery Gallery

@@ -116,7 +116,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Aigpl' ) ) {
          * @return array
          */
         function get_gallery_settings( $gallery, $settings ) {
-            $gallery_template = $this->get_gallery_template( $gallery );
+            $gallery_template = $this->get_migration_gallery_template( $gallery );
 
             if ( ! is_array( $settings ) ) {
                 $settings = array();

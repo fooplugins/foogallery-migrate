@@ -8,7 +8,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Language-Team: FooPlugins <info@fooplugins.com>\n"
 "Last-Translator: Brad Vincent <brad@fooplugins.com>\n"
-"POT-Creation-Date: 2026-04-29 15:48+0000\n"
+"POT-Creation-Date: 2026-05-11 17:54+0000\n"
 "Report-Msgid-Bugs-To: https://fooplugins.com\n"
 "X-Poedit-Basepath: ..\n"
 "X-Poedit-KeywordsList: __;_e;_ex:1,2c;_n:1,2;_n_noop:1,2;_nx:1,2,4c;_nx_noop:1,2,3c;_x:1,2c;esc_attr__;esc_attr_e;esc_attr_x:1,2c;esc_html__;esc_html_e;esc_html_x:1,2c\n"
@@ -17,87 +17,87 @@ msgstr ""
 "X-Poedit-SourceCharset: UTF-8\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: includes/class-init.php:66
+#: includes/class-init.php:68
 msgid "install FooGallery!"
 msgstr ""
 
-#: includes/class-init.php:68
+#: includes/class-init.php:70
 msgid "The FooGallery plugin is required for the FooGallery Migrate plugin to work. Activate it now if you have it installed, or "
 msgstr ""
 
-#: includes/class-init.php:109, includes/class-init.php:144, includes/class-init.php:164, includes/class-init.php:181, includes/class-init.php:199, includes/class-init.php:218, includes/class-init.php:242, includes/class-init.php:277, includes/class-init.php:297, includes/class-init.php:316, includes/class-init.php:340, includes/class-init.php:385, includes/class-init.php:407, includes/class-init.php:464, includes/views/view-migrate-tab-sources.php:22
+#: includes/class-init.php:110, includes/class-init.php:160, includes/class-init.php:195, includes/class-init.php:215, includes/class-init.php:232, includes/class-init.php:250, includes/class-init.php:269, includes/class-init.php:293, includes/class-init.php:328, includes/class-init.php:348, includes/class-init.php:367, includes/class-init.php:391, includes/class-init.php:436, includes/class-init.php:458, includes/class-init.php:515, includes/views/view-migrate-tab-sources.php:22
 msgid "Unauthorized."
 msgstr ""
 
-#: includes/class-init.php:357
+#: includes/class-init.php:408
 msgid "Successfully replaced %d shortcode(s)/block(s)."
 msgstr ""
 
-#: includes/class-init.php:364
+#: includes/class-init.php:415
 msgid "Errors:"
 msgstr ""
 
-#: includes/class-init.php:404, includes/class-init.php:461
+#: includes/class-init.php:455, includes/class-init.php:512
 msgid "Invalid request."
 msgstr ""
 
-#: includes/class-init.php:430
+#: includes/class-init.php:481
 msgid "Invalid status update."
 msgstr ""
 
-#: includes/class-init.php:441, includes/objects/class-migratable.php:213, includes/views/view-migrate-tab-log.php:7
+#: includes/class-init.php:492, includes/objects/class-migratable.php:213, includes/views/view-migrate-tab-log.php:7
 msgid "Not migrated"
 msgstr ""
 
-#: includes/class-init.php:442
+#: includes/class-init.php:493
 msgid "Queued"
 msgstr ""
 
-#: includes/class-init.php:443
+#: includes/class-init.php:494
 msgid "Started"
 msgstr ""
 
-#: includes/class-init.php:444, includes/views/view-migrate-tab-log.php:10
+#: includes/class-init.php:495, includes/views/view-migrate-tab-log.php:10
 msgid "Completed"
 msgstr ""
 
-#: includes/class-init.php:445, includes/views/view-migrate-tab-log.php:11
+#: includes/class-init.php:496, includes/views/view-migrate-tab-log.php:11
 msgid "Nothing to migrate"
 msgstr ""
 
-#: includes/class-init.php:446, includes/migrators/class-gallery-migrator.php:215, includes/views/view-migrate-tab-log.php:12, includes/views/view-migrate-tab-log.php:143
+#: includes/class-init.php:497, includes/migrators/class-gallery-migrator.php:223, includes/views/view-migrate-tab-log.php:12, includes/views/view-migrate-tab-log.php:143
 msgid "Error"
 msgstr ""
 
-#: includes/class-init.php:473
+#: includes/class-init.php:524
 msgid "Invalid object."
 msgstr ""
 
-#: includes/class-migrator-engine.php:213, includes/class-migrator-engine.php:237
+#: includes/class-migrator-engine.php:342, includes/class-migrator-engine.php:366
 msgid "Migrated object not found."
 msgstr ""
 
-#: includes/class-migrator-engine.php:218
+#: includes/class-migrator-engine.php:347
 msgid "Invalid migrated object."
 msgstr ""
 
-#: includes/class-migrator-engine.php:316, includes/class-migrator-engine.php:416
+#: includes/class-migrator-engine.php:445, includes/class-migrator-engine.php:545
 msgid "Gallery not found."
 msgstr ""
 
-#: includes/class-migrator-engine.php:469, includes/objects/class-image.php:221
+#: includes/class-migrator-engine.php:598, includes/objects/class-image.php:221
 msgid "Attachment file is missing after migration."
 msgstr ""
 
-#: includes/class-migrator-engine.php:482
+#: includes/class-migrator-engine.php:611
 msgid "Attachment file size could not be determined after migration."
 msgstr ""
 
-#: includes/class-migrator-engine.php:505
+#: includes/class-migrator-engine.php:634
 msgid "Attachment file could not be loaded after migration."
 msgstr ""
 
-#: includes/class-migrator-engine.php:525
+#: includes/class-migrator-engine.php:654
 msgid "One or more images are missing after migration."
 msgstr ""
 
@@ -113,7 +113,7 @@ msgstr ""
 msgid "Update WordPress now."
 msgstr ""
 
-#: includes/migrators/class-album-migrator.php:60, includes/migrators/class-content-migrator.php:812, includes/migrators/class-gallery-migrator.php:58
+#: includes/migrators/class-album-migrator.php:60, includes/migrators/class-content-migrator.php:820, includes/migrators/class-gallery-migrator.php:58
 msgid "Select All"
 msgstr ""
 
@@ -133,23 +133,23 @@ msgstr ""
 msgid "%s Album Name"
 msgstr ""
 
-#: includes/migrators/class-album-migrator.php:149, includes/views/view-migrate-tab-log.php:99
+#: includes/migrators/class-album-migrator.php:157, includes/views/view-migrate-tab-log.php:99
 msgid "Galleries : "
 msgstr ""
 
-#: includes/migrators/class-album-migrator.php:152, includes/migrators/class-gallery-migrator.php:156, includes/views/view-migrate-tab-log.php:106
+#: includes/migrators/class-album-migrator.php:160, includes/migrators/class-gallery-migrator.php:164, includes/views/view-migrate-tab-log.php:106
 msgid "Images : "
 msgstr ""
 
-#: includes/migrators/class-album-migrator.php:195
+#: includes/migrators/class-album-migrator.php:203
 msgid "Start Album Migration"
 msgstr ""
 
-#: includes/migrators/class-album-migrator.php:190, includes/migrators/class-gallery-migrator.php:262
+#: includes/migrators/class-album-migrator.php:198, includes/migrators/class-gallery-migrator.php:270
 msgid "Resume Migration"
 msgstr ""
 
-#: includes/migrators/class-album-migrator.php:192, includes/migrators/class-gallery-migrator.php:264
+#: includes/migrators/class-album-migrator.php:200, includes/migrators/class-gallery-migrator.php:272
 msgid "Stop Migration"
 msgstr ""
 
@@ -157,7 +157,7 @@ msgstr ""
 msgid "No albums found!"
 msgstr ""
 
-#: includes/migrators/class-album-migrator.php:201
+#: includes/migrators/class-album-migrator.php:209
 msgid "Refresh Albums"
 msgstr ""
 
@@ -181,35 +181,35 @@ msgstr ""
 msgid "Fatal error scanning content: %s"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:816
+#: includes/migrators/class-content-migrator.php:824
 msgid "Post/Page"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:819
+#: includes/migrators/class-content-migrator.php:827
 msgid "Source Plugin"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:822
+#: includes/migrators/class-content-migrator.php:830
 msgid "Source ID"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:825, includes/views/view-migrate-tab-log.php:138
+#: includes/migrators/class-content-migrator.php:833, includes/views/view-migrate-tab-log.php:138
 msgid "Type"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:828
+#: includes/migrators/class-content-migrator.php:836
 msgid "FooGallery ID"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:831, includes/views/view-migrate-tab-log.php:142
+#: includes/migrators/class-content-migrator.php:839, includes/views/view-migrate-tab-log.php:142
 msgid "Status"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:889
+#: includes/migrators/class-content-migrator.php:897
 msgid "Not Migrated"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:887, includes/views/view-migrate-tab-log.php:141
+#: includes/migrators/class-content-migrator.php:895, includes/views/view-migrate-tab-log.php:141
 msgid "Migrated"
 msgstr ""
 
@@ -237,11 +237,11 @@ msgstr ""
 msgid "Try clicking \"Refresh Scan\" button to force a new scan"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:910
+#: includes/migrators/class-content-migrator.php:918
 msgid "Replace Selected"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:912
+#: includes/migrators/class-content-migrator.php:920
 msgid "Refresh Scan"
 msgstr ""
 
@@ -253,49 +253,49 @@ msgstr ""
 msgid "%s Name"
 msgstr ""
 
-#: includes/migrators/class-gallery-migrator.php:153
+#: includes/migrators/class-gallery-migrator.php:161
 msgid "Template : "
 msgstr ""
 
-#: includes/migrators/class-gallery-migrator.php:160
+#: includes/migrators/class-gallery-migrator.php:168
 msgid "Settings : "
 msgstr ""
 
-#: includes/migrators/class-gallery-migrator.php:181
+#: includes/migrators/class-gallery-migrator.php:189
 msgid "Check"
 msgstr ""
 
-#: includes/migrators/class-gallery-migrator.php:176
+#: includes/migrators/class-gallery-migrator.php:184
 msgid "Migrate"
 msgstr ""
 
-#: includes/migrators/class-gallery-migrator.php:204
+#: includes/migrators/class-gallery-migrator.php:212
 msgid "%d error"
 msgid_plural "%d errors"
 msgstr[0] ""
 msgstr[1] ""
 
-#: includes/migrators/class-gallery-migrator.php:208
+#: includes/migrators/class-gallery-migrator.php:216
 msgid "Errors: %s"
 msgstr ""
 
-#: includes/migrators/class-gallery-migrator.php:210
+#: includes/migrators/class-gallery-migrator.php:218
 msgid "View error details"
 msgstr ""
 
-#: includes/migrators/class-gallery-migrator.php:214
+#: includes/migrators/class-gallery-migrator.php:222
 msgid "Source URL"
 msgstr ""
 
-#: includes/migrators/class-gallery-migrator.php:225
+#: includes/migrators/class-gallery-migrator.php:233
 msgid "Unknown"
 msgstr ""
 
-#: includes/migrators/class-gallery-migrator.php:235
+#: includes/migrators/class-gallery-migrator.php:243
 msgid "Retry Migration"
 msgstr ""
 
-#: includes/migrators/class-gallery-migrator.php:267
+#: includes/migrators/class-gallery-migrator.php:275
 msgid "Start Gallery Migration"
 msgstr ""
 
@@ -303,7 +303,7 @@ msgstr ""
 msgid "No galleries found!"
 msgstr ""
 
-#: includes/migrators/class-gallery-migrator.php:273
+#: includes/migrators/class-gallery-migrator.php:281
 msgid "Refresh Galleries"
 msgstr ""
 
@@ -439,6 +439,38 @@ msgstr ""
 msgid "Are you sure you want to delete this migrated object from the log?"
 msgstr ""
 
+#: includes/views/view-migrate-tab-settings.php:8
+msgid "Settings saved."
+msgstr ""
+
+#: includes/views/view-migrate-tab-settings.php:18
+msgid "Override Gallery Layout"
+msgstr ""
+
+#: includes/views/view-migrate-tab-settings.php:22
+msgid "Do not override"
+msgstr ""
+
+#: includes/views/view-migrate-tab-settings.php:33
+msgid "Page Size"
+msgstr ""
+
+#: includes/views/view-migrate-tab-settings.php:37
+msgid "The number of items per page in the migration. Set to zero to disable pagination."
+msgstr ""
+
+#: includes/views/view-migrate-tab-settings.php:41
+msgid "Debug Enabled"
+msgstr ""
+
+#: includes/views/view-migrate-tab-settings.php:45
+msgid "Enable debug output for migration views."
+msgstr ""
+
+#: includes/views/view-migrate-tab-settings.php:51
+msgid "Save Settings"
+msgstr ""
+
 #: includes/views/view-migrate-tab-sources.php:7
 msgid "Are you sure you want to clear migration histories? This may result in duplicate album/galleries and media attachments!"
 msgstr ""
@@ -505,4 +537,8 @@ msgstr ""
 
 #: includes/views/view-migrate.php:233
 msgid "Debug"
+msgstr ""
+
+#: includes/views/view-migrate.php:235
+msgid "Settings"
 msgstr ""

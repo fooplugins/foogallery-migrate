@@ -770,22 +770,30 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 					}
 					$url = add_query_arg( 'content_paged', $page, $url ) . '#shortcodes';
 				
-				$content_items_count = count( $content_items );
-				$page_size = apply_filters( 'foogallery_migrate_page_size', 50 );
-				
-				$pagination = new Pagination();
-				$pagination->items( $content_items_count );
-				$pagination->limit( $page_size );
-				$pagination->parameterName( 'content_paged' );
-				$pagination->url = $url;
-				$pagination->currentPage( $page );
-				$pagination->calculate();
+					$content_items_count = count( $content_items );
+					$page_size = $this->migrator_engine->get_page_size();
+					$show_pagination = $page_size > 0;
+
+					if ( $show_pagination ) {
+						$pagination = new Pagination();
+						$pagination->items( $content_items_count );
+						$pagination->limit( $page_size );
+						$pagination->parameterName( 'content_paged' );
+						$pagination->url = $url;
+						$pagination->currentPage( $page );
+						$pagination->calculate();
+						$start = $pagination->start;
+						$end = $pagination->end;
+					} else {
+						$start = 0;
+						$end = $content_items_count - 1;
+					}
 				
 				$enabled_count = 0;
 				$checked_count = 0;
 				$paginated_items = array();
 				
-				for ( $counter = $pagination->start; $counter <= $pagination->end; $counter++ ) {
+				for ( $counter = $start; $counter <= $end; $counter++ ) {
 					if ( $counter >= $content_items_count ) {
 						break;
 					}
@@ -897,7 +905,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				</table>
 				<div class="tablenav bottom">
 					<div class="tablenav-pages">
-						<?php echo wp_kses_post( $pagination->render() ); ?>
+						<?php if ( $show_pagination ) { echo wp_kses_post( $pagination->render( false ) ); } ?>
 					</div>
 				</div>
 				<?php

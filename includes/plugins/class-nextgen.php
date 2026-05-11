@@ -168,7 +168,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
          * @return array
          */
         function get_gallery_settings( $gallery, $settings ) {
-            $gallery_template = $this->get_gallery_template( $gallery );
+            $gallery_template = $this->get_migration_gallery_template( $gallery );
             $settings[$gallery_template . '_caption_title_source'] = 'title';
             return $settings;
         }

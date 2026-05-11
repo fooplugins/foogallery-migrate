@@ -216,7 +216,7 @@
 <?php
 $migrator = foogallery_migrate_migrator_instance();
 $has_log_tab = $migrator->has_migrated_objects();
-$show_debug_tab = $has_log_tab && function_exists( 'foogallery_is_debug' ) && foogallery_is_debug();
+$show_debug_tab = $has_log_tab && $migrator->is_debug_enabled();
 ?>
 <div class="wrap">
 	<h2><?php esc_html_e( 'FooGallery Migrate!', 'foogallery-migrate' ); ?></h2>
@@ -232,6 +232,7 @@ $show_debug_tab = $has_log_tab && function_exists( 'foogallery_is_debug' ) && fo
 		<?php if ( $show_debug_tab ) { ?>
 			<a href="#debug" data-tab="foogallery_migrate_debug" class="nav-tab"><?php esc_html_e( 'Debug', 'foogallery-migrate' ); ?></a>
 		<?php } ?>
+		<a href="#settings" data-tab="foogallery_migrate_settings" class="nav-tab"><?php esc_html_e( 'Settings', 'foogallery-migrate' ); ?></a>
 	</h2>
     <div class="foogallery_migrate_container" id="foogallery_migrate_sources">
         <?php require_once 'view-migrate-tab-sources.php'; ?>
@@ -255,4 +256,7 @@ $show_debug_tab = $has_log_tab && function_exists( 'foogallery_is_debug' ) && fo
 			<?php require_once 'view-migrate-tab-debug.php'; ?>
 		</div>
 	<?php } ?>
+	<div class="foogallery_migrate_container" id="foogallery_migrate_settings" style="display: none">
+		<?php require_once 'view-migrate-tab-settings.php'; ?>
+	</div>
 </div>
