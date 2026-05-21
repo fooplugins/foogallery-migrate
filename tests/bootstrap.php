@@ -53,6 +53,7 @@ $GLOBALS['foogallery_migrate_test_plugins'] = array();
 $GLOBALS['foogallery_migrate_test_post_meta_updates'] = array();
 $GLOBALS['foogallery_migrate_test_attached_files'] = array();
 $GLOBALS['foogallery_migrate_test_attachment_urls'] = array();
+$GLOBALS['foogallery_migrate_test_attachment_url_to_postid'] = array();
 $GLOBALS['foogallery_migrate_test_remote_head'] = array();
 
 if ( ! class_exists( 'WP_Error' ) ) {
@@ -148,6 +149,19 @@ function get_attached_file( $attachment_id ) {
 	return isset( $GLOBALS['foogallery_migrate_test_attached_files'][ $attachment_id ] )
 		? $GLOBALS['foogallery_migrate_test_attached_files'][ $attachment_id ]
 		: false;
+}
+
+function attachment_url_to_postid( $url ) {
+	static $attachment_id = 3000;
+
+	if ( array_key_exists( $url, $GLOBALS['foogallery_migrate_test_attachment_url_to_postid'] ) ) {
+		return $GLOBALS['foogallery_migrate_test_attachment_url_to_postid'][ $url ];
+	}
+
+	$attachment_id++;
+	$GLOBALS['foogallery_migrate_test_attachment_url_to_postid'][ $url ] = $attachment_id;
+
+	return $attachment_id;
 }
 
 function wp_filesize( $path ) {

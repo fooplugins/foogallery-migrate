@@ -20,22 +20,23 @@ class MigrationFlowTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_post_meta_updates'] = array();
 		$GLOBALS['foogallery_migrate_test_attached_files']    = array();
 		$GLOBALS['foogallery_migrate_test_attachment_urls']   = array();
+		$GLOBALS['foogallery_migrate_test_attachment_url_to_postid'] = array();
 		$GLOBALS['foogallery_migrate_test_remote_head']       = array();
 		$GLOBALS['foogallery_migrate_engine_instance']        = new MigratorEngine();
 	}
 
 	public function test_gallery_migration_can_resume_and_tracks_migrated_objects(): void {
 		$plugin  = new FakeSourcePlugin();
-		$gallery = new FlowGallery( $plugin );
-		$gallery->ID       = 10;
-		$gallery->title    = 'Source Gallery';
-		$gallery->settings = array();
-		$gallery->children = array(
-			$this->create_image( 'https://example.test/one.jpg' ),
-			$this->create_image( 'https://example.test/two.jpg' ),
+		$gallery = $this->create_gallery(
+			$plugin,
+			10,
+			'Source Gallery',
+			array(
+				$this->create_image( 'https://example.test/one.jpg' ),
+				$this->create_image( 'https://example.test/two.jpg' ),
+			)
 		);
-		$gallery->children_count = count( $gallery->children );
-		$plugin->galleries       = array( $gallery );
+		$plugin->galleries = array( $gallery );
 
 		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
 
@@ -84,18 +85,8 @@ class MigrationFlowTest extends TestCase {
 	public function test_album_migration_migrates_nested_gallery_flow(): void {
 		$plugin  = new FakeSourcePlugin();
 		$image   = $this->create_image( 'https://example.test/album-image.jpg' );
-		$gallery = new FlowGallery( $plugin );
-		$gallery->ID       = 20;
-		$gallery->title    = 'Nested Gallery';
-		$gallery->settings = array();
-		$gallery->children = array( $image );
-		$gallery->children_count = 1;
-
-		$album = new FlowAlbum( $plugin );
-		$album->ID       = 30;
-		$album->title    = 'Source Album';
-		$album->children = array( $gallery );
-		$album->children_count = 1;
+		$gallery = $this->create_gallery( $plugin, 20, 'Nested Gallery', array( $image ) );
+		$album   = $this->create_album( $plugin, 30, 'Source Album', array( $gallery ) );
 
 		$plugin->albums = array( $album );
 		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
@@ -127,15 +118,13 @@ class MigrationFlowTest extends TestCase {
 
 	public function test_child_errors_are_recorded_and_retry_can_resume_gallery(): void {
 		$plugin  = new FakeSourcePlugin();
-		$gallery = new FlowGallery( $plugin );
-		$gallery->ID       = 40;
-		$gallery->title    = 'Retry Gallery';
-		$gallery->settings = array();
 		$first             = $this->create_image( 'https://example.test/good.jpg' );
-		$second            = $this->create_image( 'https://example.test/bad.jpg', true );
-		$gallery->children = array( $first, $second );
-		$gallery->children_count = 2;
-		$plugin->galleries       = array( $gallery );
+		$second            = $this->create_image( 'https://example.test/bad.jpg' );
+		$second->migrated         = true;
+		$second->migration_status = Migratable::PROGRESS_ERROR;
+		$second->error            = new \WP_Error( 'forced_image_failure', 'Forced image failure.' );
+		$gallery           = $this->create_gallery( $plugin, 40, 'Retry Gallery', array( $first, $second ) );
+		$plugin->galleries = array( $gallery );
 
 		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
 
@@ -154,7 +143,6 @@ class MigrationFlowTest extends TestCase {
 			)
 		);
 		$migrator->migrate();
-		$migrator->migrate();
 
 		$errored = $migrator->get_objects_to_migrate();
 		$this->assertTrue( $errored[0]->migrated );
@@ -162,7 +150,6 @@ class MigrationFlowTest extends TestCase {
 		$this->assertCount( 1, $errored[0]->get_children_errors() );
 		$this->assertSame( 'Forced image failure.', $errored[0]->get_children_errors()[0] );
 
-		$second->should_error = false;
 		$this->assertTrue( $engine->retry_gallery_migration( $uid ) );
 
 		$retried = $migrator->get_objects_to_migrate();
@@ -221,15 +208,138 @@ class MigrationFlowTest extends TestCase {
 		$this->assertSame( 'album_FakeSource_60', $album->unique_identifier() );
 	}
 
-	private function create_image( string $source_url, bool $should_error = false ): FlowImage {
-		$image = new FlowImage();
+	public function test_newly_written_state_is_compact_and_hydrates_runtime_objects(): void {
+		$plugin  = new FakeSourcePlugin();
+		$image   = $this->create_image( 'https://example.test/compact.jpg' );
+		$image->data = (object) array(
+			'large_source_blob' => str_repeat( 'x', 1000 ),
+		);
+		$gallery = $this->create_gallery( $plugin, 70, 'Compact Gallery', array( $image ) );
+		$gallery->data = (object) array(
+			'post_content' => str_repeat( 'y', 2000 ),
+		);
+		$gallery->foogallery_title = 'Duplicate Compact Gallery';
+		$plugin->galleries = array( $gallery );
+
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+
+		$legacy_bytes = strlen( serialize( array( $gallery ) ) );
+		$engine       = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->run_detection();
+		$migrator = $engine->get_gallery_migrator();
+		$migrator->get_objects_to_migrate( true );
+
+		$raw = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+		$this->assertCompactPayload( $raw['plugins'] );
+		$this->assertCompactPayload( $raw['galleries'] );
+		$this->assertFalse( $this->contains_object( $raw['plugins'] ) );
+		$this->assertFalse( $this->contains_object( $raw['galleries'] ) );
+		$this->assertLessThan( $legacy_bytes * 0.5, strlen( serialize( $raw['galleries'] ) ) );
+		$this->assertArrayNotHasKey( 'data', $raw['galleries']['items'][0] );
+		$this->assertArrayNotHasKey( 'plugin', $raw['galleries']['items'][0] );
+		$this->assertArrayNotHasKey( 'foogallery_title', $raw['galleries']['items'][0] );
+
+		$hydrated = $migrator->get_objects_to_migrate();
+		$this->assertInstanceOf( Gallery::class, $hydrated[0] );
+		$this->assertInstanceOf( FakeSourcePlugin::class, $hydrated[0]->plugin );
+		$this->assertInstanceOf( Image::class, $hydrated[0]->children[0] );
+		$this->assertSame( 'Compact Gallery', $hydrated[0]->title );
+		$this->assertNull( $hydrated[0]->data );
+		$this->assertSame( 'https://example.test/compact.jpg', $hydrated[0]->children[0]->source_url );
+	}
+
+	public function test_legacy_object_state_is_read_without_load_time_upgrade(): void {
+		$plugin  = new FakeSourcePlugin();
+		$gallery = $this->create_gallery(
+			$plugin,
+			80,
+			'Legacy Gallery',
+			array(
+				$this->create_image( 'https://example.test/legacy.jpg' ),
+			)
+		);
+		$plugin->galleries = array( $gallery );
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		update_option(
+			FOOGALLERY_MIGRATE_OPTION_DATA,
+			array(
+				'galleries' => array( $gallery ),
+			),
+			false
+		);
+
+		$migrator = $GLOBALS['foogallery_migrate_engine_instance']->get_gallery_migrator();
+		$objects  = $migrator->get_objects_to_migrate();
+		$raw      = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+
+		$this->assertSame( $gallery, $objects[0] );
+		$this->assertSame( $gallery, $raw['galleries'][0] );
+		$this->assertTrue( $this->contains_object( $raw['galleries'] ) );
+	}
+
+	private function create_gallery( FakeSourcePlugin $plugin, int $id, string $title, array $children ): Gallery {
+		$gallery = $plugin->get_gallery(
+			array(
+				'ID'             => $id,
+				'title'          => $title,
+				'data'           => null,
+				'children'       => $children,
+				'children_count' => count( $children ),
+				'settings'       => array(),
+			)
+		);
+
+		return $gallery;
+	}
+
+	private function create_album( FakeSourcePlugin $plugin, int $id, string $title, array $children ): Album {
+		$album = $plugin->get_album(
+			array(
+				'ID'             => $id,
+				'title'          => $title,
+				'data'           => null,
+				'fooalbum_title' => $title,
+			)
+		);
+		$album->children = $children;
+		$album->children_count = count( $children );
+
+		return $album;
+	}
+
+	private function create_image( string $source_url ): Image {
+		$image = new Image();
 		$image->source_url   = $source_url;
 		$image->title        = basename( $source_url );
 		$image->alt          = '';
 		$image->date         = '2026-05-21 12:00:00';
-		$image->should_error = $should_error;
 
 		return $image;
+	}
+
+	private function assertCompactPayload( $payload ): void {
+		$this->assertIsArray( $payload );
+		$this->assertArrayHasKey( '_foogallery_migrate_compact', $payload );
+		$this->assertSame( 1, $payload['_foogallery_migrate_compact'] );
+		$this->assertArrayHasKey( 'items', $payload );
+	}
+
+	private function contains_object( $value ): bool {
+		if ( is_object( $value ) ) {
+			return true;
+		}
+
+		if ( ! is_array( $value ) ) {
+			return false;
+		}
+
+		foreach ( $value as $item ) {
+			if ( $this->contains_object( $item ) ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 }
 
@@ -260,46 +370,5 @@ class FakeSourcePlugin extends Plugin {
 	public function get_gallery_settings( $gallery, $default_settings ) {
 		$default_settings['fake_setting'] = 'yes';
 		return $default_settings;
-	}
-}
-
-class FlowGallery extends Gallery {
-	public function create_new_migrated_object() {
-		if ( 0 === (int) $this->migrated_id ) {
-			$this->migrated_id = FlowIds::next();
-		}
-	}
-}
-
-class FlowAlbum extends Album {
-	public function create_new_migrated_object() {
-		if ( 0 === (int) $this->migrated_id ) {
-			$this->migrated_id = FlowIds::next();
-		}
-	}
-}
-
-class FlowImage extends Image {
-	public $should_error = false;
-
-	public function create_new_migrated_object() {
-		if ( $this->should_error ) {
-			$this->error            = new \WP_Error( 'forced_image_failure', 'Forced image failure.' );
-			$this->migration_status = self::PROGRESS_ERROR;
-			$this->migrated         = true;
-			return;
-		}
-
-		$this->migrated_id = FlowIds::next();
-		$this->migrated    = true;
-	}
-}
-
-class FlowIds {
-	private static $next = 2000;
-
-	public static function next() {
-		self::$next++;
-		return self::$next;
 	}
 }

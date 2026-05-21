@@ -24,6 +24,8 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         protected const KEY_ALBUMS = 'albums';
         protected const KEY_CONTENT = 'block-shortcode';
         protected const KEY_MIGRATED = 'migrated';
+        protected const COMPACT_MARKER = '_foogallery_migrate_compact';
+        protected const COMPACT_VERSION = 1;
         protected const SETTING_OVERRIDE_GALLERY_LAYOUT = 'override_gallery_layout';
         protected const SETTING_PAGE_SIZE = 'page_size';
         protected const SETTING_DEBUG_ENABLED = 'debug_enabled';
@@ -37,7 +39,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
             $settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
 
             if ( isset( $settings ) && is_array( $settings ) && array_key_exists( $name, $settings ) ) {
-                return $settings[ $name ];
+                return $this->hydrate_migrator_setting( $name, $settings[ $name ] );
             }
 
             return $default;
@@ -57,9 +59,435 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 $settings = array();
             }
 
-            $settings[ $name ] = $value;
+            $settings[ $name ] = $this->compact_migrator_setting( $name, $value );
 
             update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $settings, false );
+        }
+
+        /**
+         * Compacts large migration settings before they are persisted.
+         *
+         * @param string $name Setting name.
+         * @param mixed $value Setting value.
+         * @return mixed
+         */
+        protected function compact_migrator_setting( $name, $value ) {
+            if ( $this->is_compact_payload( $value ) ) {
+                return $value;
+            }
+
+            switch ( $name ) {
+                case self::KEY_PLUGINS:
+                    return $this->compact_plugins( $value );
+                case self::KEY_GALLERIES:
+                case self::KEY_ALBUMS:
+                    return $this->compact_migratable_collection( $value, false );
+                case self::KEY_MIGRATED:
+                    return $this->compact_migratable_collection( $value, true );
+            }
+
+            return $value;
+        }
+
+        /**
+         * Hydrates compact migration settings back into runtime objects.
+         *
+         * @param string $name Setting name.
+         * @param mixed $value Setting value.
+         * @return mixed
+         */
+        protected function hydrate_migrator_setting( $name, $value ) {
+            if ( ! $this->is_compact_payload( $value ) ) {
+                return $value;
+            }
+
+            switch ( $name ) {
+                case self::KEY_PLUGINS:
+                    return $this->hydrate_plugins( $value );
+                case self::KEY_GALLERIES:
+                case self::KEY_ALBUMS:
+                    return $this->hydrate_migratable_collection( $value, false );
+                case self::KEY_MIGRATED:
+                    return $this->hydrate_migratable_collection( $value, true );
+            }
+
+            return $value;
+        }
+
+        /**
+         * Builds a compact payload wrapper.
+         *
+         * @param string $type Payload type.
+         * @param array $items Payload items.
+         * @return array
+         */
+        protected function compact_payload( $type, $items ) {
+            return array(
+                self::COMPACT_MARKER => self::COMPACT_VERSION,
+                'type'               => $type,
+                'items'              => $items,
+            );
+        }
+
+        /**
+         * Returns true when a setting uses the compact payload wrapper.
+         *
+         * @param mixed $value Setting value.
+         * @return bool
+         */
+        protected function is_compact_payload( $value ) {
+            return is_array( $value ) && isset( $value[ self::COMPACT_MARKER ] );
+        }
+
+        /**
+         * Compacts detected plugin objects to name/status records.
+         *
+         * @param mixed $plugins Plugin list.
+         * @return mixed
+         */
+        protected function compact_plugins( $plugins ) {
+            if ( ! is_array( $plugins ) ) {
+                return $plugins;
+            }
+
+            $items = array();
+            foreach ( $plugins as $plugin ) {
+                if ( ! is_object( $plugin ) || ! method_exists( $plugin, 'name' ) ) {
+                    continue;
+                }
+
+                $items[] = array(
+                    'name'        => $plugin->name(),
+                    'is_detected' => ! empty( $plugin->is_detected ),
+                );
+            }
+
+            return $this->compact_payload( self::KEY_PLUGINS, $items );
+        }
+
+        /**
+         * Hydrates compact plugin records into the available plugin adapters.
+         *
+         * @param array $payload Compact payload.
+         * @return array
+         */
+        protected function hydrate_plugins( $payload ) {
+            $plugins = array();
+            $items = isset( $payload['items'] ) && is_array( $payload['items'] ) ? $payload['items'] : array();
+
+            foreach ( $items as $item ) {
+                if ( ! is_array( $item ) || empty( $item['name'] ) ) {
+                    continue;
+                }
+
+                $plugin = $this->get_available_plugin_by_name( $item['name'] );
+                if ( false === $plugin ) {
+                    continue;
+                }
+
+                $plugin->is_detected = ! empty( $item['is_detected'] );
+                $plugins[] = $plugin;
+            }
+
+            return $plugins;
+        }
+
+        /**
+         * Returns an available plugin adapter by name.
+         *
+         * @param string $name Plugin name.
+         * @return Plugin|false
+         */
+        protected function get_available_plugin_by_name( $name ) {
+            if ( ! function_exists( 'foogallery_migrate_get_available_plugins' ) ) {
+                return false;
+            }
+
+            foreach ( foogallery_migrate_get_available_plugins() as $plugin ) {
+                if ( is_object( $plugin ) && method_exists( $plugin, 'name' ) && $plugin->name() === $name ) {
+                    return $plugin;
+                }
+            }
+
+            return false;
+        }
+
+        /**
+         * Compacts a list of migratable objects.
+         *
+         * @param mixed $objects Object list.
+         * @param bool $preserve_keys Preserve array keys.
+         * @return mixed
+         */
+        protected function compact_migratable_collection( $objects, $preserve_keys ) {
+            if ( ! is_array( $objects ) ) {
+                return $objects;
+            }
+
+            $items = array();
+            foreach ( $objects as $key => $object ) {
+                $record = $this->compact_migratable_object( $object );
+
+                if ( $preserve_keys ) {
+                    $items[ $key ] = $record;
+                } else {
+                    $items[] = $record;
+                }
+            }
+
+            return $this->compact_payload( 'migratable', $items );
+        }
+
+        /**
+         * Hydrates a compact migratable object collection.
+         *
+         * @param array $payload Compact payload.
+         * @param bool $preserve_keys Preserve array keys.
+         * @return array
+         */
+        protected function hydrate_migratable_collection( $payload, $preserve_keys ) {
+            $objects = array();
+            $items = isset( $payload['items'] ) && is_array( $payload['items'] ) ? $payload['items'] : array();
+
+            foreach ( $items as $key => $record ) {
+                $object = $this->hydrate_migratable_object( $record );
+
+                if ( $preserve_keys ) {
+                    $objects[ $key ] = $object;
+                } else {
+                    $objects[] = $object;
+                }
+            }
+
+            return $objects;
+        }
+
+        /**
+         * Compacts a migratable object into scalar data.
+         *
+         * @param mixed $object Migratable object.
+         * @return mixed
+         */
+        protected function compact_migratable_object( $object ) {
+            if ( ! is_object( $object ) || ! method_exists( $object, 'type' ) ) {
+                return $this->compact_plain_value( $object );
+            }
+
+            $record = array(
+                'object_type' => $object->type(),
+            );
+
+            if ( isset( $object->plugin ) && is_object( $object->plugin ) && method_exists( $object->plugin, 'name' ) ) {
+                $record['plugin_name'] = $object->plugin->name();
+            }
+
+            $properties = array(
+                'ID',
+                'source_url',
+                'slug',
+                'title',
+                'caption',
+                'description',
+                'alt',
+                'date',
+                'migration_status',
+                'migrated',
+                'migrated_child_count',
+                'progress',
+                'part_of_migration',
+                'migrated_id',
+                'migrated_title',
+                'children_count',
+            );
+
+            foreach ( $properties as $property ) {
+                if ( isset( $object->$property ) || property_exists( $object, $property ) ) {
+                    $value = $object->$property;
+                    if ( is_scalar( $value ) || null === $value ) {
+                        $record[ $property ] = $value;
+                    }
+                }
+            }
+
+            if ( isset( $object->settings ) && ! empty( $object->settings ) ) {
+                $record['settings'] = $this->compact_plain_value( $object->settings );
+            }
+
+            if ( isset( $object->children ) && is_array( $object->children ) && count( $object->children ) > 0 ) {
+                $children = array();
+                foreach ( $object->children as $child ) {
+                    $children[] = $this->compact_migratable_object( $child );
+                }
+                $record['children'] = $children;
+            }
+
+            $error = false;
+            if ( method_exists( $object, 'has_error' ) && $object->has_error() && method_exists( $object, 'get_error' ) ) {
+                $error = $object->get_error();
+            } else if ( isset( $object->error ) && false !== $object->error ) {
+                $error = $object->error;
+            }
+
+            if ( false !== $error ) {
+                $record['error'] = $this->compact_error( $error );
+            }
+
+            return $record;
+        }
+
+        /**
+         * Hydrates a compact migratable record into a runtime object.
+         *
+         * @param mixed $record Compact record.
+         * @return mixed
+         */
+        protected function hydrate_migratable_object( $record ) {
+            if ( ! is_array( $record ) || empty( $record['object_type'] ) ) {
+                return $record;
+            }
+
+            switch ( $record['object_type'] ) {
+                case 'gallery':
+                    $plugin = ! empty( $record['plugin_name'] ) ? $this->get_available_plugin_by_name( $record['plugin_name'] ) : false;
+                    if ( false === $plugin ) {
+                        return $record;
+                    }
+                    $object = new Objects\Gallery( $plugin );
+                    break;
+                case 'album':
+                    $plugin = ! empty( $record['plugin_name'] ) ? $this->get_available_plugin_by_name( $record['plugin_name'] ) : false;
+                    if ( false === $plugin ) {
+                        return $record;
+                    }
+                    $object = new Objects\Album( $plugin );
+                    break;
+                case 'image':
+                    $object = new Objects\Image();
+                    break;
+                default:
+                    return $record;
+            }
+
+            $properties = array(
+                'ID',
+                'source_url',
+                'slug',
+                'title',
+                'caption',
+                'description',
+                'alt',
+                'date',
+                'migration_status',
+                'migrated',
+                'migrated_child_count',
+                'progress',
+                'part_of_migration',
+                'migrated_id',
+                'migrated_title',
+                'children_count',
+            );
+
+            foreach ( $properties as $property ) {
+                if ( array_key_exists( $property, $record ) ) {
+                    $object->$property = $record[ $property ];
+                }
+            }
+
+            if ( array_key_exists( 'settings', $record ) ) {
+                $object->settings = $record['settings'];
+            }
+
+            if ( isset( $record['children'] ) && is_array( $record['children'] ) ) {
+                $children = array();
+                foreach ( $record['children'] as $child_record ) {
+                    $children[] = $this->hydrate_migratable_object( $child_record );
+                }
+                $object->children = $children;
+
+                if ( ! array_key_exists( 'children_count', $record ) ) {
+                    $object->children_count = count( $children );
+                }
+            }
+
+            if ( isset( $record['error'] ) ) {
+                $object->error = $this->hydrate_error( $record['error'] );
+            }
+
+            return $object;
+        }
+
+        /**
+         * Compacts a plain value recursively without preserving PHP objects.
+         *
+         * @param mixed $value Value to compact.
+         * @return mixed
+         */
+        protected function compact_plain_value( $value ) {
+            if ( is_scalar( $value ) || null === $value ) {
+                return $value;
+            }
+
+            if ( is_object( $value ) ) {
+                $value = get_object_vars( $value );
+            }
+
+            if ( is_array( $value ) ) {
+                $compact = array();
+                foreach ( $value as $key => $item ) {
+                    $compact[ $key ] = $this->compact_plain_value( $item );
+                }
+                return $compact;
+            }
+
+            return null;
+        }
+
+        /**
+         * Compacts an error value to code/message data.
+         *
+         * @param mixed $error Error value.
+         * @return array
+         */
+        protected function compact_error( $error ) {
+            if ( is_wp_error( $error ) ) {
+                return array(
+                    'code'    => $error->get_error_code(),
+                    'message' => $error->get_error_message(),
+                );
+            }
+
+            if ( is_string( $error ) ) {
+                return array(
+                    'code'    => '',
+                    'message' => $error,
+                );
+            }
+
+            return array(
+                'code'    => '',
+                'message' => __( 'Unknown Error', 'foogallery-migrate' ),
+            );
+        }
+
+        /**
+         * Hydrates compact error data.
+         *
+         * @param mixed $error Error data.
+         * @return mixed
+         */
+        protected function hydrate_error( $error ) {
+            if ( ! is_array( $error ) ) {
+                return $error;
+            }
+
+            $code = isset( $error['code'] ) ? $error['code'] : '';
+            $message = isset( $error['message'] ) ? $error['message'] : __( 'Unknown Error', 'foogallery-migrate' );
+
+            if ( class_exists( 'WP_Error' ) ) {
+                return new \WP_Error( $code, $message );
+            }
+
+            return $message;
         }
 
         /**
