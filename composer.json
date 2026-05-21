@@ -24,7 +24,13 @@
             "composer/installers": true
         }
     },
+    "scripts": {
+        "test": "phpunit"
+    },
     "require": {
         "composer/installers": "^2.1"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^9.6"
     }
 }
