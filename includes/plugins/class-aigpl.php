@@ -25,6 +25,39 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Aigpl' ) ) {
         const META_GALLERY_IMAGES = '_aigpl_gallery_imgs';
 
         /**
+         * Request-level lookup of imported attachments referenced by AIGPL galleries.
+         *
+         * @var array<int,array>
+         */
+        private $attachment_lookup = array();
+
+        /**
+         * Whether the request-level attachment lookup has been primed.
+         *
+         * @var bool
+         */
+        private $attachment_lookup_primed = false;
+
+        /**
+         * Keep request-only caches out of the persisted migration option.
+         *
+         * @return array
+         */
+        public function __sleep() {
+            return array( 'is_detected' );
+        }
+
+        /**
+         * Reinitialize request-only caches after loading from the migration option.
+         *
+         * @return void
+         */
+        public function __wakeup() {
+            $this->attachment_lookup = array();
+            $this->attachment_lookup_primed = false;
+        }
+
+        /**
          * Name of the plugin.
          *
          * @return string
@@ -39,13 +72,22 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Aigpl' ) ) {
          * @return bool
          */
         function detect() {
-            foreach ( $this->get_aigpl_galleries() as $aigpl_gallery ) {
-                if ( ! empty( $this->get_gallery_image_ids( $aigpl_gallery->ID ) ) ) {
-                    return true;
-                }
-            }
+            global $wpdb;
 
-            return false;
+            return (bool) $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT 1
+                    FROM {$wpdb->posts} p
+                    INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id
+                    WHERE p.post_type = %s
+                    AND p.post_status = 'publish'
+                    AND pm.meta_key = %s
+                    AND pm.meta_value <> ''
+                    LIMIT 1",
+                    self::POST_TYPE,
+                    self::META_GALLERY_IMAGES
+                )
+            );
         }
 
         /**
@@ -55,8 +97,11 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Aigpl' ) ) {
          */
         function find_galleries() {
             $galleries = array();
+            $aigpl_galleries = $this->get_aigpl_galleries();
 
-            foreach ( $this->get_aigpl_galleries() as $aigpl_gallery ) {
+            $this->prime_attachment_lookup( $aigpl_galleries );
+
+            foreach ( $aigpl_galleries as $aigpl_gallery ) {
                 $gallery = $this->get_gallery_from_post( $aigpl_gallery );
 
                 if ( false !== $gallery ) {
@@ -74,8 +119,11 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Aigpl' ) ) {
          */
         function find_albums() {
             $albums = array();
+            $aigpl_galleries = $this->get_aigpl_galleries();
 
-            foreach ( $this->get_aigpl_galleries() as $aigpl_gallery ) {
+            $this->prime_attachment_lookup( $aigpl_galleries );
+
+            foreach ( $aigpl_galleries as $aigpl_gallery ) {
                 $gallery = $this->get_gallery_from_post( $aigpl_gallery );
 
                 if ( false === $gallery ) {
@@ -85,7 +133,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Aigpl' ) ) {
                 $data = array(
                     'ID'             => (int) $aigpl_gallery->ID,
                     'title'          => $aigpl_gallery->post_title,
-                    'data'           => $aigpl_gallery,
+                    'data'           => null,
                     'fooalbum_title' => $aigpl_gallery->post_title,
                 );
 
@@ -215,21 +263,43 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Aigpl' ) ) {
          * @return object|false
          */
         private function get_gallery_from_post( $aigpl_gallery ) {
-            $images = $this->find_images( $aigpl_gallery->ID );
+            $image_count = $this->get_valid_gallery_image_count( $aigpl_gallery->ID );
 
-            if ( empty( $images ) ) {
+            if ( $image_count < 1 ) {
                 return false;
             }
 
             $data = array(
-                'ID'       => (int) $aigpl_gallery->ID,
-                'title'    => $aigpl_gallery->post_title,
-                'data'     => $aigpl_gallery,
-                'children' => $images,
-                'settings' => array(),
+                'ID'             => (int) $aigpl_gallery->ID,
+                'title'          => $aigpl_gallery->post_title,
+                'data'           => null,
+                'children'       => array(),
+                'children_count' => $image_count,
+                'settings'       => array(),
             );
 
             return $this->get_gallery( $data );
+        }
+
+        /**
+         * Load deferred child images for a gallery when it is migrated.
+         *
+         * @param object $object Migratable object.
+         * @return array
+         */
+        public function load_object_children( $object ) {
+            if ( ! is_object( $object ) || 'gallery' !== $object->type() ) {
+                return array();
+            }
+
+            $gallery = get_post( absint( $object->ID ) );
+            if ( ! $gallery || self::POST_TYPE !== $gallery->post_type ) {
+                return array();
+            }
+
+            $this->prime_attachment_lookup( array( $gallery ) );
+
+            return $this->find_images( $object->ID );
         }
 
         /**
@@ -243,33 +313,180 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Aigpl' ) ) {
             $aigpl_images = $this->get_gallery_image_ids( $gallery_id );
 
             foreach ( $aigpl_images as $attachment_id ) {
-                $attachment = get_post( $attachment_id );
+                $attachment = $this->get_cached_attachment_data( $attachment_id );
 
-                if ( ! $attachment || 'attachment' !== $attachment->post_type ) {
-                    continue;
-                }
-
-                $source_url = wp_get_attachment_url( $attachment_id );
-
-                if ( empty( $source_url ) ) {
+                if ( ! $attachment || empty( $attachment['source_url'] ) ) {
                     continue;
                 }
 
                 $data = array(
-                    'source_url'  => $source_url,
-                    'slug'        => $attachment->post_name,
-                    'title'       => $attachment->post_title,
-                    'caption'     => $attachment->post_excerpt,
-                    'description' => $attachment->post_content,
-                    'alt'         => get_post_meta( $attachment_id, '_wp_attachment_image_alt', true ),
-                    'date'        => $attachment->post_date,
-                    'data'        => $attachment,
+                    'source_url'  => $attachment['source_url'],
+                    'slug'        => $attachment['post_name'],
+                    'title'       => $attachment['post_title'],
+                    'caption'     => $attachment['post_excerpt'],
+                    'description' => $attachment['post_content'],
+                    'alt'         => $attachment['alt'],
+                    'date'        => $attachment['post_date'],
+                    'data'        => null,
                 );
 
                 $images[] = $this->get_image( $data );
             }
 
             return $images;
+        }
+
+        /**
+         * Counts valid imported attachments for an AIGPL gallery.
+         *
+         * @param int $gallery_id AIGPL gallery post ID.
+         * @return int
+         */
+        private function get_valid_gallery_image_count( $gallery_id ) {
+            $count = 0;
+
+            foreach ( $this->get_gallery_image_ids( $gallery_id ) as $attachment_id ) {
+                if ( $this->get_cached_attachment_data( $attachment_id ) ) {
+                    $count++;
+                }
+            }
+
+            return $count;
+        }
+
+        /**
+         * Prime gallery image metadata and referenced attachments in bulk.
+         *
+         * @param array $aigpl_galleries AIGPL gallery posts.
+         * @return void
+         */
+        private function prime_attachment_lookup( $aigpl_galleries ) {
+            global $wpdb;
+
+            $this->attachment_lookup = array();
+            $this->attachment_lookup_primed = true;
+
+            if ( empty( $aigpl_galleries ) ) {
+                return;
+            }
+
+            $gallery_ids = array_map( 'intval', wp_list_pluck( $aigpl_galleries, 'ID' ) );
+            update_meta_cache( 'post', $gallery_ids );
+
+            $attachment_ids = array();
+            foreach ( $gallery_ids as $gallery_id ) {
+                $attachment_ids = array_merge( $attachment_ids, $this->get_gallery_image_ids( $gallery_id ) );
+            }
+
+            $attachment_ids = array_values( array_unique( array_filter( array_map( 'absint', $attachment_ids ) ) ) );
+            if ( empty( $attachment_ids ) ) {
+                return;
+            }
+
+            foreach ( array_chunk( $attachment_ids, 1000 ) as $chunk ) {
+                $placeholders = implode( ',', array_fill( 0, count( $chunk ), '%d' ) );
+                $query_args = array_merge(
+                    array(
+                        '_wp_attached_file',
+                        '_wp_attachment_image_alt',
+                    ),
+                    $chunk
+                );
+
+                $attachments = $wpdb->get_results(
+                    $wpdb->prepare(
+                        "SELECT
+                            p.ID,
+                            p.guid,
+                            p.post_name,
+                            p.post_title,
+                            p.post_excerpt,
+                            p.post_content,
+                            p.post_date,
+                            file_meta.meta_value AS attached_file,
+                            alt_meta.meta_value AS alt
+                        FROM {$wpdb->posts} p
+                        LEFT JOIN {$wpdb->postmeta} file_meta
+                            ON file_meta.post_id = p.ID
+                            AND file_meta.meta_key = %s
+                        LEFT JOIN {$wpdb->postmeta} alt_meta
+                            ON alt_meta.post_id = p.ID
+                            AND alt_meta.meta_key = %s
+                        WHERE p.post_type = 'attachment'
+                        AND p.ID IN ($placeholders)",
+                        $query_args
+                    ),
+                    ARRAY_A
+                );
+
+                foreach ( $attachments as $attachment ) {
+                    $attachment['source_url'] = $this->build_attachment_url( $attachment );
+                    $this->attachment_lookup[ (int) $attachment['ID'] ] = $attachment;
+                }
+            }
+        }
+
+        /**
+         * Get previously primed attachment data, falling back for direct calls/tests.
+         *
+         * @param int $attachment_id Attachment ID.
+         * @return array|null
+         */
+        private function get_cached_attachment_data( $attachment_id ) {
+            $attachment_id = absint( $attachment_id );
+
+            if ( $attachment_id > 0 && isset( $this->attachment_lookup[ $attachment_id ] ) ) {
+                return $this->attachment_lookup[ $attachment_id ];
+            }
+
+            if ( $this->attachment_lookup_primed ) {
+                return null;
+            }
+
+            $attachment = $attachment_id > 0 ? get_post( $attachment_id ) : null;
+            if ( ! $attachment || 'attachment' !== $attachment->post_type ) {
+                return null;
+            }
+
+            return array(
+                'ID'           => (int) $attachment->ID,
+                'guid'         => $attachment->guid,
+                'post_name'    => $attachment->post_name,
+                'post_title'   => $attachment->post_title,
+                'post_excerpt' => $attachment->post_excerpt,
+                'post_content' => $attachment->post_content,
+                'post_date'    => $attachment->post_date,
+                'alt'          => get_post_meta( $attachment_id, '_wp_attachment_image_alt', true ),
+                'source_url'   => wp_get_attachment_url( $attachment_id ),
+            );
+        }
+
+        /**
+         * Build an attachment URL from minimal database fields.
+         *
+         * @param array $attachment Attachment row.
+         * @return string
+         */
+        private function build_attachment_url( $attachment ) {
+            $file = isset( $attachment['attached_file'] ) ? (string) $attachment['attached_file'] : '';
+
+            if ( '' === $file ) {
+                return isset( $attachment['guid'] ) ? (string) $attachment['guid'] : '';
+            }
+
+            if ( preg_match( '|^https?://|i', $file ) ) {
+                return $file;
+            }
+
+            $uploads = wp_get_upload_dir();
+            $file = wp_normalize_path( $file );
+            $uploads_basedir = wp_normalize_path( trailingslashit( $uploads['basedir'] ) );
+
+            if ( 0 === strpos( $file, $uploads_basedir ) ) {
+                $file = ltrim( substr( $file, strlen( $uploads_basedir ) ), '/' );
+            }
+
+            return trailingslashit( $uploads['baseurl'] ) . ltrim( $file, '/' );
         }
 
         /**

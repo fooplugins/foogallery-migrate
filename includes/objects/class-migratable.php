@@ -41,6 +41,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
             $this->migrated_id = 0;
             $this->migrated_title = '';
             $this->children = array();
+            $this->children_count = 0;
         }
 
         /**
@@ -84,6 +85,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
          */
         function migrate_next_child() {
             if ( !$this->has_children() ) { return; }
+            $this->ensure_children_loaded();
             if ( $this->migrated_child_count < $this->get_children_count() && $this->migrated_id > 0 ) {
                 foreach ( $this->get_children() as $child ) {
                     if ( !$child->migrated ) {
@@ -109,11 +111,41 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
         function get_children_count() {
             if ( $this->has_children() ) {
                 $children = $this->get_children();
-                if ( is_array( $children ) ) {
+                if ( is_array( $children ) && count( $children ) > 0 ) {
                     return count( $children );
+                }
+                if ( isset( $this->children_count ) ) {
+                    return absint( $this->children_count );
                 }
             }
             return 0;
+        }
+
+        /**
+         * Loads child objects on demand when a plugin supports deferred children.
+         *
+         * @return void
+         */
+        function ensure_children_loaded() {
+            if ( ! $this->has_children() ) {
+                return;
+            }
+
+            if ( is_array( $this->children ) && count( $this->children ) > 0 ) {
+                return;
+            }
+
+            if ( isset( $this->children_count ) && absint( $this->children_count ) < 1 ) {
+                return;
+            }
+
+            if ( isset( $this->plugin ) && method_exists( $this->plugin, 'load_object_children' ) ) {
+                $children = $this->plugin->load_object_children( $this );
+                if ( is_array( $children ) ) {
+                    $this->children = $children;
+                    $this->children_count = count( $children );
+                }
+            }
         }
 
         /**
@@ -143,6 +175,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
             }
 
             if ( !$this->migrated ) {
+                if ( $this->has_children() ) {
+                    $this->ensure_children_loaded();
+                }
 
                 if ( $this->has_children() && $this->get_children_count() === 0 ) {
                     $this->migration_status = self::PROGRESS_NOTHING;
