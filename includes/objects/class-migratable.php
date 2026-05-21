@@ -79,6 +79,15 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
         }
 
         /**
+         * Returns how many child objects can be migrated in one migration turn.
+         *
+         * @return int
+         */
+        function get_children_per_turn() {
+            return 1;
+        }
+
+        /**
          * Migrates the next child. Returns true if successful.
          *
          * @return void
@@ -87,13 +96,20 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
             if ( !$this->has_children() ) { return; }
             $this->ensure_children_loaded();
             if ( $this->migrated_child_count < $this->get_children_count() && $this->migrated_id > 0 ) {
+                $children_attempted = 0;
+                $children_per_turn = max( 1, absint( $this->get_children_per_turn() ) );
+
                 foreach ( $this->get_children() as $child ) {
                     if ( !$child->migrated ) {
                         $child->migrate();
                         if ( $child->migrated ) {
                             $this->migrated_child_count++;
                         }
-                        break;
+                        $children_attempted++;
+
+                        if ( $children_attempted >= $children_per_turn ) {
+                            break;
+                        }
                     }
                 }
             } 

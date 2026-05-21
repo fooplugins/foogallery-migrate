@@ -28,6 +28,15 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Gallery' ) ) {
             return 'images';
         }
 
+        /**
+         * Returns how many images can be migrated in one migration turn.
+         *
+         * @return int
+         */
+        function get_children_per_turn() {
+            return foogallery_migrate_migrator_instance()->get_images_per_turn();
+        }
+
         function create_new_migrated_object() {
             // Create an empty foogallery
             $foogallery_args = array(

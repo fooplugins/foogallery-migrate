@@ -110,6 +110,15 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         }
 
         /**
+         * Gets the number of images to import per migration AJAX turn.
+         *
+         * @return int
+         */
+        public function get_images_per_turn() {
+            return $this->settings()->get_images_per_turn();
+        }
+
+        /**
          * Returns true if migration debug output is enabled.
          *
          * @return bool

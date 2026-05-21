@@ -44,6 +44,12 @@ class MigrationFlowTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
 
 		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->save_settings(
+			array(
+				'images_per_turn' => 1,
+			)
+		);
+
 		$this->assertSame( array( $plugin ), $engine->run_detection() );
 		$this->assertTrue( $plugin->is_detected );
 
@@ -83,6 +89,50 @@ class MigrationFlowTest extends TestCase {
 		$summary = $engine->get_migrated_objects_summary();
 		$this->assertSame( 1, $summary['gallery']['count'] );
 		$this->assertSame( 2, $summary['image']['count'] );
+	}
+
+	public function test_gallery_migration_imports_configured_images_per_turn(): void {
+		$plugin = new FakeSourcePlugin();
+		$images = array();
+
+		for ( $i = 1; $i <= 6; $i++ ) {
+			$images[] = $this->create_image( 'https://example.test/batch-' . $i . '.jpg' );
+		}
+
+		$gallery = $this->create_gallery( $plugin, 15, 'Batch Gallery', $images );
+		$plugin->galleries = array( $gallery );
+
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$this->assertSame( 5, $engine->get_images_per_turn() );
+		$engine->run_detection();
+
+		$migrator = $engine->get_gallery_migrator();
+		$objects = $migrator->get_objects_to_migrate( true );
+		$uid = $objects[0]->unique_identifier();
+
+		$migrator->queue_objects_for_migration(
+			array(
+				$uid => array(
+					'title' => 'Migrated Batch Gallery',
+				),
+			)
+		);
+
+		$migrator->migrate();
+
+		$started = $migrator->get_objects_to_migrate();
+		$this->assertFalse( $started[0]->migrated );
+		$this->assertSame( Migratable::PROGRESS_STARTED, $started[0]->migration_status );
+		$this->assertSame( 5, $started[0]->migrated_child_count );
+
+		$migrator->migrate();
+
+		$completed = $migrator->get_objects_to_migrate();
+		$this->assertTrue( $completed[0]->migrated );
+		$this->assertSame( Migratable::PROGRESS_COMPLETED, $completed[0]->migration_status );
+		$this->assertSame( 6, $completed[0]->migrated_child_count );
 	}
 
 	public function test_album_migration_migrates_nested_gallery_flow(): void {
@@ -294,6 +344,7 @@ class MigrationFlowTest extends TestCase {
 
 		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
 
+		$this->assertSame( 5, $engine->get_images_per_turn() );
 		$this->assertSame(
 			array(
 				'default' => 'Default',
@@ -306,25 +357,37 @@ class MigrationFlowTest extends TestCase {
 			array(
 				'override_gallery_layout' => 'masonry',
 				'page_size' => '50',
+				'images_per_turn' => '12',
 				'debug_enabled' => true,
 			)
 		);
 
 		$this->assertSame( 'masonry', $engine->get_override_gallery_template() );
 		$this->assertSame( 50, $engine->get_page_size() );
+		$this->assertSame( 12, $engine->get_images_per_turn() );
 		$this->assertTrue( $engine->is_debug_enabled() );
 
 		$engine->save_settings(
 			array(
 				'override_gallery_layout' => 'missing-template',
 				'page_size' => array(),
+				'images_per_turn' => array(),
 				'debug_enabled' => false,
 			)
 		);
 
 		$this->assertSame( '', $engine->get_override_gallery_template() );
 		$this->assertSame( 50, $engine->get_page_size() );
+		$this->assertSame( 12, $engine->get_images_per_turn() );
 		$this->assertFalse( $engine->is_debug_enabled() );
+
+		$engine->save_settings(
+			array(
+				'images_per_turn' => 0,
+			)
+		);
+
+		$this->assertSame( 1, $engine->get_images_per_turn() );
 	}
 
 	private function create_gallery( FakeSourcePlugin $plugin, int $id, string $title, array $children ): Gallery {

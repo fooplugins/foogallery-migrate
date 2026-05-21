@@ -28,6 +28,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		protected const COMPACT_VERSION = 1;
 		protected const SETTING_OVERRIDE_GALLERY_LAYOUT = 'override_gallery_layout';
 		protected const SETTING_PAGE_SIZE = 'page_size';
+		protected const SETTING_IMAGES_PER_TURN = 'images_per_turn';
 		protected const SETTING_DEBUG_ENABLED = 'debug_enabled';
 
 		/**
@@ -93,6 +94,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 			$defaults = array(
 				self::SETTING_OVERRIDE_GALLERY_LAYOUT => '',
 				self::SETTING_PAGE_SIZE => 20,
+				self::SETTING_IMAGES_PER_TURN => 5,
 				self::SETTING_DEBUG_ENABLED => function_exists( 'foogallery_is_debug' ) && foogallery_is_debug(),
 			);
 
@@ -105,6 +107,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 			$settings = array_merge( $defaults, $settings );
 			$settings[ self::SETTING_OVERRIDE_GALLERY_LAYOUT ] = $this->sanitize_override_gallery_layout( $settings[ self::SETTING_OVERRIDE_GALLERY_LAYOUT ] );
 			$settings[ self::SETTING_PAGE_SIZE ] = is_scalar( $settings[ self::SETTING_PAGE_SIZE ] ) ? absint( $settings[ self::SETTING_PAGE_SIZE ] ) : $defaults[ self::SETTING_PAGE_SIZE ];
+			$settings[ self::SETTING_IMAGES_PER_TURN ] = is_scalar( $settings[ self::SETTING_IMAGES_PER_TURN ] ) ? $this->sanitize_positive_int( $settings[ self::SETTING_IMAGES_PER_TURN ] ) : $defaults[ self::SETTING_IMAGES_PER_TURN ];
 			$settings[ self::SETTING_DEBUG_ENABLED ] = ! empty( $settings[ self::SETTING_DEBUG_ENABLED ] );
 
 			return $settings;
@@ -126,6 +129,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 			$settings = array_merge( $current_settings, $settings );
 			$settings[ self::SETTING_OVERRIDE_GALLERY_LAYOUT ] = $this->sanitize_override_gallery_layout( $settings[ self::SETTING_OVERRIDE_GALLERY_LAYOUT ] );
 			$settings[ self::SETTING_PAGE_SIZE ] = is_scalar( $settings[ self::SETTING_PAGE_SIZE ] ) ? absint( $settings[ self::SETTING_PAGE_SIZE ] ) : $current_settings[ self::SETTING_PAGE_SIZE ];
+			$settings[ self::SETTING_IMAGES_PER_TURN ] = is_scalar( $settings[ self::SETTING_IMAGES_PER_TURN ] ) ? $this->sanitize_positive_int( $settings[ self::SETTING_IMAGES_PER_TURN ] ) : $current_settings[ self::SETTING_IMAGES_PER_TURN ];
 			$settings[ self::SETTING_DEBUG_ENABLED ] = ! empty( $settings[ self::SETTING_DEBUG_ENABLED ] );
 
 			update_option( FOOGALLERY_MIGRATE_OPTION_SETTINGS, $settings, false );
@@ -175,6 +179,17 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 			$settings = $this->get_settings();
 
 			return absint( apply_filters( 'foogallery_migrate_page_size', $settings[ self::SETTING_PAGE_SIZE ] ) );
+		}
+
+		/**
+		 * Gets the number of images to import per migration AJAX turn.
+		 *
+		 * @return int
+		 */
+		public function get_images_per_turn() {
+			$settings = $this->get_settings();
+
+			return $this->sanitize_positive_int( apply_filters( 'foogallery_migrate_images_per_turn', $settings[ self::SETTING_IMAGES_PER_TURN ] ) );
 		}
 
 		/**
@@ -634,6 +649,20 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 			$templates = $this->get_available_gallery_templates();
 
 			return array_key_exists( $value, $templates ) ? $value : '';
+		}
+
+		/**
+		 * Sanitizes a positive integer setting.
+		 *
+		 * @param mixed $value Setting value.
+		 * @return int
+		 */
+		protected function sanitize_positive_int( $value ) {
+			if ( ! is_scalar( $value ) ) {
+				return 1;
+			}
+
+			return max( 1, absint( $value ) );
 		}
 	}
 }

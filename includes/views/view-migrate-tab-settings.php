@@ -38,6 +38,15 @@ $gallery_templates = $migrator->get_available_gallery_templates();
 				</td>
 			</tr>
 			<tr>
+				<th scope="row">
+					<label for="foogallery_migrate_images_per_turn"><?php esc_html_e( 'Images Per Turn', 'foogallery-migrate' ); ?></label>
+				</th>
+				<td>
+					<input id="foogallery_migrate_images_per_turn" name="images_per_turn" type="number" min="1" step="1" class="small-text" value="<?php echo esc_attr( $settings['images_per_turn'] ); ?>">
+					<p class="description"><?php esc_html_e( 'The number of images to import during each migration AJAX request.', 'foogallery-migrate' ); ?></p>
+				</td>
+			</tr>
+			<tr>
 				<th scope="row"><?php esc_html_e( 'Debug Enabled', 'foogallery-migrate' ); ?></th>
 				<td>
 					<label for="foogallery_migrate_debug_enabled">
