@@ -86,6 +86,9 @@ Update now to get all the latest features, bug fixes and improvements!
 * Optimized Album and Image Gallery Plus Lightbox discovery for large migrations by bulk-loading attachment metadata and deferring gallery image child loading.
 * Updated Album and Image Gallery Plus Lightbox album migration to create FooGallery albums from aigpl_cat terms and gallery relationships instead of one-gallery album wrappers.
 * Moved migrator settings and migration state storage logic into a dedicated settings class.
+* Added an Images Per Turn setting to import multiple images during each migration AJAX request.
+* Added gallery and album totals below their migration tables.
+* Added preflight reporting for selected galleries, albums, child galleries and images before migration starts.
 
 = 1.7 =
 * Added a Settings tab to the migration Page.
