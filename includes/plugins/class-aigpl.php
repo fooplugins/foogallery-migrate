@@ -22,6 +22,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Aigpl' ) ) {
     class Aigpl extends Plugin {
 
         const POST_TYPE = 'aigpl_gallery';
+        const TAXONOMY = 'aigpl_cat';
         const META_GALLERY_IMAGES = '_aigpl_gallery_imgs';
 
         /**
@@ -115,10 +116,16 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Aigpl' ) ) {
         /**
          * Find all AIGPL albums.
          *
+         * AIGPL stores gallery images on aigpl_gallery posts and uses aigpl_cat
+         * terms as album/category groupings for album shortcodes.
+         *
          * @return array
          */
         function find_albums() {
             $albums = array();
+            $albums_by_term_id = array();
+            $seen_children = array();
+            $galleries_by_id = array();
             $aigpl_galleries = $this->get_aigpl_galleries();
 
             $this->prime_attachment_lookup( $aigpl_galleries );
@@ -126,21 +133,58 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Aigpl' ) ) {
             foreach ( $aigpl_galleries as $aigpl_gallery ) {
                 $gallery = $this->get_gallery_from_post( $aigpl_gallery );
 
-                if ( false === $gallery ) {
+                if ( false !== $gallery ) {
+                    $galleries_by_id[ (int) $aigpl_gallery->ID ] = $gallery;
+                }
+            }
+
+            if ( empty( $galleries_by_id ) ) {
+                return $albums;
+            }
+
+            $category_gallery_rows = $this->get_aigpl_category_gallery_rows();
+            if ( ! is_array( $category_gallery_rows ) ) {
+                return $albums;
+            }
+
+            foreach ( $category_gallery_rows as $row ) {
+                $term_id = isset( $row->term_id ) ? (int) $row->term_id : 0;
+                $gallery_id = isset( $row->gallery_id ) ? (int) $row->gallery_id : 0;
+
+                if ( $term_id < 1 || ! isset( $galleries_by_id[ $gallery_id ] ) ) {
                     continue;
                 }
 
-                $data = array(
-                    'ID'             => (int) $aigpl_gallery->ID,
-                    'title'          => $aigpl_gallery->post_title,
-                    'data'           => null,
-                    'fooalbum_title' => $aigpl_gallery->post_title,
-                );
+                if ( ! isset( $albums_by_term_id[ $term_id ] ) ) {
+                    $title = isset( $row->name ) ? $row->name : '';
+                    $data = array(
+                        'ID'             => $term_id,
+                        'title'          => $title,
+                        'data'           => null,
+                        'fooalbum_title' => $title,
+                    );
 
-                $album = $this->get_album( $data );
-                $album->children = array( $gallery );
+                    $album = $this->get_album( $data );
+                    $album->children = array();
+                    $album->children_count = 0;
 
-                $albums[] = $album;
+                    $albums_by_term_id[ $term_id ] = $album;
+                    $seen_children[ $term_id ] = array();
+                }
+
+                if ( isset( $seen_children[ $term_id ][ $gallery_id ] ) ) {
+                    continue;
+                }
+
+                $albums_by_term_id[ $term_id ]->children[] = $galleries_by_id[ $gallery_id ];
+                $albums_by_term_id[ $term_id ]->children_count = count( $albums_by_term_id[ $term_id ]->children );
+                $seen_children[ $term_id ][ $gallery_id ] = true;
+            }
+
+            foreach ( $albums_by_term_id as $album ) {
+                if ( $album->children_count > 0 ) {
+                    $albums[] = $album;
+                }
             }
 
             return $albums;
@@ -188,14 +232,15 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Aigpl' ) ) {
         /**
          * Returns shortcode regex patterns for AIGPL.
          *
-         * Only single explicit numeric IDs are matched.
+         * Only single explicit numeric IDs or category IDs are matched.
          *
          * @return array
          */
         function get_shortcode_patterns() {
             return array(
                 '/\[(?:aigpl-gallery-slider|aigpl-gallery)(?=[\s\]])[^\]]*\bid\s*=\s*(?:"(\d+)"|\'(\d+)\'|(\d+)(?=[\s\]]))[^\]]*\]/i',
-                '/\[(?:aigpl-gallery-album-slider|aigpl-gallery-album)(?=[\s\]])[^\]]*\bid\s*=\s*(?:"(\d+)"|\'(\d+)\'|(\d+)(?=[\s\]]))[^\]]*\]/i',
+                '/\[(?:aigpl-gallery-album-slider|aigpl-gallery-album)(?=[\s\]])(?![^\]]*\bcategory\s*=)[^\]]*\bid\s*=\s*(?:"(\d+)"|\'(\d+)\'|(\d+)(?=[\s\]]))[^\]]*\]/i',
+                '/\[(?:aigpl-gallery-album-slider|aigpl-gallery-album)(?=[\s\]])[^\]]*\bcategory\s*=\s*(?:"(\d+)"|\'(\d+)\'|(\d+)(?=[\s\]]))[^\]]*\]/i',
             );
         }
 
@@ -221,11 +266,13 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Aigpl' ) ) {
          * @return string
          */
         function get_content_object_type( $original_content, $block_name = '' ) {
-            if (
+            $is_album_content = (
                 'aigpl/gallery-album' === $block_name ||
                 'aigpl/gallery-album-slider' === $block_name ||
                 preg_match( '/\[(?:aigpl-gallery-album-slider|aigpl-gallery-album)(?=[\s\]])/i', $original_content )
-            ) {
+            );
+
+            if ( $is_album_content && $this->content_references_category( $original_content ) ) {
                 return 'album';
             }
 
@@ -254,6 +301,51 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Aigpl' ) ) {
                     self::META_GALLERY_IMAGES
                 )
             );
+        }
+
+        /**
+         * Return AIGPL category-to-gallery relationship rows.
+         *
+         * @return array
+         */
+        private function get_aigpl_category_gallery_rows() {
+            global $wpdb;
+
+            return $wpdb->get_results(
+                $wpdb->prepare(
+                    "SELECT DISTINCT
+                        t.term_id,
+                        t.name,
+                        t.slug,
+                        tt.description,
+                        tt.parent,
+                        tr.object_id AS gallery_id
+                    FROM {$wpdb->terms} t
+                    INNER JOIN {$wpdb->term_taxonomy} tt ON t.term_id = tt.term_id
+                    INNER JOIN {$wpdb->term_relationships} tr ON tt.term_taxonomy_id = tr.term_taxonomy_id
+                    INNER JOIN {$wpdb->posts} p ON p.ID = tr.object_id
+                    INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id
+                    WHERE tt.taxonomy = %s
+                    AND p.post_type = %s
+                    AND p.post_status = 'publish'
+                    AND pm.meta_key = %s
+                    AND pm.meta_value <> ''
+                    ORDER BY t.name ASC, t.term_id ASC, p.post_date DESC, p.ID DESC",
+                    self::TAXONOMY,
+                    self::POST_TYPE,
+                    self::META_GALLERY_IMAGES
+                )
+            );
+        }
+
+        /**
+         * Returns true when detected content explicitly references AIGPL categories.
+         *
+         * @param string $content Shortcode or serialized block content.
+         * @return bool
+         */
+        private function content_references_category( $content ) {
+            return is_string( $content ) && (bool) preg_match( '/(?:\bcategory\b|["\']category["\'])\s*(?:=|:)/i', $content );
         }
 
         /**

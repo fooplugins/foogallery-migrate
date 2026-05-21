@@ -52,8 +52,14 @@ if ( ! defined( 'FOOGALLERY_ALBUM_META_GALLERIES' ) ) {
 	define( 'FOOGALLERY_ALBUM_META_GALLERIES', '_fooalbum_galleries' );
 }
 
+if ( ! defined( 'ARRAY_A' ) ) {
+	define( 'ARRAY_A', 'ARRAY_A' );
+}
+
 $GLOBALS['foogallery_migrate_test_options'] = array();
 $GLOBALS['foogallery_migrate_test_plugins'] = array();
+$GLOBALS['foogallery_migrate_test_posts'] = array();
+$GLOBALS['foogallery_migrate_test_post_meta'] = array();
 $GLOBALS['foogallery_migrate_test_post_meta_updates'] = array();
 $GLOBALS['foogallery_migrate_test_attached_files'] = array();
 $GLOBALS['foogallery_migrate_test_attachment_urls'] = array();
@@ -148,6 +154,14 @@ function wp_insert_post( $args ) {
 	return $post_id;
 }
 
+function get_post( $post_id ) {
+	$post_id = absint( $post_id );
+
+	return isset( $GLOBALS['foogallery_migrate_test_posts'][ $post_id ] )
+		? $GLOBALS['foogallery_migrate_test_posts'][ $post_id ]
+		: null;
+}
+
 function add_post_meta( $post_id, $meta_key, $meta_value, $unique = false ) {
 	$GLOBALS['foogallery_migrate_test_post_meta_updates'][] = compact( 'post_id', 'meta_key', 'meta_value', 'unique' );
 	return true;
@@ -156,6 +170,44 @@ function add_post_meta( $post_id, $meta_key, $meta_value, $unique = false ) {
 function update_post_meta( $post_id, $meta_key, $meta_value ) {
 	$GLOBALS['foogallery_migrate_test_post_meta_updates'][] = compact( 'post_id', 'meta_key', 'meta_value' );
 	return true;
+}
+
+function get_post_meta( $post_id, $meta_key = '', $single = false ) {
+	$post_id = absint( $post_id );
+
+	if ( ! isset( $GLOBALS['foogallery_migrate_test_post_meta'][ $post_id ] ) ) {
+		return $single ? '' : array();
+	}
+
+	if ( '' === $meta_key ) {
+		return $GLOBALS['foogallery_migrate_test_post_meta'][ $post_id ];
+	}
+
+	if ( ! array_key_exists( $meta_key, $GLOBALS['foogallery_migrate_test_post_meta'][ $post_id ] ) ) {
+		return $single ? '' : array();
+	}
+
+	$value = $GLOBALS['foogallery_migrate_test_post_meta'][ $post_id ][ $meta_key ];
+
+	return $single ? $value : array( $value );
+}
+
+function update_meta_cache( $meta_type, $object_ids ) {
+	return true;
+}
+
+function wp_list_pluck( $list, $field ) {
+	$values = array();
+
+	foreach ( $list as $item ) {
+		if ( is_array( $item ) && array_key_exists( $field, $item ) ) {
+			$values[] = $item[ $field ];
+		} else if ( is_object( $item ) && isset( $item->$field ) ) {
+			$values[] = $item->$field;
+		}
+	}
+
+	return $values;
 }
 
 function get_attached_file( $attachment_id ) {
@@ -195,6 +247,21 @@ function wp_remote_head( $url, $args = array() ) {
 
 function wp_remote_retrieve_response_code( $response ) {
 	return isset( $response['response']['code'] ) ? (int) $response['response']['code'] : 0;
+}
+
+function wp_get_upload_dir() {
+	return array(
+		'basedir' => '/tmp/uploads',
+		'baseurl' => 'https://example.test/wp-content/uploads',
+	);
+}
+
+function wp_normalize_path( $path ) {
+	return str_replace( '\\', '/', (string) $path );
+}
+
+function trailingslashit( $value ) {
+	return rtrim( (string) $value, "/\\" ) . '/';
 }
 
 require dirname( __DIR__ ) . '/vendor/autoload.php';

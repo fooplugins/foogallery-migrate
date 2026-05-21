@@ -17,6 +17,8 @@ class MigrationFlowTest extends TestCase {
 
 		$GLOBALS['foogallery_migrate_test_options']           = array();
 		$GLOBALS['foogallery_migrate_test_plugins']           = array();
+		$GLOBALS['foogallery_migrate_test_posts']             = array();
+		$GLOBALS['foogallery_migrate_test_post_meta']         = array();
 		$GLOBALS['foogallery_migrate_test_post_meta_updates'] = array();
 		$GLOBALS['foogallery_migrate_test_attached_files']    = array();
 		$GLOBALS['foogallery_migrate_test_attachment_urls']   = array();
