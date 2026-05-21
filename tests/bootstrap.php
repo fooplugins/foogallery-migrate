@@ -12,6 +12,10 @@ if ( ! defined( 'FOOGM_NAMESPACE' ) ) {
 	define( 'FOOGM_NAMESPACE', 'FooPlugins\\FooGalleryMigrate' );
 }
 
+if ( ! defined( 'FOOGM_DIR' ) ) {
+	define( 'FOOGM_DIR', dirname( __DIR__ ) );
+}
+
 if ( ! defined( 'FOOGALLERY_MIGRATE_OPTION_DATA' ) ) {
 	define( 'FOOGALLERY_MIGRATE_OPTION_DATA', 'foogallery-migrate-data' );
 }
@@ -55,6 +59,7 @@ $GLOBALS['foogallery_migrate_test_attached_files'] = array();
 $GLOBALS['foogallery_migrate_test_attachment_urls'] = array();
 $GLOBALS['foogallery_migrate_test_attachment_url_to_postid'] = array();
 $GLOBALS['foogallery_migrate_test_remote_head'] = array();
+$GLOBALS['foogallery_migrate_test_gallery_templates'] = array();
 
 if ( ! class_exists( 'WP_Error' ) ) {
 	class WP_Error {
@@ -113,6 +118,10 @@ function is_wp_error( $thing ) {
 	return $thing instanceof WP_Error;
 }
 
+function apply_filters( $hook_name, $value ) {
+	return $value;
+}
+
 function foogallery_migrate_get_available_plugins() {
 	return $GLOBALS['foogallery_migrate_test_plugins'];
 }
@@ -123,6 +132,10 @@ function foogallery_migrate_migrator_instance() {
 
 function foogallery_default_gallery_template() {
 	return 'default';
+}
+
+function foogallery_gallery_templates() {
+	return $GLOBALS['foogallery_migrate_test_gallery_templates'];
 }
 
 function foogallery_get_setting( $key ) {
@@ -185,3 +198,27 @@ function wp_remote_retrieve_response_code( $response ) {
 }
 
 require dirname( __DIR__ ) . '/vendor/autoload.php';
+
+spl_autoload_register(
+	function( $class ) {
+		if ( false === strpos( $class, FOOGM_NAMESPACE ) ) {
+			return;
+		}
+
+		$class_file = str_replace( FOOGM_NAMESPACE . '\\', '', $class );
+		$class_path = explode( '\\', $class_file );
+		$class_file = array_pop( $class_path );
+		$class_path = strtolower( implode( '/', $class_path ) );
+		$class_file = lcfirst( $class_file );
+		$class_file = preg_replace( '/[A-Z]/', '_$0', $class_file );
+		$class_file = strtolower( $class_file );
+		$class_file = str_replace( '_', '-', $class_file );
+		$class_file = str_replace( '--', '-', $class_file );
+
+		$file_to_load = FOOGM_DIR . '/includes/' . $class_path . '/class-' . $class_file . '.php';
+
+		if ( file_exists( $file_to_load ) ) {
+			require_once $file_to_load;
+		}
+	}
+);

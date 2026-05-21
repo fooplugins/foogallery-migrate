@@ -22,6 +22,7 @@ class MigrationFlowTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_attachment_urls']   = array();
 		$GLOBALS['foogallery_migrate_test_attachment_url_to_postid'] = array();
 		$GLOBALS['foogallery_migrate_test_remote_head']       = array();
+		$GLOBALS['foogallery_migrate_test_gallery_templates'] = array();
 		$GLOBALS['foogallery_migrate_engine_instance']        = new MigratorEngine();
 	}
 
@@ -275,6 +276,53 @@ class MigrationFlowTest extends TestCase {
 		$this->assertSame( $gallery, $objects[0] );
 		$this->assertSame( $gallery, $raw['galleries'][0] );
 		$this->assertTrue( $this->contains_object( $raw['galleries'] ) );
+	}
+
+	public function test_user_settings_are_saved_sanitized_and_read_through_engine(): void {
+		$GLOBALS['foogallery_migrate_test_gallery_templates'] = array(
+			array(
+				'slug' => 'default',
+				'name' => 'Default',
+			),
+			array(
+				'slug' => 'masonry',
+				'name' => 'Masonry',
+			),
+		);
+
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+
+		$this->assertSame(
+			array(
+				'default' => 'Default',
+				'masonry' => 'Masonry',
+			),
+			$engine->get_available_gallery_templates()
+		);
+
+		$engine->save_settings(
+			array(
+				'override_gallery_layout' => 'masonry',
+				'page_size' => '50',
+				'debug_enabled' => true,
+			)
+		);
+
+		$this->assertSame( 'masonry', $engine->get_override_gallery_template() );
+		$this->assertSame( 50, $engine->get_page_size() );
+		$this->assertTrue( $engine->is_debug_enabled() );
+
+		$engine->save_settings(
+			array(
+				'override_gallery_layout' => 'missing-template',
+				'page_size' => array(),
+				'debug_enabled' => false,
+			)
+		);
+
+		$this->assertSame( '', $engine->get_override_gallery_template() );
+		$this->assertSame( 50, $engine->get_page_size() );
+		$this->assertFalse( $engine->is_debug_enabled() );
 	}
 
 	private function create_gallery( FakeSourcePlugin $plugin, int $id, string $title, array $children ): Gallery {
