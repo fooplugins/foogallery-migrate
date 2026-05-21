@@ -516,7 +516,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 \FooPlugins\FooGalleryMigrate\Objects\Migratable::PROGRESS_ERROR => __( 'Error', 'foogallery-migrate' )
             );
 
-            $status_label = $status_labels[ $status ] ?? $status;
+            $status_label = array_key_exists( $status, $status_labels ) ? $status_labels[ $status ] : $status;
 
             wp_send_json_success( array( 'status_label' => $status_label ) );
         }

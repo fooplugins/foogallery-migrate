@@ -19,11 +19,11 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
 	 */
 	class MigratorEngine {
 
-        protected const KEY_PLUGINS = 'plugins';
-        protected const KEY_GALLERIES = 'galleries';
-        protected const KEY_ALBUMS = 'albums';
-        protected const KEY_CONTENT = 'block-shortcode';
-        protected const KEY_MIGRATED = 'migrated';
+        const KEY_PLUGINS = 'plugins';
+        const KEY_GALLERIES = 'galleries';
+        const KEY_ALBUMS = 'albums';
+        const KEY_CONTENT = 'block-shortcode';
+        const KEY_MIGRATED = 'migrated';
 
         /**
          * @var MigratorSettings

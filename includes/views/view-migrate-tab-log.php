@@ -197,8 +197,8 @@ $paginated_objects = array_slice( $filtered_objects, $pagination->start, $pagina
 			}
 		}
 
-		$status_key = $object->migration_status ?? '';
-		$status_label = $status_options[ $status_key ] ?? $status_key;
+		$status_key = isset( $object->migration_status ) ? $object->migration_status : '';
+		$status_label = array_key_exists( $status_key, $status_options ) ? $status_options[ $status_key ] : $status_key;
 
 		$error_message = '';
 		if ( method_exists( $object, 'has_error' ) && $object->has_error() && method_exists( $object, 'get_error_message' ) ) {

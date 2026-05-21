@@ -20,16 +20,16 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 	 */
 	class MigratorSettings {
 
-		protected const KEY_PLUGINS = 'plugins';
-		protected const KEY_GALLERIES = 'galleries';
-		protected const KEY_ALBUMS = 'albums';
-		protected const KEY_MIGRATED = 'migrated';
-		protected const COMPACT_MARKER = '_foogallery_migrate_compact';
-		protected const COMPACT_VERSION = 1;
-		protected const SETTING_OVERRIDE_GALLERY_LAYOUT = 'override_gallery_layout';
-		protected const SETTING_PAGE_SIZE = 'page_size';
-		protected const SETTING_IMAGES_PER_TURN = 'images_per_turn';
-		protected const SETTING_DEBUG_ENABLED = 'debug_enabled';
+		const KEY_PLUGINS = 'plugins';
+		const KEY_GALLERIES = 'galleries';
+		const KEY_ALBUMS = 'albums';
+		const KEY_MIGRATED = 'migrated';
+		const COMPACT_MARKER = '_foogallery_migrate_compact';
+		const COMPACT_VERSION = 1;
+		const SETTING_OVERRIDE_GALLERY_LAYOUT = 'override_gallery_layout';
+		const SETTING_PAGE_SIZE = 'page_size';
+		const SETTING_IMAGES_PER_TURN = 'images_per_turn';
+		const SETTING_DEBUG_ENABLED = 'debug_enabled';
 
 		/**
 		 * Returns a setting for the migrator.
