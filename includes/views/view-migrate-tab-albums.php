@@ -22,12 +22,14 @@
                 type: "POST",
                 url: ajaxurl,
                 data: data + "&action=" + action,
-                success: success_callback,
+                success: function(data) {
+                    if (window.foogalleryMigrateHandleAjaxResponse(data, migrationErrorMessage, action)) {
+                        return;
+                    }
+                    success_callback(data);
+                },
                 error: function(xhr, ajaxOptions, thrownError) {
-                    //something went wrong! Alert the user and reload the page
-                    console.log(thrownError);
-                    window.alert(migrationErrorMessage);
-                    location.reload();
+                    window.foogalleryMigrateHandleAjaxError(xhr, ajaxOptions, thrownError, migrationErrorMessage, action);
                 }
             });
         }

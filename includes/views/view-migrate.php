@@ -99,6 +99,142 @@
 
 </style>
 <script>
+	window.foogalleryMigrateAjaxErrorLabels = {
+		action: <?php echo wp_json_encode( __( 'Action', 'foogallery-migrate' ) ); ?>,
+		status: <?php echo wp_json_encode( __( 'HTTP status', 'foogallery-migrate' ) ); ?>,
+		error: <?php echo wp_json_encode( __( 'Error', 'foogallery-migrate' ) ); ?>,
+		response: <?php echo wp_json_encode( __( 'Response', 'foogallery-migrate' ) ); ?>,
+		noDetails: <?php echo wp_json_encode( __( 'No response details were returned by the server.', 'foogallery-migrate' ) ); ?>,
+		reload: <?php echo wp_json_encode( __( 'The page will now reload. If a migration was in progress, use Resume Migration to continue.', 'foogallery-migrate' ) ); ?>
+	};
+
+	window.foogalleryMigrateNormalizeAjaxDetails = function (value) {
+		var text = '';
+
+		if (value === null || value === undefined || value === '') {
+			return '';
+		}
+
+		if (typeof value === 'object') {
+			if (value.data) {
+				if (typeof value.data === 'string') {
+					return window.foogalleryMigrateNormalizeAjaxDetails(value.data);
+				}
+				if (value.data.message) {
+					return window.foogalleryMigrateNormalizeAjaxDetails(value.data.message);
+				}
+				if (value.data.error) {
+					return window.foogalleryMigrateNormalizeAjaxDetails(value.data.error);
+				}
+			}
+
+			if (value.message) {
+				return window.foogalleryMigrateNormalizeAjaxDetails(value.message);
+			}
+
+			if (value.error) {
+				return window.foogalleryMigrateNormalizeAjaxDetails(value.error);
+			}
+
+			try {
+				text = JSON.stringify(value);
+			} catch (e) {
+				text = String(value);
+			}
+		} else {
+			text = String(value);
+		}
+
+		text = text.trim();
+
+		if (text.charAt(0) === '{' || text.charAt(0) === '[') {
+			try {
+				return window.foogalleryMigrateNormalizeAjaxDetails(JSON.parse(text));
+			} catch (e) {
+				// Keep the raw response when it is not valid JSON.
+			}
+		}
+
+		text = text
+			.replace(/<script[\s\S]*?<\/script>/gi, ' ')
+			.replace(/<style[\s\S]*?<\/style>/gi, ' ')
+			.replace(/<[^>]+>/g, ' ')
+			.replace(/&nbsp;/g, ' ')
+			.replace(/&#039;/g, "'")
+			.replace(/&quot;/g, '"')
+			.replace(/&amp;/g, '&')
+			.replace(/\s+/g, ' ')
+			.trim();
+
+		if (text.length > 1200) {
+			text = text.substring(0, 1200) + '...';
+		}
+
+		return text;
+	};
+
+	window.foogalleryMigrateBuildAjaxErrorMessage = function (xhr, ajaxOptions, thrownError, fallbackMessage, action) {
+		var labels = window.foogalleryMigrateAjaxErrorLabels;
+		var lines = [ fallbackMessage ];
+		var responseText = '';
+
+		if (action) {
+			lines.push(labels.action + ': ' + action);
+		}
+
+		if (xhr && xhr.status) {
+			lines.push(labels.status + ': ' + xhr.status + (xhr.statusText ? ' ' + xhr.statusText : ''));
+		}
+
+		if (thrownError) {
+			lines.push(labels.error + ': ' + thrownError);
+		} else if (ajaxOptions) {
+			lines.push(labels.error + ': ' + ajaxOptions);
+		}
+
+		if (xhr) {
+			responseText = window.foogalleryMigrateNormalizeAjaxDetails(xhr.responseJSON || xhr.responseText);
+		}
+
+		lines.push(labels.response + ': ' + (responseText || labels.noDetails));
+		lines.push('');
+		lines.push(labels.reload);
+
+		return lines.join("\n");
+	};
+
+	window.foogalleryMigrateHandleAjaxError = function (xhr, ajaxOptions, thrownError, fallbackMessage, action) {
+		var message = window.foogalleryMigrateBuildAjaxErrorMessage(xhr, ajaxOptions, thrownError, fallbackMessage, action);
+
+		if (window.console && window.console.error) {
+			window.console.error('FooGallery Migrate AJAX error', {
+				action: action,
+				status: xhr ? xhr.status : null,
+				statusText: xhr ? xhr.statusText : null,
+				responseText: xhr ? xhr.responseText : null,
+				responseJSON: xhr ? xhr.responseJSON : null,
+				thrownError: thrownError
+			});
+		}
+
+		window.alert(message);
+		location.reload();
+	};
+
+	window.foogalleryMigrateHandleAjaxResponse = function (data, fallbackMessage, action) {
+		if (data && typeof data === 'object' && data.success === false) {
+			window.foogalleryMigrateHandleAjaxError({
+				status: 200,
+				statusText: 'OK',
+				responseJSON: data,
+				responseText: ''
+			}, 'error', '', fallbackMessage, action);
+			return true;
+		}
+
+		return false;
+	};
+
 	jQuery(function ($) {
 		var resetAlbumMessage = <?php echo wp_json_encode( __( 'Are you sure you want to reset all NextGen album import data? This may result in duplicate albums if you decide to import again!', 'foogallery-migrate' ) ); ?>;
 		var albumImportErrorMessage = <?php echo wp_json_encode( __( 'Something went wrong with the import and the page will now reload.', 'foogallery-migrate' ) ); ?>;
@@ -132,12 +268,13 @@
 				url: ajaxurl,
 				data: data,
 				success: function(data) {
+					if (window.foogalleryMigrateHandleAjaxResponse(data, albumImportErrorMessage, 'foogallery_nextgen_album_import')) {
+						return;
+					}
 					$('#foogallery_migrate_album_form').html(data);
 				},
-				error: function() {
-					//something went wrong! Alert the user and reload the page
-					window.alert(albumImportErrorMessage);
-					location.reload();
+				error: function(xhr, ajaxOptions, thrownError) {
+					window.foogalleryMigrateHandleAjaxError(xhr, ajaxOptions, thrownError, albumImportErrorMessage, 'foogallery_nextgen_album_import');
 				}
 			});
 		});
@@ -158,15 +295,16 @@
 				url: ajaxurl,
 				data: data,
 				success: function(data) {
+					if (window.foogalleryMigrateHandleAjaxResponse(data, findShortcodesErrorMessage, 'foogallery_nextgen_find_shortcodes')) {
+						return;
+					}
 					$('#foogallery_migrate_shortcodes_container').html(data);
 				},
 				complete: function() {
 					$('#foogallery_migrate_shortcodes .spinner').removeClass('is-active');
 				},
-				error: function() {
-					//something went wrong! Alert the user and reload the page
-					window.alert(findShortcodesErrorMessage);
-					location.reload();
+				error: function(xhr, ajaxOptions, thrownError) {
+					window.foogalleryMigrateHandleAjaxError(xhr, ajaxOptions, thrownError, findShortcodesErrorMessage, 'foogallery_nextgen_find_shortcodes');
 				}
 			});
 		});
@@ -187,15 +325,16 @@
 				url: ajaxurl,
 				data: data,
 				success: function(data) {
+					if (window.foogalleryMigrateHandleAjaxResponse(data, replaceShortcodesErrorMessage, 'foogallery_nextgen_replace_shortcodes')) {
+						return;
+					}
 					$('#foogallery_migrate_shortcodes_container').html(data);
 				},
 				complete: function() {
 					$('#foogallery_migrate_shortcodes .spinner').removeClass('is-active');
 				},
-				error: function() {
-					//something went wrong! Alert the user and reload the page
-					window.alert(replaceShortcodesErrorMessage);
-					location.reload();
+				error: function(xhr, ajaxOptions, thrownError) {
+					window.foogalleryMigrateHandleAjaxError(xhr, ajaxOptions, thrownError, replaceShortcodesErrorMessage, 'foogallery_nextgen_replace_shortcodes');
 				}
 			});
 		});

@@ -150,6 +150,17 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
         }
 
         /**
+         * Send a structured AJAX error with an HTTP status code.
+         *
+         * @param string $message Error message.
+         * @param int    $status_code HTTP status code.
+         * @return void
+         */
+        function send_json_error( $message, $status_code = 400 ) {
+            wp_send_json_error( array( 'message' => $message ), $status_code );
+        }
+
+        /**
          * Start the gallery migration!
          *
          * @return void
@@ -157,7 +168,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
         function ajax_start_migration() {
             if ( check_admin_referer( 'foogallery_migrate', 'foogallery_migrate' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
-                    wp_send_json_error( array( 'message' => __( 'Unauthorized.', 'foogallery-migrate' ) ) );
+                    $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
 
                 $migrator = foogallery_migrate_migrator_instance();
@@ -192,7 +203,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
         function ajax_continue_migration() {
             if ( check_admin_referer( 'foogallery_migrate', 'foogallery_migrate' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
-                    wp_send_json_error( array( 'message' => __( 'Unauthorized.', 'foogallery-migrate' ) ) );
+                    $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
 
                 if ( array_key_exists( 'action', $_REQUEST ) ) {
@@ -212,7 +223,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
         function ajax_retry_gallery_migration() {
             if ( check_admin_referer( 'foogallery_migrate', 'foogallery_migrate' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
-                    wp_send_json_error( array( 'message' => __( 'Unauthorized.', 'foogallery-migrate' ) ) );
+                    $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
                 $migrator = foogallery_migrate_migrator_instance();
 
@@ -229,7 +240,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
         function ajax_check_gallery_errors() {
             if ( check_admin_referer( 'foogallery_migrate', 'foogallery_migrate' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
-                    wp_send_json_error( array( 'message' => __( 'Unauthorized.', 'foogallery-migrate' ) ) );
+                    $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
 
                 $migrator = foogallery_migrate_migrator_instance();
@@ -247,7 +258,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
         function ajax_cancel_migration() {
             if ( check_admin_referer( 'foogallery_migrate', 'foogallery_migrate' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
-                    wp_send_json_error( array( 'message' => __( 'Unauthorized.', 'foogallery-migrate' ) ) );
+                    $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
 
                 if ( array_key_exists( 'action', $_REQUEST ) ) {
@@ -266,7 +277,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
         function ajax_refresh_migration() {
             if ( check_admin_referer( 'foogallery_migrate', 'foogallery_migrate' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
-                    wp_send_json_error( array( 'message' => __( 'Unauthorized.', 'foogallery-migrate' ) ) );
+                    $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
 
                 if ( array_key_exists( 'action', $_REQUEST ) ) {
@@ -290,7 +301,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
         function ajax_start_album_migration() {
             if ( check_admin_referer( 'foogallery_album_migrate', 'foogallery_album_migrate' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
-                    wp_send_json_error( array( 'message' => __( 'Unauthorized.', 'foogallery-migrate' ) ) );
+                    $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
 
                 $migrator = foogallery_migrate_migrator_instance();
@@ -325,7 +336,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
         function ajax_continue_album_migration() {
             if ( check_admin_referer( 'foogallery_album_migrate', 'foogallery_album_migrate' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
-                    wp_send_json_error( array( 'message' => __( 'Unauthorized.', 'foogallery-migrate' ) ) );
+                    $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
 
                 if ( array_key_exists( 'action', $_REQUEST ) ) {
@@ -345,7 +356,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
         function ajax_cancel_album_migration() {
             if ( check_admin_referer( 'foogallery_album_migrate', 'foogallery_album_migrate' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
-                    wp_send_json_error( array( 'message' => __( 'Unauthorized.', 'foogallery-migrate' ) ) );
+                    $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
 
                 if ( array_key_exists( 'action', $_REQUEST ) ) {
@@ -364,7 +375,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
         function ajax_refresh_album_migration() {
             if ( check_admin_referer( 'foogallery_album_migrate', 'foogallery_album_migrate' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
-                    wp_send_json_error( array( 'message' => __( 'Unauthorized.', 'foogallery-migrate' ) ) );
+                    $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
 
                 if ( array_key_exists( 'action', $_REQUEST ) ) {
@@ -388,7 +399,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
         function ajax_replace_content() {
             if ( check_admin_referer( 'foogallery_content_migrate', 'foogallery_content_migrate' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
-                    wp_send_json_error( array( 'message' => __( 'Unauthorized.', 'foogallery-migrate' ) ) );
+                    $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
 
                 $migrator = foogallery_migrate_migrator_instance();
@@ -433,7 +444,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
         function ajax_refresh_content() {
             if ( check_admin_referer( 'foogallery_content_migrate', 'foogallery_content_migrate' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
-                    wp_send_json_error( array( 'message' => __( 'Unauthorized.', 'foogallery-migrate' ) ) );
+                    $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
 
                 $migrator = foogallery_migrate_migrator_instance();
@@ -452,10 +463,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
          */
         function ajax_update_migrated_status() {
             if ( ! check_admin_referer( 'foogallery_migrate_log', 'foogallery_migrate_log' ) ) {
-                wp_send_json_error( array( 'message' => __( 'Invalid request.', 'foogallery-migrate' ) ) );
+                $this->send_json_error( __( 'Invalid request.', 'foogallery-migrate' ), 403 );
             }
             if ( ! current_user_can( 'manage_options' ) ) {
-                wp_send_json_error( array( 'message' => __( 'Unauthorized.', 'foogallery-migrate' ) ) );
+                $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
             }
 
             $object_id = '';
@@ -478,14 +489,14 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             );
 
             if ( '' === $object_id || ! in_array( $status, $allowed_statuses, true ) ) {
-                wp_send_json_error( array( 'message' => __( 'Invalid status update.', 'foogallery-migrate' ) ) );
+                $this->send_json_error( __( 'Invalid status update.', 'foogallery-migrate' ), 400 );
             }
 
             $migrator = foogallery_migrate_migrator_instance();
             $result = $migrator->update_migrated_object_status( $object_id, $status );
 
             if ( is_wp_error( $result ) ) {
-                wp_send_json_error( array( 'message' => $result->get_error_message() ) );
+                $this->send_json_error( $result->get_error_message(), 400 );
             }
 
             $status_labels = array(
@@ -509,10 +520,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
          */
         function ajax_delete_migrated_object() {
             if ( ! check_admin_referer( 'foogallery_migrate_log', 'foogallery_migrate_log' ) ) {
-                wp_send_json_error( array( 'message' => __( 'Invalid request.', 'foogallery-migrate' ) ) );
+                $this->send_json_error( __( 'Invalid request.', 'foogallery-migrate' ), 403 );
             }
             if ( ! current_user_can( 'manage_options' ) ) {
-                wp_send_json_error( array( 'message' => __( 'Unauthorized.', 'foogallery-migrate' ) ) );
+                $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
             }
 
             $object_id = '';
@@ -521,14 +532,14 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             }
 
             if ( '' === $object_id ) {
-                wp_send_json_error( array( 'message' => __( 'Invalid object.', 'foogallery-migrate' ) ) );
+                $this->send_json_error( __( 'Invalid object.', 'foogallery-migrate' ), 400 );
             }
 
             $migrator = foogallery_migrate_migrator_instance();
             $result = $migrator->delete_migrated_object( $object_id );
 
             if ( is_wp_error( $result ) ) {
-                wp_send_json_error( array( 'message' => $result->get_error_message() ) );
+                $this->send_json_error( $result->get_error_message(), 400 );
             }
 
             wp_send_json_success();

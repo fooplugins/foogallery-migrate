@@ -20,10 +20,14 @@
                 type: "POST",
                 url: ajaxurl,
                 data: data + "&action=" + action,
-                success: success_callback,
+                success: function(data) {
+                    if (window.foogalleryMigrateHandleAjaxResponse(data, contentErrorMessage, action)) {
+                        return;
+                    }
+                    success_callback(data);
+                },
                 error: function(xhr, ajaxOptions, thrownError) {
-                    window.alert(contentErrorMessage);
-                    location.reload();
+                    window.foogalleryMigrateHandleAjaxError(xhr, ajaxOptions, thrownError, contentErrorMessage, action);
                 },
                 complete: function() {
                     $('#foogallery_migrate_content_spinner .spinner').removeClass('is-active');
