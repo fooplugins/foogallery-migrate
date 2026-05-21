@@ -57,8 +57,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                         <tr>
                             <td id="cb" class="manage-column column-cb check-column">
                                 <?php if ( ! $migrating ) { ?>
-                                    <label class="screen-reader-text" for="cb-select-all-1"><?php esc_html_e( 'Select All', 'foogallery-migrate' ); ?></label>
-                                    <input id="cb-select-all-1" type="checkbox" <?php echo $migrating ? 'disabled="disabled"' : ''; ?> checked="checked" />
+                                    <label class="screen-reader-text" for="foogallery-migrate-album-select-all"><?php esc_html_e( 'Select All', 'foogallery-migrate' ); ?></label>
+                                    <input id="foogallery-migrate-album-select-all" class="foogallery-migrate-album-select-all" type="checkbox" <?php echo $migrating ? 'disabled="disabled"' : ''; ?> checked="checked" />
                                 <?php } ?>
                             </td>
                             <th scope="col" class="manage-column">
@@ -98,6 +98,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                     }
                     $url = add_query_arg( 'album_paged', $page, $url ) . '#albums';
                     $albums_count = count( $albums );
+                    $preflight_album_count = 0;
+                    $preflight_gallery_count = 0;
+                    $preflight_image_count = 0;
                     $page_size = $this->migrator_engine->get_page_size();
                     $show_pagination = $page_size > 0;
 
@@ -132,11 +135,21 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                             } else {
                                 $done = false;
                             }
-                        } ?>
+                        }
+                        $gallery_count = $album->get_children_count();
+                        $image_count = $album->get_total_images();
+                        $can_select_album = !$has_migrations && !$migrating && !$done;
+
+                        if ( $can_select_album ) {
+                            $preflight_album_count++;
+                            $preflight_gallery_count += $gallery_count;
+                            $preflight_image_count += $image_count;
+                        }
+                        ?>
                         <tr class="<?php echo esc_attr( ($counter % 2 === 0) ? 'alternate' : '' ); ?>">
-                            <?php if ( !$has_migrations && !$migrating && !$done ) { ?>
+                            <?php if ( $can_select_album ) { ?>
                                 <th scope="row" class="column-cb check-column">
-                                    <input name="album-id[]" type="checkbox" checked="checked" value="<?php echo esc_attr( $album->unique_identifier() ); ?>">
+                                    <input class="foogallery-migrate-album-select" name="album-id[]" type="checkbox" checked="checked" value="<?php echo esc_attr( $album->unique_identifier() ); ?>" data-gallery-count="<?php echo esc_attr( $gallery_count ); ?>" data-image-count="<?php echo esc_attr( $image_count ); ?>">
                                 </th>
                             <?php } else if ( $migrating && $album->unique_identifier() === $current_album_id ) { ?>
                                 <th>
@@ -155,10 +168,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                             </td>
                             <td>
                                 <?php esc_html_e( 'Galleries : ', 'foogallery-migrate' ); ?>
-                                <?php echo esc_html( $album->get_children_count() ); ?>
+                                <?php echo esc_html( $gallery_count ); ?>
                                 <br />
                                 <?php esc_html_e( 'Images : ', 'foogallery-migrate' ); ?>
-                                <?php echo esc_html( $album->get_total_images() ); ?>
+                                <?php echo esc_html( $image_count ); ?>
                             </td>
                             <td>
                                 <?php
@@ -202,6 +215,17 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                     <button name="foogallery_migrate_action" value="foogallery_album_migrate_cancel"
                             class="button cancel_album_migrate"><?php esc_html_e( 'Stop Migration', 'foogallery-migrate' ); ?></button>
                 <?php } else { ?>
+                    <p class="foogallery-migrate-preflight-report">
+                        <strong><?php esc_html_e( 'Preflight:', 'foogallery-migrate' ); ?></strong>
+                        <?php
+                        printf(
+                            esc_html__( '%1$s albums selected; %2$s galleries and %3$s images will be migrated.', 'foogallery-migrate' ),
+                            '<span data-role="album-count">' . esc_html( number_format_i18n( $preflight_album_count ) ) . '</span>',
+                            '<span data-role="gallery-count">' . esc_html( number_format_i18n( $preflight_gallery_count ) ) . '</span>',
+                            '<span data-role="image-count">' . esc_html( number_format_i18n( $preflight_image_count ) ) . '</span>'
+                        );
+                        ?>
+                    </p>
                     <button name="foogallery_migrate_action" value="foogallery_album_migrate_start"
                             class="button button-primary start_album_migrate"><?php esc_html_e( 'Start Album Migration', 'foogallery-migrate' ); ?></button>
                 <?php
