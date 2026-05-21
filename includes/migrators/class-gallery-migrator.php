@@ -251,6 +251,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                     ?>
                     </tbody>
                 </table>
+                <p class="foogallery-migrate-table-total">
+                    <?php echo esc_html( sprintf( _n( 'Total galleries: %d', 'Total galleries: %d', $gallery_count, 'foogallery-migrate' ), $gallery_count ) ); ?>
+                </p>
                 <div class="tablenav bottom">
                     <div class="tablenav-pages">
                         <?php if ( $show_pagination ) { echo wp_kses_post( $pagination->render( false ) ); } ?>

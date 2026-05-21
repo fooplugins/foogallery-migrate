@@ -180,6 +180,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                     ?>
                     </tbody>
                 </table>
+                <p class="foogallery-migrate-table-total">
+                    <?php echo esc_html( sprintf( _n( 'Total albums: %d', 'Total albums: %d', $albums_count, 'foogallery-migrate' ), $albums_count ) ); ?>
+                </p>
                 <div class="tablenav bottom">
                     <div class="tablenav-pages">
                         <?php if ( $show_pagination ) { echo wp_kses_post( $pagination->render( false ) ); } ?>
