@@ -4,7 +4,7 @@ Tags: gallery, image gallery, photo gallery, wordpress gallery plugin, migrate
 Requires at least: 6.0
 Tested up to: 7.0
 Requires PHP: 5.4
-Stable tag: 1.7
+Stable tag: 1.8
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -78,6 +78,14 @@ Update now to get all the latest features, bug fixes and improvements!
 [Contact us](https://fooplugins.com/support/) and we will build an importer to help you migrate to FooGallery.
 
 == Changelog ==
+
+= 1.8 =
+* Added repo-local PHPUnit coverage for migration discovery, queueing, progress, resume behavior, retry handling, migrated object tracking and album migration.
+* Reduced the size of newly written migration state by compacting persisted plugin, gallery, album, image and migrated object data while keeping legacy state readable.
+* Improved migration AJAX error responses with clearer action details and debug output.
+* Optimized Album and Image Gallery Plus Lightbox discovery for large migrations by bulk-loading attachment metadata and deferring gallery image child loading.
+* Updated Album and Image Gallery Plus Lightbox album migration to create FooGallery albums from aigpl_cat terms and gallery relationships instead of one-gallery album wrappers.
+* Moved migrator settings and migration state storage logic into a dedicated settings class.
 
 = 1.7 =
 * Added a Settings tab to the migration Page.
