@@ -39,6 +39,11 @@ class MigrationFlowTest extends TestCase {
 				$this->create_image( 'https://example.test/two.jpg' ),
 			)
 		);
+		$this->create_test_post( 800, FOOGALLERY_CPT_GALLERY, 'Gallery Settings Source' );
+		$GLOBALS['foogallery_migrate_test_post_meta'][800] = array(
+			FOOGALLERY_META_SETTINGS => array( 'source_setting' => 'gallery-source' ),
+			FOOGALLERY_META_CUSTOM_CSS => '.gallery-source{}',
+		);
 		$plugin->galleries = array( $gallery );
 
 		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
@@ -47,6 +52,7 @@ class MigrationFlowTest extends TestCase {
 		$engine->save_settings(
 			array(
 				'images_per_turn' => 1,
+				'override_gallery_settings' => 800,
 			)
 		);
 
@@ -83,6 +89,14 @@ class MigrationFlowTest extends TestCase {
 		$this->assertTrue( $completed[0]->migrated );
 		$this->assertSame( Migratable::PROGRESS_COMPLETED, $completed[0]->migration_status );
 		$this->assertSame( 2, $completed[0]->migrated_child_count );
+		$this->assertSame(
+			array(
+				'source_setting' => 'gallery-source',
+				'fake_setting' => 'yes',
+			),
+			$this->get_meta_update_value( $completed[0]->migrated_id, FOOGALLERY_META_SETTINGS )
+		);
+		$this->assertSame( '.gallery-source{}', $this->get_meta_update_value( $completed[0]->migrated_id, FOOGALLERY_META_CUSTOM_CSS ) );
 		$this->assertSame( array( 'queued' => 1, 'completed' => 1, 'progress' => 100 ), $migrator->get_state() );
 		$this->assertTrue( $engine->has_object_been_migrated( $uid ) );
 
@@ -358,6 +372,7 @@ class MigrationFlowTest extends TestCase {
 				'name' => 'Masonry',
 			),
 		);
+		$this->create_test_post( 600, FOOGALLERY_CPT_GALLERY, 'Gallery Settings Source' );
 		$this->create_test_post( 700, FOOGALLERY_CPT_ALBUM, 'Album Settings Source' );
 
 		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
@@ -372,6 +387,12 @@ class MigrationFlowTest extends TestCase {
 		);
 		$this->assertSame(
 			array(
+				600 => 'Gallery Settings Source',
+			),
+			$engine->get_available_gallery_settings_sources()
+		);
+		$this->assertSame(
+			array(
 				700 => 'Album Settings Source',
 			),
 			$engine->get_available_album_settings_sources()
@@ -380,6 +401,7 @@ class MigrationFlowTest extends TestCase {
 		$engine->save_settings(
 			array(
 				'override_gallery_layout' => 'masonry',
+				'override_gallery_settings' => 600,
 				'override_album_settings' => 700,
 				'page_size' => '50',
 				'images_per_turn' => '12',
@@ -388,6 +410,7 @@ class MigrationFlowTest extends TestCase {
 		);
 
 		$this->assertSame( 'masonry', $engine->get_override_gallery_template() );
+		$this->assertSame( 600, $engine->get_override_gallery_settings() );
 		$this->assertSame( 700, $engine->get_override_album_settings() );
 		$this->assertSame( 50, $engine->get_page_size() );
 		$this->assertSame( 12, $engine->get_images_per_turn() );
@@ -396,6 +419,7 @@ class MigrationFlowTest extends TestCase {
 		$engine->save_settings(
 			array(
 				'override_gallery_layout' => 'missing-template',
+				'override_gallery_settings' => 999,
 				'override_album_settings' => 999,
 				'page_size' => array(),
 				'images_per_turn' => array(),
@@ -404,6 +428,7 @@ class MigrationFlowTest extends TestCase {
 		);
 
 		$this->assertSame( '', $engine->get_override_gallery_template() );
+		$this->assertSame( 0, $engine->get_override_gallery_settings() );
 		$this->assertSame( 0, $engine->get_override_album_settings() );
 		$this->assertSame( 50, $engine->get_page_size() );
 		$this->assertSame( 12, $engine->get_images_per_turn() );

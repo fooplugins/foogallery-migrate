@@ -27,6 +27,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		const COMPACT_MARKER = '_foogallery_migrate_compact';
 		const COMPACT_VERSION = 1;
 		const SETTING_OVERRIDE_GALLERY_LAYOUT = 'override_gallery_layout';
+		const SETTING_OVERRIDE_GALLERY_SETTINGS = 'override_gallery_settings';
 		const SETTING_OVERRIDE_ALBUM_SETTINGS = 'override_album_settings';
 		const SETTING_PAGE_SIZE = 'page_size';
 		const SETTING_IMAGES_PER_TURN = 'images_per_turn';
@@ -94,6 +95,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		public function get_settings() {
 			$defaults = array(
 				self::SETTING_OVERRIDE_GALLERY_LAYOUT => '',
+				self::SETTING_OVERRIDE_GALLERY_SETTINGS => 0,
 				self::SETTING_OVERRIDE_ALBUM_SETTINGS => 0,
 				self::SETTING_PAGE_SIZE => 20,
 				self::SETTING_IMAGES_PER_TURN => 5,
@@ -108,6 +110,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 
 			$settings = array_merge( $defaults, $settings );
 			$settings[ self::SETTING_OVERRIDE_GALLERY_LAYOUT ] = $this->sanitize_override_gallery_layout( $settings[ self::SETTING_OVERRIDE_GALLERY_LAYOUT ] );
+			$settings[ self::SETTING_OVERRIDE_GALLERY_SETTINGS ] = $this->sanitize_override_post_id( $settings[ self::SETTING_OVERRIDE_GALLERY_SETTINGS ], defined( 'FOOGALLERY_CPT_GALLERY' ) ? FOOGALLERY_CPT_GALLERY : '' );
 			$settings[ self::SETTING_OVERRIDE_ALBUM_SETTINGS ] = $this->sanitize_override_post_id( $settings[ self::SETTING_OVERRIDE_ALBUM_SETTINGS ], defined( 'FOOGALLERY_CPT_ALBUM' ) ? FOOGALLERY_CPT_ALBUM : '' );
 			$settings[ self::SETTING_PAGE_SIZE ] = is_scalar( $settings[ self::SETTING_PAGE_SIZE ] ) ? absint( $settings[ self::SETTING_PAGE_SIZE ] ) : $defaults[ self::SETTING_PAGE_SIZE ];
 			$settings[ self::SETTING_IMAGES_PER_TURN ] = is_scalar( $settings[ self::SETTING_IMAGES_PER_TURN ] ) ? $this->sanitize_positive_int( $settings[ self::SETTING_IMAGES_PER_TURN ] ) : $defaults[ self::SETTING_IMAGES_PER_TURN ];
@@ -131,6 +134,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 
 			$settings = array_merge( $current_settings, $settings );
 			$settings[ self::SETTING_OVERRIDE_GALLERY_LAYOUT ] = $this->sanitize_override_gallery_layout( $settings[ self::SETTING_OVERRIDE_GALLERY_LAYOUT ] );
+			$settings[ self::SETTING_OVERRIDE_GALLERY_SETTINGS ] = $this->sanitize_override_post_id( $settings[ self::SETTING_OVERRIDE_GALLERY_SETTINGS ], defined( 'FOOGALLERY_CPT_GALLERY' ) ? FOOGALLERY_CPT_GALLERY : '' );
 			$settings[ self::SETTING_OVERRIDE_ALBUM_SETTINGS ] = $this->sanitize_override_post_id( $settings[ self::SETTING_OVERRIDE_ALBUM_SETTINGS ], defined( 'FOOGALLERY_CPT_ALBUM' ) ? FOOGALLERY_CPT_ALBUM : '' );
 			$settings[ self::SETTING_PAGE_SIZE ] = is_scalar( $settings[ self::SETTING_PAGE_SIZE ] ) ? absint( $settings[ self::SETTING_PAGE_SIZE ] ) : $current_settings[ self::SETTING_PAGE_SIZE ];
 			$settings[ self::SETTING_IMAGES_PER_TURN ] = is_scalar( $settings[ self::SETTING_IMAGES_PER_TURN ] ) ? $this->sanitize_positive_int( $settings[ self::SETTING_IMAGES_PER_TURN ] ) : $current_settings[ self::SETTING_IMAGES_PER_TURN ];
@@ -164,6 +168,15 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		}
 
 		/**
+		 * Gets all available FooGallery galleries that can supply gallery settings.
+		 *
+		 * @return array
+		 */
+		public function get_available_gallery_settings_sources() {
+			return $this->get_available_setting_sources( defined( 'FOOGALLERY_CPT_GALLERY' ) ? FOOGALLERY_CPT_GALLERY : '' );
+		}
+
+		/**
 		 * Gets all available FooGallery albums that can supply album settings.
 		 *
 		 * @return array
@@ -181,6 +194,17 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 			$settings = $this->get_settings();
 
 			return $settings[ self::SETTING_OVERRIDE_GALLERY_LAYOUT ];
+		}
+
+		/**
+		 * Gets the selected source gallery to inherit settings from.
+		 *
+		 * @return int
+		 */
+		public function get_override_gallery_settings() {
+			$settings = $this->get_settings();
+
+			return absint( $settings[ self::SETTING_OVERRIDE_GALLERY_SETTINGS ] );
 		}
 
 		/**

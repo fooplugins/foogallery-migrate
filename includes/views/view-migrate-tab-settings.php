@@ -2,6 +2,7 @@
 $migrator = foogallery_migrate_migrator_instance();
 $settings = $migrator->get_settings();
 $gallery_templates = $migrator->get_available_gallery_templates();
+$gallery_settings_sources = $migrator->get_available_gallery_settings_sources();
 $album_settings_sources = $migrator->get_available_album_settings_sources();
 ?>
 <?php if ( array_key_exists( 'settings-updated', $_GET ) ) { ?>
@@ -24,6 +25,21 @@ $album_settings_sources = $migrator->get_available_album_settings_sources();
 						<?php foreach ( $gallery_templates as $template_slug => $template_name ) { ?>
 							<option value="<?php echo esc_attr( $template_slug ); ?>" <?php selected( $settings['override_gallery_layout'], $template_slug ); ?>>
 								<?php echo esc_html( $template_name ); ?>
+							</option>
+						<?php } ?>
+					</select>
+				</td>
+			</tr>
+			<tr>
+				<th scope="row">
+					<label for="foogallery_migrate_override_gallery_settings"><?php esc_html_e( 'Override Gallery Settings', 'foogallery-migrate' ); ?></label>
+				</th>
+				<td>
+					<select id="foogallery_migrate_override_gallery_settings" name="override_gallery_settings">
+						<option value="0"><?php esc_html_e( 'Default', 'foogallery-migrate' ); ?></option>
+						<?php foreach ( $gallery_settings_sources as $gallery_id => $gallery_title ) { ?>
+							<option value="<?php echo esc_attr( $gallery_id ); ?>" <?php selected( $settings['override_gallery_settings'], $gallery_id ); ?>>
+								<?php echo esc_html( $gallery_title ); ?>
 							</option>
 						<?php } ?>
 					</select>

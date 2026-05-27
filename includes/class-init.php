@@ -114,6 +114,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
 
             $settings = array(
                 'override_gallery_layout' => '',
+                'override_gallery_settings' => 0,
                 'override_album_settings' => 0,
                 'page_size' => 20,
                 'images_per_turn' => 5,
@@ -124,6 +125,13 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 $override_gallery_layout = wp_unslash( $_POST['override_gallery_layout'] );
                 if ( is_scalar( $override_gallery_layout ) ) {
                     $settings['override_gallery_layout'] = sanitize_key( $override_gallery_layout );
+                }
+            }
+
+            if ( array_key_exists( 'override_gallery_settings', $_POST ) ) {
+                $override_gallery_settings = wp_unslash( $_POST['override_gallery_settings'] );
+                if ( is_scalar( $override_gallery_settings ) ) {
+                    $settings['override_gallery_settings'] = absint( $override_gallery_settings );
                 }
             }
 
