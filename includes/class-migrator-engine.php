@@ -92,12 +92,30 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         }
 
         /**
+         * Gets all available FooGallery albums that can supply album settings.
+         *
+         * @return array
+         */
+        public function get_available_album_settings_sources() {
+            return $this->settings()->get_available_album_settings_sources();
+        }
+
+        /**
          * Gets the selected gallery layout override.
          *
          * @return string
          */
         public function get_override_gallery_template() {
             return $this->settings()->get_override_gallery_template();
+        }
+
+        /**
+         * Gets the selected source album to inherit settings from.
+         *
+         * @return int
+         */
+        public function get_override_album_settings() {
+            return $this->settings()->get_override_album_settings();
         }
 
         /**

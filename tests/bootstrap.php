@@ -40,6 +40,14 @@ if ( ! defined( 'FOOGALLERY_META_SETTINGS' ) ) {
 	define( 'FOOGALLERY_META_SETTINGS', '_foogallery_settings' );
 }
 
+if ( ! defined( 'FOOGALLERY_META_SETTINGS_OLD' ) ) {
+	define( 'FOOGALLERY_META_SETTINGS_OLD', 'foogallery_settings' );
+}
+
+if ( ! defined( 'FOOGALLERY_META_CUSTOM_CSS' ) ) {
+	define( 'FOOGALLERY_META_CUSTOM_CSS', 'foogallery_custom_css' );
+}
+
 if ( ! defined( 'FOOGALLERY_META_ATTACHMENTS' ) ) {
 	define( 'FOOGALLERY_META_ATTACHMENTS', '_foogallery_attachments' );
 }
@@ -50,6 +58,10 @@ if ( ! defined( 'FOOGALLERY_ALBUM_META_TEMPLATE' ) ) {
 
 if ( ! defined( 'FOOGALLERY_ALBUM_META_GALLERIES' ) ) {
 	define( 'FOOGALLERY_ALBUM_META_GALLERIES', '_fooalbum_galleries' );
+}
+
+if ( ! defined( 'FOOGALLERY_ALBUM_META_SORT' ) ) {
+	define( 'FOOGALLERY_ALBUM_META_SORT', 'foogallery_album_sort' );
 }
 
 if ( ! defined( 'ARRAY_A' ) ) {
@@ -151,6 +163,8 @@ function foogallery_get_setting( $key ) {
 function wp_insert_post( $args ) {
 	static $post_id = 1000;
 	$post_id++;
+	$post = (object) array_merge( $args, array( 'ID' => $post_id ) );
+	$GLOBALS['foogallery_migrate_test_posts'][ $post_id ] = $post;
 	return $post_id;
 }
 
@@ -160,6 +174,34 @@ function get_post( $post_id ) {
 	return isset( $GLOBALS['foogallery_migrate_test_posts'][ $post_id ] )
 		? $GLOBALS['foogallery_migrate_test_posts'][ $post_id ]
 		: null;
+}
+
+function get_posts( $args = array() ) {
+	$post_type = isset( $args['post_type'] ) ? $args['post_type'] : '';
+	$posts = array();
+
+	foreach ( $GLOBALS['foogallery_migrate_test_posts'] as $post ) {
+		if ( '' !== $post_type && ( ! isset( $post->post_type ) || $post_type !== $post->post_type ) ) {
+			continue;
+		}
+
+		if ( isset( $post->post_status ) && 'trash' === $post->post_status ) {
+			continue;
+		}
+
+		$posts[] = $post;
+	}
+
+	usort(
+		$posts,
+		function( $a, $b ) {
+			$a_title = isset( $a->post_title ) ? $a->post_title : '';
+			$b_title = isset( $b->post_title ) ? $b->post_title : '';
+			return strcasecmp( $a_title, $b_title );
+		}
+	);
+
+	return $posts;
 }
 
 function add_post_meta( $post_id, $meta_key, $meta_value, $unique = false ) {

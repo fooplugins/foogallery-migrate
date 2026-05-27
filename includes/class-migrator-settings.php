@@ -27,6 +27,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		const COMPACT_MARKER = '_foogallery_migrate_compact';
 		const COMPACT_VERSION = 1;
 		const SETTING_OVERRIDE_GALLERY_LAYOUT = 'override_gallery_layout';
+		const SETTING_OVERRIDE_ALBUM_SETTINGS = 'override_album_settings';
 		const SETTING_PAGE_SIZE = 'page_size';
 		const SETTING_IMAGES_PER_TURN = 'images_per_turn';
 		const SETTING_DEBUG_ENABLED = 'debug_enabled';
@@ -93,6 +94,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		public function get_settings() {
 			$defaults = array(
 				self::SETTING_OVERRIDE_GALLERY_LAYOUT => '',
+				self::SETTING_OVERRIDE_ALBUM_SETTINGS => 0,
 				self::SETTING_PAGE_SIZE => 20,
 				self::SETTING_IMAGES_PER_TURN => 5,
 				self::SETTING_DEBUG_ENABLED => function_exists( 'foogallery_is_debug' ) && foogallery_is_debug(),
@@ -106,6 +108,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 
 			$settings = array_merge( $defaults, $settings );
 			$settings[ self::SETTING_OVERRIDE_GALLERY_LAYOUT ] = $this->sanitize_override_gallery_layout( $settings[ self::SETTING_OVERRIDE_GALLERY_LAYOUT ] );
+			$settings[ self::SETTING_OVERRIDE_ALBUM_SETTINGS ] = $this->sanitize_override_post_id( $settings[ self::SETTING_OVERRIDE_ALBUM_SETTINGS ], defined( 'FOOGALLERY_CPT_ALBUM' ) ? FOOGALLERY_CPT_ALBUM : '' );
 			$settings[ self::SETTING_PAGE_SIZE ] = is_scalar( $settings[ self::SETTING_PAGE_SIZE ] ) ? absint( $settings[ self::SETTING_PAGE_SIZE ] ) : $defaults[ self::SETTING_PAGE_SIZE ];
 			$settings[ self::SETTING_IMAGES_PER_TURN ] = is_scalar( $settings[ self::SETTING_IMAGES_PER_TURN ] ) ? $this->sanitize_positive_int( $settings[ self::SETTING_IMAGES_PER_TURN ] ) : $defaults[ self::SETTING_IMAGES_PER_TURN ];
 			$settings[ self::SETTING_DEBUG_ENABLED ] = ! empty( $settings[ self::SETTING_DEBUG_ENABLED ] );
@@ -128,6 +131,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 
 			$settings = array_merge( $current_settings, $settings );
 			$settings[ self::SETTING_OVERRIDE_GALLERY_LAYOUT ] = $this->sanitize_override_gallery_layout( $settings[ self::SETTING_OVERRIDE_GALLERY_LAYOUT ] );
+			$settings[ self::SETTING_OVERRIDE_ALBUM_SETTINGS ] = $this->sanitize_override_post_id( $settings[ self::SETTING_OVERRIDE_ALBUM_SETTINGS ], defined( 'FOOGALLERY_CPT_ALBUM' ) ? FOOGALLERY_CPT_ALBUM : '' );
 			$settings[ self::SETTING_PAGE_SIZE ] = is_scalar( $settings[ self::SETTING_PAGE_SIZE ] ) ? absint( $settings[ self::SETTING_PAGE_SIZE ] ) : $current_settings[ self::SETTING_PAGE_SIZE ];
 			$settings[ self::SETTING_IMAGES_PER_TURN ] = is_scalar( $settings[ self::SETTING_IMAGES_PER_TURN ] ) ? $this->sanitize_positive_int( $settings[ self::SETTING_IMAGES_PER_TURN ] ) : $current_settings[ self::SETTING_IMAGES_PER_TURN ];
 			$settings[ self::SETTING_DEBUG_ENABLED ] = ! empty( $settings[ self::SETTING_DEBUG_ENABLED ] );
@@ -160,6 +164,15 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		}
 
 		/**
+		 * Gets all available FooGallery albums that can supply album settings.
+		 *
+		 * @return array
+		 */
+		public function get_available_album_settings_sources() {
+			return $this->get_available_setting_sources( defined( 'FOOGALLERY_CPT_ALBUM' ) ? FOOGALLERY_CPT_ALBUM : '' );
+		}
+
+		/**
 		 * Gets the selected gallery layout override.
 		 *
 		 * @return string
@@ -168,6 +181,17 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 			$settings = $this->get_settings();
 
 			return $settings[ self::SETTING_OVERRIDE_GALLERY_LAYOUT ];
+		}
+
+		/**
+		 * Gets the selected source album to inherit settings from.
+		 *
+		 * @return int
+		 */
+		public function get_override_album_settings() {
+			$settings = $this->get_settings();
+
+			return absint( $settings[ self::SETTING_OVERRIDE_ALBUM_SETTINGS ] );
 		}
 
 		/**
@@ -630,6 +654,48 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		}
 
 		/**
+		 * Gets posts that can be selected as settings sources.
+		 *
+		 * @param string $post_type Post type to list.
+		 * @return array
+		 */
+		protected function get_available_setting_sources( $post_type ) {
+			$sources = array();
+
+			if ( '' === $post_type || ! function_exists( 'get_posts' ) ) {
+				return $sources;
+			}
+
+			$posts = get_posts( array(
+				'post_type'      => $post_type,
+				'post_status'    => array( 'publish', 'draft', 'pending', 'private', 'future' ),
+				'posts_per_page' => -1,
+				'numberposts'    => -1,
+				'orderby'        => 'title',
+				'order'          => 'ASC',
+			) );
+
+			if ( ! is_array( $posts ) ) {
+				return $sources;
+			}
+
+			foreach ( $posts as $post ) {
+				if ( ! is_object( $post ) || empty( $post->ID ) ) {
+					continue;
+				}
+
+				$title = isset( $post->post_title ) ? trim( (string) $post->post_title ) : '';
+				if ( '' === $title ) {
+					$title = sprintf( __( '(no title) #%d', 'foogallery-migrate' ), absint( $post->ID ) );
+				}
+
+				$sources[ absint( $post->ID ) ] = $title;
+			}
+
+			return $sources;
+		}
+
+		/**
 		 * Sanitizes the selected gallery layout override.
 		 *
 		 * @param string $value Gallery template slug.
@@ -649,6 +715,35 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 			$templates = $this->get_available_gallery_templates();
 
 			return array_key_exists( $value, $templates ) ? $value : '';
+		}
+
+		/**
+		 * Sanitizes a selected source post ID.
+		 *
+		 * @param mixed  $value Source post ID.
+		 * @param string $post_type Expected post type.
+		 * @return int
+		 */
+		protected function sanitize_override_post_id( $value, $post_type ) {
+			if ( ! is_scalar( $value ) || '' === $post_type ) {
+				return 0;
+			}
+
+			$post_id = absint( $value );
+			if ( $post_id < 1 ) {
+				return 0;
+			}
+
+			if ( ! function_exists( 'get_post' ) ) {
+				return 0;
+			}
+
+			$post = get_post( $post_id );
+			if ( ! is_object( $post ) || ! isset( $post->post_type ) || $post_type !== $post->post_type ) {
+				return 0;
+			}
+
+			return $post_id;
 		}
 
 		/**

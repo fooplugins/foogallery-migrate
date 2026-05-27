@@ -140,11 +140,23 @@ class MigrationFlowTest extends TestCase {
 		$image   = $this->create_image( 'https://example.test/album-image.jpg' );
 		$gallery = $this->create_gallery( $plugin, 20, 'Nested Gallery', array( $image ) );
 		$album   = $this->create_album( $plugin, 30, 'Source Album', array( $gallery ) );
+		$this->create_test_post( 900, FOOGALLERY_CPT_ALBUM, 'Album Settings Source' );
+		$GLOBALS['foogallery_migrate_test_post_meta'][900] = array(
+			FOOGALLERY_ALBUM_META_TEMPLATE => 'stack',
+			FOOGALLERY_META_SETTINGS_OLD => array( 'album_setting' => 'source' ),
+			FOOGALLERY_ALBUM_META_SORT => 'date_desc',
+			FOOGALLERY_META_CUSTOM_CSS => '.album-source{}',
+		);
 
 		$plugin->albums = array( $album );
 		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
 
 		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->save_settings(
+			array(
+				'override_album_settings' => 900,
+			)
+		);
 		$engine->run_detection();
 
 		$migrator = $engine->get_album_migrator();
@@ -163,6 +175,11 @@ class MigrationFlowTest extends TestCase {
 		$completed = $migrator->get_objects_to_migrate();
 		$this->assertTrue( $completed[0]->migrated );
 		$this->assertSame( Migratable::PROGRESS_COMPLETED, $completed[0]->migration_status );
+		$this->assertSame( 'Migrated Album', $GLOBALS['foogallery_migrate_test_posts'][ $completed[0]->migrated_id ]->post_title );
+		$this->assertSame( 'stack', $this->get_meta_update_value( $completed[0]->migrated_id, FOOGALLERY_ALBUM_META_TEMPLATE ) );
+		$this->assertSame( array( 'album_setting' => 'source' ), $this->get_meta_update_value( $completed[0]->migrated_id, FOOGALLERY_META_SETTINGS_OLD ) );
+		$this->assertSame( 'date_desc', $this->get_meta_update_value( $completed[0]->migrated_id, FOOGALLERY_ALBUM_META_SORT ) );
+		$this->assertSame( '.album-source{}', $this->get_meta_update_value( $completed[0]->migrated_id, FOOGALLERY_META_CUSTOM_CSS ) );
 		$this->assertSame( 1, $completed[0]->migrated_child_count );
 		$this->assertSame( 1, $completed[0]->get_total_migrated_images() );
 		$this->assertSame( array( 'queued' => 1, 'completed' => 1, 'progress' => 100 ), $migrator->get_state() );
@@ -341,6 +358,7 @@ class MigrationFlowTest extends TestCase {
 				'name' => 'Masonry',
 			),
 		);
+		$this->create_test_post( 700, FOOGALLERY_CPT_ALBUM, 'Album Settings Source' );
 
 		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
 
@@ -352,10 +370,17 @@ class MigrationFlowTest extends TestCase {
 			),
 			$engine->get_available_gallery_templates()
 		);
+		$this->assertSame(
+			array(
+				700 => 'Album Settings Source',
+			),
+			$engine->get_available_album_settings_sources()
+		);
 
 		$engine->save_settings(
 			array(
 				'override_gallery_layout' => 'masonry',
+				'override_album_settings' => 700,
 				'page_size' => '50',
 				'images_per_turn' => '12',
 				'debug_enabled' => true,
@@ -363,6 +388,7 @@ class MigrationFlowTest extends TestCase {
 		);
 
 		$this->assertSame( 'masonry', $engine->get_override_gallery_template() );
+		$this->assertSame( 700, $engine->get_override_album_settings() );
 		$this->assertSame( 50, $engine->get_page_size() );
 		$this->assertSame( 12, $engine->get_images_per_turn() );
 		$this->assertTrue( $engine->is_debug_enabled() );
@@ -370,6 +396,7 @@ class MigrationFlowTest extends TestCase {
 		$engine->save_settings(
 			array(
 				'override_gallery_layout' => 'missing-template',
+				'override_album_settings' => 999,
 				'page_size' => array(),
 				'images_per_turn' => array(),
 				'debug_enabled' => false,
@@ -377,6 +404,7 @@ class MigrationFlowTest extends TestCase {
 		);
 
 		$this->assertSame( '', $engine->get_override_gallery_template() );
+		$this->assertSame( 0, $engine->get_override_album_settings() );
 		$this->assertSame( 50, $engine->get_page_size() );
 		$this->assertSame( 12, $engine->get_images_per_turn() );
 		$this->assertFalse( $engine->is_debug_enabled() );
@@ -388,6 +416,27 @@ class MigrationFlowTest extends TestCase {
 		);
 
 		$this->assertSame( 1, $engine->get_images_per_turn() );
+	}
+
+	private function create_test_post( int $id, string $post_type, string $title ): void {
+		$GLOBALS['foogallery_migrate_test_posts'][ $id ] = (object) array(
+			'ID' => $id,
+			'post_type' => $post_type,
+			'post_status' => 'publish',
+			'post_title' => $title,
+			'post_name' => sanitize_key( $title ),
+			'post_author' => 1,
+		);
+	}
+
+	private function get_meta_update_value( int $post_id, string $meta_key ) {
+		foreach ( array_reverse( $GLOBALS['foogallery_migrate_test_post_meta_updates'] ) as $update ) {
+			if ( absint( $update['post_id'] ) === $post_id && $meta_key === $update['meta_key'] ) {
+				return $update['meta_value'];
+			}
+		}
+
+		return null;
 	}
 
 	private function create_gallery( FakeSourcePlugin $plugin, int $id, string $title, array $children ): Gallery {
