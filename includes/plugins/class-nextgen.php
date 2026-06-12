@@ -109,6 +109,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
 				}
                 
                 $data = array(
+                    'ID' => $nextgen_image->pid,
                     'source_url' => $source_url,
                     'slug' => $nextgen_image->filename,
                     'title' => $alt_text,
@@ -210,6 +211,59 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
             }
 
             return (bool) $wpdb->get_var( $sql );
+        }
+
+        /**
+         * Returns NextGEN image tag names for migration to FooGallery media tags.
+         *
+         * @param Image $image Source image object.
+         * @return array Tag names.
+         */
+        function get_image_tags( $image ) {
+            if ( ! is_object( $image ) ) {
+                return array();
+            }
+
+            $image_id = 0;
+            if ( isset( $image->data ) && is_object( $image->data ) && ! empty( $image->data->pid ) ) {
+                $image_id = absint( $image->data->pid );
+            } else if ( ! empty( $image->ID ) ) {
+                $image_id = absint( $image->ID );
+            }
+
+            if ( $image_id < 1 ) {
+                return array();
+            }
+
+            if ( ! function_exists( 'wp_get_object_terms' ) ) {
+                return array();
+            }
+
+            $terms = wp_get_object_terms(
+                $image_id,
+                'ngg_tag',
+                array(
+                    'fields' => 'names',
+                )
+            );
+
+            if ( is_wp_error( $terms ) || ! is_array( $terms ) || empty( $terms ) ) {
+                return array();
+            }
+
+            $tags = array();
+            foreach ( $terms as $term ) {
+                if ( ! is_scalar( $term ) ) {
+                    continue;
+                }
+
+                $term = trim( (string) $term );
+                if ( '' !== $term && ! in_array( $term, $tags, true ) ) {
+                    $tags[] = $term;
+                }
+            }
+
+            return $tags;
         }
 
         /**
@@ -327,6 +381,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
                 '/\[ngg_images\b[^\]]*\bgallery_ids\s*=\s*["\']?(\d+)(?:\s*,\s*\d+)*["\']?[^\]]*\]/i',
                 '/\[imagely\b[^\]]*\bid\s*=\s*["\']?(\d+)["\']?[^\]]*\]/i',
                 '/\[singlepic\b[^\]]*\bid\s*=\s*["\']?(\d+)["\']?[^\]]*\]/i',
+                '/\[ngg\b(?=[^\]]*\b(?:source|src)\s*=\s*["\']?(?:tags|tag|image_tags|image_tag)["\']?)(?=[^\]]*\b(?:container_ids|ids|tag_ids)\s*=)[^\]]*\]/i',
+                '/\[ngg\b(?=[^\]]*\btag_ids\s*=)[^\]]*\]/i',
+                '/\[nggtags\b[^\]]*\b(?:gallery|album)\s*=[^\]]+\]/i',
+                '/\[(?:tags|albumtags)\s*=[^\]]+\]/i',
             );
         }
 
@@ -342,7 +400,205 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
                 return 'image';
             }
 
+            if ( $this->get_media_tag_slugs_from_shortcode( $original_content ) ) {
+                return 'dynamic_gallery';
+            }
+
             return 'gallery';
+        }
+
+        /**
+         * Build direct replacement content for NextGEN dynamic tag shortcodes.
+         *
+         * @param string $original_content Original shortcode or serialized block content.
+         * @param string $block_name Block name, if the detected content is a block.
+         * @return string|false Replacement content, or false to use migrated-object replacement.
+         */
+        function get_content_replacement_content( $original_content, $block_name = '' ) {
+            $media_tag_slugs = $this->get_media_tag_slugs_from_shortcode( $original_content );
+            if ( empty( $media_tag_slugs ) ) {
+                return false;
+            }
+
+            return '[foogallery media_tags="' . esc_attr( implode( ',', $media_tag_slugs ) ) . '"]';
+        }
+
+        /**
+         * Extract FooGallery media tag slugs from a NextGEN tag-source shortcode.
+         *
+         * @param string $shortcode Shortcode text.
+         * @return array Tag slugs.
+         */
+        private function get_media_tag_slugs_from_shortcode( $shortcode ) {
+            if ( ! is_string( $shortcode ) || '' === trim( $shortcode ) ) {
+                return array();
+            }
+
+            if ( preg_match( '/^\[(tags|albumtags)\s*=\s*([^\]]+)\]/i', $shortcode, $legacy_match ) ) {
+                return $this->normalize_media_tag_slugs( $legacy_match[2] );
+            }
+
+            $shortcode_name = $this->get_shortcode_name( $shortcode );
+            if ( '' === $shortcode_name ) {
+                return array();
+            }
+
+            $attributes = $this->parse_shortcode_attributes( $shortcode );
+            if ( empty( $attributes ) ) {
+                return array();
+            }
+
+            if ( 'nggtags' === $shortcode_name ) {
+                $tag_value = $this->get_first_shortcode_attribute( $attributes, array( 'gallery', 'album' ) );
+                return $this->normalize_media_tag_slugs( $tag_value );
+            }
+
+            if ( 'ngg' !== $shortcode_name ) {
+                return array();
+            }
+
+            if ( $this->is_truthy_shortcode_attribute( $attributes, 'tagcloud' ) ) {
+                return array();
+            }
+
+            $source = $this->get_first_shortcode_attribute( $attributes, array( 'source', 'src' ) );
+            $source = is_scalar( $source ) ? sanitize_key( str_replace( '-', '_', (string) $source ) ) : '';
+            $is_tag_source = in_array( $source, array( 'tags', 'tag', 'image_tags', 'image_tag' ), true );
+
+            if ( $is_tag_source ) {
+                $tag_value = $this->get_first_shortcode_attribute( $attributes, array( 'container_ids', 'ids', 'tag_ids' ) );
+            } else {
+                $tag_value = $this->get_first_shortcode_attribute( $attributes, array( 'tag_ids' ) );
+            }
+
+            return $this->normalize_media_tag_slugs( $tag_value );
+        }
+
+        /**
+         * Get the shortcode name.
+         *
+         * @param string $shortcode Shortcode text.
+         * @return string Shortcode name.
+         */
+        private function get_shortcode_name( $shortcode ) {
+            if ( ! is_string( $shortcode ) || ! preg_match( '/^\[([a-z0-9_-]+)/i', trim( $shortcode ), $matches ) ) {
+                return '';
+            }
+
+            return strtolower( $matches[1] );
+        }
+
+        /**
+         * Parse shortcode attributes from a matched shortcode string.
+         *
+         * @param string $shortcode Shortcode text.
+         * @return array Parsed attributes.
+         */
+        private function parse_shortcode_attributes( $shortcode ) {
+            if ( ! is_string( $shortcode ) || ! preg_match( '/^\[[^\s\]]+\s*([^\]]*)\]/', $shortcode, $matches ) ) {
+                return array();
+            }
+
+            $attribute_text = trim( $matches[1] );
+            if ( '' === $attribute_text ) {
+                return array();
+            }
+
+            if ( function_exists( 'shortcode_parse_atts' ) ) {
+                $attributes = shortcode_parse_atts( $attribute_text );
+                return is_array( $attributes ) ? array_change_key_case( $attributes, CASE_LOWER ) : array();
+            }
+
+            $attributes = array();
+            if ( preg_match_all( '/([\w-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s\]]+))/', $attribute_text, $attribute_matches, PREG_SET_ORDER ) ) {
+                foreach ( $attribute_matches as $attribute_match ) {
+                    $value = '';
+                    if ( isset( $attribute_match[2] ) && '' !== $attribute_match[2] ) {
+                        $value = $attribute_match[2];
+                    } else if ( isset( $attribute_match[3] ) && '' !== $attribute_match[3] ) {
+                        $value = $attribute_match[3];
+                    } else if ( isset( $attribute_match[4] ) ) {
+                        $value = $attribute_match[4];
+                    }
+                    $attributes[ strtolower( $attribute_match[1] ) ] = $value;
+                }
+            }
+
+            return $attributes;
+        }
+
+        /**
+         * Get the first non-empty shortcode attribute from a list of keys.
+         *
+         * @param array $attributes Parsed attributes.
+         * @param array $keys Attribute keys.
+         * @return string|false Attribute value, or false.
+         */
+        private function get_first_shortcode_attribute( $attributes, $keys ) {
+            foreach ( $keys as $key ) {
+                if ( isset( $attributes[ $key ] ) && is_scalar( $attributes[ $key ] ) && '' !== trim( (string) $attributes[ $key ] ) ) {
+                    return (string) $attributes[ $key ];
+                }
+            }
+
+            return false;
+        }
+
+        /**
+         * Returns true when a shortcode attribute is explicitly enabled.
+         *
+         * @param array $attributes Parsed attributes.
+         * @param string $key Attribute key.
+         * @return bool
+         */
+        private function is_truthy_shortcode_attribute( $attributes, $key ) {
+            if ( ! isset( $attributes[ $key ] ) ) {
+                return false;
+            }
+
+            $value = is_scalar( $attributes[ $key ] ) ? strtolower( trim( (string) $attributes[ $key ] ) ) : '';
+            return in_array( $value, array( '1', 'true', 'yes', 'on' ), true );
+        }
+
+        /**
+         * Normalize a NextGEN tag list into FooGallery media tag slugs.
+         *
+         * @param string|false $tag_value Comma- or pipe-delimited tag list.
+         * @return array Tag slugs.
+         */
+        private function normalize_media_tag_slugs( $tag_value ) {
+            if ( ! is_scalar( $tag_value ) ) {
+                return array();
+            }
+
+            $tags = preg_split( '/,|\|/', (string) $tag_value );
+            if ( ! is_array( $tags ) ) {
+                return array();
+            }
+
+            $slugs = array();
+            foreach ( $tags as $tag ) {
+                $tag = trim( html_entity_decode( (string) $tag, ENT_QUOTES, 'UTF-8' ) );
+                $tag = trim( rawurldecode( $tag ) );
+                $tag = trim( $tag, " \t\n\r\0\x0B\"'" );
+                if ( '' === $tag || 'all' === strtolower( $tag ) ) {
+                    continue;
+                }
+
+                if ( function_exists( 'sanitize_title' ) ) {
+                    $slug = sanitize_title( $tag );
+                } else {
+                    $slug = strtolower( $tag );
+                    $slug = preg_replace( '/[^a-z0-9_-]+/', '-', $slug );
+                    $slug = trim( $slug, '-' );
+                }
+
+                if ( is_string( $slug ) && '' !== $slug && ! in_array( $slug, $slugs, true ) ) {
+                    $slugs[] = $slug;
+                }
+            }
+
+            return $slugs;
         }
 
         /**

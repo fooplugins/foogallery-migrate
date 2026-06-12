@@ -143,7 +143,14 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Plugin' ) ) {
             if ( $migrated_object ) {
                 $image = foogallery_migrate_migrator_instance()->get_migrated_objects()[$data['source_url']];
             } else {
-                $image = new Image();
+                $image = new Image( $this );
+                if ( array_key_exists( 'ID', $data ) ) {
+                    $image->ID = absint( $data['ID'] );
+                } else if ( isset( $data['data'] ) && is_object( $data['data'] ) && isset( $data['data']->pid ) ) {
+                    $image->ID = absint( $data['data']->pid );
+                } else if ( isset( $data['data'] ) && is_object( $data['data'] ) && isset( $data['data']->id ) ) {
+                    $image->ID = absint( $data['data']->id );
+                }
                 $image->source_url = $data['source_url'];
                 if ( array_key_exists( 'slug', $data ) ) {
                     $image->slug = $data['slug'];
@@ -232,6 +239,16 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Plugin' ) ) {
          */
         function has_migratable_image_tags() {
             return false;
+        }
+
+        /**
+         * Returns source image tag names that can be assigned to FooGallery media tags.
+         *
+         * @param Image $image Source image object.
+         * @return array Tag names.
+         */
+        function get_image_tags( $image ) {
+            return array();
         }
     }
 }

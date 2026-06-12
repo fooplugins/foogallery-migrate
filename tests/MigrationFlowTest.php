@@ -26,6 +26,9 @@ class MigrationFlowTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_attachment_image_urls'] = array();
 		$GLOBALS['foogallery_migrate_test_attachment_image_calls'] = array();
 		$GLOBALS['foogallery_migrate_test_attachment_url_to_postid'] = array();
+		$GLOBALS['foogallery_migrate_test_object_terms']       = array();
+		$GLOBALS['foogallery_migrate_test_set_object_terms']   = array();
+		$GLOBALS['foogallery_migrate_test_imported_attachments'] = array();
 		$GLOBALS['foogallery_migrate_test_remote_head']       = array();
 		$GLOBALS['foogallery_migrate_test_gallery_templates'] = array();
 		$GLOBALS['foogallery_migrate_test_taxonomies']        = array();
@@ -290,6 +293,7 @@ class MigrationFlowTest extends TestCase {
 
 		$this->assertInstanceOf( Image::class, $image );
 		$this->assertSame( 'https://example.test/factory.jpg', $image->unique_identifier() );
+		$this->assertSame( $plugin, $image->plugin );
 		$this->assertInstanceOf( Gallery::class, $gallery );
 		$this->assertSame( 'gallery_FakeSource_50', $gallery->unique_identifier() );
 		$this->assertSame( 1, $gallery->get_children_count() );
@@ -349,9 +353,19 @@ class MigrationFlowTest extends TestCase {
 
 	public function test_newly_written_state_is_compact_and_hydrates_runtime_objects(): void {
 		$plugin  = new FakeSourcePlugin();
-		$image   = $this->create_image( 'https://example.test/compact.jpg' );
-		$image->data = (object) array(
-			'large_source_blob' => str_repeat( 'x', 1000 ),
+		$image = $plugin->get_image(
+			array(
+				'source_url'  => 'https://example.test/compact.jpg',
+				'slug'        => 'compact.jpg',
+				'title'       => 'Compact',
+				'caption'     => '',
+				'description' => '',
+				'alt'         => '',
+				'date'        => '2026-05-21 12:00:00',
+				'data'        => (object) array(
+					'large_source_blob' => str_repeat( 'x', 1000 ),
+				),
+			)
 		);
 		$gallery = $this->create_gallery( $plugin, 70, 'Compact Gallery', array( $image ) );
 		$gallery->data = (object) array(
@@ -382,6 +396,7 @@ class MigrationFlowTest extends TestCase {
 		$this->assertInstanceOf( Gallery::class, $hydrated[0] );
 		$this->assertInstanceOf( FakeSourcePlugin::class, $hydrated[0]->plugin );
 		$this->assertInstanceOf( Image::class, $hydrated[0]->children[0] );
+		$this->assertInstanceOf( FakeSourcePlugin::class, $hydrated[0]->children[0]->plugin );
 		$this->assertSame( 'Compact Gallery', $hydrated[0]->title );
 		$this->assertNull( $hydrated[0]->data );
 		$this->assertSame( 'https://example.test/compact.jpg', $hydrated[0]->children[0]->source_url );
@@ -511,6 +526,10 @@ class MigrationFlowTest extends TestCase {
 				'[imagely id=15]',
 				'[ngg src="galleries" ids="99" display="basic_thumbnail"]',
 				'[singlepic id=11328 w=800 float=center]',
+				'[ngg tag_ids="bridge"]',
+				'[ngg source="tags" container_ids="bridge|wedding shoots" display_type="photocrati-nextgen_basic_thumbnails"]',
+				'[nggtags gallery="old bridge"]',
+				'[tags=urban bridge]',
 			)
 		);
 
@@ -531,8 +550,141 @@ class MigrationFlowTest extends TestCase {
 		$this->assertContains( '[imagely id=15]', $matched_shortcodes );
 		$this->assertContains( '[ngg src="galleries" ids="99" display="basic_thumbnail"]', $matched_shortcodes );
 		$this->assertContains( '[singlepic id=11328 w=800 float=center]', $matched_shortcodes );
+		$this->assertContains( '[ngg tag_ids="bridge"]', $matched_shortcodes );
+		$this->assertContains( '[ngg source="tags" container_ids="bridge|wedding shoots" display_type="photocrati-nextgen_basic_thumbnails"]', $matched_shortcodes );
+		$this->assertContains( '[nggtags gallery="old bridge"]', $matched_shortcodes );
+		$this->assertContains( '[tags=urban bridge]', $matched_shortcodes );
 		$this->assertSame( 'image', $plugin->get_content_object_type( '[singlepic id=11328 w=800 float=center]' ) );
 		$this->assertSame( 'gallery', $plugin->get_content_object_type( '[ngg src="galleries" ids="99"]' ) );
+		$this->assertSame( 'dynamic_gallery', $plugin->get_content_object_type( '[ngg tag_ids="bridge"]' ) );
+		$this->assertSame( '[foogallery media_tags="bridge,wedding-shoots"]', $plugin->get_content_replacement_content( '[ngg source="tags" container_ids="bridge|wedding shoots"]' ) );
+		$this->assertSame( '[foogallery media_tags="urban-bridge"]', $plugin->get_content_replacement_content( '[tags=urban bridge]' ) );
+		$this->assertFalse( $plugin->get_content_replacement_content( '[ngg source="tags" tagcloud=yes ids="bridge"]' ) );
+	}
+
+	public function test_nextgen_image_migration_passes_tags_to_foogallery_import(): void {
+		$plugin = new Nextgen();
+		$source_url = 'https://example.test/wp-content/gallery/poland/bridge.jpg';
+		$GLOBALS['foogallery_migrate_test_taxonomies'] = array( FOOGALLERY_ATTACHMENT_TAXONOMY_TAG );
+		$GLOBALS['foogallery_migrate_test_attachment_url_to_postid'][ $source_url ] = 0;
+		$GLOBALS['foogallery_migrate_test_object_terms']['ngg_tag'][11328] = array(
+			'Bridge',
+			'Wedding Shoots',
+			'Bridge',
+			'',
+		);
+
+		$image = $plugin->get_image(
+			array(
+				'source_url'  => $source_url,
+				'slug'        => 'bridge.jpg',
+				'title'       => 'Bridge',
+				'caption'     => 'Bridge caption',
+				'description' => 'Bridge description',
+				'alt'         => 'Bridge alt',
+				'date'        => '2026-05-21 12:00:00',
+				'data'        => (object) array(
+					'pid' => 11328,
+				),
+			)
+		);
+
+		$this->assertSame( array( 'Bridge', 'Wedding Shoots' ), $plugin->get_image_tags( $image ) );
+		$this->assertSame( 11328, $image->ID );
+		$image_without_raw_data = clone $image;
+		$image_without_raw_data->data = null;
+		$this->assertSame( array( 'Bridge', 'Wedding Shoots' ), $plugin->get_image_tags( $image_without_raw_data ) );
+
+		$image->create_new_migrated_object();
+
+		$this->assertGreaterThan( 6000, $image->migrated_id );
+		$this->assertCount( 1, $GLOBALS['foogallery_migrate_test_imported_attachments'] );
+		$this->assertSame(
+			array( 'Bridge', 'Wedding Shoots' ),
+			$GLOBALS['foogallery_migrate_test_imported_attachments'][0]['data']['tags']
+		);
+		$this->assertSame(
+			array( 'Bridge', 'Wedding Shoots' ),
+			$GLOBALS['foogallery_migrate_test_object_terms'][ FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ][ $image->migrated_id ]
+		);
+		$this->assertSame( '2026-05-21 12:00:00', $GLOBALS['foogallery_migrate_test_posts'][ $image->migrated_id ]->post_date );
+	}
+
+	public function test_nextgen_image_migration_applies_tags_to_existing_attachment(): void {
+		$plugin = new Nextgen();
+		$source_url = 'https://example.test/wp-content/gallery/italy/bridge.jpg';
+		$GLOBALS['foogallery_migrate_test_taxonomies'] = array( FOOGALLERY_ATTACHMENT_TAXONOMY_TAG );
+		$GLOBALS['foogallery_migrate_test_attachment_url_to_postid'][ $source_url ] = 4500;
+		$GLOBALS['foogallery_migrate_test_object_terms']['ngg_tag'][11329] = array(
+			'Bridge',
+			'Italy',
+		);
+
+		$image = $plugin->get_image(
+			array(
+				'source_url'  => $source_url,
+				'slug'        => 'bridge.jpg',
+				'title'       => 'Italy bridge',
+				'caption'     => '',
+				'description' => '',
+				'alt'         => '',
+				'date'        => '2026-05-21 12:00:00',
+				'data'        => (object) array(
+					'pid' => 11329,
+				),
+			)
+		);
+
+		$image->create_new_migrated_object();
+
+		$this->assertTrue( $image->migrated );
+		$this->assertSame( 4500, $image->migrated_id );
+		$this->assertSame( array(), $GLOBALS['foogallery_migrate_test_imported_attachments'] );
+		$this->assertSame(
+			array( 'Bridge', 'Italy' ),
+			$GLOBALS['foogallery_migrate_test_object_terms'][ FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ][4500]
+		);
+	}
+
+	public function test_content_migration_replaces_nextgen_tag_shortcodes_with_media_tag_shortcodes(): void {
+		$plugin = new Nextgen();
+		$plugin->is_detected = true;
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+
+		$original_content = 'Before [ngg tag_ids="bridge"] middle [ngg source="tags" container_ids="bridge|wedding shoots" display_type="photocrati-nextgen_basic_thumbnails"] legacy [nggtags gallery="old bridge"] oldest [tags=urban bridge] after';
+		$this->create_test_post( 503, 'post', 'NextGEN Tag Shortcodes', $original_content );
+
+		$content_migrator = $engine->get_content_migrator();
+		$content_items = $this->find_content_items( $content_migrator, get_post( 503 ), array( $plugin ) );
+
+		$replacements = array();
+		foreach ( $content_items as $content_item ) {
+			if ( isset( $content_item['replacement_content'] ) ) {
+				$replacements[] = $content_item['replacement_content'];
+			}
+			$this->assertSame( 'dynamic_gallery', $content_item['object_type'] );
+			$this->assertFalse( $content_item['migrated_foogallery_id'] );
+		}
+
+		$this->assertCount( 4, $content_items );
+		$this->assertContains( '[foogallery media_tags="bridge"]', $replacements );
+		$this->assertContains( '[foogallery media_tags="bridge,wedding-shoots"]', $replacements );
+		$this->assertContains( '[foogallery media_tags="old-bridge"]', $replacements );
+		$this->assertContains( '[foogallery media_tags="urban-bridge"]', $replacements );
+
+		$content_migrator->set_setting( MigratorEngine::KEY_CONTENT, $content_items );
+		$result = $content_migrator->replace_content( array( 0, 1, 2, 3 ) );
+
+		$this->assertSame( 4, $result['success'] );
+		$this->assertSame( array(), $result['errors'] );
+
+		$updated_content = $GLOBALS['foogallery_migrate_test_posts'][503]->post_content;
+		$this->assertSame(
+			'Before [foogallery media_tags="bridge"] middle [foogallery media_tags="bridge,wedding-shoots"] legacy [foogallery media_tags="old-bridge"] oldest [foogallery media_tags="urban-bridge"] after',
+			$updated_content
+		);
 	}
 
 	public function test_content_migration_replaces_gallery_shortcodes_and_singlepic_images(): void {

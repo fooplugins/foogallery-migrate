@@ -86,6 +86,9 @@ $GLOBALS['foogallery_migrate_test_attachment_urls'] = array();
 $GLOBALS['foogallery_migrate_test_attachment_image_urls'] = array();
 $GLOBALS['foogallery_migrate_test_attachment_image_calls'] = array();
 $GLOBALS['foogallery_migrate_test_attachment_url_to_postid'] = array();
+$GLOBALS['foogallery_migrate_test_object_terms'] = array();
+$GLOBALS['foogallery_migrate_test_set_object_terms'] = array();
+$GLOBALS['foogallery_migrate_test_imported_attachments'] = array();
 $GLOBALS['foogallery_migrate_test_remote_head'] = array();
 $GLOBALS['foogallery_migrate_test_gallery_templates'] = array();
 $GLOBALS['foogallery_migrate_test_taxonomies'] = array();
@@ -186,8 +189,87 @@ function apply_filters( $hook_name, $value ) {
 	return $value;
 }
 
+function wp_raise_memory_limit( $context = 'admin' ) {
+	return true;
+}
+
 function taxonomy_exists( $taxonomy ) {
 	return in_array( $taxonomy, $GLOBALS['foogallery_migrate_test_taxonomies'], true );
+}
+
+function wp_get_object_terms( $object_id, $taxonomy, $args = array() ) {
+	$object_id = absint( $object_id );
+
+	if (
+		! isset( $GLOBALS['foogallery_migrate_test_object_terms'][ $taxonomy ] ) ||
+		! isset( $GLOBALS['foogallery_migrate_test_object_terms'][ $taxonomy ][ $object_id ] )
+	) {
+		return array();
+	}
+
+	$terms = $GLOBALS['foogallery_migrate_test_object_terms'][ $taxonomy ][ $object_id ];
+	if ( isset( $args['fields'] ) && 'names' === $args['fields'] ) {
+		return array_values( $terms );
+	}
+
+	return array_map(
+		function( $term ) use ( $taxonomy ) {
+			return (object) array(
+				'name'     => $term,
+				'taxonomy' => $taxonomy,
+			);
+		},
+		$terms
+	);
+}
+
+function wp_set_object_terms( $object_id, $terms, $taxonomy, $append = false ) {
+	if ( ! taxonomy_exists( $taxonomy ) ) {
+		return new WP_Error( 'invalid_taxonomy', 'Invalid taxonomy.' );
+	}
+
+	$object_id = absint( $object_id );
+	$terms = is_array( $terms ) ? array_values( $terms ) : array( $terms );
+
+	if ( $append && isset( $GLOBALS['foogallery_migrate_test_object_terms'][ $taxonomy ][ $object_id ] ) ) {
+		$terms = array_merge( $GLOBALS['foogallery_migrate_test_object_terms'][ $taxonomy ][ $object_id ], $terms );
+	}
+
+	$terms = array_values( array_unique( array_filter( array_map( 'strval', $terms ) ) ) );
+	$GLOBALS['foogallery_migrate_test_object_terms'][ $taxonomy ][ $object_id ] = $terms;
+	$GLOBALS['foogallery_migrate_test_set_object_terms'][] = compact( 'object_id', 'terms', 'taxonomy', 'append' );
+
+	return $terms;
+}
+
+function foogallery_import_attachment( $attachment_data ) {
+	static $attachment_id = 6000;
+
+	$attachment_id++;
+	$GLOBALS['foogallery_migrate_test_imported_attachments'][] = array(
+		'id'   => $attachment_id,
+		'data' => $attachment_data,
+	);
+	$GLOBALS['foogallery_migrate_test_posts'][ $attachment_id ] = (object) array(
+		'ID'           => $attachment_id,
+		'post_type'    => 'attachment',
+		'post_status'  => 'inherit',
+		'post_title'   => isset( $attachment_data['title'] ) ? $attachment_data['title'] : '',
+		'post_excerpt' => isset( $attachment_data['caption'] ) ? $attachment_data['caption'] : '',
+		'post_content' => isset( $attachment_data['description'] ) ? $attachment_data['description'] : '',
+	);
+	$GLOBALS['foogallery_migrate_test_attachment_urls'][ $attachment_id ] = isset( $attachment_data['url'] ) ? $attachment_data['url'] : '';
+
+	if (
+		isset( $attachment_data['tags'] ) &&
+		is_array( $attachment_data['tags'] ) &&
+		count( $attachment_data['tags'] ) > 0 &&
+		taxonomy_exists( FOOGALLERY_ATTACHMENT_TAXONOMY_TAG )
+	) {
+		wp_set_object_terms( $attachment_id, $attachment_data['tags'], FOOGALLERY_ATTACHMENT_TAXONOMY_TAG, false );
+	}
+
+	return $attachment_id;
 }
 
 function foogallery_fs() {
@@ -423,12 +505,28 @@ function wp_get_upload_dir() {
 	);
 }
 
+function wp_parse_url( $url, $component = -1 ) {
+	return -1 === $component ? parse_url( $url ) : parse_url( $url, $component );
+}
+
+function home_url( $path = '' ) {
+	return 'https://example.test' . ( '' === $path ? '' : '/' . ltrim( $path, '/' ) );
+}
+
+function site_url( $path = '' ) {
+	return home_url( $path );
+}
+
 function wp_normalize_path( $path ) {
 	return str_replace( '\\', '/', (string) $path );
 }
 
 function trailingslashit( $value ) {
 	return rtrim( (string) $value, "/\\" ) . '/';
+}
+
+function untrailingslashit( $value ) {
+	return rtrim( (string) $value, "/\\" );
 }
 
 require dirname( __DIR__ ) . '/vendor/autoload.php';

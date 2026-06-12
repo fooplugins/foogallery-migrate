@@ -549,7 +549,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 					$object = new Objects\Album( $plugin );
 					break;
 				case 'image':
-					$object = new Objects\Image();
+					$plugin = ! empty( $record['plugin_name'] ) ? $this->get_available_plugin_by_name( $record['plugin_name'] ) : null;
+					$object = new Objects\Image( false !== $plugin ? $plugin : null );
 					break;
 				default:
 					return $record;
