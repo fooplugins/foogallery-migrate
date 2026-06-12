@@ -230,7 +230,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			if ( is_object( $plugin ) && method_exists( $plugin, 'get_content_object_type' ) ) {
 				$object_type = $plugin->get_content_object_type( $original_content, $block_name );
 			}
-			if ( 'album' !== $object_type ) {
+			if ( ! in_array( $object_type, array( 'album', 'gallery', 'image' ), true ) ) {
 				$object_type = 'gallery';
 			}
 
@@ -535,17 +535,24 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		}
 
 		/**
-		 * Find migrated object matching plugin and gallery_id.
+		 * Find migrated object matching plugin and source ID.
 		 *
-		 * @param object $plugin Plugin object
-		 * @param int $gallery_id Gallery ID
-		 * @return object|false Migrated object or false if not found
+		 * @param object $plugin Plugin object.
+		 * @param int $gallery_id Gallery, album, or image ID from the source plugin.
+		 * @param string $object_type Source object type.
+		 * @return object|false Migrated object or false if not found.
 		 */
 		private function find_migrated_object( $plugin, $gallery_id, $object_type = 'gallery' ) {
 			$migrated_objects = $this->migrator_engine->get_migrated_objects();
 			$gallery_id = (int) $gallery_id;
 			$plugin_name = $plugin->name();
-			$object_type = ( 'album' === $object_type ) ? 'album' : 'gallery';
+			if ( ! in_array( $object_type, array( 'album', 'gallery', 'image' ), true ) ) {
+				$object_type = 'gallery';
+			}
+
+			if ( 'image' === $object_type ) {
+				return $this->find_migrated_image_object( $plugin, $gallery_id );
+			}
 
 			foreach ( $migrated_objects as $migrated_object ) {
 				if ( $migrated_object->type() !== $object_type ) {
@@ -582,6 +589,44 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		}
 
 		/**
+		 * Find a migrated image object by resolving the source image ID to its unique identifier.
+		 *
+		 * @param object $plugin Plugin object.
+		 * @param int $image_id Image ID from the source plugin.
+		 * @return object|false Migrated image object or false if not found.
+		 */
+		private function find_migrated_image_object( $plugin, $image_id ) {
+			if ( ! is_object( $plugin ) || ! method_exists( $plugin, 'get_content_image_identifier' ) ) {
+				return false;
+			}
+
+			$identifier = $plugin->get_content_image_identifier( $image_id );
+			if ( ! is_string( $identifier ) || '' === $identifier ) {
+				return false;
+			}
+
+			$migrated_objects = $this->migrator_engine->get_migrated_objects();
+			if ( ! isset( $migrated_objects[ $identifier ] ) || ! is_object( $migrated_objects[ $identifier ] ) ) {
+				return false;
+			}
+
+			$migrated_object = $migrated_objects[ $identifier ];
+			if ( ! method_exists( $migrated_object, 'type' ) || 'image' !== $migrated_object->type() ) {
+				return false;
+			}
+
+			if ( ! isset( $migrated_object->migrated ) || ! $migrated_object->migrated ) {
+				return false;
+			}
+
+			if ( ! isset( $migrated_object->migrated_id ) || (int) $migrated_object->migrated_id <= 0 ) {
+				return false;
+			}
+
+			return $migrated_object;
+		}
+
+		/**
 		 * Check if a gallery has been migrated.
 		 *
 		 * @param object $plugin Plugin object
@@ -605,6 +650,230 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		}
 
 		/**
+		 * Build replacement markup for a migrated single image shortcode.
+		 *
+		 * @param array $item Content migration item.
+		 * @return string Replacement markup.
+		 */
+		private function build_image_replacement_content( $item ) {
+			$attachment_id = ! empty( $item['migrated_foogallery_id'] ) ? absint( $item['migrated_foogallery_id'] ) : 0;
+			if ( $attachment_id < 1 ) {
+				return '';
+			}
+
+			$attributes = $this->parse_shortcode_attributes( isset( $item['original_content'] ) ? $item['original_content'] : '' );
+			$image_attributes = array();
+			$align = $this->get_shortcode_alignment( $attributes );
+			$caption = $this->get_attachment_caption_text( $attachment_id );
+
+			$width = $this->get_shortcode_dimension( $attributes, array( 'w', 'width' ) );
+			if ( $width > 0 ) {
+				$image_attributes['width'] = $width;
+			}
+
+			$height = $this->get_shortcode_dimension( $attributes, array( 'h', 'height' ) );
+			if ( $height > 0 ) {
+				$image_attributes['height'] = $height;
+			}
+
+			foreach ( array( 'alt', 'alttext' ) as $alt_key ) {
+				if ( isset( $attributes[ $alt_key ] ) && is_scalar( $attributes[ $alt_key ] ) && '' !== (string) $attributes[ $alt_key ] ) {
+					$image_attributes['alt'] = (string) $attributes[ $alt_key ];
+					break;
+				}
+			}
+
+			if ( '' === $caption && 'alignnone' !== $align ) {
+				$image_attributes['class'] = $align;
+			}
+
+			$image_markup = '';
+			if ( function_exists( 'wp_get_attachment_image' ) ) {
+				$image_size = ( $width > 0 || $height > 0 ) ? 'full' : 'thumbnail';
+				$markup = wp_get_attachment_image( $attachment_id, $image_size, false, $image_attributes );
+				if ( is_string( $markup ) && '' !== $markup ) {
+					$image_markup = $markup;
+				}
+			}
+
+			if ( ! function_exists( 'wp_get_attachment_url' ) ) {
+				return '';
+			}
+
+			$url = wp_get_attachment_url( $attachment_id );
+			if ( empty( $url ) ) {
+				return '';
+			}
+
+			if ( '' === $image_markup ) {
+				$classes = array( 'wp-image-' . $attachment_id );
+				if ( '' === $caption && 'alignnone' !== $align ) {
+					$classes[] = $align;
+				}
+				$image_attributes['class'] = implode( ' ', $classes );
+
+				$attribute_strings = array(
+					'src="' . esc_url( $url ) . '"',
+				);
+
+				foreach ( $image_attributes as $name => $value ) {
+					if ( is_scalar( $value ) && '' !== (string) $value ) {
+						$attribute_strings[] = esc_attr( $name ) . '="' . esc_attr( $value ) . '"';
+					}
+				}
+
+				$image_markup = '<img ' . implode( ' ', $attribute_strings ) . ' />';
+			}
+
+			$image_content = '<a href="' . esc_url( $url ) . '">' . $image_markup . '</a>';
+			if ( '' === $caption ) {
+				return $image_content;
+			}
+
+			$caption_width = $this->get_caption_width( $width, $image_markup );
+			if ( $caption_width < 1 ) {
+				return $image_content;
+			}
+
+			return '[caption id="attachment_' . $attachment_id . '" align="' . esc_attr( $align ) . '" width="' . $caption_width . '"]' . $image_content . ' ' . $caption . '[/caption]';
+		}
+
+		/**
+		 * Get the WordPress alignment class matching a legacy shortcode's float value.
+		 *
+		 * @param array $attributes Parsed shortcode attributes.
+		 * @return string WordPress alignment class.
+		 */
+		private function get_shortcode_alignment( $attributes ) {
+			if ( isset( $attributes['float'] ) && is_scalar( $attributes['float'] ) ) {
+				switch ( sanitize_key( $attributes['float'] ) ) {
+					case 'center':
+						return 'aligncenter';
+					case 'left':
+						return 'alignleft';
+					case 'right':
+						return 'alignright';
+				}
+			}
+
+			return 'alignnone';
+		}
+
+		/**
+		 * Get caption text for an attachment, falling back to description for older migrations.
+		 *
+		 * @param int $attachment_id Attachment post ID.
+		 * @return string Caption text.
+		 */
+		private function get_attachment_caption_text( $attachment_id ) {
+			$caption = '';
+
+			if ( function_exists( 'wp_get_attachment_caption' ) ) {
+				$caption = wp_get_attachment_caption( $attachment_id );
+			}
+
+			if ( ! is_scalar( $caption ) || '' === trim( (string) $caption ) ) {
+				$post = get_post( $attachment_id );
+				if ( is_object( $post ) ) {
+					if ( isset( $post->post_excerpt ) && '' !== trim( (string) $post->post_excerpt ) ) {
+						$caption = $post->post_excerpt;
+					} else if ( isset( $post->post_content ) && '' !== trim( (string) $post->post_content ) ) {
+						$caption = $post->post_content;
+					}
+				}
+			}
+
+			if ( ! is_scalar( $caption ) || '' === trim( (string) $caption ) ) {
+				return '';
+			}
+
+			$caption = trim( (string) $caption );
+			if ( function_exists( 'wp_kses_post' ) ) {
+				return wp_kses_post( $caption );
+			}
+
+			return strip_tags( $caption );
+		}
+
+		/**
+		 * Get the caption shortcode width from explicit shortcode dimensions or image markup.
+		 *
+		 * @param int $width Explicit shortcode width.
+		 * @param string $image_markup Image HTML.
+		 * @return int Caption width.
+		 */
+		private function get_caption_width( $width, $image_markup ) {
+			if ( $width > 0 ) {
+				return $width;
+			}
+
+			if ( is_string( $image_markup ) && preg_match( '/\swidth=["\']?(\d+)["\']?/', $image_markup, $matches ) ) {
+				return absint( $matches[1] );
+			}
+
+			return 0;
+		}
+
+		/**
+		 * Parse shortcode attributes from a matched shortcode string.
+		 *
+		 * @param string $shortcode Shortcode text.
+		 * @return array Parsed attributes.
+		 */
+		private function parse_shortcode_attributes( $shortcode ) {
+			if ( ! is_string( $shortcode ) || ! preg_match( '/^\[[^\s\]]+\s*([^\]]*)\]/', $shortcode, $matches ) ) {
+				return array();
+			}
+
+			$attribute_text = trim( $matches[1] );
+			if ( '' === $attribute_text ) {
+				return array();
+			}
+
+			if ( function_exists( 'shortcode_parse_atts' ) ) {
+				$attributes = shortcode_parse_atts( $attribute_text );
+				return is_array( $attributes ) ? $attributes : array();
+			}
+
+			$attributes = array();
+			if ( preg_match_all( '/([\w-]+)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s\]]+))/', $attribute_text, $attribute_matches, PREG_SET_ORDER ) ) {
+				foreach ( $attribute_matches as $attribute_match ) {
+					$value = '';
+					if ( isset( $attribute_match[2] ) && '' !== $attribute_match[2] ) {
+						$value = $attribute_match[2];
+					} else if ( isset( $attribute_match[3] ) && '' !== $attribute_match[3] ) {
+						$value = $attribute_match[3];
+					} else if ( isset( $attribute_match[4] ) ) {
+						$value = $attribute_match[4];
+					}
+					$attributes[ strtolower( $attribute_match[1] ) ] = $value;
+				}
+			}
+
+			return $attributes;
+		}
+
+		/**
+		 * Read the first positive integer dimension from shortcode attributes.
+		 *
+		 * @param array $attributes Parsed shortcode attributes.
+		 * @param array $keys Attribute keys to inspect.
+		 * @return int Positive dimension or zero.
+		 */
+		private function get_shortcode_dimension( $attributes, $keys ) {
+			foreach ( $keys as $key ) {
+				if ( isset( $attributes[ $key ] ) && is_scalar( $attributes[ $key ] ) ) {
+					$value = absint( $attributes[ $key ] );
+					if ( $value > 0 ) {
+						return $value;
+					}
+				}
+			}
+
+			return 0;
+		}
+
+		/**
 		 * Replace shortcodes/blocks in selected posts.
 		 *
 		 * @param array $selected_items Array of content item keys to replace
@@ -623,7 +892,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				}
 
 				$item = $content_items[ $item_key ];
-				$object_type = isset( $item['object_type'] ) && 'album' === $item['object_type'] ? 'album' : 'gallery';
+				$object_type = isset( $item['object_type'] ) && in_array( $item['object_type'], array( 'album', 'gallery', 'image' ), true ) ? $item['object_type'] : 'gallery';
 
 				if ( ! $item['migrated'] || ! $item['migrated_foogallery_id'] ) {
 					$errors[] = sprintf(
@@ -654,7 +923,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				}
 
 				$new_content = '';
-				if ( $item['type'] === 'shortcode' ) {
+				if ( 'image' === $object_type ) {
+					$new_content = $this->build_image_replacement_content( $item );
+				} else if ( $item['type'] === 'shortcode' ) {
 					if ( 'album' === $object_type ) {
 						$new_content = '[foogallery-album id="' . $item['migrated_foogallery_id'] . '"]';
 					} else {
@@ -833,7 +1104,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 								<span><?php esc_html_e( 'Type', 'foogallery-migrate' ); ?></span>
 							</th>
 							<th scope="col" class="manage-column">
-								<span><?php esc_html_e( 'FooGallery ID', 'foogallery-migrate' ); ?></span>
+								<span><?php esc_html_e( 'Migrated ID', 'foogallery-migrate' ); ?></span>
 							</th>
 							<th scope="col" class="manage-column">
 								<span><?php esc_html_e( 'Status', 'foogallery-migrate' ); ?></span>

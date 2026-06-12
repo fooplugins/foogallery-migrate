@@ -8,7 +8,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Language-Team: FooPlugins <info@fooplugins.com>\n"
 "Last-Translator: Brad Vincent <brad@fooplugins.com>\n"
-"POT-Creation-Date: 2026-05-27 17:32+0000\n"
+"POT-Creation-Date: 2026-06-12 10:32+0000\n"
 "Report-Msgid-Bugs-To: https://fooplugins.com\n"
 "X-Poedit-Basepath: ..\n"
 "X-Poedit-KeywordsList: __;_e;_ex:1,2c;_n:1,2;_n_noop:1,2;_nx:1,2,4c;_nx_noop:1,2,3c;_x:1,2c;esc_attr__;esc_attr_e;esc_attr_x:1,2c;esc_html__;esc_html_e;esc_html_x:1,2c\n"
@@ -121,7 +121,7 @@ msgstr ""
 msgid "Update WordPress now."
 msgstr ""
 
-#: includes/migrators/class-album-migrator.php:60, includes/migrators/class-content-migrator.php:820, includes/migrators/class-gallery-migrator.php:58
+#: includes/migrators/class-album-migrator.php:60, includes/migrators/class-content-migrator.php:1091, includes/migrators/class-gallery-migrator.php:58
 msgid "Select All"
 msgstr ""
 
@@ -183,87 +183,87 @@ msgstr ""
 msgid "Refresh Albums"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:630
+#: includes/migrators/class-content-migrator.php:899
 msgid "%1$s %2$d from %3$s in post \"%4$s\" has not been migrated yet."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:644
+#: includes/migrators/class-content-migrator.php:913
 msgid "Post %d not found."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:692
+#: includes/migrators/class-content-migrator.php:963
 msgid "Error updating post \"%s\": %s"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:720
+#: includes/migrators/class-content-migrator.php:991
 msgid "Error scanning content: %s"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:728
+#: includes/migrators/class-content-migrator.php:999
 msgid "Fatal error scanning content: %s"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:824
+#: includes/migrators/class-content-migrator.php:1095
 msgid "Post/Page"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:827
+#: includes/migrators/class-content-migrator.php:1098
 msgid "Source Plugin"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:830
+#: includes/migrators/class-content-migrator.php:1101
 msgid "Source ID"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:833, includes/views/view-migrate-tab-log.php:138
+#: includes/migrators/class-content-migrator.php:1104, includes/views/view-migrate-tab-log.php:138
 msgid "Type"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:836
-msgid "FooGallery ID"
+#: includes/migrators/class-content-migrator.php:1107
+msgid "Migrated ID"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:839, includes/views/view-migrate-tab-log.php:142
+#: includes/migrators/class-content-migrator.php:1110, includes/views/view-migrate-tab-log.php:142
 msgid "Status"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:897
+#: includes/migrators/class-content-migrator.php:1168
 msgid "Not Migrated"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:895, includes/views/view-migrate-tab-log.php:141
+#: includes/migrators/class-content-migrator.php:1166, includes/views/view-migrate-tab-log.php:141
 msgid "Migrated"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:738
+#: includes/migrators/class-content-migrator.php:1009
 msgid "No gallery shortcodes or blocks found in your content."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:739
+#: includes/migrators/class-content-migrator.php:1010
 msgid "Make sure your posts/pages are published and contain gallery shortcodes like [envira-gallery id=\"1\"] or [nggallery id=\"2\"]"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:741
+#: includes/migrators/class-content-migrator.php:1012
 msgid "Tips:"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:742
+#: includes/migrators/class-content-migrator.php:1013
 msgid "Ensure your post/page is published (not draft)"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:743
+#: includes/migrators/class-content-migrator.php:1014
 msgid "Check that the gallery plugins are detected in the Plugins tab"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:744
+#: includes/migrators/class-content-migrator.php:1015
 msgid "Try clicking \"Refresh Scan\" button to force a new scan"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:918
+#: includes/migrators/class-content-migrator.php:1189
 msgid "Replace Selected"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:920
+#: includes/migrators/class-content-migrator.php:1191
 msgid "Refresh Scan"
 msgstr ""
 

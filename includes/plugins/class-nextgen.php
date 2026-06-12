@@ -112,6 +112,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
                     'source_url' => $source_url,
                     'slug' => $nextgen_image->filename,
                     'title' => $alt_text,
+                    'caption' => $nextgen_image->description,
                     'alt' => $alt_text,
                     'description' => $nextgen_image->description,
                     'date' => $nextgen_image->imagedate,
@@ -136,6 +137,32 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
             global $wpdb;
             $gallery_table = $wpdb->prefix . self::NEXTGEN_TABLE_GALLERY;  
             return $wpdb->get_results( "select * from {$gallery_table}" );
+        }
+
+        /**
+         * Return single gallery object data.
+         *
+         * @param int $id ID of the gallery.
+         * @return object|null Object of the gallery.
+         */
+        private function get_nextgen_gallery( $id ) {
+            global $wpdb;
+            $gallery_table = $wpdb->prefix . self::NEXTGEN_TABLE_GALLERY;
+
+            return $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$gallery_table} WHERE gid = %d", $id ) );
+        }
+
+        /**
+         * Return single image object data.
+         *
+         * @param int $id ID of the image.
+         * @return object|null Object of the image.
+         */
+        private function get_nextgen_image( $id ) {
+            global $wpdb;
+            $picture_table = $wpdb->prefix . self::NEXTGEN_TABLE_PICTURES;
+
+            return $wpdb->get_row( $wpdb->prepare( "SELECT * FROM {$picture_table} WHERE pid = %d", $id ) );
         }
 
         /**
@@ -259,12 +286,59 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
          */
         function get_shortcode_patterns() {
             return array(
-                '/\[nggallery\s+id=["\']?(\d+)["\']?(?:\s+[^\]]*)?\]/i',
-                '/\[ngg[^\]]*ids=["\']?(\d+)["\']?[^\]]*\]/i',
-                '/\[ngg\s+id=["\']?(\d+)["\']?(?:\s+[^\]]*)?\]/i',
-                '/\[ngg_images[^\]]*gallery_ids=["\']?(\d+)["\']?[^\]]*\]/i',
-                '/\[imagely\s+id=["\']?(\d+)["\']?(?:\s+[^\]]*)?\]/i',
+                '/\[nggallery\b[^\]]*\bid\s*=\s*["\']?(\d+)["\']?[^\]]*\]/i',
+                '/\[ngg\b[^\]]*\bids\s*=\s*["\']?(\d+)(?:\s*,\s*\d+)*["\']?[^\]]*\]/i',
+                '/\[ngg\b[^\]]*\bid\s*=\s*["\']?(\d+)["\']?[^\]]*\]/i',
+                '/\[ngg_images\b[^\]]*\bgallery_ids\s*=\s*["\']?(\d+)(?:\s*,\s*\d+)*["\']?[^\]]*\]/i',
+                '/\[imagely\b[^\]]*\bid\s*=\s*["\']?(\d+)["\']?[^\]]*\]/i',
+                '/\[singlepic\b[^\]]*\bid\s*=\s*["\']?(\d+)["\']?[^\]]*\]/i',
             );
+        }
+
+        /**
+         * Returns the migrated object type for a detected NextGEN shortcode/block.
+         *
+         * @param string $original_content Original shortcode or serialized block content.
+         * @param string $block_name Block name, if the detected content is a block.
+         * @return string
+         */
+        function get_content_object_type( $original_content, $block_name = '' ) {
+            if ( is_string( $original_content ) && preg_match( '/\[singlepic\b/i', $original_content ) ) {
+                return 'image';
+            }
+
+            return 'gallery';
+        }
+
+        /**
+         * Resolve a NextGEN single image ID to the original source URL.
+         *
+         * @param int $image_id NextGEN picture ID.
+         * @return string|false
+         */
+        function get_content_image_identifier( $image_id ) {
+            $nextgen_image = $this->get_nextgen_image( $image_id );
+            if ( ! is_object( $nextgen_image ) || empty( $nextgen_image->filename ) ) {
+                return false;
+            }
+
+            $gallery_path = '';
+            if ( ! empty( $nextgen_image->galleryid ) ) {
+                $gallery = $this->get_nextgen_gallery( $nextgen_image->galleryid );
+                if ( is_object( $gallery ) && ! empty( $gallery->path ) ) {
+                    $gallery_path = $gallery->path;
+                }
+            }
+
+            if ( '' === $gallery_path && ! empty( $nextgen_image->path ) ) {
+                $gallery_path = $nextgen_image->path;
+            }
+
+            if ( '' === $gallery_path ) {
+                return false;
+            }
+
+            return trailingslashit( site_url() ) . trailingslashit( $gallery_path ) . $nextgen_image->filename;
         }
 
         /**

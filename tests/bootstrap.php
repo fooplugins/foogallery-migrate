@@ -75,6 +75,8 @@ $GLOBALS['foogallery_migrate_test_post_meta'] = array();
 $GLOBALS['foogallery_migrate_test_post_meta_updates'] = array();
 $GLOBALS['foogallery_migrate_test_attached_files'] = array();
 $GLOBALS['foogallery_migrate_test_attachment_urls'] = array();
+$GLOBALS['foogallery_migrate_test_attachment_image_urls'] = array();
+$GLOBALS['foogallery_migrate_test_attachment_image_calls'] = array();
 $GLOBALS['foogallery_migrate_test_attachment_url_to_postid'] = array();
 $GLOBALS['foogallery_migrate_test_remote_head'] = array();
 $GLOBALS['foogallery_migrate_test_gallery_templates'] = array();
@@ -124,6 +126,18 @@ function sanitize_key( $key ) {
 	return preg_replace( '/[^a-z0-9_\-]/', '', $key );
 }
 
+function esc_attr( $text ) {
+	return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
+}
+
+function esc_url( $url ) {
+	return esc_attr( $url );
+}
+
+function wp_kses_post( $content ) {
+	return $content;
+}
+
 function __( $text, $domain = 'default' ) {
 	return $text;
 }
@@ -165,6 +179,20 @@ function wp_insert_post( $args ) {
 	$post_id++;
 	$post = (object) array_merge( $args, array( 'ID' => $post_id ) );
 	$GLOBALS['foogallery_migrate_test_posts'][ $post_id ] = $post;
+	return $post_id;
+}
+
+function wp_update_post( $args, $wp_error = false ) {
+	$post_id = isset( $args['ID'] ) ? absint( $args['ID'] ) : 0;
+
+	if ( $post_id < 1 || ! isset( $GLOBALS['foogallery_migrate_test_posts'][ $post_id ] ) ) {
+		return $wp_error ? new WP_Error( 'missing_post', 'Post not found.' ) : 0;
+	}
+
+	foreach ( $args as $key => $value ) {
+		$GLOBALS['foogallery_migrate_test_posts'][ $post_id ]->$key = $value;
+	}
+
 	return $post_id;
 }
 
@@ -279,6 +307,63 @@ function wp_get_attachment_url( $attachment_id ) {
 	return isset( $GLOBALS['foogallery_migrate_test_attachment_urls'][ $attachment_id ] )
 		? $GLOBALS['foogallery_migrate_test_attachment_urls'][ $attachment_id ]
 		: '';
+}
+
+function wp_get_attachment_caption( $attachment_id ) {
+	$post = get_post( $attachment_id );
+
+	if ( ! $post || ! isset( $post->post_type ) || 'attachment' !== $post->post_type ) {
+		return false;
+	}
+
+	return isset( $post->post_excerpt ) ? $post->post_excerpt : '';
+}
+
+function wp_get_attachment_image( $attachment_id, $size = 'thumbnail', $icon = false, $attr = array() ) {
+	$GLOBALS['foogallery_migrate_test_attachment_image_calls'][] = compact( 'attachment_id', 'size', 'attr' );
+
+	$url = wp_get_attachment_url( $attachment_id );
+	if (
+		is_string( $size ) &&
+		isset( $GLOBALS['foogallery_migrate_test_attachment_image_urls'][ $attachment_id ] ) &&
+		isset( $GLOBALS['foogallery_migrate_test_attachment_image_urls'][ $attachment_id ][ $size ] )
+	) {
+		$url = $GLOBALS['foogallery_migrate_test_attachment_image_urls'][ $attachment_id ][ $size ];
+	}
+	if ( '' === $url ) {
+		return '';
+	}
+
+	$attr = is_array( $attr ) ? $attr : array();
+	$class = 'wp-image-' . absint( $attachment_id );
+	if ( is_string( $size ) && '' !== $size ) {
+		$class .= ' attachment-' . $size . ' size-' . $size;
+	}
+	if ( isset( $attr['class'] ) && '' !== (string) $attr['class'] ) {
+		$class .= ' ' . $attr['class'];
+	}
+	$attr['class'] = $class;
+
+	if ( 'thumbnail' === $size ) {
+		if ( ! isset( $attr['width'] ) ) {
+			$attr['width'] = 150;
+		}
+		if ( ! isset( $attr['height'] ) ) {
+			$attr['height'] = 150;
+		}
+	}
+
+	$attribute_strings = array(
+		'src="' . esc_url( $url ) . '"',
+	);
+
+	foreach ( $attr as $name => $value ) {
+		if ( is_scalar( $value ) && '' !== (string) $value ) {
+			$attribute_strings[] = esc_attr( $name ) . '="' . esc_attr( $value ) . '"';
+		}
+	}
+
+	return '<img ' . implode( ' ', $attribute_strings ) . ' />';
 }
 
 function wp_remote_head( $url, $args = array() ) {

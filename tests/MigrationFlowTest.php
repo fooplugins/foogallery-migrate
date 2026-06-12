@@ -8,6 +8,7 @@ use FooPlugins\FooGalleryMigrate\Objects\Gallery;
 use FooPlugins\FooGalleryMigrate\Objects\Image;
 use FooPlugins\FooGalleryMigrate\Objects\Migratable;
 use FooPlugins\FooGalleryMigrate\Objects\Plugin;
+use FooPlugins\FooGalleryMigrate\Plugins\Nextgen;
 use PHPUnit\Framework\TestCase;
 
 class MigrationFlowTest extends TestCase {
@@ -22,6 +23,8 @@ class MigrationFlowTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_post_meta_updates'] = array();
 		$GLOBALS['foogallery_migrate_test_attached_files']    = array();
 		$GLOBALS['foogallery_migrate_test_attachment_urls']   = array();
+		$GLOBALS['foogallery_migrate_test_attachment_image_urls'] = array();
+		$GLOBALS['foogallery_migrate_test_attachment_image_calls'] = array();
 		$GLOBALS['foogallery_migrate_test_attachment_url_to_postid'] = array();
 		$GLOBALS['foogallery_migrate_test_remote_head']       = array();
 		$GLOBALS['foogallery_migrate_test_gallery_templates'] = array();
@@ -443,7 +446,189 @@ class MigrationFlowTest extends TestCase {
 		$this->assertSame( 1, $engine->get_images_per_turn() );
 	}
 
-	private function create_test_post( int $id, string $post_type, string $title ): void {
+	public function test_nextgen_patterns_detect_modern_gallery_and_singlepic_shortcodes(): void {
+		$plugin = new Nextgen();
+		$content = implode(
+			' ',
+			array(
+				'[nggallery id=10]',
+				'[nggallery id="11" template=caption]',
+				'[ngg id=12]',
+				'[ngg ids=13]',
+				'[ngg_images gallery_ids=14]',
+				'[imagely id=15]',
+				'[ngg src="galleries" ids="99" display="basic_thumbnail"]',
+				'[singlepic id=11328 w=800 float=center]',
+			)
+		);
+
+		$matched_shortcodes = array();
+		foreach ( $plugin->get_shortcode_patterns() as $pattern ) {
+			if ( preg_match_all( $pattern, $content, $matches, PREG_SET_ORDER ) ) {
+				foreach ( $matches as $match ) {
+					$matched_shortcodes[] = $match[0];
+				}
+			}
+		}
+
+		$this->assertContains( '[nggallery id=10]', $matched_shortcodes );
+		$this->assertContains( '[nggallery id="11" template=caption]', $matched_shortcodes );
+		$this->assertContains( '[ngg id=12]', $matched_shortcodes );
+		$this->assertContains( '[ngg ids=13]', $matched_shortcodes );
+		$this->assertContains( '[ngg_images gallery_ids=14]', $matched_shortcodes );
+		$this->assertContains( '[imagely id=15]', $matched_shortcodes );
+		$this->assertContains( '[ngg src="galleries" ids="99" display="basic_thumbnail"]', $matched_shortcodes );
+		$this->assertContains( '[singlepic id=11328 w=800 float=center]', $matched_shortcodes );
+		$this->assertSame( 'image', $plugin->get_content_object_type( '[singlepic id=11328 w=800 float=center]' ) );
+		$this->assertSame( 'gallery', $plugin->get_content_object_type( '[ngg src="galleries" ids="99"]' ) );
+	}
+
+	public function test_content_migration_replaces_gallery_shortcodes_and_singlepic_images(): void {
+		$plugin = new FakeSourcePlugin();
+		$plugin->shortcode_patterns = array(
+			'/\[ngg\b[^\]]*\bids\s*=\s*["\']?(\d+)(?:\s*,\s*\d+)*["\']?[^\]]*\]/i',
+			'/\[singlepic\b[^\]]*\bid\s*=\s*["\']?(\d+)["\']?[^\]]*\]/i',
+		);
+		$plugin->content_object_types = array(
+			'singlepic' => 'image',
+		);
+		$plugin->content_image_identifiers = array(
+			11328 => 'https://example.test/nextgen/source-single.jpg',
+			11329 => 'https://example.test/nextgen/source-thumb-default.jpg',
+		);
+		$plugin->is_detected = true;
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+
+		$gallery = $this->create_gallery( $plugin, 99, 'Migrated NextGEN Gallery', array() );
+		$gallery->migrated = true;
+		$gallery->migrated_id = 199;
+		$gallery->migration_status = Migratable::PROGRESS_COMPLETED;
+		$engine->add_migrated_object( $gallery );
+
+		$image = $this->create_image( 'https://example.test/nextgen/source-single.jpg' );
+		$image->migrated = true;
+		$image->migrated_id = 1133;
+		$image->migration_status = Migratable::PROGRESS_COMPLETED;
+		$engine->add_migrated_object( $image );
+
+		$thumbnail_default_image = $this->create_image( 'https://example.test/nextgen/source-thumb-default.jpg' );
+		$thumbnail_default_image->migrated = true;
+		$thumbnail_default_image->migrated_id = 1134;
+		$thumbnail_default_image->migration_status = Migratable::PROGRESS_COMPLETED;
+		$engine->add_migrated_object( $thumbnail_default_image );
+
+		$GLOBALS['foogallery_migrate_test_attachment_urls'][1133] = 'https://example.test/wp-content/uploads/source-single.jpg';
+		$GLOBALS['foogallery_migrate_test_attachment_urls'][1134] = 'https://example.test/wp-content/uploads/source-thumb-default.jpg';
+		$GLOBALS['foogallery_migrate_test_attachment_image_urls'][1134] = array(
+			'thumbnail' => 'https://example.test/wp-content/uploads/source-thumb-default-150x150.jpg',
+		);
+		$GLOBALS['foogallery_migrate_test_posts'][1133] = (object) array(
+			'ID'           => 1133,
+			'post_type'    => 'attachment',
+			'post_status'  => 'inherit',
+			'post_title'   => 'Source single',
+			'post_excerpt' => 'Migrated image caption',
+			'post_content' => 'Migrated image description',
+		);
+		$GLOBALS['foogallery_migrate_test_posts'][1134] = (object) array(
+			'ID'           => 1134,
+			'post_type'    => 'attachment',
+			'post_status'  => 'inherit',
+			'post_title'   => 'Source thumbnail default',
+			'post_excerpt' => 'Thumbnail default caption',
+			'post_content' => 'Thumbnail default description',
+		);
+
+		$original_content = 'Intro [ngg src="galleries" ids="99" display="basic_thumbnail"] middle [singlepic id=11328 w=800 float=center] and [singlepic id=11329 float=left] outro';
+		$this->create_test_post( 501, 'post', 'Legacy Shortcodes', $original_content );
+
+		$content_migrator = $engine->get_content_migrator();
+		$content_items = $this->find_content_items( $content_migrator, get_post( 501 ), array( $plugin ) );
+
+		$this->assertCount( 3, $content_items );
+		$this->assertSame( 'gallery', $content_items[0]['object_type'] );
+		$this->assertSame( 199, $content_items[0]['migrated_foogallery_id'] );
+		$this->assertSame( 'image', $content_items[1]['object_type'] );
+		$this->assertSame( 1133, $content_items[1]['migrated_foogallery_id'] );
+		$this->assertSame( 'image', $content_items[2]['object_type'] );
+		$this->assertSame( 1134, $content_items[2]['migrated_foogallery_id'] );
+
+		$content_migrator->set_setting( MigratorEngine::KEY_CONTENT, $content_items );
+		$result = $content_migrator->replace_content( array( 0, 1, 2 ) );
+
+		$this->assertSame( 3, $result['success'] );
+		$this->assertSame( array(), $result['errors'] );
+
+		$updated_content = $GLOBALS['foogallery_migrate_test_posts'][501]->post_content;
+		$this->assertStringContainsString( '[foogallery id="199"]', $updated_content );
+		$this->assertStringContainsString( '[caption id="attachment_1133" align="aligncenter" width="800"]', $updated_content );
+		$this->assertStringContainsString( '<a href="https://example.test/wp-content/uploads/source-single.jpg">', $updated_content );
+		$this->assertStringContainsString( '[caption id="attachment_1134" align="alignleft" width="150"]', $updated_content );
+		$this->assertStringContainsString( '<a href="https://example.test/wp-content/uploads/source-thumb-default.jpg">', $updated_content );
+		$this->assertStringContainsString( 'src="https://example.test/wp-content/uploads/source-thumb-default-150x150.jpg"', $updated_content );
+		$this->assertStringContainsString( '<img ', $updated_content );
+		$this->assertStringContainsString( 'wp-image-1133', $updated_content );
+		$this->assertStringContainsString( 'width="800"', $updated_content );
+		$this->assertStringContainsString( 'Migrated image caption[/caption]', $updated_content );
+		$this->assertStringContainsString( 'Thumbnail default caption[/caption]', $updated_content );
+		$this->assertStringNotContainsString( '[ngg ', $updated_content );
+		$this->assertStringNotContainsString( '[singlepic ', $updated_content );
+		$this->assertStringNotContainsString( 'ngg-gallery-singlepic-image', $updated_content );
+		$this->assertSame( 'full', $GLOBALS['foogallery_migrate_test_attachment_image_calls'][0]['size'] );
+		$this->assertSame( 'thumbnail', $GLOBALS['foogallery_migrate_test_attachment_image_calls'][1]['size'] );
+	}
+
+	public function test_content_migration_still_replaces_gallery_and_album_items_without_image_branch(): void {
+		$plugin = new FakeSourcePlugin();
+		$plugin->shortcode_patterns = array(
+			'/\[fake-gallery\b[^\]]*\bid\s*=\s*["\']?(\d+)["\']?[^\]]*\]/i',
+			'/\[fake-album\b[^\]]*\bid\s*=\s*["\']?(\d+)["\']?[^\]]*\]/i',
+		);
+		$plugin->content_object_types = array(
+			'fake-album' => 'album',
+		);
+		$plugin->is_detected = true;
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+
+		$gallery = $this->create_gallery( $plugin, 77, 'Migrated Gallery', array() );
+		$gallery->migrated = true;
+		$gallery->migrated_id = 177;
+		$gallery->migration_status = Migratable::PROGRESS_COMPLETED;
+		$engine->add_migrated_object( $gallery );
+
+		$album = $this->create_album( $plugin, 88, 'Migrated Album', array() );
+		$album->migrated = true;
+		$album->migrated_id = 188;
+		$album->migration_status = Migratable::PROGRESS_COMPLETED;
+		$engine->add_migrated_object( $album );
+
+		$original_content = 'Before [fake-gallery id=77] between [fake-album id=88] after';
+		$this->create_test_post( 502, 'post', 'Gallery And Album Shortcodes', $original_content );
+
+		$content_migrator = $engine->get_content_migrator();
+		$content_items = $this->find_content_items( $content_migrator, get_post( 502 ), array( $plugin ) );
+
+		$this->assertCount( 2, $content_items );
+		$this->assertSame( 'gallery', $content_items[0]['object_type'] );
+		$this->assertSame( 177, $content_items[0]['migrated_foogallery_id'] );
+		$this->assertSame( 'album', $content_items[1]['object_type'] );
+		$this->assertSame( 188, $content_items[1]['migrated_foogallery_id'] );
+
+		$content_migrator->set_setting( MigratorEngine::KEY_CONTENT, $content_items );
+		$result = $content_migrator->replace_content( array( 0, 1 ) );
+
+		$this->assertSame( 2, $result['success'] );
+		$this->assertSame( array(), $result['errors'] );
+
+		$updated_content = $GLOBALS['foogallery_migrate_test_posts'][502]->post_content;
+		$this->assertSame( 'Before [foogallery id="177"] between [foogallery-album id="188"] after', $updated_content );
+	}
+
+	private function create_test_post( int $id, string $post_type, string $title, string $content = '' ): void {
 		$GLOBALS['foogallery_migrate_test_posts'][ $id ] = (object) array(
 			'ID' => $id,
 			'post_type' => $post_type,
@@ -451,7 +636,15 @@ class MigrationFlowTest extends TestCase {
 			'post_title' => $title,
 			'post_name' => sanitize_key( $title ),
 			'post_author' => 1,
+			'post_content' => $content,
 		);
+	}
+
+	private function find_content_items( $content_migrator, $post, array $plugins ): array {
+		$method = new \ReflectionMethod( $content_migrator, 'find_shortcodes_and_blocks_in_content' );
+		$method->setAccessible( true );
+
+		return $method->invoke( $content_migrator, $post, $plugins );
 	}
 
 	private function get_meta_update_value( int $post_id, string $meta_key ) {
@@ -533,6 +726,9 @@ class MigrationFlowTest extends TestCase {
 class FakeSourcePlugin extends Plugin {
 	public $galleries = array();
 	public $albums = array();
+	public $shortcode_patterns = array();
+	public $content_object_types = array();
+	public $content_image_identifiers = array();
 
 	public function name() {
 		return 'FakeSource';
@@ -557,5 +753,27 @@ class FakeSourcePlugin extends Plugin {
 	public function get_gallery_settings( $gallery, $default_settings ) {
 		$default_settings['fake_setting'] = 'yes';
 		return $default_settings;
+	}
+
+	public function get_shortcode_patterns() {
+		return $this->shortcode_patterns;
+	}
+
+	public function get_content_object_type( $original_content, $block_name = '' ) {
+		foreach ( $this->content_object_types as $needle => $object_type ) {
+			if ( false !== stripos( $original_content, $needle ) ) {
+				return $object_type;
+			}
+		}
+
+		return parent::get_content_object_type( $original_content, $block_name );
+	}
+
+	public function get_content_image_identifier( $image_id ) {
+		$image_id = absint( $image_id );
+
+		return isset( $this->content_image_identifiers[ $image_id ] )
+			? $this->content_image_identifiers[ $image_id ]
+			: false;
 	}
 }

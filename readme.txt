@@ -79,6 +79,13 @@ Update now to get all the latest features, bug fixes and improvements!
 
 == Changelog ==
 
+= 1.10 =
+* Added support for replacing NextGEN singlepic shortcodes with standard WordPress captioned image content that links to the full-size attachment.
+* Improved NextGEN shortcode detection for legacy gallery formats and modern [ngg src="galleries" ids="..."] shortcodes.
+* Preserved NextGEN singlepic alignment and explicit width/height settings during content migration.
+* Defaulted migrated NextGEN singlepic output to the attachment thumbnail when no size is specified.
+* Imported NextGEN image descriptions into WordPress attachment captions for captioned single-image replacements.
+
 = 1.9 =
 * Added Override Gallery Settings and Override Album Settings options to inherit settings from existing FooGallery galleries and albums during migration.
 * Migrated albums can now inherit album template, settings, sort order and custom CSS from a selected source album while preserving the migrated child gallery list.
