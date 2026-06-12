@@ -64,6 +64,14 @@ if ( ! defined( 'FOOGALLERY_ALBUM_META_SORT' ) ) {
 	define( 'FOOGALLERY_ALBUM_META_SORT', 'foogallery_album_sort' );
 }
 
+if ( ! defined( 'FOOGALLERY_ATTACHMENT_TAXONOMY_TAG' ) ) {
+	define( 'FOOGALLERY_ATTACHMENT_TAXONOMY_TAG', 'foogallery_attachment_tag' );
+}
+
+if ( ! defined( 'FOOGALLERY_PRO_PLAN_EXPERT' ) ) {
+	define( 'FOOGALLERY_PRO_PLAN_EXPERT', 'pro' );
+}
+
 if ( ! defined( 'ARRAY_A' ) ) {
 	define( 'ARRAY_A', 'ARRAY_A' );
 }
@@ -80,6 +88,30 @@ $GLOBALS['foogallery_migrate_test_attachment_image_calls'] = array();
 $GLOBALS['foogallery_migrate_test_attachment_url_to_postid'] = array();
 $GLOBALS['foogallery_migrate_test_remote_head'] = array();
 $GLOBALS['foogallery_migrate_test_gallery_templates'] = array();
+$GLOBALS['foogallery_migrate_test_taxonomies'] = array();
+$GLOBALS['foogallery_migrate_test_foogallery_fs'] = null;
+
+class FooGalleryMigrateTestFreemius {
+	private $can_use_premium_code;
+	private $plans;
+
+	public function __construct( $can_use_premium_code = false, $plans = array() ) {
+		$this->can_use_premium_code = $can_use_premium_code;
+		$this->plans = $plans;
+	}
+
+	public function can_use_premium_code() {
+		return $this->can_use_premium_code;
+	}
+
+	public function is_plan_or_trial( $plan, $exact = false ) {
+		return ! empty( $this->plans[ $plan ] );
+	}
+
+	public function is_plan( $plan, $exact = false ) {
+		return ! empty( $this->plans[ $plan ] );
+	}
+}
 
 if ( ! class_exists( 'WP_Error' ) ) {
 	class WP_Error {
@@ -152,6 +184,14 @@ function is_wp_error( $thing ) {
 
 function apply_filters( $hook_name, $value ) {
 	return $value;
+}
+
+function taxonomy_exists( $taxonomy ) {
+	return in_array( $taxonomy, $GLOBALS['foogallery_migrate_test_taxonomies'], true );
+}
+
+function foogallery_fs() {
+	return $GLOBALS['foogallery_migrate_test_foogallery_fs'];
 }
 
 function foogallery_migrate_get_available_plugins() {

@@ -28,7 +28,10 @@ class MigrationFlowTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_attachment_url_to_postid'] = array();
 		$GLOBALS['foogallery_migrate_test_remote_head']       = array();
 		$GLOBALS['foogallery_migrate_test_gallery_templates'] = array();
+		$GLOBALS['foogallery_migrate_test_taxonomies']        = array();
+		$GLOBALS['foogallery_migrate_test_foogallery_fs']     = null;
 		$GLOBALS['foogallery_migrate_engine_instance']        = new MigratorEngine();
+		unset( $GLOBALS['wpdb'] );
 	}
 
 	public function test_gallery_migration_can_resume_and_tracks_migrated_objects(): void {
@@ -293,6 +296,55 @@ class MigrationFlowTest extends TestCase {
 		$this->assertSame( array( 'type' => 'default' ), $gallery->settings );
 		$this->assertInstanceOf( Album::class, $album );
 		$this->assertSame( 'album_FakeSource_60', $album->unique_identifier() );
+	}
+
+	public function test_nextgen_detects_migratable_image_tags(): void {
+		$GLOBALS['wpdb'] = new FakeWpdb( true );
+
+		$plugin = new Nextgen();
+
+		$this->assertTrue( $plugin->has_migratable_image_tags() );
+		$this->assertStringContainsString( 'ngg_tag', $GLOBALS['wpdb']->last_query );
+
+		$GLOBALS['wpdb'] = new FakeWpdb( false );
+
+		$this->assertFalse( $plugin->has_migratable_image_tags() );
+	}
+
+	public function test_image_tag_plan_warning_requires_tagged_images_without_foogallery_expert(): void {
+		$plugin = new FakeSourcePlugin();
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->run_detection();
+
+		$this->assertFalse( $engine->has_migratable_image_tags() );
+		$this->assertFalse( $engine->should_show_image_tag_plan_warning() );
+
+		$plugin->has_image_tags = true;
+		$engine->run_detection();
+
+		$this->assertTrue( $engine->has_migratable_image_tags() );
+		$this->assertTrue( $engine->should_show_image_tag_plan_warning() );
+
+		$GLOBALS['foogallery_migrate_test_foogallery_fs'] = new \FooGalleryMigrateTestFreemius(
+			false,
+			array( FOOGALLERY_PRO_PLAN_EXPERT => true )
+		);
+
+		$this->assertTrue( $engine->should_show_image_tag_plan_warning() );
+
+		$GLOBALS['foogallery_migrate_test_foogallery_fs'] = new \FooGalleryMigrateTestFreemius(
+			true,
+			array( FOOGALLERY_PRO_PLAN_EXPERT => true )
+		);
+
+		$this->assertFalse( $engine->should_show_image_tag_plan_warning() );
+
+		$GLOBALS['foogallery_migrate_test_foogallery_fs'] = null;
+		$GLOBALS['foogallery_migrate_test_taxonomies'] = array( FOOGALLERY_ATTACHMENT_TAXONOMY_TAG );
+
+		$this->assertFalse( $engine->should_show_image_tag_plan_warning() );
 	}
 
 	public function test_newly_written_state_is_compact_and_hydrates_runtime_objects(): void {
@@ -729,6 +781,7 @@ class FakeSourcePlugin extends Plugin {
 	public $shortcode_patterns = array();
 	public $content_object_types = array();
 	public $content_image_identifiers = array();
+	public $has_image_tags = false;
 
 	public function name() {
 		return 'FakeSource';
@@ -775,5 +828,43 @@ class FakeSourcePlugin extends Plugin {
 		return isset( $this->content_image_identifiers[ $image_id ] )
 			? $this->content_image_identifiers[ $image_id ]
 			: false;
+	}
+
+	public function has_migratable_image_tags() {
+		return $this->has_image_tags;
+	}
+}
+
+class FakeWpdb {
+	public $prefix = 'wp_';
+	public $term_relationships = 'wp_term_relationships';
+	public $term_taxonomy = 'wp_term_taxonomy';
+	public $last_query = '';
+	private $has_nextgen_tags;
+
+	public function __construct( $has_nextgen_tags ) {
+		$this->has_nextgen_tags = $has_nextgen_tags;
+	}
+
+	public function prepare( $query ) {
+		$args = func_get_args();
+		array_shift( $args );
+
+		foreach ( $args as $arg ) {
+			$replacement = is_numeric( $arg ) ? (string) $arg : "'" . addslashes( (string) $arg ) . "'";
+			$query = preg_replace( '/%[ds]/', $replacement, $query, 1 );
+		}
+
+		return $query;
+	}
+
+	public function get_var( $query ) {
+		$this->last_query = $query;
+
+		if ( false !== strpos( $query, 'ngg_tag' ) ) {
+			return $this->has_nextgen_tags ? '1' : null;
+		}
+
+		return null;
 	}
 }

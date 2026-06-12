@@ -213,5 +213,25 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Plugin' ) ) {
         function get_content_image_identifier( $image_id ) {
             return false;
         }
+
+        /**
+         * Returns replacement content for source content that does not need a migrated FooGallery object.
+         *
+         * @param string $original_content Original shortcode or serialized block content.
+         * @param string $block_name Block name, if the detected content is a block.
+         * @return string|false Replacement content, or false to use the normal migrated-object replacement.
+         */
+        function get_content_replacement_content( $original_content, $block_name = '' ) {
+            return false;
+        }
+
+        /**
+         * Returns true when the source plugin has image tags that FooGallery can migrate.
+         *
+         * @return bool
+         */
+        function has_migratable_image_tags() {
+            return false;
+        }
     }
 }

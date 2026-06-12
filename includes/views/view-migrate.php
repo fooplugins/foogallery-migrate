@@ -360,6 +360,18 @@ $show_debug_tab = $has_log_tab && $migrator->is_debug_enabled();
 <div class="wrap">
 	<h2><?php esc_html_e( 'FooGallery Migrate!', 'foogallery-migrate' ); ?></h2>
 
+	<?php if ( $migrator->should_show_image_tag_plan_warning() ) { ?>
+		<div class="notice notice-warning">
+			<p><strong><?php esc_html_e( 'NextGEN image tags detected.', 'foogallery-migrate' ); ?></strong></p>
+			<p><?php esc_html_e( 'FooGallery Migrate found tagged NextGEN images. Migrating those tags into FooGallery media tags for tag-based dynamic galleries requires FooGallery PRO Expert.', 'foogallery-migrate' ); ?></p>
+			<p>
+				<a class="button button-primary" href="<?php echo esc_url( admin_url( 'edit.php?post_type=foogallery&page=foogallery-pricing&trial=true' ) ); ?>">
+					<?php esc_html_e( 'Start PRO Expert trial', 'foogallery-migrate' ); ?>
+				</a>
+			</p>
+		</div>
+	<?php } ?>
+
 	<h2 class="foo-nav-tabs nav-tab-wrapper">
 		<a href="#sources" data-tab="foogallery_migrate_sources" class="nav-tab nav-tab-active"><?php esc_html_e( 'Plugins', 'foogallery-migrate' ); ?></a>
 		<a href="#galleries" data-tab="foogallery_migrate_galleries" class="nav-tab"><?php esc_html_e( 'Galleries', 'foogallery-migrate' ); ?></a>

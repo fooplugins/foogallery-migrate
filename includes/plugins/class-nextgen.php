@@ -178,6 +178,41 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
         }
 
         /**
+         * Returns true when NextGEN image tags are present.
+         *
+         * @return bool
+         */
+        function has_migratable_image_tags() {
+            global $wpdb;
+
+            if ( ! is_object( $wpdb ) || ! method_exists( $wpdb, 'get_var' ) ) {
+                return false;
+            }
+
+            if ( empty( $wpdb->term_relationships ) || empty( $wpdb->term_taxonomy ) ) {
+                return false;
+            }
+
+            $picture_table = $wpdb->prefix . self::NEXTGEN_TABLE_PICTURES;
+            $sql = "
+                SELECT 1
+                FROM {$picture_table} p
+                INNER JOIN {$wpdb->term_relationships} tr ON tr.object_id = p.pid
+                INNER JOIN {$wpdb->term_taxonomy} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
+                WHERE tt.taxonomy = %s
+                LIMIT 1
+            ";
+
+            if ( method_exists( $wpdb, 'prepare' ) ) {
+                $sql = $wpdb->prepare( $sql, 'ngg_tag' );
+            } else {
+                $sql = str_replace( '%s', "'ngg_tag'", $sql );
+            }
+
+            return (bool) $wpdb->get_var( $sql );
+        }
+
+        /**
          * Returns the gallery template.
          *
          * @param $gallery

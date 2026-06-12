@@ -236,6 +236,73 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         }
 
         /**
+         * Returns true when a detected source plugin has migratable image tags.
+         *
+         * @return bool
+         */
+        public function has_migratable_image_tags() {
+            foreach ( $this->get_plugins() as $plugin ) {
+                if ( ! is_object( $plugin ) || empty( $plugin->is_detected ) ) {
+                    continue;
+                }
+
+                if ( method_exists( $plugin, 'has_migratable_image_tags' ) && $plugin->has_migratable_image_tags() ) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /**
+         * Returns true when FooGallery Expert media tag functionality is available.
+         *
+         * @return bool
+         */
+        public function is_foogallery_expert_available() {
+            if (
+                defined( 'FOOGALLERY_ATTACHMENT_TAXONOMY_TAG' ) &&
+                function_exists( 'taxonomy_exists' ) &&
+                taxonomy_exists( FOOGALLERY_ATTACHMENT_TAXONOMY_TAG )
+            ) {
+                return true;
+            }
+
+            if ( ! function_exists( 'foogallery_fs' ) ) {
+                return false;
+            }
+
+            $fs = foogallery_fs();
+            if ( ! is_object( $fs ) ) {
+                return false;
+            }
+
+            if ( method_exists( $fs, 'can_use_premium_code' ) && ! $fs->can_use_premium_code() ) {
+                return false;
+            }
+
+            $expert_plan = defined( 'FOOGALLERY_PRO_PLAN_EXPERT' ) ? FOOGALLERY_PRO_PLAN_EXPERT : 'pro';
+            if ( method_exists( $fs, 'is_plan_or_trial' ) ) {
+                return (bool) $fs->is_plan_or_trial( $expert_plan );
+            }
+
+            if ( method_exists( $fs, 'is_plan' ) ) {
+                return (bool) $fs->is_plan( $expert_plan );
+            }
+
+            return false;
+        }
+
+        /**
+         * Returns true when the migration screen should warn about tagged image migrations.
+         *
+         * @return bool
+         */
+        public function should_show_image_tag_plan_warning() {
+            return $this->has_migratable_image_tags() && ! $this->is_foogallery_expert_available();
+        }
+
+        /**
          * Returns the Gallery Migrator
          *
          * @return Migrators\GalleryMigrator
