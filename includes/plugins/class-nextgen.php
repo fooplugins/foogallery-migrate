@@ -267,6 +267,75 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
         }
 
         /**
+         * Finds tagged NextGEN images for post-migration FooGallery media tag sync.
+         *
+         * @return array Image tag sync items.
+         */
+        function find_image_tag_sync_items() {
+            global $wpdb;
+
+            if (
+                ! is_object( $wpdb ) ||
+                ! method_exists( $wpdb, 'get_results' ) ||
+                empty( $wpdb->term_relationships ) ||
+                empty( $wpdb->term_taxonomy )
+            ) {
+                return array();
+            }
+
+            $picture_table = $wpdb->prefix . self::NEXTGEN_TABLE_PICTURES;
+            $gallery_table = $wpdb->prefix . self::NEXTGEN_TABLE_GALLERY;
+            $sql = "
+                SELECT DISTINCT p.pid, p.filename, p.galleryid, g.path
+                FROM {$picture_table} p
+                INNER JOIN {$gallery_table} g ON g.gid = p.galleryid
+                INNER JOIN {$wpdb->term_relationships} tr ON tr.object_id = p.pid
+                INNER JOIN {$wpdb->term_taxonomy} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
+                WHERE tt.taxonomy = %s
+                ORDER BY p.pid
+            ";
+
+            if ( method_exists( $wpdb, 'prepare' ) ) {
+                $sql = $wpdb->prepare( $sql, 'ngg_tag' );
+            } else {
+                $sql = str_replace( '%s', "'ngg_tag'", $sql );
+            }
+
+            $rows = $wpdb->get_results( $sql );
+            if ( ! is_array( $rows ) || empty( $rows ) ) {
+                return array();
+            }
+
+            $items = array();
+            foreach ( $rows as $row ) {
+                if ( ! is_object( $row ) || empty( $row->pid ) || empty( $row->filename ) || empty( $row->path ) ) {
+                    continue;
+                }
+
+                $source_url = trailingslashit( site_url() ) . trailingslashit( $row->path ) . $row->filename;
+                $image = (object) array(
+                    'ID'   => absint( $row->pid ),
+                    'data' => (object) array(
+                        'pid' => absint( $row->pid ),
+                    ),
+                );
+                $tags = $this->get_image_tags( $image );
+                if ( empty( $tags ) ) {
+                    continue;
+                }
+
+                $items[] = array(
+                    'plugin_name'     => $this->name(),
+                    'source_image_id' => absint( $row->pid ),
+                    'source_url'      => $source_url,
+                    'tags'            => $tags,
+                );
+            }
+
+            return $items;
+        }
+
+        /**
          * Returns the gallery template.
          *
          * @param $gallery

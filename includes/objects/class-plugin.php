@@ -250,5 +250,14 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Plugin' ) ) {
         function get_image_tags( $image ) {
             return array();
         }
+
+        /**
+         * Finds source images with tags for post-migration attachment tag sync.
+         *
+         * @return array Image tag sync items.
+         */
+        function find_image_tag_sync_items() {
+            return array();
+        }
     }
 }

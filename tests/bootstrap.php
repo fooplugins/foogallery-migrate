@@ -328,6 +328,8 @@ function get_post( $post_id ) {
 
 function get_posts( $args = array() ) {
 	$post_type = isset( $args['post_type'] ) ? $args['post_type'] : '';
+	$meta_key = isset( $args['meta_key'] ) ? $args['meta_key'] : '';
+	$meta_value = isset( $args['meta_value'] ) ? $args['meta_value'] : null;
 	$posts = array();
 
 	foreach ( $GLOBALS['foogallery_migrate_test_posts'] as $post ) {
@@ -336,6 +338,10 @@ function get_posts( $args = array() ) {
 		}
 
 		if ( isset( $post->post_status ) && 'trash' === $post->post_status ) {
+			continue;
+		}
+
+		if ( '' !== $meta_key && get_post_meta( $post->ID, $meta_key, true ) !== $meta_value ) {
 			continue;
 		}
 
@@ -350,6 +356,10 @@ function get_posts( $args = array() ) {
 			return strcasecmp( $a_title, $b_title );
 		}
 	);
+
+	if ( isset( $args['fields'] ) && 'ids' === $args['fields'] ) {
+		return wp_list_pluck( $posts, 'ID' );
+	}
 
 	return $posts;
 }

@@ -79,6 +79,13 @@ Update now to get all the latest features, bug fixes and improvements!
 
 == Changelog ==
 
+= 1.11 =
+* Added support for migrating NextGEN tag-based gallery shortcodes to FooGallery media tag shortcodes.
+* Added NextGEN image tag migration so imported attachments can receive matching FooGallery media tags when available.
+* Added a Sync Image Tags tool to bring NextGEN tags across for images that were already imported.
+* Improved existing migrated image matching so image tags can be synced from saved migration state or detected NextGEN records.
+* Preserved existing FooGallery media tags when syncing migrated NextGEN image tags.
+
 = 1.10 =
 * Added support for replacing NextGEN singlepic shortcodes with standard WordPress captioned image content that links to the full-size attachment.
 * Improved NextGEN shortcode detection for legacy gallery formats and modern [ngg src="galleries" ids="..."] shortcodes.

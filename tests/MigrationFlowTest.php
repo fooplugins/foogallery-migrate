@@ -646,6 +646,145 @@ class MigrationFlowTest extends TestCase {
 		);
 	}
 
+	public function test_image_tag_sync_updates_previously_migrated_state_images(): void {
+		$plugin = new Nextgen();
+		$plugin->is_detected = true;
+		$source_url = 'https://example.test/wp-content/gallery/poland/state-bridge.jpg';
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$GLOBALS['foogallery_migrate_test_taxonomies'] = array( FOOGALLERY_ATTACHMENT_TAXONOMY_TAG );
+		$GLOBALS['foogallery_migrate_test_object_terms']['ngg_tag'][12345] = array(
+			'Bridge',
+			'Poland',
+		);
+		$GLOBALS['foogallery_migrate_test_object_terms']['ngg_tag'][12346] = array(
+			'Night',
+			'City',
+		);
+		$GLOBALS['foogallery_migrate_test_object_terms'][ FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ][9001] = array(
+			'Existing',
+		);
+
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->set_migrator_setting( MigratorEngine::KEY_PLUGINS, array( $plugin ) );
+		$engine->save_settings(
+			array(
+				'images_per_turn' => 1,
+			)
+		);
+
+		$image = $plugin->get_image(
+			array(
+				'ID'          => 12345,
+				'source_url'  => $source_url,
+				'slug'        => 'state-bridge.jpg',
+				'title'       => 'State bridge',
+				'caption'     => '',
+				'description' => '',
+				'alt'         => '',
+				'date'        => '2026-05-21 12:00:00',
+				'data'        => (object) array(
+					'pid' => 12345,
+				),
+			)
+		);
+		$image->migrated = true;
+		$image->migrated_id = 9001;
+		$image->migration_status = Migratable::PROGRESS_COMPLETED;
+		$engine->add_migrated_object( $image );
+
+		$second_image = $plugin->get_image(
+			array(
+				'ID'          => 12346,
+				'source_url'  => 'https://example.test/wp-content/gallery/poland/night-city.jpg',
+				'slug'        => 'night-city.jpg',
+				'title'       => 'Night city',
+				'caption'     => '',
+				'description' => '',
+				'alt'         => '',
+				'date'        => '2026-05-21 12:00:00',
+				'data'        => (object) array(
+					'pid' => 12346,
+				),
+			)
+		);
+		$second_image->migrated = true;
+		$second_image->migrated_id = 9003;
+		$second_image->migration_status = Migratable::PROGRESS_COMPLETED;
+		$engine->add_migrated_object( $second_image );
+
+		$result = $engine->start_image_tag_sync();
+
+		$this->assertSame( 2, $result['total'] );
+		$this->assertSame( 1, $result['processed'] );
+		$this->assertSame( 1, $result['updated'] );
+		$this->assertSame( 0, $result['error_count'] );
+		$this->assertFalse( $result['complete'] );
+		$this->assertSame(
+			array( 'Existing', 'Bridge', 'Poland' ),
+			$GLOBALS['foogallery_migrate_test_object_terms'][ FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ][9001]
+		);
+		$this->assertTrue( $GLOBALS['foogallery_migrate_test_set_object_terms'][0]['append'] );
+
+		$result = $engine->continue_image_tag_sync();
+
+		$this->assertSame( 2, $result['total'] );
+		$this->assertSame( 2, $result['processed'] );
+		$this->assertSame( 2, $result['updated'] );
+		$this->assertTrue( $result['complete'] );
+		$this->assertSame(
+			array( 'Night', 'City' ),
+			$GLOBALS['foogallery_migrate_test_object_terms'][ FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ][9003]
+		);
+	}
+
+	public function test_image_tag_sync_falls_back_to_nextgen_scan_for_old_state_images(): void {
+		$plugin = new Nextgen();
+		$plugin->is_detected = true;
+		$source_url = 'https://example.test/wp-content/gallery/poland/fallback-bridge.jpg';
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$GLOBALS['foogallery_migrate_test_taxonomies'] = array( FOOGALLERY_ATTACHMENT_TAXONOMY_TAG );
+		$GLOBALS['foogallery_migrate_test_object_terms']['ngg_tag'][22334] = array(
+			'Bridge',
+			'Fallback',
+		);
+		$GLOBALS['wpdb'] = new FakeNextgenTagSyncWpdb(
+			array(
+				(object) array(
+					'pid'       => 22334,
+					'filename'  => 'fallback-bridge.jpg',
+					'galleryid' => 9,
+					'path'      => 'wp-content/gallery/poland',
+				),
+			)
+		);
+
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->set_migrator_setting( MigratorEngine::KEY_PLUGINS, array( $plugin ) );
+		$engine->save_settings(
+			array(
+				'images_per_turn' => 1,
+			)
+		);
+
+		$old_state_image = $this->create_image( $source_url );
+		$old_state_image->migrated = true;
+		$old_state_image->migrated_id = 9002;
+		$old_state_image->migration_status = Migratable::PROGRESS_COMPLETED;
+		$engine->add_migrated_object( $old_state_image );
+
+		$result = $engine->start_image_tag_sync();
+
+		$this->assertSame( 1, $result['total'] );
+		$this->assertSame( 1, $result['processed'] );
+		$this->assertSame( 1, $result['updated'] );
+		$this->assertSame( 0, $result['unmatched'] );
+		$this->assertTrue( $result['complete'] );
+		$this->assertSame(
+			array( 'Bridge', 'Fallback' ),
+			$GLOBALS['foogallery_migrate_test_object_terms'][ FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ][9002]
+		);
+	}
+
 	public function test_content_migration_replaces_nextgen_tag_shortcodes_with_media_tag_shortcodes(): void {
 		$plugin = new Nextgen();
 		$plugin->is_detected = true;
@@ -1018,5 +1157,61 @@ class FakeWpdb {
 		}
 
 		return null;
+	}
+}
+
+class FakeNextgenTagSyncWpdb {
+	public $prefix = 'wp_';
+	public $term_relationships = 'wp_term_relationships';
+	public $term_taxonomy = 'wp_term_taxonomy';
+	public $last_query = '';
+	private $tagged_images;
+
+	public function __construct( $tagged_images ) {
+		$this->tagged_images = $tagged_images;
+	}
+
+	public function prepare( $query ) {
+		$args = func_get_args();
+		array_shift( $args );
+
+		foreach ( $args as $arg ) {
+			$replacement = is_numeric( $arg ) ? (string) $arg : "'" . addslashes( (string) $arg ) . "'";
+			$query = preg_replace( '/%[ds]/', $replacement, $query, 1 );
+		}
+
+		return $query;
+	}
+
+	public function get_var( $query ) {
+		$this->last_query = $query;
+
+		if ( false !== strpos( $query, 'SHOW TABLES LIKE' ) ) {
+			return 'wp_ngg_gallery';
+		}
+
+		if ( false !== strpos( $query, 'ngg_tag' ) ) {
+			return '1';
+		}
+
+		return null;
+	}
+
+	public function get_results( $query ) {
+		$this->last_query = $query;
+
+		if ( false !== strpos( $query, 'SELECT DISTINCT p.pid' ) ) {
+			return $this->tagged_images;
+		}
+
+		if ( false !== strpos( $query, 'wp_ngg_gallery' ) ) {
+			return array(
+				(object) array(
+					'gid' => 9,
+				),
+			);
+		}
+
+		return array();
 	}
 }

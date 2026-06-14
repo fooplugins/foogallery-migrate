@@ -34,6 +34,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             add_action( 'wp_ajax_foogallery_migrate_refresh', array( $this, 'ajax_refresh_migration' ) );
             add_action( 'wp_ajax_foogallery_migrate_retry_gallery', array( $this, 'ajax_retry_gallery_migration' ) );
             add_action( 'wp_ajax_foogallery_migrate_check_gallery_errors', array( $this, 'ajax_check_gallery_errors' ) );
+            add_action( 'wp_ajax_foogallery_migrate_image_tags', array( $this, 'ajax_sync_image_tags' ) );
         
 
             // Ajax calls for importing albums
@@ -277,6 +278,34 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 $migrator->get_gallery_migrator()->render_gallery_form();
                 die();
             }
+        }
+
+        /**
+         * Sync source image tags onto already-migrated FooGallery attachments.
+         *
+         * @return void
+         */
+        function ajax_sync_image_tags() {
+            if ( ! check_admin_referer( 'foogallery_migrate_image_tags', 'foogallery_migrate_image_tags' ) ) {
+                $this->send_json_error( __( 'Invalid request.', 'foogallery-migrate' ), 403 );
+            }
+
+            if ( ! current_user_can( 'manage_options' ) ) {
+                $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
+            }
+
+            $reset = false;
+            if ( array_key_exists( 'reset', $_POST ) ) {
+                $reset = ! empty( $_POST['reset'] );
+            }
+
+            $migrator = foogallery_migrate_migrator_instance();
+            $result = $reset ? $migrator->start_image_tag_sync() : $migrator->continue_image_tag_sync();
+            if ( is_wp_error( $result ) ) {
+                $this->send_json_error( $result->get_error_message(), 400 );
+            }
+
+            wp_send_json_success( $result );
         }
 
         function ajax_cancel_migration() {
