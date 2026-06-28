@@ -47,13 +47,16 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
                 // Do some checks even if the plugin is not activated.
                 global $wpdb;
 
+                $gallery_table = $wpdb->prefix . self::NEXTGEN_TABLE_GALLERY;
+
+                $gallery_table_like = method_exists( $wpdb, 'esc_like' ) ? $wpdb->esc_like( $gallery_table ) : $gallery_table;
+
                 // Check if plugin's table ngg_gallery exists in database
-                if ( !$wpdb->get_var( 'SHOW TABLES LIKE"%' . $wpdb->prefix . 'ngg_gallery%"' ) ) {
+                if ( ! $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $gallery_table_like ) ) ) {
                    return false;
                 }
-                $galleries = $wpdb->get_results('SELECT * FROM ' . $wpdb->prefix . 'ngg_gallery');
 
-                return count($galleries) > 0;
+                return (bool) $wpdb->get_var( "SELECT 1 FROM {$gallery_table} LIMIT 1" );
             }
         }
 

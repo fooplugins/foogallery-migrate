@@ -53,13 +53,15 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
                 // Do some checks even if the plugin is not activated.
                 global $wpdb;
 
+                $gallery_table = $wpdb->prefix . self::FM_PHOTO_TABLE_GALLERY;
+                $gallery_table_like = method_exists( $wpdb, 'esc_like' ) ? $wpdb->esc_like( $gallery_table ) : $gallery_table;
+
                 // Check if plugin's table exists in database
-                if ( !$wpdb->get_var( 'SHOW TABLES LIKE"%' . $wpdb->prefix . self::FM_PHOTO_TABLE_GALLERY . '%"' ) ) {
+                if ( ! $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $gallery_table_like ) ) ) {
                     return false;
                 }
-                $galleries = $wpdb->get_results('SELECT * FROM ' . $wpdb->prefix . self::FM_PHOTO_TABLE_GALLERY );
 
-                return count($galleries) > 0;
+                return (bool) $wpdb->get_var( "SELECT 1 FROM {$gallery_table} LIMIT 1" );
             }
         }
 
