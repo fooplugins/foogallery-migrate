@@ -1128,7 +1128,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				echo '<li>' . esc_html__( 'Try clicking "Refresh Scan" button to force a new scan', 'foogallery-migrate' ) . '</li>';
 				echo '</ul></div>';
 			} else {
-					$url = add_query_arg( 'page', 'foogallery-migrate' );
+					$url = foogallery_migrate_admin_url( 'content' );
 					$page = 1;
 					if ( defined( 'DOING_AJAX' ) ) {
 						if ( array_key_exists( 'foogallery_content_migrate_paged', $_POST ) ) {
@@ -1152,7 +1152,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 					if ( $page < 1 ) {
 						$page = 1;
 					}
-					$url = add_query_arg( 'content_paged', $page, $url ) . '#shortcodes';
+					$url = add_query_arg( 'content_paged', $page, $url );
 				
 					$content_items_count = count( $content_items );
 					$page_size = $this->migrator_engine->get_page_size();

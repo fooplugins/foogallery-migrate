@@ -339,23 +339,51 @@
 			});
 		});
 
-		$('.foo-nav-tabs').on('click', 'a', function (e) {
-			$('.foogallery_migrate_container').hide();
-			var tab = $(this).data('tab');
-			$('#' + tab).show();
-			$('.nav-tab').removeClass('nav-tab-active');
-			$(this).addClass('nav-tab-active');
-		});
-
-		if (window.location.hash) {
-			$('.foo-nav-tabs a[href="' + window.location.hash + '"]').click();
-		}
 	});
 </script>
 <?php
 $migrator = foogallery_migrate_migrator_instance();
 $has_log_tab = $migrator->has_migrated_objects();
 $show_debug_tab = $has_log_tab && $migrator->is_debug_enabled();
+$tabs = array(
+	'sources'   => array(
+		'label' => __( 'Plugins', 'foogallery-migrate' ),
+		'view'  => 'view-migrate-tab-sources.php',
+	),
+	'galleries' => array(
+		'label' => __( 'Galleries', 'foogallery-migrate' ),
+		'view'  => 'view-migrate-tab-galleries.php',
+	),
+	'albums'    => array(
+		'label' => __( 'Albums', 'foogallery-migrate' ),
+		'view'  => 'view-migrate-tab-albums.php',
+	),
+	'content'   => array(
+		'label' => __( 'Blocks / Shortcodes', 'foogallery-migrate' ),
+		'view'  => 'view-migrate-tab-content.php',
+	),
+	'log'       => array(
+		'label'   => __( 'Log', 'foogallery-migrate' ),
+		'view'    => 'view-migrate-tab-log.php',
+		'enabled' => $has_log_tab,
+	),
+	'debug'     => array(
+		'label'   => __( 'Debug', 'foogallery-migrate' ),
+		'view'    => 'view-migrate-tab-debug.php',
+		'enabled' => $show_debug_tab,
+	),
+	'settings'  => array(
+		'label' => __( 'Settings', 'foogallery-migrate' ),
+		'view'  => 'view-migrate-tab-settings.php',
+	),
+);
+$active_tab = 'sources';
+if ( array_key_exists( 'tab', $_GET ) ) {
+	$requested_tab = sanitize_key( wp_unslash( $_GET['tab'] ) );
+	if ( isset( $tabs[ $requested_tab ] ) && ( ! isset( $tabs[ $requested_tab ]['enabled'] ) || $tabs[ $requested_tab ]['enabled'] ) ) {
+		$active_tab = $requested_tab;
+	}
+}
 ?>
 <div class="wrap">
 	<h2><?php esc_html_e( 'FooGallery Migrate!', 'foogallery-migrate' ); ?></h2>
@@ -373,41 +401,12 @@ $show_debug_tab = $has_log_tab && $migrator->is_debug_enabled();
 	<?php } ?>
 
 	<h2 class="foo-nav-tabs nav-tab-wrapper">
-		<a href="#sources" data-tab="foogallery_migrate_sources" class="nav-tab nav-tab-active"><?php esc_html_e( 'Plugins', 'foogallery-migrate' ); ?></a>
-		<a href="#galleries" data-tab="foogallery_migrate_galleries" class="nav-tab"><?php esc_html_e( 'Galleries', 'foogallery-migrate' ); ?></a>
-		<a href="#albums" data-tab="foogallery_migrate_albums" class="nav-tab"><?php esc_html_e( 'Albums', 'foogallery-migrate' ); ?></a>
-		<a href="#shortcodes" data-tab="foogallery_migrate_content" class="nav-tab"><?php esc_html_e( 'Blocks / Shortcodes', 'foogallery-migrate' ); ?></a>
-		<?php if ( $has_log_tab ) { ?>
-			<a href="#log" data-tab="foogallery_migrate_log" class="nav-tab"><?php esc_html_e( 'Log', 'foogallery-migrate' ); ?></a>
+		<?php foreach ( $tabs as $tab_key => $tab ) { ?>
+			<?php if ( isset( $tab['enabled'] ) && ! $tab['enabled'] ) { continue; } ?>
+			<a href="<?php echo esc_url( foogallery_migrate_admin_url( $tab_key ) ); ?>" class="nav-tab <?php echo $active_tab === $tab_key ? 'nav-tab-active' : ''; ?>"><?php echo esc_html( $tab['label'] ); ?></a>
 		<?php } ?>
-		<?php if ( $show_debug_tab ) { ?>
-			<a href="#debug" data-tab="foogallery_migrate_debug" class="nav-tab"><?php esc_html_e( 'Debug', 'foogallery-migrate' ); ?></a>
-		<?php } ?>
-		<a href="#settings" data-tab="foogallery_migrate_settings" class="nav-tab"><?php esc_html_e( 'Settings', 'foogallery-migrate' ); ?></a>
 	</h2>
-    <div class="foogallery_migrate_container" id="foogallery_migrate_sources">
-        <?php require_once 'view-migrate-tab-sources.php'; ?>
-    </div>
-	<div class="foogallery_migrate_container" id="foogallery_migrate_galleries" style="display: none">
-        <?php require_once 'view-migrate-tab-galleries.php'; ?>
-	</div>
-	<div class="foogallery_migrate_container" id="foogallery_migrate_albums" style="display: none">
-        <?php require_once 'view-migrate-tab-albums.php'; ?>
-	</div>
-	<div class="foogallery_migrate_container" id="foogallery_migrate_content" style="display: none">
-        <?php require_once 'view-migrate-tab-content.php'; ?>
-	</div>
-	<?php if ( $has_log_tab ) { ?>
-		<div class="foogallery_migrate_container" id="foogallery_migrate_log" style="display: none">
-			<?php require_once 'view-migrate-tab-log.php'; ?>
-		</div>
-	<?php } ?>
-	<?php if ( $show_debug_tab ) { ?>
-		<div class="foogallery_migrate_container" id="foogallery_migrate_debug" style="display: none">
-			<?php require_once 'view-migrate-tab-debug.php'; ?>
-		</div>
-	<?php } ?>
-	<div class="foogallery_migrate_container" id="foogallery_migrate_settings" style="display: none">
-		<?php require_once 'view-migrate-tab-settings.php'; ?>
+	<div class="foogallery_migrate_container" id="foogallery_migrate_<?php echo esc_attr( $active_tab ); ?>">
+		<?php require_once $tabs[ $active_tab ]['view']; ?>
 	</div>
 </div>

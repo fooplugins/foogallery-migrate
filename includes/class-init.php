@@ -162,15 +162,14 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             $migrator = foogallery_migrate_migrator_instance();
             $migrator->save_settings( $settings );
 
-            $redirect_url = add_query_arg(
+            $redirect_url = foogallery_migrate_admin_url(
+                'settings',
                 array(
-                    'page' => 'foogallery-migrate',
                     'settings-updated' => 'true',
-                ),
-                admin_url( 'admin.php' )
+                )
             );
 
-            wp_safe_redirect( $redirect_url . '#settings' );
+            wp_safe_redirect( $redirect_url );
             exit;
         }
 

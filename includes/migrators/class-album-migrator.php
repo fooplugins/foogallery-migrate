@@ -81,7 +81,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                     <tbody>
                     <?php
 
-                    $url = add_query_arg( 'page', 'foogallery-migrate' );
+                    $url = foogallery_migrate_admin_url( 'albums' );
                     $page = 1;
                     if ( defined( 'DOING_AJAX' ) ) {
                         if ( array_key_exists( 'foogallery_album_migrate_paged', $_POST ) ) {
@@ -96,7 +96,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                     } else if ( array_key_exists( 'album_paged', $_GET ) ) {
                         $page = absint( wp_unslash( $_GET['album_paged'] ) );
                     }
-                    $url = add_query_arg( 'album_paged', $page, $url ) . '#albums';
+                    $url = add_query_arg( 'album_paged', $page, $url );
                     $albums_count = count( $albums );
                     $preflight_album_count = 0;
                     $preflight_gallery_count = 0;
