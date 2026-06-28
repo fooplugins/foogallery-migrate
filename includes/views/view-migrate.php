@@ -362,6 +362,10 @@ $tabs = array(
 		'label' => __( 'Blocks / Shortcodes', 'foogallery-migrate' ),
 		'view'  => 'view-migrate-tab-content.php',
 	),
+	'image-tags' => array(
+		'label' => __( 'Image Tags', 'foogallery-migrate' ),
+		'view'  => 'view-migrate-tab-image-tags.php',
+	),
 	'log'       => array(
 		'label'   => __( 'Log', 'foogallery-migrate' ),
 		'view'    => 'view-migrate-tab-log.php',
@@ -387,18 +391,6 @@ if ( array_key_exists( 'tab', $_GET ) ) {
 ?>
 <div class="wrap">
 	<h2><?php esc_html_e( 'FooGallery Migrate!', 'foogallery-migrate' ); ?></h2>
-
-	<?php if ( $migrator->should_show_image_tag_plan_warning() ) { ?>
-		<div class="notice notice-warning">
-			<p><strong><?php esc_html_e( 'NextGEN image tags detected.', 'foogallery-migrate' ); ?></strong></p>
-			<p><?php esc_html_e( 'FooGallery Migrate found tagged NextGEN images. Migrating those tags into FooGallery media tags for tag-based dynamic galleries requires FooGallery PRO Expert.', 'foogallery-migrate' ); ?></p>
-			<p>
-				<a class="button button-primary" href="<?php echo esc_url( admin_url( 'edit.php?post_type=foogallery&page=foogallery-pricing&trial=true' ) ); ?>">
-					<?php esc_html_e( 'Start PRO Expert trial', 'foogallery-migrate' ); ?>
-				</a>
-			</p>
-		</div>
-	<?php } ?>
 
 	<h2 class="foo-nav-tabs nav-tab-wrapper">
 		<?php foreach ( $tabs as $tab_key => $tab ) { ?>
