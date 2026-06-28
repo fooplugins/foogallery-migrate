@@ -67,27 +67,41 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
          */
         function find_galleries() {
             $nextgen_galleries = $this->get_nextgen_galleries();
+            $image_counts = $this->get_nextgen_gallery_image_counts();
             $galleries = array();
 
             if ( count( $nextgen_galleries ) != 0 ) {
                 foreach ( $nextgen_galleries as $key => $nextgen_gallery ) {
-
-					$data = array(
-						'ID' => $nextgen_gallery->gid,
-						'title' => $nextgen_gallery->title,
-						'foogallery_title' => $nextgen_gallery->title,
-						'data' => $nextgen_gallery,
-						'children' => $this->find_images( $nextgen_gallery->gid, $nextgen_gallery->path ),
-						'settings' => ''
-					);
-					
-					$gallery = $this->get_gallery( $data );
-                        
-                    $galleries[] = $gallery;
+                    $galleries[] = $this->get_gallery_from_nextgen_gallery( $nextgen_gallery, $image_counts );
                 }
             }
 
             return $galleries;
+        }
+
+        /**
+         * Build a FooGallery migratable gallery from a NextGEN gallery row.
+         *
+         * @param object $nextgen_gallery NextGEN gallery row.
+         * @param array  $image_counts Image counts by NextGEN gallery ID.
+         * @return Gallery
+         */
+        private function get_gallery_from_nextgen_gallery( $nextgen_gallery, $image_counts = array() ) {
+            $gallery_id = isset( $nextgen_gallery->gid ) ? absint( $nextgen_gallery->gid ) : 0;
+            $title = isset( $nextgen_gallery->title ) ? $nextgen_gallery->title : '';
+            $children_count = isset( $image_counts[ $gallery_id ] ) ? absint( $image_counts[ $gallery_id ] ) : 0;
+
+            $data = array(
+                'ID'             => $gallery_id,
+                'title'          => $title,
+                'foogallery_title' => $title,
+                'data'           => $nextgen_gallery,
+                'children'       => array(),
+                'children_count' => $children_count,
+                'settings'       => ''
+            );
+
+            return $this->get_gallery( $data );
         }
 
         /**
@@ -178,7 +192,74 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
             global $wpdb;
             $picture_table = $wpdb->prefix . self::NEXTGEN_TABLE_PICTURES;
 
-            return $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$picture_table} WHERE galleryid = %d order by sortorder", $id ) );
+            return $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$picture_table} WHERE galleryid = %d AND (exclude = 0 OR exclude IS NULL) order by sortorder", $id ) );
+        }
+
+        /**
+         * Returns non-excluded image counts by NextGEN gallery ID.
+         *
+         * @param array $gallery_ids Optional gallery IDs to restrict.
+         * @return array<int,int>
+         */
+        private function get_nextgen_gallery_image_counts( $gallery_ids = array() ) {
+            global $wpdb;
+
+            $picture_table = $wpdb->prefix . self::NEXTGEN_TABLE_PICTURES;
+            $where = 'WHERE (exclude = 0 OR exclude IS NULL)';
+            $query_args = array();
+
+            if ( ! empty( $gallery_ids ) ) {
+                $gallery_ids = array_values( array_unique( array_filter( array_map( 'absint', $gallery_ids ) ) ) );
+                if ( ! empty( $gallery_ids ) ) {
+                    $where .= ' AND galleryid IN (' . implode( ',', array_fill( 0, count( $gallery_ids ), '%d' ) ) . ')';
+                    $query_args = $gallery_ids;
+                }
+            }
+
+            $sql = "SELECT galleryid, COUNT(*) AS image_count FROM {$picture_table} {$where} GROUP BY galleryid";
+            if ( ! empty( $query_args ) ) {
+                $sql = $wpdb->prepare( $sql, $query_args );
+            }
+
+            $rows = $wpdb->get_results( $sql );
+            if ( ! is_array( $rows ) || empty( $rows ) ) {
+                return array();
+            }
+
+            $counts = array();
+            foreach ( $rows as $row ) {
+                if ( ! is_object( $row ) || ! isset( $row->galleryid ) ) {
+                    continue;
+                }
+
+                $counts[ absint( $row->galleryid ) ] = isset( $row->image_count ) ? absint( $row->image_count ) : 0;
+            }
+
+            return $counts;
+        }
+
+        /**
+         * Load deferred child images for a gallery when it is migrated.
+         *
+         * @param object $object Migratable object.
+         * @return array
+         */
+        public function load_object_children( $object ) {
+            if ( ! is_object( $object ) || ! method_exists( $object, 'type' ) || 'gallery' !== $object->type() ) {
+                return array();
+            }
+
+            $gallery_id = isset( $object->ID ) ? absint( $object->ID ) : 0;
+            if ( $gallery_id < 1 ) {
+                return array();
+            }
+
+            $nextgen_gallery = isset( $object->data ) && is_object( $object->data ) ? $object->data : $this->get_nextgen_gallery( $gallery_id );
+            if ( ! is_object( $nextgen_gallery ) || empty( $nextgen_gallery->path ) ) {
+                return array();
+            }
+
+            return $this->find_images( $gallery_id, $nextgen_gallery->path );
         }
 
         /**
@@ -459,6 +540,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
 
         function find_albums() {
             $nextgen_albums = $this->get_nextgen_albums();
+            $image_counts = $this->get_nextgen_gallery_image_counts();
             $albums = array();
 
             if ( count( $nextgen_albums ) !== 0 ) {
@@ -476,20 +558,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
                     $galleries = array();
                     $album_galleries = $this->get_galleries_by_album( $nextgen_album->id );
 
-                    foreach( $album_galleries as $album_gallery ) {
-
-                        $data = array(
-                            'ID' => $album_gallery->gid,
-                            'title' => $album_gallery->title,
-                            'foogallery_title' => $album_gallery->title,
-                            'data' => $album_gallery,
-                            'children' => $this->find_images( $album_gallery->gid, $album_gallery->path ),
-                            'settings' => ''
-                        );
-
-                        $gallery = $this->get_gallery( $data );
-
-                        $galleries[] = $gallery;
+                    if ( is_array( $album_galleries ) ) {
+                        foreach ( $album_galleries as $album_gallery ) {
+                            $galleries[] = $this->get_gallery_from_nextgen_gallery( $album_gallery, $image_counts );
+                        }
                     }
 
                     $album->children = $galleries;

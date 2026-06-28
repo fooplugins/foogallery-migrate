@@ -315,6 +315,26 @@ class MigrationFlowTest extends TestCase {
 		$this->assertFalse( $plugin->has_migratable_image_tags() );
 	}
 
+	public function test_nextgen_gallery_discovery_defers_image_row_loading(): void {
+		$GLOBALS['wpdb'] = new FakeNextgenLazyDiscoveryWpdb();
+
+		$plugin = new Nextgen();
+		$galleries = $plugin->find_galleries();
+
+		$this->assertCount( 1, $galleries );
+		$this->assertSame( 2, $galleries[0]->get_children_count() );
+		$this->assertSame( array(), $galleries[0]->get_children() );
+		$this->assertSame( 0, $GLOBALS['wpdb']->image_query_count );
+
+		$galleries[0]->ensure_children_loaded();
+		$children = $galleries[0]->get_children();
+
+		$this->assertSame( 1, $GLOBALS['wpdb']->image_query_count );
+		$this->assertCount( 2, $children );
+		$this->assertSame( 'https://example.test/wp-content/gallery/bridges/bridge-one.jpg', $children[0]->source_url );
+		$this->assertStringContainsString( 'exclude = 0 OR exclude IS NULL', $GLOBALS['wpdb']->last_image_query );
+	}
+
 	public function test_image_tag_plan_warning_requires_tagged_images_without_foogallery_expert(): void {
 		$plugin = new FakeSourcePlugin();
 		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
@@ -1159,6 +1179,71 @@ class FakeWpdb {
 		}
 
 		return null;
+	}
+}
+
+class FakeNextgenLazyDiscoveryWpdb {
+	public $prefix = 'wp_';
+	public $image_query_count = 0;
+	public $last_image_query = '';
+
+	public function prepare( $query ) {
+		$args = func_get_args();
+		array_shift( $args );
+
+		foreach ( $args as $arg ) {
+			$replacement = is_numeric( $arg ) ? (string) $arg : "'" . addslashes( (string) $arg ) . "'";
+			$query = preg_replace( '/%[ds]/', $replacement, $query, 1 );
+		}
+
+		return $query;
+	}
+
+	public function get_results( $query ) {
+		if ( false !== stripos( $query, 'from wp_ngg_gallery' ) ) {
+			return array(
+				(object) array(
+					'gid'   => 7,
+					'title' => 'Bridge Gallery',
+					'path'  => 'wp-content/gallery/bridges',
+				),
+			);
+		}
+
+		if ( false !== stripos( $query, 'COUNT(*) AS image_count' ) ) {
+			return array(
+				(object) array(
+					'galleryid'    => 7,
+					'image_count' => 2,
+				),
+			);
+		}
+
+		if ( false !== stripos( $query, 'from wp_ngg_pictures' ) ) {
+			$this->image_query_count++;
+			$this->last_image_query = $query;
+
+			return array(
+				(object) array(
+					'pid'         => 701,
+					'filename'    => 'bridge-one.jpg',
+					'alttext'     => 'Bridge One',
+					'description' => 'First bridge',
+					'imagedate'   => '2026-06-01 10:00:00',
+					'exclude'     => 0,
+				),
+				(object) array(
+					'pid'         => 702,
+					'filename'    => 'bridge-two.jpg',
+					'alttext'     => 'Bridge Two',
+					'description' => 'Second bridge',
+					'imagedate'   => '2026-06-01 10:01:00',
+					'exclude'     => 0,
+				),
+			);
+		}
+
+		return array();
 	}
 }
 
