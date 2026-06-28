@@ -88,6 +88,31 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		}
 
 		/**
+		 * Returns true if a saved migrator setting has one or more stored items.
+		 *
+		 * This avoids hydrating compact payloads when the caller only needs an
+		 * existence check, such as deciding whether to show a tab.
+		 *
+		 * @param string $name Setting name.
+		 * @return bool
+		 */
+		public function has_migrator_setting_items( $name ) {
+			$settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+
+			if ( ! isset( $settings ) || ! is_array( $settings ) || ! array_key_exists( $name, $settings ) ) {
+				return false;
+			}
+
+			$value = $settings[ $name ];
+
+			if ( $this->is_compact_payload( $value ) ) {
+				return isset( $value['items'] ) && is_array( $value['items'] ) && count( $value['items'] ) > 0;
+			}
+
+			return is_array( $value ) && count( $value ) > 0;
+		}
+
+		/**
 		 * Returns the saved user settings for the migrator.
 		 *
 		 * @return array

@@ -866,7 +866,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return bool
          */
         public function has_migrated_objects() {
-            return count ( $this->get_migrated_objects() ) > 0;
+            return $this->settings()->has_migrator_setting_items( self::KEY_MIGRATED );
         }
 
         /**

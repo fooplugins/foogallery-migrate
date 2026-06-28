@@ -3,6 +3,7 @@
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
+use FooPlugins\FooGalleryMigrate\MigratorSettings;
 use FooPlugins\FooGalleryMigrate\Objects\Album;
 use FooPlugins\FooGalleryMigrate\Objects\Gallery;
 use FooPlugins\FooGalleryMigrate\Objects\Image;
@@ -333,6 +334,37 @@ class MigrationFlowTest extends TestCase {
 		$this->assertCount( 2, $children );
 		$this->assertSame( 'https://example.test/wp-content/gallery/bridges/bridge-one.jpg', $children[0]->source_url );
 		$this->assertStringContainsString( 'exclude = 0 OR exclude IS NULL', $GLOBALS['wpdb']->last_image_query );
+	}
+
+	public function test_has_migrated_objects_checks_raw_saved_items(): void {
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+
+		$this->assertFalse( $engine->has_migrated_objects() );
+
+		$GLOBALS['foogallery_migrate_test_options'][ FOOGALLERY_MIGRATE_OPTION_DATA ] = array(
+			MigratorEngine::KEY_MIGRATED => array(
+				MigratorSettings::COMPACT_MARKER => MigratorSettings::COMPACT_VERSION,
+				'type'                           => 'migratable',
+				'items'                          => array(
+					'image_NextGen_701' => array(
+						'object_type' => 'image',
+						'source_url'  => 'https://example.test/wp-content/gallery/bridges/bridge-one.jpg',
+					),
+				),
+			),
+		);
+
+		$this->assertTrue( $engine->has_migrated_objects() );
+
+		$GLOBALS['foogallery_migrate_test_options'][ FOOGALLERY_MIGRATE_OPTION_DATA ][ MigratorEngine::KEY_MIGRATED ]['items'] = array();
+		$this->assertFalse( $engine->has_migrated_objects() );
+
+		$GLOBALS['foogallery_migrate_test_options'][ FOOGALLERY_MIGRATE_OPTION_DATA ][ MigratorEngine::KEY_MIGRATED ] = array(
+			'image_NextGen_701' => (object) array(
+				'source_url' => 'https://example.test/wp-content/gallery/bridges/bridge-one.jpg',
+			),
+		);
+		$this->assertTrue( $engine->has_migrated_objects() );
 	}
 
 	public function test_image_tag_plan_warning_requires_tagged_images_without_foogallery_expert(): void {
