@@ -1096,37 +1096,32 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * @return void
 		 */
 		function render_content_form() {
-			try {
-				$content_items = $this->scan_content();
-			} catch ( \Exception $e ) {
-				echo '<div class="notice notice-error"><p>';
-				printf(
-					esc_html__( 'Error scanning content: %s', 'foogallery-migrate' ),
-					esc_html( $e->getMessage() )
-				);
-				echo '</p></div>';
+			$content_items = $this->get_setting( $this->type );
+			$has_scanned_content = false !== $content_items;
+
+			if ( $content_items !== false && ! is_array( $content_items ) ) {
 				$content_items = array();
-			} catch ( \Error $e ) {
-				echo '<div class="notice notice-error"><p>';
-				printf(
-					esc_html__( 'Fatal error scanning content: %s', 'foogallery-migrate' ),
-					esc_html( $e->getMessage() )
-				);
-				echo '</p></div>';
+				$has_scanned_content = false;
+			} else if ( false === $content_items ) {
 				$content_items = array();
 			}
 
 			wp_nonce_field( 'foogallery_content_migrate', 'foogallery_content_migrate', false );
 
 			if ( empty( $content_items ) || ! is_array( $content_items ) ) {
-				echo '<p>' . esc_html__( 'No gallery shortcodes or blocks found in your content.', 'foogallery-migrate' ) . '</p>';
-				echo '<p><small>' . esc_html__( 'Make sure your posts/pages are published and contain gallery shortcodes like [envira-gallery id="1"] or [nggallery id="2"]', 'foogallery-migrate' ) . '</small></p>';
-				
-				echo '<div class="notice notice-info inline"><p><strong>' . esc_html__( 'Tips:', 'foogallery-migrate' ) . '</strong></p><ul>';
-				echo '<li>' . esc_html__( 'Ensure your post/page is published (not draft)', 'foogallery-migrate' ) . '</li>';
-				echo '<li>' . esc_html__( 'Check that the gallery plugins are detected in the Plugins tab', 'foogallery-migrate' ) . '</li>';
-				echo '<li>' . esc_html__( 'Try clicking "Refresh Scan" button to force a new scan', 'foogallery-migrate' ) . '</li>';
-				echo '</ul></div>';
+				if ( $has_scanned_content ) {
+					echo '<p>' . esc_html__( 'No gallery shortcodes or blocks found in your content.', 'foogallery-migrate' ) . '</p>';
+					echo '<p><small>' . esc_html__( 'Make sure your posts/pages are published and contain gallery shortcodes like [envira-gallery id="1"] or [nggallery id="2"]', 'foogallery-migrate' ) . '</small></p>';
+
+					echo '<div class="notice notice-info inline"><p><strong>' . esc_html__( 'Tips:', 'foogallery-migrate' ) . '</strong></p><ul>';
+					echo '<li>' . esc_html__( 'Ensure your post/page is published (not draft)', 'foogallery-migrate' ) . '</li>';
+					echo '<li>' . esc_html__( 'Check that the gallery plugins are detected in the Plugins tab', 'foogallery-migrate' ) . '</li>';
+					echo '<li>' . esc_html__( 'Try clicking "Refresh Scan" button to force a new scan', 'foogallery-migrate' ) . '</li>';
+					echo '</ul></div>';
+				} else {
+					echo '<p>' . esc_html__( 'Content has not been scanned yet.', 'foogallery-migrate' ) . '</p>';
+					echo '<p><small>' . esc_html__( 'Start a scan to find gallery shortcodes and blocks in published posts and pages.', 'foogallery-migrate' ) . '</small></p>';
+				}
 			} else {
 					$url = foogallery_migrate_admin_url( 'content' );
 					$page = 1;
@@ -1305,10 +1300,12 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			}
 			?>
 			<p>
-				<button name="foogallery_content_action" value="foogallery_content_replace"
-						class="button button-primary replace_content"><?php esc_html_e( 'Replace Selected', 'foogallery-migrate' ); ?></button>
+				<?php if ( ! empty( $content_items ) ) { ?>
+					<button name="foogallery_content_action" value="foogallery_content_replace"
+							class="button button-primary replace_content"><?php esc_html_e( 'Replace Selected', 'foogallery-migrate' ); ?></button>
+				<?php } ?>
 				<button name="foogallery_content_action" value="foogallery_content_refresh"
-						class="button refresh_content"><?php esc_html_e( 'Refresh Scan', 'foogallery-migrate' ); ?></button>
+						class="button refresh_content"><?php echo $has_scanned_content ? esc_html__( 'Refresh Scan', 'foogallery-migrate' ) : esc_html__( 'Scan Content', 'foogallery-migrate' ); ?></button>
 			</p>
 			<div id="foogallery_migrate_content_spinner" style="width:20px; display: inline-block;">
 				<span class="spinner"></span>
