@@ -743,10 +743,6 @@ class MigrationFlowTest extends TestCase {
 		$source_url = 'https://example.test/wp-content/gallery/poland/fallback-bridge.jpg';
 		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
 		$GLOBALS['foogallery_migrate_test_taxonomies'] = array( FOOGALLERY_ATTACHMENT_TAXONOMY_TAG );
-		$GLOBALS['foogallery_migrate_test_object_terms']['ngg_tag'][22334] = array(
-			'Bridge',
-			'Fallback',
-		);
 		$GLOBALS['wpdb'] = new FakeNextgenTagSyncWpdb(
 			array(
 				(object) array(
@@ -754,6 +750,12 @@ class MigrationFlowTest extends TestCase {
 					'filename'  => 'fallback-bridge.jpg',
 					'galleryid' => 9,
 					'path'      => 'wp-content/gallery/poland',
+				),
+			),
+			array(
+				22334 => array(
+					'Bridge',
+					'Fallback',
 				),
 			)
 		);
@@ -1162,13 +1164,16 @@ class FakeWpdb {
 
 class FakeNextgenTagSyncWpdb {
 	public $prefix = 'wp_';
+	public $terms = 'wp_terms';
 	public $term_relationships = 'wp_term_relationships';
 	public $term_taxonomy = 'wp_term_taxonomy';
 	public $last_query = '';
 	private $tagged_images;
+	private $image_tags;
 
-	public function __construct( $tagged_images ) {
+	public function __construct( $tagged_images, $image_tags = array() ) {
 		$this->tagged_images = $tagged_images;
+		$this->image_tags = $image_tags;
 	}
 
 	public function prepare( $query ) {
@@ -1202,6 +1207,26 @@ class FakeNextgenTagSyncWpdb {
 
 		if ( false !== strpos( $query, 'SELECT DISTINCT p.pid' ) ) {
 			return $this->tagged_images;
+		}
+
+		if ( false !== strpos( $query, 'SELECT t.name' ) ) {
+			$image_id = 0;
+			if ( preg_match( '/tr\\.object_id\\s*=\\s*(\\d+)/', $query, $matches ) ) {
+				$image_id = absint( $matches[1] );
+			}
+
+			if ( $image_id < 1 || ! isset( $this->image_tags[ $image_id ] ) ) {
+				return array();
+			}
+
+			return array_map(
+				function( $tag ) {
+					return (object) array(
+						'name' => $tag,
+					);
+				},
+				$this->image_tags[ $image_id ]
+			);
 		}
 
 		if ( false !== strpos( $query, 'wp_ngg_gallery' ) ) {

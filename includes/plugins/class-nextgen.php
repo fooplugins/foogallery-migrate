@@ -236,7 +236,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
             }
 
             if ( ! function_exists( 'wp_get_object_terms' ) ) {
-                return array();
+                return $this->get_image_tags_from_database( $image_id );
             }
 
             $terms = wp_get_object_terms(
@@ -248,7 +248,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
             );
 
             if ( is_wp_error( $terms ) || ! is_array( $terms ) || empty( $terms ) ) {
-                return array();
+                return $this->get_image_tags_from_database( $image_id );
             }
 
             $tags = array();
@@ -260,6 +260,66 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
                 $term = trim( (string) $term );
                 if ( '' !== $term && ! in_array( $term, $tags, true ) ) {
                     $tags[] = $term;
+                }
+            }
+
+            return $tags;
+        }
+
+        /**
+         * Returns NextGEN image tag names directly from persisted term rows.
+         *
+         * This keeps tag migration working when NextGEN is installed but inactive,
+         * because the ngg_tag taxonomy is not registered in those requests.
+         *
+         * @param int $image_id NextGEN image ID.
+         * @return array Tag names.
+         */
+        private function get_image_tags_from_database( $image_id ) {
+            global $wpdb;
+
+            $image_id = absint( $image_id );
+            if (
+                $image_id < 1 ||
+                ! is_object( $wpdb ) ||
+                ! method_exists( $wpdb, 'get_results' ) ||
+                empty( $wpdb->terms ) ||
+                empty( $wpdb->term_relationships ) ||
+                empty( $wpdb->term_taxonomy )
+            ) {
+                return array();
+            }
+
+            $sql = "
+                SELECT t.name
+                FROM {$wpdb->terms} t
+                INNER JOIN {$wpdb->term_taxonomy} tt ON tt.term_id = t.term_id
+                INNER JOIN {$wpdb->term_relationships} tr ON tr.term_taxonomy_id = tt.term_taxonomy_id
+                WHERE tr.object_id = %d
+                AND tt.taxonomy = %s
+                ORDER BY t.name
+            ";
+
+            if ( method_exists( $wpdb, 'prepare' ) ) {
+                $sql = $wpdb->prepare( $sql, $image_id, 'ngg_tag' );
+            } else {
+                $sql = str_replace( array( '%d', '%s' ), array( (string) $image_id, "'ngg_tag'" ), $sql );
+            }
+
+            $rows = $wpdb->get_results( $sql );
+            if ( ! is_array( $rows ) || empty( $rows ) ) {
+                return array();
+            }
+
+            $tags = array();
+            foreach ( $rows as $row ) {
+                if ( ! is_object( $row ) || ! isset( $row->name ) || ! is_scalar( $row->name ) ) {
+                    continue;
+                }
+
+                $tag = trim( (string) $row->name );
+                if ( '' !== $tag && ! in_array( $tag, $tags, true ) ) {
+                    $tags[] = $tag;
                 }
             }
 
