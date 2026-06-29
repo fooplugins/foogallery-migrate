@@ -79,6 +79,13 @@ Update now to get all the latest features, bug fixes and improvements!
 
 == Changelog ==
 
+= 1.12 =
+* Improved migration page performance by loading each tab from its own query arg instead of rendering every tab on first load.
+* Moved image tag migration into a dedicated Image Tags tab.
+* Improved large NextGEN library handling by using lightweight detection queries and deferring image row loading until migration runs.
+* Stopped automatic content scans and migrated log hydration during normal migration page loads.
+* Improved NextGEN image tag reads when NextGEN is installed but inactive.
+
 = 1.11 =
 * Added support for migrating NextGEN tag-based gallery shortcodes to FooGallery media tag shortcodes.
 * Added NextGEN image tag migration so imported attachments can receive matching FooGallery media tags, including when NextGEN is installed but inactive.
