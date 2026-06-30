@@ -10,6 +10,7 @@ use FooPlugins\FooGalleryMigrate\Objects\Image;
 use FooPlugins\FooGalleryMigrate\Objects\Migratable;
 use FooPlugins\FooGalleryMigrate\Objects\Plugin;
 use FooPlugins\FooGalleryMigrate\Plugins\Nextgen;
+use FooPlugins\FooGalleryMigrate\Plugins\Photo;
 use PHPUnit\Framework\TestCase;
 
 class MigrationFlowTest extends TestCase {
@@ -310,6 +311,7 @@ class MigrationFlowTest extends TestCase {
 
 		$this->assertTrue( $plugin->has_migratable_image_tags() );
 		$this->assertStringContainsString( 'ngg_tag', $GLOBALS['wpdb']->last_query );
+		$this->assertStringNotContainsString( '%s', $GLOBALS['wpdb']->last_query );
 
 		$GLOBALS['wpdb'] = new FakeWpdb( false );
 
@@ -334,6 +336,38 @@ class MigrationFlowTest extends TestCase {
 		$this->assertCount( 2, $children );
 		$this->assertSame( 'https://example.test/wp-content/gallery/bridges/bridge-one.jpg', $children[0]->source_url );
 		$this->assertStringContainsString( 'exclude = 0 OR exclude IS NULL', $GLOBALS['wpdb']->last_image_query );
+	}
+
+	public function test_nextgen_album_discovery_sanitizes_album_gallery_queries(): void {
+		$GLOBALS['wpdb'] = new FakeNextgenAlbumWpdb();
+
+		$plugin = new Nextgen();
+		$albums = $plugin->find_albums();
+
+		$this->assertCount( 1, $albums );
+		$this->assertSame( 'album_NextGen_15 OR 1=1', $albums[0]->unique_identifier() );
+		$this->assertSame( 2, $albums[0]->get_children_count() );
+		$this->assertSame( 3, $albums[0]->get_total_images() );
+		$this->assertStringContainsString( 'WHERE id = 15', $GLOBALS['wpdb']->album_query );
+		$this->assertStringNotContainsString( 'OR 1=1', $GLOBALS['wpdb']->album_query );
+		$this->assertStringContainsString( 'WHERE gid IN (7,8)', $GLOBALS['wpdb']->gallery_query );
+		$this->assertStringNotContainsString( 'bad-value', $GLOBALS['wpdb']->gallery_query );
+		$this->assertStringContainsString( 'COUNT(*) AS image_count', $GLOBALS['wpdb']->count_query );
+	}
+
+	public function test_photo_album_discovery_sanitizes_album_gallery_queries(): void {
+		$GLOBALS['wpdb'] = new FakePhotoAlbumWpdb();
+
+		$plugin = new Photo();
+		$albums = $plugin->find_albums();
+
+		$this->assertCount( 1, $albums );
+		$this->assertSame( 'album_10Web_12 OR 1=1', $albums[0]->unique_identifier() );
+		$this->assertSame( 2, $albums[0]->get_children_count() );
+		$this->assertStringContainsString( 'WHERE album_id = 12', $GLOBALS['wpdb']->album_gallery_query );
+		$this->assertStringNotContainsString( 'OR 1=1', $GLOBALS['wpdb']->album_gallery_query );
+		$this->assertStringContainsString( 'id IN (34,35)', $GLOBALS['wpdb']->gallery_query );
+		$this->assertStringNotContainsString( 'bad-value', $GLOBALS['wpdb']->gallery_query );
 	}
 
 	public function test_has_migrated_objects_checks_raw_saved_items(): void {
@@ -1271,6 +1305,164 @@ class FakeNextgenLazyDiscoveryWpdb {
 					'description' => 'Second bridge',
 					'imagedate'   => '2026-06-01 10:01:00',
 					'exclude'     => 0,
+				),
+			);
+		}
+
+		return array();
+	}
+}
+
+class FakeNextgenAlbumWpdb {
+	public $prefix = 'wp_';
+	public $album_query = '';
+	public $gallery_query = '';
+	public $count_query = '';
+
+	public function prepare( $query ) {
+		$args = func_get_args();
+		array_shift( $args );
+
+		foreach ( $args as $arg ) {
+			if ( is_array( $arg ) ) {
+				foreach ( $arg as $item ) {
+					$replacement = is_numeric( $item ) ? (string) $item : "'" . addslashes( (string) $item ) . "'";
+					$query = preg_replace( '/%[ds]/', $replacement, $query, 1 );
+				}
+				continue;
+			}
+
+			$replacement = is_numeric( $arg ) ? (string) $arg : "'" . addslashes( (string) $arg ) . "'";
+			$query = preg_replace( '/%[ds]/', $replacement, $query, 1 );
+		}
+
+		return $query;
+	}
+
+	public function get_results( $query ) {
+		if ( false !== stripos( $query, 'from wp_ngg_album' ) ) {
+			return array(
+				(object) array(
+					'id'   => '15 OR 1=1',
+					'name' => 'Unsafe Album',
+				),
+			);
+		}
+
+		if ( false !== stripos( $query, 'COUNT(*) AS image_count' ) ) {
+			$this->count_query = $query;
+			return array(
+				(object) array(
+					'galleryid'    => 7,
+					'image_count' => 1,
+				),
+				(object) array(
+					'galleryid'    => 8,
+					'image_count' => 2,
+				),
+			);
+		}
+
+		if ( false !== stripos( $query, 'from wp_ngg_gallery' ) ) {
+			$this->gallery_query = $query;
+			return array(
+				(object) array(
+					'gid'   => 7,
+					'title' => 'Bridge',
+					'path'  => 'wp-content/gallery/bridge',
+				),
+				(object) array(
+					'gid'   => 8,
+					'title' => 'City',
+					'path'  => 'wp-content/gallery/city',
+				),
+			);
+		}
+
+		return array();
+	}
+
+	public function get_row( $query ) {
+		$this->album_query = $query;
+
+		return (object) array(
+			'sortorder' => base64_encode( json_encode( array( '7', 'bad-value', '8 OR 1=1', '0' ) ) ),
+		);
+	}
+}
+
+class FakePhotoAlbumWpdb {
+	public $prefix = 'wp_';
+	public $album_gallery_query = '';
+	public $gallery_query = '';
+
+	public function prepare( $query ) {
+		$args = func_get_args();
+		array_shift( $args );
+
+		foreach ( $args as $arg ) {
+			if ( is_array( $arg ) ) {
+				foreach ( $arg as $item ) {
+					$replacement = is_numeric( $item ) ? (string) $item : "'" . addslashes( (string) $item ) . "'";
+					$query = preg_replace( '/%[ds]/', $replacement, $query, 1 );
+				}
+				continue;
+			}
+
+			$replacement = is_numeric( $arg ) ? (string) $arg : "'" . addslashes( (string) $arg ) . "'";
+			$query = preg_replace( '/%[ds]/', $replacement, $query, 1 );
+		}
+
+		return $query;
+	}
+
+	public function get_results( $query ) {
+		if ( false !== stripos( $query, 'from wp_bwg_album_gallery' ) ) {
+			$this->album_gallery_query = $query;
+			return array(
+				(object) array(
+					'alb_gal_id' => '34',
+				),
+				(object) array(
+					'alb_gal_id' => 'bad-value',
+				),
+				(object) array(
+					'alb_gal_id' => '35 OR 1=1',
+				),
+			);
+		}
+
+		if ( false !== stripos( $query, 'from wp_bwg_gallery' ) ) {
+			$this->gallery_query = $query;
+			return array(
+				(object) array(
+					'id'   => 34,
+					'name' => 'Bridge',
+				),
+				(object) array(
+					'id'   => 35,
+					'name' => 'City',
+				),
+			);
+		}
+
+		if ( false !== stripos( $query, 'from wp_bwg_image' ) ) {
+			return array(
+				(object) array(
+					'image_url'   => '/bridge.jpg',
+					'description' => 'Bridge',
+					'alt'         => 'Bridge',
+					'date'        => '2026-06-01 10:00:00',
+					'published'   => '1',
+				),
+			);
+		}
+
+		if ( false !== stripos( $query, 'from wp_bwg_album' ) ) {
+			return array(
+				(object) array(
+					'id'   => '12 OR 1=1',
+					'name' => 'Unsafe 10Web Album',
 				),
 			);
 		}
