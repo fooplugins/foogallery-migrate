@@ -1,4 +1,7 @@
 <?php
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
 $migrator = foogallery_migrate_migrator_instance();
 $image_tag_sync_status = $migrator->get_image_tag_sync_status();
 $has_migratable_image_tags = $migrator->has_migratable_image_tags();

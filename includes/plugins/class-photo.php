@@ -7,6 +7,10 @@
 
 namespace FooPlugins\FooGalleryMigrate\Plugins;
 
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
 use FooPlugins\FooGalleryMigrate\Objects\Gallery;
 use FooPlugins\FooGalleryMigrate\Objects\Image;
 use FooPlugins\FooGalleryMigrate\Objects\Album;
@@ -188,17 +192,29 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
 
         private function get_galleries_by_album( $album_id ) {
             global $wpdb;
+            $album_id = absint( $album_id );
+            if ( $album_id < 1 ) {
+                return array();
+            }
+
             $album_gallery_table = $wpdb->prefix . self::FM_PHOTO_ALBUM_GALLERY_TABLE;
-            $galleries_by_album = $wpdb->get_results( "select * from {$album_gallery_table} WHERE album_id = $album_id" );
+            $galleries_by_album = $wpdb->get_results( $wpdb->prepare( "select * from {$album_gallery_table} WHERE album_id = %d", $album_id ) );
 
             $galleries_id = array();
             foreach( $galleries_by_album as $gallery_by_album ) {
-                $galleries_id[] = $gallery_by_album->alb_gal_id;
+                $gallery_id = isset( $gallery_by_album->alb_gal_id ) ? absint( $gallery_by_album->alb_gal_id ) : 0;
+                if ( $gallery_id > 0 ) {
+                    $galleries_id[] = $gallery_id;
+                }
             }
 
-            $galleries_id = implode(",", $galleries_id);
+            if ( empty( $galleries_id ) ) {
+                return array();
+            }
+
+            $placeholders = implode( ',', array_fill( 0, count( $galleries_id ), '%d' ) );
             $gallery_table = $wpdb->prefix . self::FM_PHOTO_TABLE_GALLERY;
-            return $wpdb->get_results( "select * from {$gallery_table} WHERE published = 1 AND id IN($galleries_id)" );                        
+            return $wpdb->get_results( $wpdb->prepare( "select * from {$gallery_table} WHERE published = 1 AND id IN ({$placeholders})", $galleries_id ) );
         }
 
         function find_albums() {

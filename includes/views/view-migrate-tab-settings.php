@@ -1,4 +1,7 @@
 <?php
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
 $migrator = foogallery_migrate_migrator_instance();
 $settings = $migrator->get_settings();
 $gallery_templates = $migrator->get_available_gallery_templates();

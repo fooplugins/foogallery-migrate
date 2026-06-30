@@ -9,6 +9,10 @@
 
 namespace FooPlugins\FooGalleryMigrate;
 
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
 if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
 
 	/**

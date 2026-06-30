@@ -1,4 +1,7 @@
 <?php
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
     $migrator = foogallery_migrate_migrator_instance();
     $albums_enabled = class_exists( 'FooGalleryAlbum' );
 ?>

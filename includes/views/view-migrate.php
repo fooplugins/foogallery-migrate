@@ -1,3 +1,8 @@
+<?php
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+?>
 <style>
 	.foo-nav-tabs a:focus {
 		-webkit-box-shadow: none;

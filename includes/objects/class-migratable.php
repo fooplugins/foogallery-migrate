@@ -7,6 +7,10 @@
 
 namespace FooPlugins\FooGalleryMigrate\Objects;
 
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
 use WP_Error;
 
 if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {

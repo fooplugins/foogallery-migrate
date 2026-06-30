@@ -7,6 +7,10 @@
 
 namespace FooPlugins\FooGalleryMigrate\Migrators;
 
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
 use FooPlugins\FooGalleryMigrate\Plugins\Photo;
 use FooPlugins\FooGalleryMigrate\Pagination;

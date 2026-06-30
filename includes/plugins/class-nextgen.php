@@ -7,6 +7,10 @@
 
 namespace FooPlugins\FooGalleryMigrate\Plugins;
 
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
 use FooPlugins\FooGalleryMigrate\Objects\Gallery;
 use FooPlugins\FooGalleryMigrate\Objects\Image;
 use FooPlugins\FooGalleryMigrate\Objects\Album;
@@ -198,30 +202,13 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
         /**
          * Returns non-excluded image counts by NextGEN gallery ID.
          *
-         * @param array $gallery_ids Optional gallery IDs to restrict.
          * @return array<int,int>
          */
-        private function get_nextgen_gallery_image_counts( $gallery_ids = array() ) {
+        private function get_nextgen_gallery_image_counts() {
             global $wpdb;
 
             $picture_table = $wpdb->prefix . self::NEXTGEN_TABLE_PICTURES;
-            $where = 'WHERE (exclude = 0 OR exclude IS NULL)';
-            $query_args = array();
-
-            if ( ! empty( $gallery_ids ) ) {
-                $gallery_ids = array_values( array_unique( array_filter( array_map( 'absint', $gallery_ids ) ) ) );
-                if ( ! empty( $gallery_ids ) ) {
-                    $where .= ' AND galleryid IN (' . implode( ',', array_fill( 0, count( $gallery_ids ), '%d' ) ) . ')';
-                    $query_args = $gallery_ids;
-                }
-            }
-
-            $sql = "SELECT galleryid, COUNT(*) AS image_count FROM {$picture_table} {$where} GROUP BY galleryid";
-            if ( ! empty( $query_args ) ) {
-                $sql = $wpdb->prepare( $sql, $query_args );
-            }
-
-            $rows = $wpdb->get_results( $sql );
+            $rows = $wpdb->get_results( "SELECT galleryid, COUNT(*) AS image_count FROM {$picture_table} WHERE (exclude = 0 OR exclude IS NULL) GROUP BY galleryid" );
             if ( ! is_array( $rows ) || empty( $rows ) ) {
                 return array();
             }
@@ -279,22 +266,19 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
             }
 
             $picture_table = $wpdb->prefix . self::NEXTGEN_TABLE_PICTURES;
-            $sql = "
-                SELECT 1
-                FROM {$picture_table} p
-                INNER JOIN {$wpdb->term_relationships} tr ON tr.object_id = p.pid
-                INNER JOIN {$wpdb->term_taxonomy} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
-                WHERE tt.taxonomy = %s
-                LIMIT 1
-            ";
-
-            if ( method_exists( $wpdb, 'prepare' ) ) {
-                $sql = $wpdb->prepare( $sql, 'ngg_tag' );
-            } else {
-                $sql = str_replace( '%s', "'ngg_tag'", $sql );
-            }
-
-            return (bool) $wpdb->get_var( $sql );
+            return (bool) $wpdb->get_var(
+                $wpdb->prepare(
+                    "
+                    SELECT 1
+                    FROM {$picture_table} p
+                    INNER JOIN {$wpdb->term_relationships} tr ON tr.object_id = p.pid
+                    INNER JOIN {$wpdb->term_taxonomy} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
+                    WHERE tt.taxonomy = %s
+                    LIMIT 1
+                    ",
+                    'ngg_tag'
+                )
+            );
         }
 
         /**
@@ -374,23 +358,21 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
                 return array();
             }
 
-            $sql = "
-                SELECT t.name
-                FROM {$wpdb->terms} t
-                INNER JOIN {$wpdb->term_taxonomy} tt ON tt.term_id = t.term_id
-                INNER JOIN {$wpdb->term_relationships} tr ON tr.term_taxonomy_id = tt.term_taxonomy_id
-                WHERE tr.object_id = %d
-                AND tt.taxonomy = %s
-                ORDER BY t.name
-            ";
-
-            if ( method_exists( $wpdb, 'prepare' ) ) {
-                $sql = $wpdb->prepare( $sql, $image_id, 'ngg_tag' );
-            } else {
-                $sql = str_replace( array( '%d', '%s' ), array( (string) $image_id, "'ngg_tag'" ), $sql );
-            }
-
-            $rows = $wpdb->get_results( $sql );
+            $rows = $wpdb->get_results(
+                $wpdb->prepare(
+                    "
+                    SELECT t.name
+                    FROM {$wpdb->terms} t
+                    INNER JOIN {$wpdb->term_taxonomy} tt ON tt.term_id = t.term_id
+                    INNER JOIN {$wpdb->term_relationships} tr ON tr.term_taxonomy_id = tt.term_taxonomy_id
+                    WHERE tr.object_id = %d
+                    AND tt.taxonomy = %s
+                    ORDER BY t.name
+                    ",
+                    $image_id,
+                    'ngg_tag'
+                )
+            );
             if ( ! is_array( $rows ) || empty( $rows ) ) {
                 return array();
             }
@@ -429,23 +411,20 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
 
             $picture_table = $wpdb->prefix . self::NEXTGEN_TABLE_PICTURES;
             $gallery_table = $wpdb->prefix . self::NEXTGEN_TABLE_GALLERY;
-            $sql = "
-                SELECT DISTINCT p.pid, p.filename, p.galleryid, g.path
-                FROM {$picture_table} p
-                INNER JOIN {$gallery_table} g ON g.gid = p.galleryid
-                INNER JOIN {$wpdb->term_relationships} tr ON tr.object_id = p.pid
-                INNER JOIN {$wpdb->term_taxonomy} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
-                WHERE tt.taxonomy = %s
-                ORDER BY p.pid
-            ";
-
-            if ( method_exists( $wpdb, 'prepare' ) ) {
-                $sql = $wpdb->prepare( $sql, 'ngg_tag' );
-            } else {
-                $sql = str_replace( '%s', "'ngg_tag'", $sql );
-            }
-
-            $rows = $wpdb->get_results( $sql );
+            $rows = $wpdb->get_results(
+                $wpdb->prepare(
+                    "
+                    SELECT DISTINCT p.pid, p.filename, p.galleryid, g.path
+                    FROM {$picture_table} p
+                    INNER JOIN {$gallery_table} g ON g.gid = p.galleryid
+                    INNER JOIN {$wpdb->term_relationships} tr ON tr.object_id = p.pid
+                    INNER JOIN {$wpdb->term_taxonomy} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id
+                    WHERE tt.taxonomy = %s
+                    ORDER BY p.pid
+                    ",
+                    'ngg_tag'
+                )
+            );
             if ( ! is_array( $rows ) || empty( $rows ) ) {
                 return array();
             }
@@ -523,19 +502,29 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
             global $wpdb;
             $album_table = $wpdb->prefix . self::NEXTGEN_TABLE_ALBUMS;
             $gallery_table = $wpdb->prefix . self::NEXTGEN_TABLE_GALLERY;
-            $get_galleries_data = $wpdb->get_row("SELECT sortorder FROM $album_table WHERE id = $album_id");
-            if ( $get_galleries_data->sortorder !== '' ) {
-                $galleries_id = base64_decode($get_galleries_data->sortorder);
-                $galleries_id = str_replace("[", "", $galleries_id);
-                $galleries_id = str_replace("]", "", $galleries_id);
-                $galleries_id = str_replace('"', '', $galleries_id);
+            $album_id = absint( $album_id );
+            if ( $album_id < 1 ) {
+                return array();
+            }
 
-                if ( $galleries_id !== '' ) {
-                    $get_galleries_data = $wpdb->get_results("SELECT * FROM {$gallery_table} WHERE gid IN ($galleries_id)");                    
-                }
-            } 
+            $get_galleries_data = $wpdb->get_row( $wpdb->prepare( "SELECT sortorder FROM {$album_table} WHERE id = %d", $album_id ) );
+            if ( ! is_object( $get_galleries_data ) || empty( $get_galleries_data->sortorder ) ) {
+                return array();
+            }
 
-            return $get_galleries_data;
+            $sortorder = base64_decode( $get_galleries_data->sortorder );
+            $gallery_ids = json_decode( $sortorder, true );
+            if ( ! is_array( $gallery_ids ) ) {
+                $gallery_ids = preg_split( '/\s*,\s*/', trim( str_replace( array( '[', ']', '"' ), '', (string) $sortorder ) ) );
+            }
+
+            $gallery_ids = array_values( array_unique( array_filter( array_map( 'absint', $gallery_ids ) ) ) );
+            if ( empty( $gallery_ids ) ) {
+                return array();
+            }
+
+            $placeholders = implode( ',', array_fill( 0, count( $gallery_ids ), '%d' ) );
+            return $wpdb->get_results( $wpdb->prepare( "SELECT * FROM {$gallery_table} WHERE gid IN ({$placeholders})", $gallery_ids ) );
         }
 
         function find_albums() {

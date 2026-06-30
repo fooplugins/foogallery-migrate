@@ -6,6 +6,10 @@
  */
 
 namespace FooPlugins\FooGalleryMigrate\Migrators;
+
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
 use FooPlugins\FooGalleryMigrate\Objects\Album;
 use FooPlugins\FooGalleryMigrate\Objects\Migratable;
 use FooPlugins\FooGalleryMigrate\Pagination;
@@ -176,7 +180,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                             <td>
                                 <?php
                                  if ( $fooalbum ) {
-                                    echo $edit_link;
+                                    echo wp_kses_post( $edit_link );
                                 } else {
                                     ?>
                                     <input name="foogallery-album-title-<?php echo esc_attr( $album->unique_identifier() ); ?>" value="<?php echo esc_attr( $album->title ); ?>">
