@@ -79,6 +79,12 @@ Update now to get all the latest features, bug fixes and improvements!
 
 == Changelog ==
 
+= 1.13 =
+* Added direct-access guards to plugin include and view files.
+* Hardened legacy NextGEN and 10Web album queries with sanitized IDs and prepared SQL.
+* Escaped migrated album edit links on the album migration screen.
+* Verified the release package with WordPress Plugin Check security checks.
+
 = 1.12 =
 * Improved migration page performance by loading each tab from its own query arg instead of rendering every tab on first load.
 * Moved image tag migration into a dedicated Image Tags tab.
