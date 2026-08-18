@@ -46,6 +46,30 @@
     <?php esc_html_e( 'We detected the following gallery plugins to migrate:', 'foogallery-migrate' ); ?>
 </p>
     <?php } ?>
+<?php
+$wordpress_gallery_detected = isset( $_GET['wordpress-gallery-detected'] ) ? sanitize_key( wp_unslash( $_GET['wordpress-gallery-detected'] ) ) : '';
+$wordpress_gallery_count = isset( $_GET['wordpress-gallery-count'] ) ? absint( wp_unslash( $_GET['wordpress-gallery-count'] ) ) : 0;
+if ( '0' === $wordpress_gallery_detected ) {
+    echo '<div class="notice notice-info inline"><p>' . esc_html__( 'No valid WordPress core galleries were found in published posts or pages.', 'foogallery-migrate' ) . '</p></div>';
+} elseif ( '1' === $wordpress_gallery_detected ) {
+    echo '<div class="notice notice-success inline"><p>';
+    printf(
+        /* translators: %d: detected gallery occurrence count. */
+        esc_html( _n( 'Found %d WordPress core gallery. You can migrate it in Blocks / Shortcodes.', 'Found %d WordPress core galleries. You can migrate them in Blocks / Shortcodes.', $wordpress_gallery_count, 'foogallery-migrate' ) ),
+        absint( $wordpress_gallery_count )
+    );
+    echo '</p></div>';
+}
+?>
+<div class="notice notice-info inline">
+    <p><strong><?php esc_html_e( 'Built-in WordPress galleries', 'foogallery-migrate' ); ?></strong></p>
+    <p><?php esc_html_e( 'Scan published posts and pages for valid [gallery] shortcodes and core Gallery blocks. Detection does not change content.', 'foogallery-migrate' ); ?></p>
+    <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+        <input type="hidden" name="action" value="foogallery_migrate_detect_wordpress_core">
+        <?php wp_nonce_field( 'foogallery_migrate_detect_wordpress_core' ); ?>
+        <button type="submit" class="button button-primary"><?php esc_html_e( 'Detect WordPress Galleries', 'foogallery-migrate' ); ?></button>
+    </form>
+</div>
 <ul>
     <?php
     foreach ( $migrator->get_plugins() as $plugin ) {

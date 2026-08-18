@@ -52,6 +52,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             add_action( 'wp_ajax_foogallery_migrate_delete_object', array( $this, 'ajax_delete_migrated_object' ) );
 
             add_action( 'admin_post_foogallery_migrate_save_settings', array( $this, 'save_settings' ) );
+            add_action( 'admin_post_foogallery_migrate_detect_wordpress_core', array( $this, 'detect_wordpress_core_galleries' ) );
+            add_action( 'admin_post_foogallery_migrate_content', array( $this, 'migrate_content_no_js' ) );
+            add_action( 'admin_post_foogallery_migrate_refresh_content', array( $this, 'refresh_content_no_js' ) );
                       
 		}
 
@@ -97,7 +100,125 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
          * @return void
          */
         function render_view() {
+            $content_migration_result = $this->consume_content_migration_result();
             require_once 'views/view-migrate.php';
+        }
+
+        /**
+         * Consume the current administrator's no-JS content migration result.
+         *
+         * @return array|false
+         */
+        private function consume_content_migration_result() {
+            $result_key = 'foogallery_migrate_content_result_' . get_current_user_id();
+            $result = get_transient( $result_key );
+            if ( is_array( $result ) ) {
+                delete_transient( $result_key );
+                return $result;
+            }
+
+            return false;
+        }
+
+        /**
+         * Detect stored WordPress core galleries and route to content migration.
+         *
+         * Detection is read-only. Gallery creation and post updates remain behind
+         * the existing nonce/capability protected content migration action.
+         *
+         * @return void
+         */
+        function detect_wordpress_core_galleries() {
+            if ( ! current_user_can( 'manage_options' ) ) {
+                wp_die( esc_html__( 'Unauthorized.', 'foogallery-migrate' ) );
+            }
+
+            check_admin_referer( 'foogallery_migrate_detect_wordpress_core' );
+
+            $migrator = foogallery_migrate_migrator_instance();
+            $migrator->run_detection();
+            $migrator->get_gallery_migrator()->get_objects_to_migrate( true );
+            $content_items = $migrator->get_content_migrator()->scan_content( true );
+            $count = 0;
+            foreach ( $content_items as $item ) {
+                if ( is_array( $item ) && isset( $item['plugin_name'] ) && 'WordPress Core' === $item['plugin_name'] ) {
+                    $count++;
+                }
+            }
+
+            $redirect_url = add_query_arg(
+                array(
+                    'page'                       => 'foogallery-migrate',
+                    'wordpress-gallery-count'    => $count,
+                    'wordpress-gallery-detected' => $count > 0 ? '1' : '0',
+                ),
+                admin_url( 'edit.php?post_type=foogallery' )
+            );
+
+            wp_safe_redirect( $redirect_url . ( $count > 0 ? '#shortcodes' : '#sources' ) );
+            exit;
+        }
+
+        /**
+         * Migrate and replace selected content without JavaScript.
+         *
+         * @return void
+         */
+        function migrate_content_no_js() {
+            if ( ! current_user_can( 'manage_options' ) ) {
+                wp_die( esc_html__( 'Unauthorized.', 'foogallery-migrate' ) );
+            }
+
+            check_admin_referer( 'foogallery_content_migrate', 'foogallery_content_migrate' );
+
+            $selected_items = array();
+            if ( isset( $_POST['content-item'] ) ) {
+                $selected_items = map_deep( wp_unslash( $_POST['content-item'] ), 'absint' );
+            }
+
+            $result = foogallery_migrate_migrator_instance()
+                ->get_content_migrator()
+                ->migrate_and_replace_content( $selected_items );
+
+            set_transient(
+                'foogallery_migrate_content_result_' . get_current_user_id(),
+                $result,
+                MINUTE_IN_SECONDS
+            );
+
+            $this->redirect_to_content_migration();
+        }
+
+        /**
+         * Refresh the content scan without JavaScript.
+         *
+         * @return void
+         */
+        function refresh_content_no_js() {
+            if ( ! current_user_can( 'manage_options' ) ) {
+                wp_die( esc_html__( 'Unauthorized.', 'foogallery-migrate' ) );
+            }
+
+            check_admin_referer( 'foogallery_content_migrate', 'foogallery_content_migrate' );
+            $migrator = foogallery_migrate_migrator_instance();
+            $migrator->get_gallery_migrator()->get_objects_to_migrate( true );
+            $migrator->get_content_migrator()->scan_content( true );
+            $this->redirect_to_content_migration();
+        }
+
+        /**
+         * Redirect back to the content migration tab.
+         *
+         * @return void
+         */
+        private function redirect_to_content_migration() {
+            $redirect_url = add_query_arg(
+                'page',
+                'foogallery-migrate',
+                admin_url( 'edit.php?post_type=foogallery' )
+            );
+            wp_safe_redirect( $redirect_url . '#shortcodes' );
+            exit;
         }
 
         /**
@@ -399,13 +520,14 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                     $selected_items = map_deep( wp_unslash( $_POST['content-item'] ), 'sanitize_text_field' );
                 }
 
-                $result = $content_migrator->replace_content( $selected_items );
+                $result = $content_migrator->migrate_and_replace_content( $selected_items );
 
                 // Show success/error messages
                 if ( $result['success'] > 0 ) {
                     echo '<div class="notice notice-success"><p>';
                     printf(
-                        esc_html__( 'Successfully replaced %d shortcode(s)/block(s).', 'foogallery-migrate' ),
+                        /* translators: %d: migrated occurrence count. */
+                        esc_html( _n( 'Successfully migrated and replaced %d gallery occurrence.', 'Successfully migrated and replaced %d gallery occurrences.', $result['success'], 'foogallery-migrate' ) ),
                         absint( $result['success'] )
                     );
                     echo '</p></div>';
@@ -438,6 +560,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
 
                 $migrator = foogallery_migrate_migrator_instance();
                 $content_migrator = $migrator->get_content_migrator();
+                $migrator->get_gallery_migrator()->get_objects_to_migrate( true );
                 $content_migrator->scan_content( true );
                 $content_migrator->render_content_form();
 

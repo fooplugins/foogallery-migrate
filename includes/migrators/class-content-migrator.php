@@ -163,6 +163,35 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				}
 
 				try {
+					if ( method_exists( $plugin, 'find_content_occurrences' ) ) {
+						$occurrences = $plugin->find_content_occurrences( $post );
+						foreach ( $occurrences as $occurrence ) {
+							if ( empty( $occurrence['source_id'] ) || empty( $occurrence['original_content'] ) ) {
+								continue;
+							}
+
+							$item = $this->create_content_item(
+								$post,
+								$plugin,
+								$occurrence['source_id'],
+								$occurrence['type'],
+								$occurrence['original_content'],
+								isset( $occurrence['match_offset'] ) ? (int) $occurrence['match_offset'] : 0,
+								isset( $occurrence['block_name'] ) ? $occurrence['block_name'] : ''
+							);
+							if ( ! empty( $occurrence['source_context'] ) ) {
+								$item['source_context'] = $occurrence['source_context'];
+							}
+							if ( ! empty( $occurrence['attributes'] ) ) {
+								$item['attributes'] = $occurrence['attributes'];
+							}
+							if ( isset( $occurrence['match_offset'] ) ) {
+								$item['match_offset'] = (int) $occurrence['match_offset'];
+							}
+							$found_items[] = $item;
+						}
+					}
+
 					$block_patterns = $plugin->get_block_patterns();
 					if ( ! empty( $block_patterns ) && is_array( $block_patterns ) && ! empty( $all_blocks ) ) {
 						foreach ( $block_patterns as $block_name => $pattern ) {
@@ -239,7 +268,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				'post_title' => $post->post_title,
 				'post_type' => $post->post_type,
 				'plugin_name' => $plugin->name(),
-				'gallery_id' => (int) $gallery_id,
+				'gallery_id' => is_scalar( $gallery_id ) ? (string) $gallery_id : '',
 				'object_type' => $object_type,
 				'type' => $type,
 				'original_content' => $original_content,
@@ -543,7 +572,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 */
 		private function find_migrated_object( $plugin, $gallery_id, $object_type = 'gallery' ) {
 			$migrated_objects = $this->migrator_engine->get_migrated_objects();
-			$gallery_id = (int) $gallery_id;
+			$gallery_id = (string) $gallery_id;
 			$plugin_name = $plugin->name();
 			$object_type = ( 'album' === $object_type ) ? 'album' : 'gallery';
 
@@ -561,7 +590,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 					continue;
 				}
 				
-				$migrated_id = isset( $migrated_object->ID ) ? (int) $migrated_object->ID : 0;
+				$migrated_id = isset( $migrated_object->ID ) ? (string) $migrated_object->ID : '';
 				
 				if ( $migrated_id !== $gallery_id ) {
 					continue;
@@ -608,9 +637,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * Replace shortcodes/blocks in selected posts.
 		 *
 		 * @param array $selected_items Array of content item keys to replace
+		 * @param array $expected_post_contents Optional post content snapshots captured before entity migration.
 		 * @return array Results with success count and errors
 		 */
-		function replace_content( $selected_items ) {
+		function replace_content( $selected_items, $expected_post_contents = array() ) {
 			$content_items = $this->get_setting( $this->type, array() );
 			$replaced_count = 0;
 			$errors = array();
@@ -627,7 +657,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 
 				if ( ! $item['migrated'] || ! $item['migrated_foogallery_id'] ) {
 					$errors[] = sprintf(
-						__( '%1$s %2$d from %3$s in post "%4$s" has not been migrated yet.', 'foogallery-migrate' ),
+						__( '%1$s %2$s from %3$s in post "%4$s" has not been migrated yet.', 'foogallery-migrate' ),
 						ucfirst( $object_type ),
 						$item['gallery_id'],
 						$item['plugin_name'],
@@ -639,10 +669,18 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				$post_id = $item['post_id'];
 				if ( ! isset( $posts_to_update[ $post_id ] ) ) {
 					$post = get_post( $post_id );
-					if ( ! $post ) {
+					if ( ! $post || 'publish' !== $post->post_status || ! in_array( $post->post_type, array( 'post', 'page' ), true ) ) {
 						$errors[] = sprintf(
-							__( 'Post %d not found.', 'foogallery-migrate' ),
+							__( 'Published post or page %d not found.', 'foogallery-migrate' ),
 							$post_id
+						);
+						continue;
+					}
+					if ( isset( $expected_post_contents[ $post_id ] ) && $post->post_content !== $expected_post_contents[ $post_id ] ) {
+						$errors[] = sprintf(
+							/* translators: %s: post title. */
+							__( 'Post or page "%s" changed during migration and was not updated. Refresh the scan and try again.', 'foogallery-migrate' ),
+							$post->post_title
 						);
 						continue;
 					}
@@ -672,14 +710,46 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 					$posts_to_update[ $post_id ]['replacements'][] = array(
 						'old' => $item['original_content'],
 						'new' => $new_content,
+						'offset' => isset( $item['match_offset'] ) ? (int) $item['match_offset'] : false,
 					);
 				}
 			}
 
 			foreach ( $posts_to_update as $post_id => $post_data ) {
 				$updated_content = $post_data['content'];
+				usort( $post_data['replacements'], array( $this, 'sort_replacements_descending' ) );
+				$applied_count = 0;
 				foreach ( $post_data['replacements'] as $replacement ) {
-					$updated_content = str_replace( $replacement['old'], $replacement['new'], $updated_content );
+					$offset = $replacement['offset'];
+					if ( false === $offset ) {
+						$offset = strpos( $updated_content, $replacement['old'] );
+					}
+
+					if ( false === $offset || substr( $updated_content, $offset, strlen( $replacement['old'] ) ) !== $replacement['old'] ) {
+						$errors[] = sprintf(
+							/* translators: %s: post title. */
+							__( 'The selected gallery occurrence in "%s" changed after detection and was not replaced. Refresh the scan and try again.', 'foogallery-migrate' ),
+							$post_data['post']->post_title
+						);
+						continue;
+					}
+
+					$updated_content = substr_replace( $updated_content, $replacement['new'], $offset, strlen( $replacement['old'] ) );
+					$applied_count++;
+				}
+
+				if ( 0 === $applied_count ) {
+					continue;
+				}
+
+				$current_post = get_post( $post_id );
+				if ( ! $current_post || 'publish' !== $current_post->post_status || ! in_array( $current_post->post_type, array( 'post', 'page' ), true ) || $current_post->post_content !== $post_data['content'] ) {
+					$errors[] = sprintf(
+						/* translators: %s: post title. */
+						__( 'Post or page "%s" changed during migration and was not updated. Refresh the scan and try again.', 'foogallery-migrate' ),
+						$post_data['post']->post_title
+					);
+					continue;
 				}
 
 				$result = wp_update_post( array(
@@ -694,7 +764,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 						$result->get_error_message()
 					);
 				} else {
-					$replaced_count += count( $post_data['replacements'] );
+					$replaced_count += $applied_count;
 				}
 			}
 
@@ -704,6 +774,150 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				'success' => $replaced_count,
 				'errors' => $errors,
 			);
+		}
+
+		/**
+		 * Sort exact replacements from the end of the post to the beginning.
+		 *
+		 * @param array $left Left replacement.
+		 * @param array $right Right replacement.
+		 * @return int
+		 */
+		function sort_replacements_descending( $left, $right ) {
+			$left_offset = false === $left['offset'] ? -1 : (int) $left['offset'];
+			$right_offset = false === $right['offset'] ? -1 : (int) $right['offset'];
+			if ( $left_offset === $right_offset ) {
+				return 0;
+			}
+
+			return ( $left_offset > $right_offset ) ? -1 : 1;
+		}
+
+		/**
+		 * Migrate selected WP core gallery entities, then replace their occurrences.
+		 *
+		 * @param array $selected_items Content item keys.
+		 * @return array
+		 */
+		function migrate_and_replace_content( $selected_items ) {
+			$content_items = $this->get_setting( $this->type, array() );
+			if ( ! is_array( $content_items ) ) {
+				$content_items = array();
+			}
+			$core_source_ids = array();
+			$preflight_errors = array();
+			$preflight_post_contents = array();
+			$selected_item_keys = array_unique( array_map( 'absint', (array) $selected_items ) );
+
+			foreach ( $selected_item_keys as $item_key ) {
+				if ( ! isset( $content_items[ $item_key ] ) || ! is_array( $content_items[ $item_key ] ) ) {
+					$preflight_errors[] = __( 'One or more selected content items are no longer available. Refresh the scan and try again.', 'foogallery-migrate' );
+					continue;
+				}
+
+				$item = $content_items[ $item_key ];
+				$post = isset( $item['post_id'] ) ? get_post( $item['post_id'] ) : false;
+				$offset = isset( $item['match_offset'] ) ? (int) $item['match_offset'] : false;
+				$original_content = isset( $item['original_content'] ) ? (string) $item['original_content'] : '';
+				$is_eligible_post = $post && 'publish' === $post->post_status && in_array( $post->post_type, array( 'post', 'page' ), true );
+				if ( ! $is_eligible_post || false === $offset || '' === $original_content || substr( $post->post_content, $offset, strlen( $original_content ) ) !== $original_content ) {
+					$preflight_errors[] = sprintf(
+						/* translators: %s: post title. */
+						__( 'The selected gallery occurrence in "%s" changed after detection. Refresh the scan and try again.', 'foogallery-migrate' ),
+						isset( $item['post_title'] ) ? $item['post_title'] : ''
+					);
+					continue;
+				}
+				$preflight_post_contents[ (int) $post->ID ] = $post->post_content;
+
+				$is_core = isset( $item['plugin_name'] ) && 'WordPress Core' === $item['plugin_name'];
+				if ( $is_core && ( empty( $item['migrated'] ) || empty( $item['migrated_foogallery_id'] ) ) ) {
+					$core_source_ids[ (string) $item['gallery_id'] ] = true;
+				} elseif ( ! $is_core && ( empty( $item['migrated'] ) || empty( $item['migrated_foogallery_id'] ) ) ) {
+					$preflight_errors[] = sprintf(
+						/* translators: %s: post title. */
+						__( 'The selected gallery in "%s" has not been migrated yet.', 'foogallery-migrate' ),
+						isset( $item['post_title'] ) ? $item['post_title'] : ''
+					);
+				}
+			}
+
+			if ( ! empty( $preflight_errors ) ) {
+				return array(
+					'success' => 0,
+					'errors'  => $preflight_errors,
+				);
+			}
+
+			if ( ! empty( $core_source_ids ) ) {
+				$gallery_migrator = $this->migrator_engine->get_gallery_migrator();
+				$galleries = $gallery_migrator->get_objects_to_migrate( true );
+				$queue = array();
+				$maximum_steps = 1;
+
+				foreach ( $galleries as $gallery ) {
+					if ( 'WordPress Core' !== $gallery->plugin->name() || ! isset( $core_source_ids[ (string) $gallery->ID ] ) ) {
+						continue;
+					}
+					$queue[ $gallery->unique_identifier() ] = array(
+						'id'       => $gallery->unique_identifier(),
+						'migrated' => false,
+						'current'  => false,
+						'title'    => $gallery->title,
+					);
+					$maximum_steps += $gallery->get_children_count() + 1;
+				}
+
+				if ( count( $queue ) !== count( $core_source_ids ) ) {
+					return array(
+						'success' => 0,
+						'errors'  => array( __( 'One or more selected core galleries changed after detection. Refresh the scan and try again.', 'foogallery-migrate' ) ),
+					);
+				}
+
+				$gallery_migrator->queue_objects_for_migration( $queue );
+				for ( $step = 0; $step < $maximum_steps; $step++ ) {
+					$state = $gallery_migrator->get_state();
+					if ( is_array( $state ) && isset( $state['queued'], $state['completed'] ) && (int) $state['queued'] === (int) $state['completed'] ) {
+						break;
+					}
+					$gallery_migrator->migrate();
+				}
+
+				$state = $gallery_migrator->get_state();
+				if ( ! is_array( $state ) || empty( $state['queued'] ) || (int) $state['completed'] !== (int) $state['queued'] ) {
+					return array(
+						'success' => 0,
+						'errors'  => array( __( 'One or more core galleries could not be migrated. Review the Galleries tab for details.', 'foogallery-migrate' ) ),
+					);
+				}
+
+				$migrated_core_ids = array();
+				foreach ( $gallery_migrator->get_objects_to_migrate() as $gallery ) {
+					$source_id = isset( $gallery->ID ) ? (string) $gallery->ID : '';
+					if ( 'WordPress Core' === $gallery->plugin->name() && isset( $core_source_ids[ $source_id ] ) && ! empty( $gallery->migrated ) && ! empty( $gallery->migrated_id ) ) {
+						$migrated_core_ids[ $source_id ] = (int) $gallery->migrated_id;
+					}
+				}
+
+				if ( count( $migrated_core_ids ) !== count( $core_source_ids ) ) {
+					return array(
+						'success' => 0,
+						'errors'  => array( __( 'One or more core galleries could not be verified after migration. Review the Galleries tab for details.', 'foogallery-migrate' ) ),
+					);
+				}
+
+				foreach ( $content_items as $item_key => $item ) {
+					$source_id = is_array( $item ) && isset( $item['gallery_id'] ) ? (string) $item['gallery_id'] : '';
+					if ( isset( $migrated_core_ids[ $source_id ] ) && isset( $item['plugin_name'] ) && 'WordPress Core' === $item['plugin_name'] ) {
+						$content_items[ $item_key ]['migrated'] = true;
+						$content_items[ $item_key ]['migrated_foogallery_id'] = $migrated_core_ids[ $source_id ];
+					}
+				}
+				$this->set_setting( $this->type, $content_items );
+			}
+
+			return $this->replace_content( $selected_item_keys, $preflight_post_contents );
 		}
 
 		/**
@@ -771,6 +985,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 					$url = add_query_arg( 'content_paged', $page, $url ) . '#shortcodes';
 				
 					$content_items_count = count( $content_items );
+					printf(
+						'<p><strong>%s</strong></p>',
+						esc_html( sprintf( _n( '%d gallery occurrence found.', '%d gallery occurrences found.', $content_items_count, 'foogallery-migrate' ), $content_items_count ) )
+					);
 					$page_size = $this->migrator_engine->get_page_size();
 					$show_pagination = $page_size > 0;
 
@@ -806,7 +1024,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 					}
 					$paginated_items[ $counter ] = $item;
 					$is_migrated = ! empty( $item['migrated'] ) && ! empty( $item['migrated_foogallery_id'] );
-					if ( $is_migrated ) {
+					$is_actionable = $is_migrated || ( isset( $item['plugin_name'] ) && 'WordPress Core' === $item['plugin_name'] );
+					if ( $is_actionable ) {
 						$enabled_count++;
 						$checked_count++;
 					}
@@ -827,7 +1046,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 								<span><?php esc_html_e( 'Source Plugin', 'foogallery-migrate' ); ?></span>
 							</th>
 							<th scope="col" class="manage-column">
-								<span><?php esc_html_e( 'Source ID', 'foogallery-migrate' ); ?></span>
+								<span><?php esc_html_e( 'Source Context', 'foogallery-migrate' ); ?></span>
 							</th>
 							<th scope="col" class="manage-column">
 								<span><?php esc_html_e( 'Type', 'foogallery-migrate' ); ?></span>
@@ -853,10 +1072,12 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 							$foogallery_edit_link = admin_url( 'post.php?post=' . absint( $item['migrated_foogallery_id'] ) . '&action=edit' );
 						}
 						$is_migrated = ! empty( $item['migrated'] ) && ! empty( $item['migrated_foogallery_id'] );
+						$is_core = isset( $item['plugin_name'] ) && 'WordPress Core' === $item['plugin_name'];
+						$is_actionable = $is_migrated || $is_core;
 						?>
 						<tr class="<?php echo esc_attr( ($key % 2 === 0) ? 'alternate' : '' ); ?>">
 							<th scope="row" class="check-column">
-								<?php if ( $is_migrated ) { ?>
+								<?php if ( $is_actionable ) { ?>
 									<input name="content-item[]" type="checkbox" checked="checked" value="<?php echo esc_attr( $key ); ?>">
 								<?php } else { ?>
 									<input name="content-item[]" type="checkbox" disabled="disabled" value="<?php echo esc_attr( $key ); ?>">
@@ -873,7 +1094,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 								<?php echo esc_html( $item['plugin_name'] ); ?>
 							</td>
 							<td>
-								<?php echo esc_html( $item['gallery_id'] ); ?>
+								<?php echo esc_html( isset( $item['source_context'] ) ? $item['source_context'] : $item['gallery_id'] ); ?>
 							</td>
 							<td>
 								<?php
@@ -893,6 +1114,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 							<td>
 								<?php if ( $is_migrated ) { ?>
 									<span style="color: #080;"><?php esc_html_e( 'Migrated', 'foogallery-migrate' ); ?></span>
+								<?php } elseif ( $is_core ) { ?>
+									<span style="color: #2271b1;"><?php esc_html_e( 'Ready to migrate', 'foogallery-migrate' ); ?></span>
 								<?php } else { ?>
 									<span style="color: #f60;"><?php esc_html_e( 'Not Migrated', 'foogallery-migrate' ); ?></span>
 								<?php } ?>
@@ -914,9 +1137,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			}
 			?>
 			<p>
-				<button name="foogallery_content_action" value="foogallery_content_replace"
-						class="button button-primary replace_content"><?php esc_html_e( 'Replace Selected', 'foogallery-migrate' ); ?></button>
-				<button name="foogallery_content_action" value="foogallery_content_refresh"
+				<button name="action" value="foogallery_migrate_content"
+						class="button button-primary replace_content"><?php esc_html_e( 'Migrate & Replace Selected', 'foogallery-migrate' ); ?></button>
+				<button name="action" value="foogallery_migrate_refresh_content"
 						class="button refresh_content"><?php esc_html_e( 'Refresh Scan', 'foogallery-migrate' ); ?></button>
 			</p>
 			<div id="foogallery_migrate_content_spinner" style="width:20px; display: inline-block;">
