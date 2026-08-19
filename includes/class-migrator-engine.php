@@ -48,7 +48,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          *
          * @param $name
          * @param $value
-         * @return void
+         * @return bool Whether the setting was persisted.
          */
         public function set_migrator_setting( $name, $value ) {
             $settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
@@ -59,7 +59,12 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
 
             $settings[ $name ] = $value;
 
-            update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $settings, false );
+            if ( update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $settings, false ) ) {
+                return true;
+            }
+
+            // update_option() also returns false when the requested value is already stored.
+            return $settings === get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
         }
 
         /**

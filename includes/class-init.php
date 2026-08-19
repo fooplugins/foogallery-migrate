@@ -431,17 +431,44 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
          * @return void
          */
         function ajax_refresh_content() {
-            if ( check_admin_referer( 'foogallery_content_migrate', 'foogallery_content_migrate' ) ) {
-                if ( ! current_user_can( 'manage_options' ) ) {
-                    wp_send_json_error( array( 'message' => __( 'Unauthorized.', 'foogallery-migrate' ) ) );
-                }
+            if ( ! check_ajax_referer( 'foogallery_content_migrate', 'foogallery_content_migrate', false ) ) {
+                wp_send_json_error( array( 'message' => __( 'Invalid request.', 'foogallery-migrate' ) ), 403 );
+                return;
+            }
 
+            if ( ! current_user_can( 'manage_options' ) ) {
+                wp_send_json_error( array( 'message' => __( 'Unauthorized.', 'foogallery-migrate' ) ), 403 );
+                return;
+            }
+
+            $reset = false;
+            if ( array_key_exists( 'reset', $_POST ) ) {
+                $reset = '1' === sanitize_text_field( wp_unslash( $_POST['reset'] ) );
+            }
+
+            try {
                 $migrator = foogallery_migrate_migrator_instance();
                 $content_migrator = $migrator->get_content_migrator();
-                $content_migrator->scan_content( true );
-                $content_migrator->render_content_form();
+                $progress = $content_migrator->scan_content_batch( $reset );
+                $html = '';
 
-                die();
+                if ( ! empty( $progress['complete'] ) ) {
+                    ob_start();
+                    $content_migrator->render_content_form();
+                    $html = ob_get_clean();
+                }
+
+                wp_send_json_success(
+                    array(
+                        'progress' => $progress,
+                        'html' => $html,
+                    )
+                );
+            } catch ( \Throwable $e ) {
+                wp_send_json_error(
+                    array( 'message' => __( 'The content scan stopped before completion. Previously saved results are safe; use the scan button to retry.', 'foogallery-migrate' ) ),
+                    500
+                );
             }
         }
 

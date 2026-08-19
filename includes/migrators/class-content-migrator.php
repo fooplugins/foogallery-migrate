@@ -59,55 +59,229 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * @return void
 		 */
 		function set_setting( $name, $value ) {
-			$this->migrator_engine->set_migrator_setting( $name, $value );
+			return $this->migrator_engine->set_migrator_setting( $name, $value );
 		}
 
 		/**
-		 * Scan all content for shortcodes and blocks.
+		 * Return the current content scan results, optionally starting a fresh batch.
 		 *
-		 * @param bool $force Force a fresh scan
+		 * @param bool $force Force a fresh scan.
 		 * @return array
 		 */
 		function scan_content( $force = false ) {
-			$content_items = $this->get_setting( $this->type );
-
-			if ( $content_items !== false && ! is_array( $content_items ) ) {
-				$content_items = false;
+			if ( $force ) {
+				$this->scan_content_batch( true );
 			}
 
-			if ( $content_items === false || $force ) {
-				$content_items = array();
-				$plugins = $this->migrator_engine->get_plugins();
+			return $this->get_content_items();
+		}
 
-				if ( empty( $plugins ) ) {
-					return $content_items;
-				}
+		/**
+		 * Process one bounded, resumable batch of posts containing possible gallery content.
+		 *
+		 * A batch's findings and cursor are persisted as one state record. If parsing or
+		 * persistence fails, the prior state remains resumable and no cursor is advanced.
+		 *
+		 * @param bool $reset Start a fresh scan without discarding the prior state until this batch succeeds.
+		 * @return array Scan progress.
+		 * @throws \RuntimeException When the batch state cannot be persisted.
+		 */
+		function scan_content_batch( $reset = false ) {
+			$state = $reset ? array(
+				'items' => array(),
+				'progress' => $this->default_scan_progress(),
+			) : $this->get_scan_state();
+			$content_items = $state['items'];
+			$progress = $state['progress'];
 
-				global $wpdb;
-				$posts = $wpdb->get_results( "
-					SELECT ID, post_title, post_content, post_type, post_status
+			if ( ! $reset && $progress['complete'] ) {
+				return $progress;
+			}
+
+			$plugins = $this->migrator_engine->get_plugins();
+			if ( empty( $plugins ) ) {
+				$progress['started'] = true;
+				$progress['complete'] = true;
+				$this->persist_scan_state( $content_items, $progress );
+				return $progress;
+			}
+
+			$batch_size = (int) apply_filters( 'foogallery_migrate_content_scan_batch_size', 20 );
+			$batch_size = max( 1, min( 100, $batch_size ) );
+			$time_limit = (float) apply_filters( 'foogallery_migrate_content_scan_time_limit', 10 );
+			$time_limit = max( 1, min( 30, $time_limit ) );
+			$started_at = microtime( true );
+
+			global $wpdb;
+			$shortcode_like = '%' . $wpdb->esc_like( '[' ) . '%';
+			$block_like = '%' . $wpdb->esc_like( '<!-- wp:' ) . '%';
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$posts = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT ID, post_title, post_content, post_type, post_status
 					FROM {$wpdb->posts}
 					WHERE post_status = 'publish'
 					AND post_type IN ('post', 'page')
-					AND (post_content LIKE '%[%' OR post_content LIKE '%<!-- wp:%')
-				" );
+					AND (post_content LIKE %s OR post_content LIKE %s)
+					AND ID > %d
+					ORDER BY ID ASC
+					LIMIT %d",
+					$shortcode_like,
+					$block_like,
+					(int) $progress['cursor'],
+					$batch_size + 1
+				)
+			);
+			$posts = is_array( $posts ) ? $posts : array();
+			$has_more_posts = count( $posts ) > $batch_size;
+			if ( $has_more_posts ) {
+				$posts = array_slice( $posts, 0, $batch_size );
+			}
 
-				if ( ! empty( $posts ) ) {
-					foreach ( $posts as $post ) {
-						try {
-							$found_items = $this->find_shortcodes_and_blocks_in_content( $post, $plugins );
-							if ( ! empty( $found_items ) ) {
-								$content_items = array_merge( $content_items, $found_items );
-							}
-						} catch ( \Exception $e ) {
-						}
+			$seen_items = array();
+			foreach ( $content_items as $item ) {
+				if ( is_array( $item ) ) {
+					$seen_items[ $this->content_item_key( $item ) ] = true;
+				}
+			}
+
+			$processed = 0;
+			foreach ( $posts as $post ) {
+				if ( $processed > 0 && microtime( true ) - $started_at >= $time_limit ) {
+					break;
+				}
+
+				$found_items = $this->find_shortcodes_and_blocks_in_content( $post, $plugins );
+				foreach ( $found_items as $occurrence => $item ) {
+					$item['scan_occurrence'] = (int) $occurrence;
+					$item_key = $this->content_item_key( $item );
+					if ( ! isset( $seen_items[ $item_key ] ) ) {
+						$content_items[] = $item;
+						$seen_items[ $item_key ] = true;
 					}
 				}
 
-				$this->set_setting( $this->type, $content_items );
+				$progress['cursor'] = (int) $post->ID;
+				$progress['scanned']++;
+				$processed++;
 			}
 
-			return $content_items;
+			$progress['started'] = true;
+			$progress['complete'] = ! $has_more_posts && $processed === count( $posts );
+
+			$this->persist_scan_state( $content_items, $progress );
+
+			return $progress;
+		}
+
+		/**
+		 * Get persisted content scan progress.
+		 *
+		 * @return array
+		 */
+		function get_scan_progress() {
+			$state = $this->get_scan_state();
+			return $state['progress'];
+		}
+
+		/**
+		 * Get the atomic content scan state, importing legacy separate settings when present.
+		 *
+		 * @return array
+		 */
+		private function get_scan_state() {
+			$state = $this->get_setting( $this->type . '_scan_state', false );
+			if ( is_array( $state ) && isset( $state['items'], $state['progress'] ) && is_array( $state['items'] ) && is_array( $state['progress'] ) ) {
+				$state['progress'] = array_merge( $this->default_scan_progress(), $state['progress'] );
+				return $state;
+			}
+
+			$legacy_items = $this->get_setting( $this->type, false );
+			if ( is_array( $legacy_items ) ) {
+				$legacy_progress = $this->get_setting( $this->type . '_scan_progress', array() );
+				if ( ! is_array( $legacy_progress ) || empty( $legacy_progress ) ) {
+					$legacy_progress = array(
+						'started' => true,
+						'complete' => true,
+					);
+				}
+				return array(
+					'items' => $legacy_items,
+					'progress' => array_merge( $this->default_scan_progress(), $legacy_progress ),
+				);
+			}
+
+			return array(
+				'items' => array(),
+				'progress' => $this->default_scan_progress(),
+			);
+		}
+
+		/**
+		 * Get current discovered content items.
+		 *
+		 * @return array
+		 */
+		private function get_content_items() {
+			$state = $this->get_scan_state();
+			return $state['items'];
+		}
+
+		/**
+		 * Return a new content scan progress record.
+		 *
+		 * @return array
+		 */
+		private function default_scan_progress() {
+			return array(
+				'started' => false,
+				'cursor' => 0,
+				'scanned' => 0,
+				'complete' => false,
+			);
+		}
+
+		/**
+		 * Persist findings and cursor together so a failed write cannot skip content.
+		 *
+		 * @param array $content_items Content findings.
+		 * @param array $progress Scan progress.
+		 * @return void
+		 * @throws \RuntimeException When the state cannot be persisted.
+		 */
+		private function persist_scan_state( $content_items, $progress ) {
+			$persisted = $this->set_setting(
+				$this->type . '_scan_state',
+				array(
+					'items' => $content_items,
+					'progress' => $progress,
+				)
+			);
+			if ( false === $persisted ) {
+				throw new \RuntimeException( 'Unable to persist content scan progress.' );
+			}
+		}
+
+		/**
+		 * Build a stable key so retried batches cannot duplicate discovered items.
+		 *
+		 * @param array $item Content item.
+		 * @return string
+		 */
+		private function content_item_key( $item ) {
+			return md5(
+				implode(
+					'|',
+					array(
+						isset( $item['post_id'] ) ? (int) $item['post_id'] : 0,
+						isset( $item['plugin_name'] ) ? $item['plugin_name'] : '',
+						isset( $item['type'] ) ? $item['type'] : '',
+						isset( $item['original_content'] ) ? $item['original_content'] : '',
+						isset( $item['match_offset'] ) ? (int) $item['match_offset'] : 0,
+						isset( $item['scan_occurrence'] ) ? (int) $item['scan_occurrence'] : 0,
+					)
+				)
+			);
 		}
 
 		/**
@@ -207,6 +381,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 						}
 					}
 				} catch ( \Exception $e ) {
+					throw $e;
 				}
 			}
 
@@ -611,7 +786,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * @return array Results with success count and errors
 		 */
 		function replace_content( $selected_items ) {
-			$content_items = $this->get_setting( $this->type, array() );
+			$content_items = $this->get_content_items();
 			$replaced_count = 0;
 			$errors = array();
 
@@ -699,6 +874,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			}
 
 			$this->set_setting( $this->type, false );
+			$this->set_setting( $this->type . '_scan_state', false );
 
 			return array(
 				'success' => $replaced_count,
@@ -712,37 +888,32 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * @return void
 		 */
 		function render_content_form() {
-			try {
-				$content_items = $this->scan_content();
-			} catch ( \Exception $e ) {
-				echo '<div class="notice notice-error"><p>';
-				printf(
-					esc_html__( 'Error scanning content: %s', 'foogallery-migrate' ),
-					esc_html( $e->getMessage() )
-				);
-				echo '</p></div>';
-				$content_items = array();
-			} catch ( \Error $e ) {
-				echo '<div class="notice notice-error"><p>';
-				printf(
-					esc_html__( 'Fatal error scanning content: %s', 'foogallery-migrate' ),
-					esc_html( $e->getMessage() )
-				);
-				echo '</p></div>';
-				$content_items = array();
-			}
+			$state = $this->get_scan_state();
+			$content_items = $state['items'];
+			$progress = $state['progress'];
+			$has_scanned_content = ! empty( $progress['started'] );
+			$scan_paused = $has_scanned_content && ! $progress['complete'];
 
 			wp_nonce_field( 'foogallery_content_migrate', 'foogallery_content_migrate', false );
 
-			if ( empty( $content_items ) || ! is_array( $content_items ) ) {
-				echo '<p>' . esc_html__( 'No gallery shortcodes or blocks found in your content.', 'foogallery-migrate' ) . '</p>';
-				echo '<p><small>' . esc_html__( 'Make sure your posts/pages are published and contain gallery shortcodes like [envira-gallery id="1"] or [nggallery id="2"]', 'foogallery-migrate' ) . '</small></p>';
-				
-				echo '<div class="notice notice-info inline"><p><strong>' . esc_html__( 'Tips:', 'foogallery-migrate' ) . '</strong></p><ul>';
-				echo '<li>' . esc_html__( 'Ensure your post/page is published (not draft)', 'foogallery-migrate' ) . '</li>';
-				echo '<li>' . esc_html__( 'Check that the gallery plugins are detected in the Plugins tab', 'foogallery-migrate' ) . '</li>';
-				echo '<li>' . esc_html__( 'Try clicking "Refresh Scan" button to force a new scan', 'foogallery-migrate' ) . '</li>';
-				echo '</ul></div>';
+			if ( $scan_paused ) {
+				echo '<div class="notice notice-warning inline"><p>';
+				printf(
+					// translators: %d is the number of posts and pages already scanned.
+					esc_html__( 'Content scan paused after %d posts/pages. Use Resume Scan to continue from the saved position.', 'foogallery-migrate' ),
+					absint( $progress['scanned'] )
+				);
+				echo '</p></div>';
+			}
+
+
+			if ( empty( $content_items ) ) {
+				if ( $has_scanned_content && $progress['complete'] ) {
+					echo '<p>' . esc_html__( 'No gallery shortcodes or blocks found in your content.', 'foogallery-migrate' ) . '</p>';
+				} else if ( ! $scan_paused ) {
+					echo '<p>' . esc_html__( 'Content has not been scanned yet.', 'foogallery-migrate' ) . '</p>';
+				}
+				echo '<p><small>' . esc_html__( 'Scan published posts and pages for gallery shortcodes and blocks.', 'foogallery-migrate' ) . '</small></p>';
 			} else {
 					$url = add_query_arg( 'page', 'foogallery-migrate' );
 					$page = 1;
@@ -914,11 +1085,16 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			}
 			?>
 			<p>
-				<button name="foogallery_content_action" value="foogallery_content_replace"
-						class="button button-primary replace_content"><?php esc_html_e( 'Replace Selected', 'foogallery-migrate' ); ?></button>
+				<?php if ( ! empty( $content_items ) ) { ?>
+					<button name="foogallery_content_action" value="foogallery_content_replace"
+							class="button button-primary replace_content"><?php esc_html_e( 'Replace Selected', 'foogallery-migrate' ); ?></button>
+				<?php } ?>
 				<button name="foogallery_content_action" value="foogallery_content_refresh"
-						class="button refresh_content"><?php esc_html_e( 'Refresh Scan', 'foogallery-migrate' ); ?></button>
+						class="button refresh_content" data-reset="<?php echo $scan_paused ? '0' : '1'; ?>">
+					<?php echo $scan_paused ? esc_html__( 'Resume Scan', 'foogallery-migrate' ) : ( $has_scanned_content ? esc_html__( 'Refresh Scan', 'foogallery-migrate' ) : esc_html__( 'Scan Content', 'foogallery-migrate' ) ); ?>
+				</button>
 			</p>
+			<p id="foogallery_migrate_content_progress" aria-live="polite"></p>
 			<div id="foogallery_migrate_content_spinner" style="width:20px; display: inline-block;">
 				<span class="spinner"></span>
 			</div>
