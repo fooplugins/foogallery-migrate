@@ -1,0 +1,1551 @@
+<?php
+
+namespace FooPlugins\FooGalleryMigrate\Tests;
+
+use FooPlugins\FooGalleryMigrate\MigratorEngine;
+use FooPlugins\FooGalleryMigrate\MigratorSettings;
+use FooPlugins\FooGalleryMigrate\Objects\Album;
+use FooPlugins\FooGalleryMigrate\Objects\Gallery;
+use FooPlugins\FooGalleryMigrate\Objects\Image;
+use FooPlugins\FooGalleryMigrate\Objects\Migratable;
+use FooPlugins\FooGalleryMigrate\Objects\Plugin;
+use FooPlugins\FooGalleryMigrate\Plugins\Nextgen;
+use FooPlugins\FooGalleryMigrate\Plugins\Photo;
+use PHPUnit\Framework\TestCase;
+
+class MigrationFlowTest extends TestCase {
+
+	protected function setUp(): void {
+		parent::setUp();
+
+		$GLOBALS['foogallery_migrate_test_options']           = array();
+		$GLOBALS['foogallery_migrate_test_plugins']           = array();
+		$GLOBALS['foogallery_migrate_test_posts']             = array();
+		$GLOBALS['foogallery_migrate_test_post_meta']         = array();
+		$GLOBALS['foogallery_migrate_test_post_meta_updates'] = array();
+		$GLOBALS['foogallery_migrate_test_attached_files']    = array();
+		$GLOBALS['foogallery_migrate_test_attachment_urls']   = array();
+		$GLOBALS['foogallery_migrate_test_attachment_image_urls'] = array();
+		$GLOBALS['foogallery_migrate_test_attachment_image_calls'] = array();
+		$GLOBALS['foogallery_migrate_test_attachment_url_to_postid'] = array();
+		$GLOBALS['foogallery_migrate_test_object_terms']       = array();
+		$GLOBALS['foogallery_migrate_test_set_object_terms']   = array();
+		$GLOBALS['foogallery_migrate_test_imported_attachments'] = array();
+		$GLOBALS['foogallery_migrate_test_remote_head']       = array();
+		$GLOBALS['foogallery_migrate_test_gallery_templates'] = array();
+		$GLOBALS['foogallery_migrate_test_taxonomies']        = array();
+		$GLOBALS['foogallery_migrate_test_foogallery_fs']     = null;
+		$GLOBALS['foogallery_migrate_engine_instance']        = new MigratorEngine();
+		unset( $GLOBALS['wpdb'] );
+	}
+
+	public function test_gallery_migration_can_resume_and_tracks_migrated_objects(): void {
+		$plugin  = new FakeSourcePlugin();
+		$gallery = $this->create_gallery(
+			$plugin,
+			10,
+			'Source Gallery',
+			array(
+				$this->create_image( 'https://example.test/one.jpg' ),
+				$this->create_image( 'https://example.test/two.jpg' ),
+			)
+		);
+		$this->create_test_post( 800, FOOGALLERY_CPT_GALLERY, 'Gallery Settings Source' );
+		$GLOBALS['foogallery_migrate_test_post_meta'][800] = array(
+			FOOGALLERY_META_SETTINGS => array( 'source_setting' => 'gallery-source' ),
+			FOOGALLERY_META_CUSTOM_CSS => '.gallery-source{}',
+		);
+		$plugin->galleries = array( $gallery );
+
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->save_settings(
+			array(
+				'images_per_turn' => 1,
+				'override_gallery_settings' => 800,
+			)
+		);
+
+		$this->assertSame( array( $plugin ), $engine->run_detection() );
+		$this->assertTrue( $plugin->is_detected );
+
+		$migrator = $engine->get_gallery_migrator();
+		$objects  = $migrator->get_objects_to_migrate( true );
+		$uid      = $objects[0]->unique_identifier();
+
+		$migrator->queue_objects_for_migration(
+			array(
+				$uid => array(
+					'title' => 'Migrated Gallery',
+				),
+			)
+		);
+
+		$queued = $migrator->get_objects_to_migrate();
+		$this->assertSame( Migratable::PROGRESS_QUEUED, $queued[0]->migration_status );
+		$this->assertSame( 'Migrated Gallery', $queued[0]->migrated_title );
+		$this->assertSame( array( 'queued' => 1, 'completed' => 0, 'progress' => 0 ), $migrator->get_state() );
+
+		$migrator->migrate();
+
+		$started = $migrator->get_objects_to_migrate();
+		$this->assertSame( Migratable::PROGRESS_STARTED, $started[0]->migration_status );
+		$this->assertSame( 1, $started[0]->migrated_child_count );
+		$this->assertSame( $uid, $migrator->get_current_object_being_migrated() );
+
+		$migrator->migrate();
+
+		$completed = $migrator->get_objects_to_migrate();
+		$this->assertTrue( $completed[0]->migrated );
+		$this->assertSame( Migratable::PROGRESS_COMPLETED, $completed[0]->migration_status );
+		$this->assertSame( 2, $completed[0]->migrated_child_count );
+		$this->assertSame(
+			array(
+				'source_setting' => 'gallery-source',
+				'fake_setting' => 'yes',
+			),
+			$this->get_meta_update_value( $completed[0]->migrated_id, FOOGALLERY_META_SETTINGS )
+		);
+		$this->assertSame( '.gallery-source{}', $this->get_meta_update_value( $completed[0]->migrated_id, FOOGALLERY_META_CUSTOM_CSS ) );
+		$this->assertSame( array( 'queued' => 1, 'completed' => 1, 'progress' => 100 ), $migrator->get_state() );
+		$this->assertTrue( $engine->has_object_been_migrated( $uid ) );
+
+		$summary = $engine->get_migrated_objects_summary();
+		$this->assertSame( 1, $summary['gallery']['count'] );
+		$this->assertSame( 2, $summary['image']['count'] );
+	}
+
+	public function test_gallery_migration_imports_configured_images_per_turn(): void {
+		$plugin = new FakeSourcePlugin();
+		$images = array();
+
+		for ( $i = 1; $i <= 6; $i++ ) {
+			$images[] = $this->create_image( 'https://example.test/batch-' . $i . '.jpg' );
+		}
+
+		$gallery = $this->create_gallery( $plugin, 15, 'Batch Gallery', $images );
+		$plugin->galleries = array( $gallery );
+
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$this->assertSame( 5, $engine->get_images_per_turn() );
+		$engine->run_detection();
+
+		$migrator = $engine->get_gallery_migrator();
+		$objects = $migrator->get_objects_to_migrate( true );
+		$uid = $objects[0]->unique_identifier();
+
+		$migrator->queue_objects_for_migration(
+			array(
+				$uid => array(
+					'title' => 'Migrated Batch Gallery',
+				),
+			)
+		);
+
+		$migrator->migrate();
+
+		$started = $migrator->get_objects_to_migrate();
+		$this->assertFalse( $started[0]->migrated );
+		$this->assertSame( Migratable::PROGRESS_STARTED, $started[0]->migration_status );
+		$this->assertSame( 5, $started[0]->migrated_child_count );
+
+		$migrator->migrate();
+
+		$completed = $migrator->get_objects_to_migrate();
+		$this->assertTrue( $completed[0]->migrated );
+		$this->assertSame( Migratable::PROGRESS_COMPLETED, $completed[0]->migration_status );
+		$this->assertSame( 6, $completed[0]->migrated_child_count );
+	}
+
+	public function test_album_migration_migrates_nested_gallery_flow(): void {
+		$plugin  = new FakeSourcePlugin();
+		$image   = $this->create_image( 'https://example.test/album-image.jpg' );
+		$gallery = $this->create_gallery( $plugin, 20, 'Nested Gallery', array( $image ) );
+		$album   = $this->create_album( $plugin, 30, 'Source Album', array( $gallery ) );
+		$this->create_test_post( 900, FOOGALLERY_CPT_ALBUM, 'Album Settings Source' );
+		$GLOBALS['foogallery_migrate_test_post_meta'][900] = array(
+			FOOGALLERY_ALBUM_META_TEMPLATE => 'stack',
+			FOOGALLERY_META_SETTINGS_OLD => array( 'album_setting' => 'source' ),
+			FOOGALLERY_ALBUM_META_SORT => 'date_desc',
+			FOOGALLERY_META_CUSTOM_CSS => '.album-source{}',
+		);
+
+		$plugin->albums = array( $album );
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->save_settings(
+			array(
+				'override_album_settings' => 900,
+			)
+		);
+		$engine->run_detection();
+
+		$migrator = $engine->get_album_migrator();
+		$objects  = $migrator->get_objects_to_migrate( true );
+		$uid      = $objects[0]->unique_identifier();
+
+		$migrator->queue_objects_for_migration(
+			array(
+				$uid => array(
+					'title' => 'Migrated Album',
+				),
+			)
+		);
+		$migrator->migrate();
+
+		$completed = $migrator->get_objects_to_migrate();
+		$this->assertTrue( $completed[0]->migrated );
+		$this->assertSame( Migratable::PROGRESS_COMPLETED, $completed[0]->migration_status );
+		$this->assertSame( 'Migrated Album', $GLOBALS['foogallery_migrate_test_posts'][ $completed[0]->migrated_id ]->post_title );
+		$this->assertSame( 'stack', $this->get_meta_update_value( $completed[0]->migrated_id, FOOGALLERY_ALBUM_META_TEMPLATE ) );
+		$this->assertSame( array( 'album_setting' => 'source' ), $this->get_meta_update_value( $completed[0]->migrated_id, FOOGALLERY_META_SETTINGS_OLD ) );
+		$this->assertSame( 'date_desc', $this->get_meta_update_value( $completed[0]->migrated_id, FOOGALLERY_ALBUM_META_SORT ) );
+		$this->assertSame( '.album-source{}', $this->get_meta_update_value( $completed[0]->migrated_id, FOOGALLERY_META_CUSTOM_CSS ) );
+		$this->assertSame( 1, $completed[0]->migrated_child_count );
+		$this->assertSame( 1, $completed[0]->get_total_migrated_images() );
+		$this->assertSame( array( 'queued' => 1, 'completed' => 1, 'progress' => 100 ), $migrator->get_state() );
+		$this->assertTrue( $engine->has_object_been_migrated( $uid ) );
+	}
+
+	public function test_child_errors_are_recorded_and_retry_can_resume_gallery(): void {
+		$plugin  = new FakeSourcePlugin();
+		$first             = $this->create_image( 'https://example.test/good.jpg' );
+		$second            = $this->create_image( 'https://example.test/bad.jpg' );
+		$second->migrated         = true;
+		$second->migration_status = Migratable::PROGRESS_ERROR;
+		$second->error            = new \WP_Error( 'forced_image_failure', 'Forced image failure.' );
+		$gallery           = $this->create_gallery( $plugin, 40, 'Retry Gallery', array( $first, $second ) );
+		$plugin->galleries = array( $gallery );
+
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->run_detection();
+
+		$migrator = $engine->get_gallery_migrator();
+		$objects  = $migrator->get_objects_to_migrate( true );
+		$uid      = $objects[0]->unique_identifier();
+
+		$migrator->queue_objects_for_migration(
+			array(
+				$uid => array(
+					'title' => 'Retry Gallery',
+				),
+			)
+		);
+		$migrator->migrate();
+
+		$errored = $migrator->get_objects_to_migrate();
+		$this->assertTrue( $errored[0]->migrated );
+		$this->assertSame( Migratable::PROGRESS_ERROR, $errored[0]->migration_status );
+		$this->assertCount( 1, $errored[0]->get_children_errors() );
+		$this->assertSame( 'Forced image failure.', $errored[0]->get_children_errors()[0] );
+
+		$this->assertTrue( $engine->retry_gallery_migration( $uid ) );
+
+		$retried = $migrator->get_objects_to_migrate();
+		$this->assertTrue( $retried[0]->migrated );
+		$this->assertSame( Migratable::PROGRESS_COMPLETED, $retried[0]->migration_status );
+		$this->assertCount( 0, $retried[0]->get_children_errors() );
+	}
+
+	public function test_plugin_factories_preserve_runtime_contract(): void {
+		$plugin = new FakeSourcePlugin();
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->run_detection();
+
+		$image = $plugin->get_image(
+			array(
+				'source_url'  => 'https://example.test/factory.jpg',
+				'slug'        => 'factory',
+				'title'       => 'Factory Image',
+				'caption'     => 'Caption',
+				'description' => 'Description',
+				'alt'         => 'Alt',
+				'date'        => '2026-05-21 12:00:00',
+				'data'        => (object) array( 'ignored' => true ),
+			)
+		);
+
+		$gallery = $plugin->get_gallery(
+			array(
+				'ID'             => 50,
+				'title'          => 'Factory Gallery',
+				'data'           => (object) array( 'ignored' => true ),
+				'children'       => array( $image ),
+				'children_count' => 1,
+				'settings'       => array( 'type' => 'default' ),
+			)
+		);
+
+		$album = $plugin->get_album(
+			array(
+				'ID'             => 60,
+				'title'          => 'Factory Album',
+				'data'           => (object) array( 'ignored' => true ),
+				'fooalbum_title' => 'Factory Album',
+			)
+		);
+
+		$this->assertInstanceOf( Image::class, $image );
+		$this->assertSame( 'https://example.test/factory.jpg', $image->unique_identifier() );
+		$this->assertSame( $plugin, $image->plugin );
+		$this->assertInstanceOf( Gallery::class, $gallery );
+		$this->assertSame( 'gallery_FakeSource_50', $gallery->unique_identifier() );
+		$this->assertSame( 1, $gallery->get_children_count() );
+		$this->assertSame( array( 'type' => 'default' ), $gallery->settings );
+		$this->assertInstanceOf( Album::class, $album );
+		$this->assertSame( 'album_FakeSource_60', $album->unique_identifier() );
+	}
+
+	public function test_nextgen_detects_migratable_image_tags(): void {
+		$GLOBALS['wpdb'] = new FakeWpdb( true );
+
+		$plugin = new Nextgen();
+
+		$this->assertTrue( $plugin->has_migratable_image_tags() );
+		$this->assertStringContainsString( 'ngg_tag', $GLOBALS['wpdb']->last_query );
+		$this->assertStringNotContainsString( '%s', $GLOBALS['wpdb']->last_query );
+
+		$GLOBALS['wpdb'] = new FakeWpdb( false );
+
+		$this->assertFalse( $plugin->has_migratable_image_tags() );
+	}
+
+	public function test_nextgen_gallery_discovery_defers_image_row_loading(): void {
+		$GLOBALS['wpdb'] = new FakeNextgenLazyDiscoveryWpdb();
+
+		$plugin = new Nextgen();
+		$galleries = $plugin->find_galleries();
+
+		$this->assertCount( 1, $galleries );
+		$this->assertSame( 2, $galleries[0]->get_children_count() );
+		$this->assertSame( array(), $galleries[0]->get_children() );
+		$this->assertSame( 0, $GLOBALS['wpdb']->image_query_count );
+
+		$galleries[0]->ensure_children_loaded();
+		$children = $galleries[0]->get_children();
+
+		$this->assertSame( 1, $GLOBALS['wpdb']->image_query_count );
+		$this->assertCount( 2, $children );
+		$this->assertSame( 'https://example.test/wp-content/gallery/bridges/bridge-one.jpg', $children[0]->source_url );
+		$this->assertStringContainsString( 'exclude = 0 OR exclude IS NULL', $GLOBALS['wpdb']->last_image_query );
+	}
+
+	public function test_nextgen_album_discovery_sanitizes_album_gallery_queries(): void {
+		$GLOBALS['wpdb'] = new FakeNextgenAlbumWpdb();
+
+		$plugin = new Nextgen();
+		$albums = $plugin->find_albums();
+
+		$this->assertCount( 1, $albums );
+		$this->assertSame( 'album_NextGen_15 OR 1=1', $albums[0]->unique_identifier() );
+		$this->assertSame( 2, $albums[0]->get_children_count() );
+		$this->assertSame( 3, $albums[0]->get_total_images() );
+		$this->assertStringContainsString( 'WHERE id = 15', $GLOBALS['wpdb']->album_query );
+		$this->assertStringNotContainsString( 'OR 1=1', $GLOBALS['wpdb']->album_query );
+		$this->assertStringContainsString( 'WHERE gid IN (7,8)', $GLOBALS['wpdb']->gallery_query );
+		$this->assertStringNotContainsString( 'bad-value', $GLOBALS['wpdb']->gallery_query );
+		$this->assertStringContainsString( 'COUNT(*) AS image_count', $GLOBALS['wpdb']->count_query );
+	}
+
+	public function test_photo_album_discovery_sanitizes_album_gallery_queries(): void {
+		$GLOBALS['wpdb'] = new FakePhotoAlbumWpdb();
+
+		$plugin = new Photo();
+		$albums = $plugin->find_albums();
+
+		$this->assertCount( 1, $albums );
+		$this->assertSame( 'album_10Web_12 OR 1=1', $albums[0]->unique_identifier() );
+		$this->assertSame( 2, $albums[0]->get_children_count() );
+		$this->assertStringContainsString( 'WHERE album_id = 12', $GLOBALS['wpdb']->album_gallery_query );
+		$this->assertStringNotContainsString( 'OR 1=1', $GLOBALS['wpdb']->album_gallery_query );
+		$this->assertStringContainsString( 'id IN (34,35)', $GLOBALS['wpdb']->gallery_query );
+		$this->assertStringNotContainsString( 'bad-value', $GLOBALS['wpdb']->gallery_query );
+	}
+
+	public function test_has_migrated_objects_checks_raw_saved_items(): void {
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+
+		$this->assertFalse( $engine->has_migrated_objects() );
+
+		$GLOBALS['foogallery_migrate_test_options'][ FOOGALLERY_MIGRATE_OPTION_DATA ] = array(
+			MigratorEngine::KEY_MIGRATED => array(
+				MigratorSettings::COMPACT_MARKER => MigratorSettings::COMPACT_VERSION,
+				'type'                           => 'migratable',
+				'items'                          => array(
+					'image_NextGen_701' => array(
+						'object_type' => 'image',
+						'source_url'  => 'https://example.test/wp-content/gallery/bridges/bridge-one.jpg',
+					),
+				),
+			),
+		);
+
+		$this->assertTrue( $engine->has_migrated_objects() );
+
+		$GLOBALS['foogallery_migrate_test_options'][ FOOGALLERY_MIGRATE_OPTION_DATA ][ MigratorEngine::KEY_MIGRATED ]['items'] = array();
+		$this->assertFalse( $engine->has_migrated_objects() );
+
+		$GLOBALS['foogallery_migrate_test_options'][ FOOGALLERY_MIGRATE_OPTION_DATA ][ MigratorEngine::KEY_MIGRATED ] = array(
+			'image_NextGen_701' => (object) array(
+				'source_url' => 'https://example.test/wp-content/gallery/bridges/bridge-one.jpg',
+			),
+		);
+		$this->assertTrue( $engine->has_migrated_objects() );
+	}
+
+	public function test_image_tag_plan_warning_requires_tagged_images_without_foogallery_expert(): void {
+		$plugin = new FakeSourcePlugin();
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->run_detection();
+
+		$this->assertFalse( $engine->has_migratable_image_tags() );
+		$this->assertFalse( $engine->should_show_image_tag_plan_warning() );
+
+		$plugin->has_image_tags = true;
+		$engine->run_detection();
+
+		$this->assertTrue( $engine->has_migratable_image_tags() );
+		$this->assertTrue( $engine->should_show_image_tag_plan_warning() );
+
+		$GLOBALS['foogallery_migrate_test_foogallery_fs'] = new \FooGalleryMigrateTestFreemius(
+			false,
+			array( FOOGALLERY_PRO_PLAN_EXPERT => true )
+		);
+
+		$this->assertTrue( $engine->should_show_image_tag_plan_warning() );
+
+		$GLOBALS['foogallery_migrate_test_foogallery_fs'] = new \FooGalleryMigrateTestFreemius(
+			true,
+			array( FOOGALLERY_PRO_PLAN_EXPERT => true )
+		);
+
+		$this->assertFalse( $engine->should_show_image_tag_plan_warning() );
+
+		$GLOBALS['foogallery_migrate_test_foogallery_fs'] = null;
+		$GLOBALS['foogallery_migrate_test_taxonomies'] = array( FOOGALLERY_ATTACHMENT_TAXONOMY_TAG );
+
+		$this->assertFalse( $engine->should_show_image_tag_plan_warning() );
+	}
+
+	public function test_newly_written_state_is_compact_and_hydrates_runtime_objects(): void {
+		$plugin  = new FakeSourcePlugin();
+		$image = $plugin->get_image(
+			array(
+				'source_url'  => 'https://example.test/compact.jpg',
+				'slug'        => 'compact.jpg',
+				'title'       => 'Compact',
+				'caption'     => '',
+				'description' => '',
+				'alt'         => '',
+				'date'        => '2026-05-21 12:00:00',
+				'data'        => (object) array(
+					'large_source_blob' => str_repeat( 'x', 1000 ),
+				),
+			)
+		);
+		$gallery = $this->create_gallery( $plugin, 70, 'Compact Gallery', array( $image ) );
+		$gallery->data = (object) array(
+			'post_content' => str_repeat( 'y', 2000 ),
+		);
+		$gallery->foogallery_title = 'Duplicate Compact Gallery';
+		$plugin->galleries = array( $gallery );
+
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+
+		$legacy_bytes = strlen( serialize( array( $gallery ) ) );
+		$engine       = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->run_detection();
+		$migrator = $engine->get_gallery_migrator();
+		$migrator->get_objects_to_migrate( true );
+
+		$raw = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+		$this->assertCompactPayload( $raw['plugins'] );
+		$this->assertCompactPayload( $raw['galleries'] );
+		$this->assertFalse( $this->contains_object( $raw['plugins'] ) );
+		$this->assertFalse( $this->contains_object( $raw['galleries'] ) );
+		$this->assertLessThan( $legacy_bytes * 0.5, strlen( serialize( $raw['galleries'] ) ) );
+		$this->assertArrayNotHasKey( 'data', $raw['galleries']['items'][0] );
+		$this->assertArrayNotHasKey( 'plugin', $raw['galleries']['items'][0] );
+		$this->assertArrayNotHasKey( 'foogallery_title', $raw['galleries']['items'][0] );
+
+		$hydrated = $migrator->get_objects_to_migrate();
+		$this->assertInstanceOf( Gallery::class, $hydrated[0] );
+		$this->assertInstanceOf( FakeSourcePlugin::class, $hydrated[0]->plugin );
+		$this->assertInstanceOf( Image::class, $hydrated[0]->children[0] );
+		$this->assertInstanceOf( FakeSourcePlugin::class, $hydrated[0]->children[0]->plugin );
+		$this->assertSame( 'Compact Gallery', $hydrated[0]->title );
+		$this->assertNull( $hydrated[0]->data );
+		$this->assertSame( 'https://example.test/compact.jpg', $hydrated[0]->children[0]->source_url );
+	}
+
+	public function test_legacy_object_state_is_read_without_load_time_upgrade(): void {
+		$plugin  = new FakeSourcePlugin();
+		$gallery = $this->create_gallery(
+			$plugin,
+			80,
+			'Legacy Gallery',
+			array(
+				$this->create_image( 'https://example.test/legacy.jpg' ),
+			)
+		);
+		$plugin->galleries = array( $gallery );
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		update_option(
+			FOOGALLERY_MIGRATE_OPTION_DATA,
+			array(
+				'galleries' => array( $gallery ),
+			),
+			false
+		);
+
+		$migrator = $GLOBALS['foogallery_migrate_engine_instance']->get_gallery_migrator();
+		$objects  = $migrator->get_objects_to_migrate();
+		$raw      = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+
+		$this->assertSame( $gallery, $objects[0] );
+		$this->assertSame( $gallery, $raw['galleries'][0] );
+		$this->assertTrue( $this->contains_object( $raw['galleries'] ) );
+	}
+
+	public function test_user_settings_are_saved_sanitized_and_read_through_engine(): void {
+		$GLOBALS['foogallery_migrate_test_gallery_templates'] = array(
+			array(
+				'slug' => 'default',
+				'name' => 'Default',
+			),
+			array(
+				'slug' => 'masonry',
+				'name' => 'Masonry',
+			),
+		);
+		$this->create_test_post( 600, FOOGALLERY_CPT_GALLERY, 'Gallery Settings Source' );
+		$this->create_test_post( 700, FOOGALLERY_CPT_ALBUM, 'Album Settings Source' );
+
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+
+		$this->assertSame( 5, $engine->get_images_per_turn() );
+		$this->assertSame(
+			array(
+				'default' => 'Default',
+				'masonry' => 'Masonry',
+			),
+			$engine->get_available_gallery_templates()
+		);
+		$this->assertSame(
+			array(
+				600 => 'Gallery Settings Source',
+			),
+			$engine->get_available_gallery_settings_sources()
+		);
+		$this->assertSame(
+			array(
+				700 => 'Album Settings Source',
+			),
+			$engine->get_available_album_settings_sources()
+		);
+
+		$engine->save_settings(
+			array(
+				'override_gallery_layout' => 'masonry',
+				'override_gallery_settings' => 600,
+				'override_album_settings' => 700,
+				'page_size' => '50',
+				'images_per_turn' => '12',
+				'debug_enabled' => true,
+			)
+		);
+
+		$this->assertSame( 'masonry', $engine->get_override_gallery_template() );
+		$this->assertSame( 600, $engine->get_override_gallery_settings() );
+		$this->assertSame( 700, $engine->get_override_album_settings() );
+		$this->assertSame( 50, $engine->get_page_size() );
+		$this->assertSame( 12, $engine->get_images_per_turn() );
+		$this->assertTrue( $engine->is_debug_enabled() );
+
+		$engine->save_settings(
+			array(
+				'override_gallery_layout' => 'missing-template',
+				'override_gallery_settings' => 999,
+				'override_album_settings' => 999,
+				'page_size' => array(),
+				'images_per_turn' => array(),
+				'debug_enabled' => false,
+			)
+		);
+
+		$this->assertSame( '', $engine->get_override_gallery_template() );
+		$this->assertSame( 0, $engine->get_override_gallery_settings() );
+		$this->assertSame( 0, $engine->get_override_album_settings() );
+		$this->assertSame( 50, $engine->get_page_size() );
+		$this->assertSame( 12, $engine->get_images_per_turn() );
+		$this->assertFalse( $engine->is_debug_enabled() );
+
+		$engine->save_settings(
+			array(
+				'images_per_turn' => 0,
+			)
+		);
+
+		$this->assertSame( 1, $engine->get_images_per_turn() );
+	}
+
+	public function test_nextgen_patterns_detect_modern_gallery_and_singlepic_shortcodes(): void {
+		$plugin = new Nextgen();
+		$content = implode(
+			' ',
+			array(
+				'[nggallery id=10]',
+				'[nggallery id="11" template=caption]',
+				'[ngg id=12]',
+				'[ngg ids=13]',
+				'[ngg_images gallery_ids=14]',
+				'[imagely id=15]',
+				'[ngg src="galleries" ids="99" display="basic_thumbnail"]',
+				'[singlepic id=11328 w=800 float=center]',
+				'[ngg tag_ids="bridge"]',
+				'[ngg source="tags" container_ids="bridge|wedding shoots" display_type="photocrati-nextgen_basic_thumbnails"]',
+				'[nggtags gallery="old bridge"]',
+				'[tags=urban bridge]',
+			)
+		);
+
+		$matched_shortcodes = array();
+		foreach ( $plugin->get_shortcode_patterns() as $pattern ) {
+			if ( preg_match_all( $pattern, $content, $matches, PREG_SET_ORDER ) ) {
+				foreach ( $matches as $match ) {
+					$matched_shortcodes[] = $match[0];
+				}
+			}
+		}
+
+		$this->assertContains( '[nggallery id=10]', $matched_shortcodes );
+		$this->assertContains( '[nggallery id="11" template=caption]', $matched_shortcodes );
+		$this->assertContains( '[ngg id=12]', $matched_shortcodes );
+		$this->assertContains( '[ngg ids=13]', $matched_shortcodes );
+		$this->assertContains( '[ngg_images gallery_ids=14]', $matched_shortcodes );
+		$this->assertContains( '[imagely id=15]', $matched_shortcodes );
+		$this->assertContains( '[ngg src="galleries" ids="99" display="basic_thumbnail"]', $matched_shortcodes );
+		$this->assertContains( '[singlepic id=11328 w=800 float=center]', $matched_shortcodes );
+		$this->assertContains( '[ngg tag_ids="bridge"]', $matched_shortcodes );
+		$this->assertContains( '[ngg source="tags" container_ids="bridge|wedding shoots" display_type="photocrati-nextgen_basic_thumbnails"]', $matched_shortcodes );
+		$this->assertContains( '[nggtags gallery="old bridge"]', $matched_shortcodes );
+		$this->assertContains( '[tags=urban bridge]', $matched_shortcodes );
+		$this->assertSame( 'image', $plugin->get_content_object_type( '[singlepic id=11328 w=800 float=center]' ) );
+		$this->assertSame( 'gallery', $plugin->get_content_object_type( '[ngg src="galleries" ids="99"]' ) );
+		$this->assertSame( 'dynamic_gallery', $plugin->get_content_object_type( '[ngg tag_ids="bridge"]' ) );
+		$this->assertSame( '[foogallery media_tags="bridge,wedding-shoots"]', $plugin->get_content_replacement_content( '[ngg source="tags" container_ids="bridge|wedding shoots"]' ) );
+		$this->assertSame( '[foogallery media_tags="urban-bridge"]', $plugin->get_content_replacement_content( '[tags=urban bridge]' ) );
+		$this->assertFalse( $plugin->get_content_replacement_content( '[ngg source="tags" tagcloud=yes ids="bridge"]' ) );
+	}
+
+	public function test_nextgen_image_migration_passes_tags_to_foogallery_import(): void {
+		$plugin = new Nextgen();
+		$source_url = 'https://example.test/wp-content/gallery/poland/bridge.jpg';
+		$GLOBALS['foogallery_migrate_test_taxonomies'] = array( FOOGALLERY_ATTACHMENT_TAXONOMY_TAG );
+		$GLOBALS['foogallery_migrate_test_attachment_url_to_postid'][ $source_url ] = 0;
+		$GLOBALS['foogallery_migrate_test_object_terms']['ngg_tag'][11328] = array(
+			'Bridge',
+			'Wedding Shoots',
+			'Bridge',
+			'',
+		);
+
+		$image = $plugin->get_image(
+			array(
+				'source_url'  => $source_url,
+				'slug'        => 'bridge.jpg',
+				'title'       => 'Bridge',
+				'caption'     => 'Bridge caption',
+				'description' => 'Bridge description',
+				'alt'         => 'Bridge alt',
+				'date'        => '2026-05-21 12:00:00',
+				'data'        => (object) array(
+					'pid' => 11328,
+				),
+			)
+		);
+
+		$this->assertSame( array( 'Bridge', 'Wedding Shoots' ), $plugin->get_image_tags( $image ) );
+		$this->assertSame( 11328, $image->ID );
+		$image_without_raw_data = clone $image;
+		$image_without_raw_data->data = null;
+		$this->assertSame( array( 'Bridge', 'Wedding Shoots' ), $plugin->get_image_tags( $image_without_raw_data ) );
+
+		$image->create_new_migrated_object();
+
+		$this->assertGreaterThan( 6000, $image->migrated_id );
+		$this->assertCount( 1, $GLOBALS['foogallery_migrate_test_imported_attachments'] );
+		$this->assertSame(
+			array( 'Bridge', 'Wedding Shoots' ),
+			$GLOBALS['foogallery_migrate_test_imported_attachments'][0]['data']['tags']
+		);
+		$this->assertSame(
+			array( 'Bridge', 'Wedding Shoots' ),
+			$GLOBALS['foogallery_migrate_test_object_terms'][ FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ][ $image->migrated_id ]
+		);
+		$this->assertSame( '2026-05-21 12:00:00', $GLOBALS['foogallery_migrate_test_posts'][ $image->migrated_id ]->post_date );
+	}
+
+	public function test_nextgen_image_migration_applies_tags_to_existing_attachment(): void {
+		$plugin = new Nextgen();
+		$source_url = 'https://example.test/wp-content/gallery/italy/bridge.jpg';
+		$GLOBALS['foogallery_migrate_test_taxonomies'] = array( FOOGALLERY_ATTACHMENT_TAXONOMY_TAG );
+		$GLOBALS['foogallery_migrate_test_attachment_url_to_postid'][ $source_url ] = 4500;
+		$GLOBALS['foogallery_migrate_test_object_terms']['ngg_tag'][11329] = array(
+			'Bridge',
+			'Italy',
+		);
+
+		$image = $plugin->get_image(
+			array(
+				'source_url'  => $source_url,
+				'slug'        => 'bridge.jpg',
+				'title'       => 'Italy bridge',
+				'caption'     => '',
+				'description' => '',
+				'alt'         => '',
+				'date'        => '2026-05-21 12:00:00',
+				'data'        => (object) array(
+					'pid' => 11329,
+				),
+			)
+		);
+
+		$image->create_new_migrated_object();
+
+		$this->assertTrue( $image->migrated );
+		$this->assertSame( 4500, $image->migrated_id );
+		$this->assertSame( array(), $GLOBALS['foogallery_migrate_test_imported_attachments'] );
+		$this->assertSame(
+			array( 'Bridge', 'Italy' ),
+			$GLOBALS['foogallery_migrate_test_object_terms'][ FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ][4500]
+		);
+	}
+
+	public function test_image_tag_sync_updates_previously_migrated_state_images(): void {
+		$plugin = new Nextgen();
+		$plugin->is_detected = true;
+		$source_url = 'https://example.test/wp-content/gallery/poland/state-bridge.jpg';
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$GLOBALS['foogallery_migrate_test_taxonomies'] = array( FOOGALLERY_ATTACHMENT_TAXONOMY_TAG );
+		$GLOBALS['foogallery_migrate_test_object_terms']['ngg_tag'][12345] = array(
+			'Bridge',
+			'Poland',
+		);
+		$GLOBALS['foogallery_migrate_test_object_terms']['ngg_tag'][12346] = array(
+			'Night',
+			'City',
+		);
+		$GLOBALS['foogallery_migrate_test_object_terms'][ FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ][9001] = array(
+			'Existing',
+		);
+
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->set_migrator_setting( MigratorEngine::KEY_PLUGINS, array( $plugin ) );
+		$engine->save_settings(
+			array(
+				'images_per_turn' => 1,
+			)
+		);
+
+		$image = $plugin->get_image(
+			array(
+				'ID'          => 12345,
+				'source_url'  => $source_url,
+				'slug'        => 'state-bridge.jpg',
+				'title'       => 'State bridge',
+				'caption'     => '',
+				'description' => '',
+				'alt'         => '',
+				'date'        => '2026-05-21 12:00:00',
+				'data'        => (object) array(
+					'pid' => 12345,
+				),
+			)
+		);
+		$image->migrated = true;
+		$image->migrated_id = 9001;
+		$image->migration_status = Migratable::PROGRESS_COMPLETED;
+		$engine->add_migrated_object( $image );
+
+		$second_image = $plugin->get_image(
+			array(
+				'ID'          => 12346,
+				'source_url'  => 'https://example.test/wp-content/gallery/poland/night-city.jpg',
+				'slug'        => 'night-city.jpg',
+				'title'       => 'Night city',
+				'caption'     => '',
+				'description' => '',
+				'alt'         => '',
+				'date'        => '2026-05-21 12:00:00',
+				'data'        => (object) array(
+					'pid' => 12346,
+				),
+			)
+		);
+		$second_image->migrated = true;
+		$second_image->migrated_id = 9003;
+		$second_image->migration_status = Migratable::PROGRESS_COMPLETED;
+		$engine->add_migrated_object( $second_image );
+
+		$result = $engine->start_image_tag_sync();
+
+		$this->assertSame( 2, $result['total'] );
+		$this->assertSame( 1, $result['processed'] );
+		$this->assertSame( 1, $result['updated'] );
+		$this->assertSame( 0, $result['error_count'] );
+		$this->assertFalse( $result['complete'] );
+		$this->assertSame(
+			array( 'Existing', 'Bridge', 'Poland' ),
+			$GLOBALS['foogallery_migrate_test_object_terms'][ FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ][9001]
+		);
+		$this->assertTrue( $GLOBALS['foogallery_migrate_test_set_object_terms'][0]['append'] );
+
+		$result = $engine->continue_image_tag_sync();
+
+		$this->assertSame( 2, $result['total'] );
+		$this->assertSame( 2, $result['processed'] );
+		$this->assertSame( 2, $result['updated'] );
+		$this->assertTrue( $result['complete'] );
+		$this->assertSame(
+			array( 'Night', 'City' ),
+			$GLOBALS['foogallery_migrate_test_object_terms'][ FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ][9003]
+		);
+	}
+
+	public function test_image_tag_sync_falls_back_to_nextgen_scan_for_old_state_images(): void {
+		$plugin = new Nextgen();
+		$plugin->is_detected = true;
+		$source_url = 'https://example.test/wp-content/gallery/poland/fallback-bridge.jpg';
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$GLOBALS['foogallery_migrate_test_taxonomies'] = array( FOOGALLERY_ATTACHMENT_TAXONOMY_TAG );
+		$GLOBALS['wpdb'] = new FakeNextgenTagSyncWpdb(
+			array(
+				(object) array(
+					'pid'       => 22334,
+					'filename'  => 'fallback-bridge.jpg',
+					'galleryid' => 9,
+					'path'      => 'wp-content/gallery/poland',
+				),
+			),
+			array(
+				22334 => array(
+					'Bridge',
+					'Fallback',
+				),
+			)
+		);
+
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->set_migrator_setting( MigratorEngine::KEY_PLUGINS, array( $plugin ) );
+		$engine->save_settings(
+			array(
+				'images_per_turn' => 1,
+			)
+		);
+
+		$old_state_image = $this->create_image( $source_url );
+		$old_state_image->migrated = true;
+		$old_state_image->migrated_id = 9002;
+		$old_state_image->migration_status = Migratable::PROGRESS_COMPLETED;
+		$engine->add_migrated_object( $old_state_image );
+
+		$result = $engine->start_image_tag_sync();
+
+		$this->assertSame( 1, $result['total'] );
+		$this->assertSame( 1, $result['processed'] );
+		$this->assertSame( 1, $result['updated'] );
+		$this->assertSame( 0, $result['unmatched'] );
+		$this->assertTrue( $result['complete'] );
+		$this->assertSame(
+			array( 'Bridge', 'Fallback' ),
+			$GLOBALS['foogallery_migrate_test_object_terms'][ FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ][9002]
+		);
+	}
+
+	public function test_content_migration_replaces_nextgen_tag_shortcodes_with_media_tag_shortcodes(): void {
+		$plugin = new Nextgen();
+		$plugin->is_detected = true;
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+
+		$original_content = 'Before [ngg tag_ids="bridge"] middle [ngg source="tags" container_ids="bridge|wedding shoots" display_type="photocrati-nextgen_basic_thumbnails"] legacy [nggtags gallery="old bridge"] oldest [tags=urban bridge] after';
+		$this->create_test_post( 503, 'post', 'NextGEN Tag Shortcodes', $original_content );
+
+		$content_migrator = $engine->get_content_migrator();
+		$content_items = $this->find_content_items( $content_migrator, get_post( 503 ), array( $plugin ) );
+
+		$replacements = array();
+		foreach ( $content_items as $content_item ) {
+			if ( isset( $content_item['replacement_content'] ) ) {
+				$replacements[] = $content_item['replacement_content'];
+			}
+			$this->assertSame( 'dynamic_gallery', $content_item['object_type'] );
+			$this->assertFalse( $content_item['migrated_foogallery_id'] );
+		}
+
+		$this->assertCount( 4, $content_items );
+		$this->assertContains( '[foogallery media_tags="bridge"]', $replacements );
+		$this->assertContains( '[foogallery media_tags="bridge,wedding-shoots"]', $replacements );
+		$this->assertContains( '[foogallery media_tags="old-bridge"]', $replacements );
+		$this->assertContains( '[foogallery media_tags="urban-bridge"]', $replacements );
+
+		$content_migrator->set_setting( MigratorEngine::KEY_CONTENT, $content_items );
+		$result = $content_migrator->replace_content( array( 0, 1, 2, 3 ) );
+
+		$this->assertSame( 4, $result['success'] );
+		$this->assertSame( array(), $result['errors'] );
+
+		$updated_content = $GLOBALS['foogallery_migrate_test_posts'][503]->post_content;
+		$this->assertSame(
+			'Before [foogallery media_tags="bridge"] middle [foogallery media_tags="bridge,wedding-shoots"] legacy [foogallery media_tags="old-bridge"] oldest [foogallery media_tags="urban-bridge"] after',
+			$updated_content
+		);
+	}
+
+	public function test_content_migration_replaces_gallery_shortcodes_and_singlepic_images(): void {
+		$plugin = new FakeSourcePlugin();
+		$plugin->shortcode_patterns = array(
+			'/\[ngg\b[^\]]*\bids\s*=\s*["\']?(\d+)(?:\s*,\s*\d+)*["\']?[^\]]*\]/i',
+			'/\[singlepic\b[^\]]*\bid\s*=\s*["\']?(\d+)["\']?[^\]]*\]/i',
+		);
+		$plugin->content_object_types = array(
+			'singlepic' => 'image',
+		);
+		$plugin->content_image_identifiers = array(
+			11328 => 'https://example.test/nextgen/source-single.jpg',
+			11329 => 'https://example.test/nextgen/source-thumb-default.jpg',
+		);
+		$plugin->is_detected = true;
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+
+		$gallery = $this->create_gallery( $plugin, 99, 'Migrated NextGEN Gallery', array() );
+		$gallery->migrated = true;
+		$gallery->migrated_id = 199;
+		$gallery->migration_status = Migratable::PROGRESS_COMPLETED;
+		$engine->add_migrated_object( $gallery );
+
+		$image = $this->create_image( 'https://example.test/nextgen/source-single.jpg' );
+		$image->migrated = true;
+		$image->migrated_id = 1133;
+		$image->migration_status = Migratable::PROGRESS_COMPLETED;
+		$engine->add_migrated_object( $image );
+
+		$thumbnail_default_image = $this->create_image( 'https://example.test/nextgen/source-thumb-default.jpg' );
+		$thumbnail_default_image->migrated = true;
+		$thumbnail_default_image->migrated_id = 1134;
+		$thumbnail_default_image->migration_status = Migratable::PROGRESS_COMPLETED;
+		$engine->add_migrated_object( $thumbnail_default_image );
+
+		$GLOBALS['foogallery_migrate_test_attachment_urls'][1133] = 'https://example.test/wp-content/uploads/source-single.jpg';
+		$GLOBALS['foogallery_migrate_test_attachment_urls'][1134] = 'https://example.test/wp-content/uploads/source-thumb-default.jpg';
+		$GLOBALS['foogallery_migrate_test_attachment_image_urls'][1134] = array(
+			'thumbnail' => 'https://example.test/wp-content/uploads/source-thumb-default-150x150.jpg',
+		);
+		$GLOBALS['foogallery_migrate_test_posts'][1133] = (object) array(
+			'ID'           => 1133,
+			'post_type'    => 'attachment',
+			'post_status'  => 'inherit',
+			'post_title'   => 'Source single',
+			'post_excerpt' => 'Migrated image caption',
+			'post_content' => 'Migrated image description',
+		);
+		$GLOBALS['foogallery_migrate_test_posts'][1134] = (object) array(
+			'ID'           => 1134,
+			'post_type'    => 'attachment',
+			'post_status'  => 'inherit',
+			'post_title'   => 'Source thumbnail default',
+			'post_excerpt' => 'Thumbnail default caption',
+			'post_content' => 'Thumbnail default description',
+		);
+
+		$original_content = 'Intro [ngg src="galleries" ids="99" display="basic_thumbnail"] middle [singlepic id=11328 w=800 float=center] and [singlepic id=11329 float=left] outro';
+		$this->create_test_post( 501, 'post', 'Legacy Shortcodes', $original_content );
+
+		$content_migrator = $engine->get_content_migrator();
+		$content_items = $this->find_content_items( $content_migrator, get_post( 501 ), array( $plugin ) );
+
+		$this->assertCount( 3, $content_items );
+		$this->assertSame( 'gallery', $content_items[0]['object_type'] );
+		$this->assertSame( 199, $content_items[0]['migrated_foogallery_id'] );
+		$this->assertSame( 'image', $content_items[1]['object_type'] );
+		$this->assertSame( 1133, $content_items[1]['migrated_foogallery_id'] );
+		$this->assertSame( 'image', $content_items[2]['object_type'] );
+		$this->assertSame( 1134, $content_items[2]['migrated_foogallery_id'] );
+
+		$content_migrator->set_setting( MigratorEngine::KEY_CONTENT, $content_items );
+		$result = $content_migrator->replace_content( array( 0, 1, 2 ) );
+
+		$this->assertSame( 3, $result['success'] );
+		$this->assertSame( array(), $result['errors'] );
+
+		$updated_content = $GLOBALS['foogallery_migrate_test_posts'][501]->post_content;
+		$this->assertStringContainsString( '[foogallery id="199"]', $updated_content );
+		$this->assertStringContainsString( '[caption id="attachment_1133" align="aligncenter" width="800"]', $updated_content );
+		$this->assertStringContainsString( '<a href="https://example.test/wp-content/uploads/source-single.jpg">', $updated_content );
+		$this->assertStringContainsString( '[caption id="attachment_1134" align="alignleft" width="150"]', $updated_content );
+		$this->assertStringContainsString( '<a href="https://example.test/wp-content/uploads/source-thumb-default.jpg">', $updated_content );
+		$this->assertStringContainsString( 'src="https://example.test/wp-content/uploads/source-thumb-default-150x150.jpg"', $updated_content );
+		$this->assertStringContainsString( '<img ', $updated_content );
+		$this->assertStringContainsString( 'wp-image-1133', $updated_content );
+		$this->assertStringContainsString( 'width="800"', $updated_content );
+		$this->assertStringContainsString( 'Migrated image caption[/caption]', $updated_content );
+		$this->assertStringContainsString( 'Thumbnail default caption[/caption]', $updated_content );
+		$this->assertStringNotContainsString( '[ngg ', $updated_content );
+		$this->assertStringNotContainsString( '[singlepic ', $updated_content );
+		$this->assertStringNotContainsString( 'ngg-gallery-singlepic-image', $updated_content );
+		$this->assertSame( 'full', $GLOBALS['foogallery_migrate_test_attachment_image_calls'][0]['size'] );
+		$this->assertSame( 'thumbnail', $GLOBALS['foogallery_migrate_test_attachment_image_calls'][1]['size'] );
+	}
+
+	public function test_content_migration_still_replaces_gallery_and_album_items_without_image_branch(): void {
+		$plugin = new FakeSourcePlugin();
+		$plugin->shortcode_patterns = array(
+			'/\[fake-gallery\b[^\]]*\bid\s*=\s*["\']?(\d+)["\']?[^\]]*\]/i',
+			'/\[fake-album\b[^\]]*\bid\s*=\s*["\']?(\d+)["\']?[^\]]*\]/i',
+		);
+		$plugin->content_object_types = array(
+			'fake-album' => 'album',
+		);
+		$plugin->is_detected = true;
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+
+		$gallery = $this->create_gallery( $plugin, 77, 'Migrated Gallery', array() );
+		$gallery->migrated = true;
+		$gallery->migrated_id = 177;
+		$gallery->migration_status = Migratable::PROGRESS_COMPLETED;
+		$engine->add_migrated_object( $gallery );
+
+		$album = $this->create_album( $plugin, 88, 'Migrated Album', array() );
+		$album->migrated = true;
+		$album->migrated_id = 188;
+		$album->migration_status = Migratable::PROGRESS_COMPLETED;
+		$engine->add_migrated_object( $album );
+
+		$original_content = 'Before [fake-gallery id=77] between [fake-album id=88] after';
+		$this->create_test_post( 502, 'post', 'Gallery And Album Shortcodes', $original_content );
+
+		$content_migrator = $engine->get_content_migrator();
+		$content_items = $this->find_content_items( $content_migrator, get_post( 502 ), array( $plugin ) );
+
+		$this->assertCount( 2, $content_items );
+		$this->assertSame( 'gallery', $content_items[0]['object_type'] );
+		$this->assertSame( 177, $content_items[0]['migrated_foogallery_id'] );
+		$this->assertSame( 'album', $content_items[1]['object_type'] );
+		$this->assertSame( 188, $content_items[1]['migrated_foogallery_id'] );
+
+		$content_migrator->set_setting( MigratorEngine::KEY_CONTENT, $content_items );
+		$result = $content_migrator->replace_content( array( 0, 1 ) );
+
+		$this->assertSame( 2, $result['success'] );
+		$this->assertSame( array(), $result['errors'] );
+
+		$updated_content = $GLOBALS['foogallery_migrate_test_posts'][502]->post_content;
+		$this->assertSame( 'Before [foogallery id="177"] between [foogallery-album id="188"] after', $updated_content );
+	}
+
+	private function create_test_post( int $id, string $post_type, string $title, string $content = '' ): void {
+		$GLOBALS['foogallery_migrate_test_posts'][ $id ] = (object) array(
+			'ID' => $id,
+			'post_type' => $post_type,
+			'post_status' => 'publish',
+			'post_title' => $title,
+			'post_name' => sanitize_key( $title ),
+			'post_author' => 1,
+			'post_content' => $content,
+		);
+	}
+
+	private function find_content_items( $content_migrator, $post, array $plugins ): array {
+		$method = new \ReflectionMethod( $content_migrator, 'find_shortcodes_and_blocks_in_content' );
+		$method->setAccessible( true );
+
+		return $method->invoke( $content_migrator, $post, $plugins );
+	}
+
+	private function get_meta_update_value( int $post_id, string $meta_key ) {
+		foreach ( array_reverse( $GLOBALS['foogallery_migrate_test_post_meta_updates'] ) as $update ) {
+			if ( absint( $update['post_id'] ) === $post_id && $meta_key === $update['meta_key'] ) {
+				return $update['meta_value'];
+			}
+		}
+
+		return null;
+	}
+
+	private function create_gallery( FakeSourcePlugin $plugin, int $id, string $title, array $children ): Gallery {
+		$gallery = $plugin->get_gallery(
+			array(
+				'ID'             => $id,
+				'title'          => $title,
+				'data'           => null,
+				'children'       => $children,
+				'children_count' => count( $children ),
+				'settings'       => array(),
+			)
+		);
+
+		return $gallery;
+	}
+
+	private function create_album( FakeSourcePlugin $plugin, int $id, string $title, array $children ): Album {
+		$album = $plugin->get_album(
+			array(
+				'ID'             => $id,
+				'title'          => $title,
+				'data'           => null,
+				'fooalbum_title' => $title,
+			)
+		);
+		$album->children = $children;
+		$album->children_count = count( $children );
+
+		return $album;
+	}
+
+	private function create_image( string $source_url ): Image {
+		$image = new Image();
+		$image->source_url   = $source_url;
+		$image->title        = basename( $source_url );
+		$image->alt          = '';
+		$image->date         = '2026-05-21 12:00:00';
+
+		return $image;
+	}
+
+	private function assertCompactPayload( $payload ): void {
+		$this->assertIsArray( $payload );
+		$this->assertArrayHasKey( '_foogallery_migrate_compact', $payload );
+		$this->assertSame( 1, $payload['_foogallery_migrate_compact'] );
+		$this->assertArrayHasKey( 'items', $payload );
+	}
+
+	private function contains_object( $value ): bool {
+		if ( is_object( $value ) ) {
+			return true;
+		}
+
+		if ( ! is_array( $value ) ) {
+			return false;
+		}
+
+		foreach ( $value as $item ) {
+			if ( $this->contains_object( $item ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+}
+
+class FakeSourcePlugin extends Plugin {
+	public $galleries = array();
+	public $albums = array();
+	public $shortcode_patterns = array();
+	public $content_object_types = array();
+	public $content_image_identifiers = array();
+	public $has_image_tags = false;
+
+	public function name() {
+		return 'FakeSource';
+	}
+
+	public function detect() {
+		return true;
+	}
+
+	public function find_galleries() {
+		return $this->galleries;
+	}
+
+	public function find_albums() {
+		return $this->albums;
+	}
+
+	public function get_gallery_template( $gallery ) {
+		return 'default';
+	}
+
+	public function get_gallery_settings( $gallery, $default_settings ) {
+		$default_settings['fake_setting'] = 'yes';
+		return $default_settings;
+	}
+
+	public function get_shortcode_patterns() {
+		return $this->shortcode_patterns;
+	}
+
+	public function get_content_object_type( $original_content, $block_name = '' ) {
+		foreach ( $this->content_object_types as $needle => $object_type ) {
+			if ( false !== stripos( $original_content, $needle ) ) {
+				return $object_type;
+			}
+		}
+
+		return parent::get_content_object_type( $original_content, $block_name );
+	}
+
+	public function get_content_image_identifier( $image_id ) {
+		$image_id = absint( $image_id );
+
+		return isset( $this->content_image_identifiers[ $image_id ] )
+			? $this->content_image_identifiers[ $image_id ]
+			: false;
+	}
+
+	public function has_migratable_image_tags() {
+		return $this->has_image_tags;
+	}
+}
+
+class FakeWpdb {
+	public $prefix = 'wp_';
+	public $term_relationships = 'wp_term_relationships';
+	public $term_taxonomy = 'wp_term_taxonomy';
+	public $last_query = '';
+	private $has_nextgen_tags;
+
+	public function __construct( $has_nextgen_tags ) {
+		$this->has_nextgen_tags = $has_nextgen_tags;
+	}
+
+	public function prepare( $query ) {
+		$args = func_get_args();
+		array_shift( $args );
+
+		foreach ( $args as $arg ) {
+			$replacement = is_numeric( $arg ) ? (string) $arg : "'" . addslashes( (string) $arg ) . "'";
+			$query = preg_replace( '/%[ds]/', $replacement, $query, 1 );
+		}
+
+		return $query;
+	}
+
+	public function get_var( $query ) {
+		$this->last_query = $query;
+
+		if ( false !== strpos( $query, 'ngg_tag' ) ) {
+			return $this->has_nextgen_tags ? '1' : null;
+		}
+
+		return null;
+	}
+}
+
+class FakeNextgenLazyDiscoveryWpdb {
+	public $prefix = 'wp_';
+	public $image_query_count = 0;
+	public $last_image_query = '';
+
+	public function prepare( $query ) {
+		$args = func_get_args();
+		array_shift( $args );
+
+		foreach ( $args as $arg ) {
+			$replacement = is_numeric( $arg ) ? (string) $arg : "'" . addslashes( (string) $arg ) . "'";
+			$query = preg_replace( '/%[ds]/', $replacement, $query, 1 );
+		}
+
+		return $query;
+	}
+
+	public function get_results( $query ) {
+		if ( false !== stripos( $query, 'from wp_ngg_gallery' ) ) {
+			return array(
+				(object) array(
+					'gid'   => 7,
+					'title' => 'Bridge Gallery',
+					'path'  => 'wp-content/gallery/bridges',
+				),
+			);
+		}
+
+		if ( false !== stripos( $query, 'COUNT(*) AS image_count' ) ) {
+			return array(
+				(object) array(
+					'galleryid'    => 7,
+					'image_count' => 2,
+				),
+			);
+		}
+
+		if ( false !== stripos( $query, 'from wp_ngg_pictures' ) ) {
+			$this->image_query_count++;
+			$this->last_image_query = $query;
+
+			return array(
+				(object) array(
+					'pid'         => 701,
+					'filename'    => 'bridge-one.jpg',
+					'alttext'     => 'Bridge One',
+					'description' => 'First bridge',
+					'imagedate'   => '2026-06-01 10:00:00',
+					'exclude'     => 0,
+				),
+				(object) array(
+					'pid'         => 702,
+					'filename'    => 'bridge-two.jpg',
+					'alttext'     => 'Bridge Two',
+					'description' => 'Second bridge',
+					'imagedate'   => '2026-06-01 10:01:00',
+					'exclude'     => 0,
+				),
+			);
+		}
+
+		return array();
+	}
+}
+
+class FakeNextgenAlbumWpdb {
+	public $prefix = 'wp_';
+	public $album_query = '';
+	public $gallery_query = '';
+	public $count_query = '';
+
+	public function prepare( $query ) {
+		$args = func_get_args();
+		array_shift( $args );
+
+		foreach ( $args as $arg ) {
+			if ( is_array( $arg ) ) {
+				foreach ( $arg as $item ) {
+					$replacement = is_numeric( $item ) ? (string) $item : "'" . addslashes( (string) $item ) . "'";
+					$query = preg_replace( '/%[ds]/', $replacement, $query, 1 );
+				}
+				continue;
+			}
+
+			$replacement = is_numeric( $arg ) ? (string) $arg : "'" . addslashes( (string) $arg ) . "'";
+			$query = preg_replace( '/%[ds]/', $replacement, $query, 1 );
+		}
+
+		return $query;
+	}
+
+	public function get_results( $query ) {
+		if ( false !== stripos( $query, 'from wp_ngg_album' ) ) {
+			return array(
+				(object) array(
+					'id'   => '15 OR 1=1',
+					'name' => 'Unsafe Album',
+				),
+			);
+		}
+
+		if ( false !== stripos( $query, 'COUNT(*) AS image_count' ) ) {
+			$this->count_query = $query;
+			return array(
+				(object) array(
+					'galleryid'    => 7,
+					'image_count' => 1,
+				),
+				(object) array(
+					'galleryid'    => 8,
+					'image_count' => 2,
+				),
+			);
+		}
+
+		if ( false !== stripos( $query, 'from wp_ngg_gallery' ) ) {
+			$this->gallery_query = $query;
+			return array(
+				(object) array(
+					'gid'   => 7,
+					'title' => 'Bridge',
+					'path'  => 'wp-content/gallery/bridge',
+				),
+				(object) array(
+					'gid'   => 8,
+					'title' => 'City',
+					'path'  => 'wp-content/gallery/city',
+				),
+			);
+		}
+
+		return array();
+	}
+
+	public function get_row( $query ) {
+		$this->album_query = $query;
+
+		return (object) array(
+			'sortorder' => base64_encode( json_encode( array( '7', 'bad-value', '8 OR 1=1', '0' ) ) ),
+		);
+	}
+}
+
+class FakePhotoAlbumWpdb {
+	public $prefix = 'wp_';
+	public $album_gallery_query = '';
+	public $gallery_query = '';
+
+	public function prepare( $query ) {
+		$args = func_get_args();
+		array_shift( $args );
+
+		foreach ( $args as $arg ) {
+			if ( is_array( $arg ) ) {
+				foreach ( $arg as $item ) {
+					$replacement = is_numeric( $item ) ? (string) $item : "'" . addslashes( (string) $item ) . "'";
+					$query = preg_replace( '/%[ds]/', $replacement, $query, 1 );
+				}
+				continue;
+			}
+
+			$replacement = is_numeric( $arg ) ? (string) $arg : "'" . addslashes( (string) $arg ) . "'";
+			$query = preg_replace( '/%[ds]/', $replacement, $query, 1 );
+		}
+
+		return $query;
+	}
+
+	public function get_results( $query ) {
+		if ( false !== stripos( $query, 'from wp_bwg_album_gallery' ) ) {
+			$this->album_gallery_query = $query;
+			return array(
+				(object) array(
+					'alb_gal_id' => '34',
+				),
+				(object) array(
+					'alb_gal_id' => 'bad-value',
+				),
+				(object) array(
+					'alb_gal_id' => '35 OR 1=1',
+				),
+			);
+		}
+
+		if ( false !== stripos( $query, 'from wp_bwg_gallery' ) ) {
+			$this->gallery_query = $query;
+			return array(
+				(object) array(
+					'id'   => 34,
+					'name' => 'Bridge',
+				),
+				(object) array(
+					'id'   => 35,
+					'name' => 'City',
+				),
+			);
+		}
+
+		if ( false !== stripos( $query, 'from wp_bwg_image' ) ) {
+			return array(
+				(object) array(
+					'image_url'   => '/bridge.jpg',
+					'description' => 'Bridge',
+					'alt'         => 'Bridge',
+					'date'        => '2026-06-01 10:00:00',
+					'published'   => '1',
+				),
+			);
+		}
+
+		if ( false !== stripos( $query, 'from wp_bwg_album' ) ) {
+			return array(
+				(object) array(
+					'id'   => '12 OR 1=1',
+					'name' => 'Unsafe 10Web Album',
+				),
+			);
+		}
+
+		return array();
+	}
+}
+
+class FakeNextgenTagSyncWpdb {
+	public $prefix = 'wp_';
+	public $terms = 'wp_terms';
+	public $term_relationships = 'wp_term_relationships';
+	public $term_taxonomy = 'wp_term_taxonomy';
+	public $last_query = '';
+	private $tagged_images;
+	private $image_tags;
+
+	public function __construct( $tagged_images, $image_tags = array() ) {
+		$this->tagged_images = $tagged_images;
+		$this->image_tags = $image_tags;
+	}
+
+	public function prepare( $query ) {
+		$args = func_get_args();
+		array_shift( $args );
+
+		foreach ( $args as $arg ) {
+			$replacement = is_numeric( $arg ) ? (string) $arg : "'" . addslashes( (string) $arg ) . "'";
+			$query = preg_replace( '/%[ds]/', $replacement, $query, 1 );
+		}
+
+		return $query;
+	}
+
+	public function get_var( $query ) {
+		$this->last_query = $query;
+
+		if ( false !== strpos( $query, 'SHOW TABLES LIKE' ) ) {
+			return 'wp_ngg_gallery';
+		}
+
+		if ( false !== strpos( $query, 'ngg_tag' ) ) {
+			return '1';
+		}
+
+		return null;
+	}
+
+	public function get_results( $query ) {
+		$this->last_query = $query;
+
+		if ( false !== strpos( $query, 'SELECT DISTINCT p.pid' ) ) {
+			return $this->tagged_images;
+		}
+
+		if ( false !== strpos( $query, 'SELECT t.name' ) ) {
+			$image_id = 0;
+			if ( preg_match( '/tr\\.object_id\\s*=\\s*(\\d+)/', $query, $matches ) ) {
+				$image_id = absint( $matches[1] );
+			}
+
+			if ( $image_id < 1 || ! isset( $this->image_tags[ $image_id ] ) ) {
+				return array();
+			}
+
+			return array_map(
+				function( $tag ) {
+					return (object) array(
+						'name' => $tag,
+					);
+				},
+				$this->image_tags[ $image_id ]
+			);
+		}
+
+		if ( false !== strpos( $query, 'wp_ngg_gallery' ) ) {
+			return array(
+				(object) array(
+					'gid' => 9,
+				),
+			);
+		}
+
+		return array();
+	}
+}

@@ -1,12 +1,31 @@
 <?php
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
     $migrator = foogallery_migrate_migrator_instance();
 ?>
 <script>
     jQuery(function ($) {
         var migrationErrorMessage = <?php echo wp_json_encode( __( 'Something went wrong with the migration and the page will now reload. Once it has reloaded, click "Resume Migration" to continue with the migration.', 'foogallery-migrate' ) ); ?>;
         var cancelConfirmMessage = <?php echo wp_json_encode( __( 'Are you sure you want to cancel?', 'foogallery-migrate' ) ); ?>;
+        var selectGalleryMessage = <?php echo wp_json_encode( __( 'Please select at least one gallery to migrate.', 'foogallery-migrate' ) ); ?>;
 
         var $form = $('#foogallery_migrate_gallery_form');
+
+        function updateGalleryPreflight() {
+            var galleryCount = 0;
+            var imageCount = 0;
+            var $checkboxes = $form.find('.foogallery-migrate-gallery-select:not(:disabled)');
+
+            $checkboxes.filter(':checked').each(function () {
+                galleryCount++;
+                imageCount += parseInt($(this).data('imageCount'), 10) || 0;
+            });
+
+            $form.find('.foogallery-migrate-preflight-report [data-role="gallery-count"]').text(galleryCount);
+            $form.find('.foogallery-migrate-preflight-report [data-role="image-count"]').text(imageCount);
+            $form.find('.foogallery-migrate-gallery-select-all').prop('checked', $checkboxes.length > 0 && $checkboxes.length === $checkboxes.filter(':checked').length);
+        }
 
         function foogallery_gallery_migration_ajax(action, success_callback) {
             var data = $form.serialize();
@@ -21,11 +40,15 @@
                 type: "POST",
                 url: ajaxurl,
                 data: data + "&action=" + action,
-                success: success_callback,
+                success: function(data) {
+                    if (window.foogalleryMigrateHandleAjaxResponse(data, migrationErrorMessage, action)) {
+                        return;
+                    }
+                    success_callback(data);
+                    updateGalleryPreflight();
+                },
                 error: function(xhr, ajaxOptions, thrownError) {
-                    //something went wrong! Alert the user and reload the page
-                    window.alert(migrationErrorMessage);
-                    location.reload();
+                    window.foogalleryMigrateHandleAjaxError(xhr, ajaxOptions, thrownError, migrationErrorMessage, action);
                 }
             });
         }
@@ -48,6 +71,11 @@
 
         $form.on('click', '.start_migrate', function (e) {
             e.preventDefault();
+
+            if ($form.find('.foogallery-migrate-gallery-select:checked:not(:disabled)').length < 1) {
+                window.alert(selectGalleryMessage);
+                return false;
+            }
 
             foogallery_gallery_migration_ajax( 'foogallery_migrate', function (data) {
                 $form.html(data);
@@ -96,6 +124,15 @@
                 $form.html(data);
             } );
         });
+
+        $form.on('change', '.foogallery-migrate-gallery-select-all', function () {
+            $form.find('.foogallery-migrate-gallery-select:not(:disabled)').prop('checked', $(this).prop('checked'));
+            updateGalleryPreflight();
+        });
+
+        $form.on('change', '.foogallery-migrate-gallery-select', updateGalleryPreflight);
+
+        updateGalleryPreflight();
     });
 </script>
 <form id="foogallery_migrate_gallery_form" method="POST">

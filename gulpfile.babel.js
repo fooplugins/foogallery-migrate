@@ -95,7 +95,21 @@ gulp.task( 'translate', ( done ) => {
 } );
 
 const zip = require( 'gulp-zip' ),
-	buildInclude = [ '**/*', '!package*.json', '!./{node_modules,node_modules/**/*}', '!./{bin,bin/**/*}', '!./{dist,dist/**/*}', '!./{src,src/**/*}', '!fs-config.json', '!composer.json', '!composer.lock', '!wpgulp.config.js', '!gulpfile.babel.js' ],
+	buildInclude = [
+		'**/*',
+		'!package*.json',
+		'!./{node_modules,node_modules/**/*}',
+		'!./{bin,bin/**/*}',
+		'!./{dist,dist/**/*}',
+		'!./{src,src/**/*}',
+		'!./{tests,tests/**/*}',
+		'!fs-config.json',
+		'!composer.json',
+		'!composer.lock',
+		'!phpunit.xml.dist',
+		'!wpgulp.config.js',
+		'!gulpfile.babel.js'
+	],
 	packageJSON = require( './package.json' ), fileName = packageJSON.name, fileVersion = packageJSON.version;
 
 /**

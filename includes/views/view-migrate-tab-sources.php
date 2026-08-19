@@ -1,4 +1,7 @@
 <?php
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
     $migrator = foogallery_migrate_migrator_instance();    
 ?>
 <script>
@@ -49,7 +52,16 @@
 <?php
 $wordpress_gallery_detected = isset( $_GET['wordpress-gallery-detected'] ) ? sanitize_key( wp_unslash( $_GET['wordpress-gallery-detected'] ) ) : '';
 $wordpress_gallery_count = isset( $_GET['wordpress-gallery-count'] ) ? absint( wp_unslash( $_GET['wordpress-gallery-count'] ) ) : 0;
-if ( '0' === $wordpress_gallery_detected ) {
+$wordpress_scan_complete = isset( $_GET['wordpress-scan-complete'] ) ? sanitize_key( wp_unslash( $_GET['wordpress-scan-complete'] ) ) : '';
+if ( '' !== $wordpress_gallery_detected && '0' === $wordpress_scan_complete ) {
+    echo '<div class="notice notice-info inline"><p>';
+    printf(
+        /* translators: %d: detected gallery occurrence count so far. */
+        esc_html( _n( 'The scan started and found %d WordPress core gallery so far. Continue it in Blocks / Shortcodes.', 'The scan started and found %d WordPress core galleries so far. Continue it in Blocks / Shortcodes.', $wordpress_gallery_count, 'foogallery-migrate' ) ),
+        absint( $wordpress_gallery_count )
+    );
+    echo '</p></div>';
+} elseif ( '0' === $wordpress_gallery_detected ) {
     echo '<div class="notice notice-info inline"><p>' . esc_html__( 'No valid WordPress core galleries were found in published posts or pages.', 'foogallery-migrate' ) . '</p></div>';
 } elseif ( '1' === $wordpress_gallery_detected ) {
     echo '<div class="notice notice-success inline"><p>';

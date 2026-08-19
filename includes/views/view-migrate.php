@@ -1,3 +1,8 @@
+<?php
+if ( ! defined( 'ABSPATH' ) ) {
+	exit;
+}
+?>
 <style>
 	.foo-nav-tabs a:focus {
 		-webkit-box-shadow: none;
@@ -99,6 +104,142 @@
 
 </style>
 <script>
+	window.foogalleryMigrateAjaxErrorLabels = {
+		action: <?php echo wp_json_encode( __( 'Action', 'foogallery-migrate' ) ); ?>,
+		status: <?php echo wp_json_encode( __( 'HTTP status', 'foogallery-migrate' ) ); ?>,
+		error: <?php echo wp_json_encode( __( 'Error', 'foogallery-migrate' ) ); ?>,
+		response: <?php echo wp_json_encode( __( 'Response', 'foogallery-migrate' ) ); ?>,
+		noDetails: <?php echo wp_json_encode( __( 'No response details were returned by the server.', 'foogallery-migrate' ) ); ?>,
+		reload: <?php echo wp_json_encode( __( 'The page will now reload. If a migration was in progress, use Resume Migration to continue.', 'foogallery-migrate' ) ); ?>
+	};
+
+	window.foogalleryMigrateNormalizeAjaxDetails = function (value) {
+		var text = '';
+
+		if (value === null || value === undefined || value === '') {
+			return '';
+		}
+
+		if (typeof value === 'object') {
+			if (value.data) {
+				if (typeof value.data === 'string') {
+					return window.foogalleryMigrateNormalizeAjaxDetails(value.data);
+				}
+				if (value.data.message) {
+					return window.foogalleryMigrateNormalizeAjaxDetails(value.data.message);
+				}
+				if (value.data.error) {
+					return window.foogalleryMigrateNormalizeAjaxDetails(value.data.error);
+				}
+			}
+
+			if (value.message) {
+				return window.foogalleryMigrateNormalizeAjaxDetails(value.message);
+			}
+
+			if (value.error) {
+				return window.foogalleryMigrateNormalizeAjaxDetails(value.error);
+			}
+
+			try {
+				text = JSON.stringify(value);
+			} catch (e) {
+				text = String(value);
+			}
+		} else {
+			text = String(value);
+		}
+
+		text = text.trim();
+
+		if (text.charAt(0) === '{' || text.charAt(0) === '[') {
+			try {
+				return window.foogalleryMigrateNormalizeAjaxDetails(JSON.parse(text));
+			} catch (e) {
+				// Keep the raw response when it is not valid JSON.
+			}
+		}
+
+		text = text
+			.replace(/<script[\s\S]*?<\/script>/gi, ' ')
+			.replace(/<style[\s\S]*?<\/style>/gi, ' ')
+			.replace(/<[^>]+>/g, ' ')
+			.replace(/&nbsp;/g, ' ')
+			.replace(/&#039;/g, "'")
+			.replace(/&quot;/g, '"')
+			.replace(/&amp;/g, '&')
+			.replace(/\s+/g, ' ')
+			.trim();
+
+		if (text.length > 1200) {
+			text = text.substring(0, 1200) + '...';
+		}
+
+		return text;
+	};
+
+	window.foogalleryMigrateBuildAjaxErrorMessage = function (xhr, ajaxOptions, thrownError, fallbackMessage, action) {
+		var labels = window.foogalleryMigrateAjaxErrorLabels;
+		var lines = [ fallbackMessage ];
+		var responseText = '';
+
+		if (action) {
+			lines.push(labels.action + ': ' + action);
+		}
+
+		if (xhr && xhr.status) {
+			lines.push(labels.status + ': ' + xhr.status + (xhr.statusText ? ' ' + xhr.statusText : ''));
+		}
+
+		if (thrownError) {
+			lines.push(labels.error + ': ' + thrownError);
+		} else if (ajaxOptions) {
+			lines.push(labels.error + ': ' + ajaxOptions);
+		}
+
+		if (xhr) {
+			responseText = window.foogalleryMigrateNormalizeAjaxDetails(xhr.responseJSON || xhr.responseText);
+		}
+
+		lines.push(labels.response + ': ' + (responseText || labels.noDetails));
+		lines.push('');
+		lines.push(labels.reload);
+
+		return lines.join("\n");
+	};
+
+	window.foogalleryMigrateHandleAjaxError = function (xhr, ajaxOptions, thrownError, fallbackMessage, action) {
+		var message = window.foogalleryMigrateBuildAjaxErrorMessage(xhr, ajaxOptions, thrownError, fallbackMessage, action);
+
+		if (window.console && window.console.error) {
+			window.console.error('FooGallery Migrate AJAX error', {
+				action: action,
+				status: xhr ? xhr.status : null,
+				statusText: xhr ? xhr.statusText : null,
+				responseText: xhr ? xhr.responseText : null,
+				responseJSON: xhr ? xhr.responseJSON : null,
+				thrownError: thrownError
+			});
+		}
+
+		window.alert(message);
+		location.reload();
+	};
+
+	window.foogalleryMigrateHandleAjaxResponse = function (data, fallbackMessage, action) {
+		if (data && typeof data === 'object' && data.success === false) {
+			window.foogalleryMigrateHandleAjaxError({
+				status: 200,
+				statusText: 'OK',
+				responseJSON: data,
+				responseText: ''
+			}, 'error', '', fallbackMessage, action);
+			return true;
+		}
+
+		return false;
+	};
+
 	jQuery(function ($) {
 		var resetAlbumMessage = <?php echo wp_json_encode( __( 'Are you sure you want to reset all NextGen album import data? This may result in duplicate albums if you decide to import again!', 'foogallery-migrate' ) ); ?>;
 		var albumImportErrorMessage = <?php echo wp_json_encode( __( 'Something went wrong with the import and the page will now reload.', 'foogallery-migrate' ) ); ?>;
@@ -132,12 +273,13 @@
 				url: ajaxurl,
 				data: data,
 				success: function(data) {
+					if (window.foogalleryMigrateHandleAjaxResponse(data, albumImportErrorMessage, 'foogallery_nextgen_album_import')) {
+						return;
+					}
 					$('#foogallery_migrate_album_form').html(data);
 				},
-				error: function() {
-					//something went wrong! Alert the user and reload the page
-					window.alert(albumImportErrorMessage);
-					location.reload();
+				error: function(xhr, ajaxOptions, thrownError) {
+					window.foogalleryMigrateHandleAjaxError(xhr, ajaxOptions, thrownError, albumImportErrorMessage, 'foogallery_nextgen_album_import');
 				}
 			});
 		});
@@ -158,15 +300,16 @@
 				url: ajaxurl,
 				data: data,
 				success: function(data) {
+					if (window.foogalleryMigrateHandleAjaxResponse(data, findShortcodesErrorMessage, 'foogallery_nextgen_find_shortcodes')) {
+						return;
+					}
 					$('#foogallery_migrate_shortcodes_container').html(data);
 				},
 				complete: function() {
 					$('#foogallery_migrate_shortcodes .spinner').removeClass('is-active');
 				},
-				error: function() {
-					//something went wrong! Alert the user and reload the page
-					window.alert(findShortcodesErrorMessage);
-					location.reload();
+				error: function(xhr, ajaxOptions, thrownError) {
+					window.foogalleryMigrateHandleAjaxError(xhr, ajaxOptions, thrownError, findShortcodesErrorMessage, 'foogallery_nextgen_find_shortcodes');
 				}
 			});
 		});
@@ -187,76 +330,80 @@
 				url: ajaxurl,
 				data: data,
 				success: function(data) {
+					if (window.foogalleryMigrateHandleAjaxResponse(data, replaceShortcodesErrorMessage, 'foogallery_nextgen_replace_shortcodes')) {
+						return;
+					}
 					$('#foogallery_migrate_shortcodes_container').html(data);
 				},
 				complete: function() {
 					$('#foogallery_migrate_shortcodes .spinner').removeClass('is-active');
 				},
-				error: function() {
-					//something went wrong! Alert the user and reload the page
-					window.alert(replaceShortcodesErrorMessage);
-					location.reload();
+				error: function(xhr, ajaxOptions, thrownError) {
+					window.foogalleryMigrateHandleAjaxError(xhr, ajaxOptions, thrownError, replaceShortcodesErrorMessage, 'foogallery_nextgen_replace_shortcodes');
 				}
 			});
 		});
 
-		$('.foo-nav-tabs').on('click', 'a', function (e) {
-			$('.foogallery_migrate_container').hide();
-			var tab = $(this).data('tab');
-			$('#' + tab).show();
-			$('.nav-tab').removeClass('nav-tab-active');
-			$(this).addClass('nav-tab-active');
-		});
-
-		if (window.location.hash) {
-			$('.foo-nav-tabs a[href="' + window.location.hash + '"]').click();
-		}
 	});
 </script>
 <?php
 $migrator = foogallery_migrate_migrator_instance();
 $has_log_tab = $migrator->has_migrated_objects();
 $show_debug_tab = $has_log_tab && $migrator->is_debug_enabled();
+$tabs = array(
+	'sources'   => array(
+		'label' => __( 'Plugins', 'foogallery-migrate' ),
+		'view'  => 'view-migrate-tab-sources.php',
+	),
+	'galleries' => array(
+		'label' => __( 'Galleries', 'foogallery-migrate' ),
+		'view'  => 'view-migrate-tab-galleries.php',
+	),
+	'albums'    => array(
+		'label' => __( 'Albums', 'foogallery-migrate' ),
+		'view'  => 'view-migrate-tab-albums.php',
+	),
+	'content'   => array(
+		'label' => __( 'Blocks / Shortcodes', 'foogallery-migrate' ),
+		'view'  => 'view-migrate-tab-content.php',
+	),
+	'image-tags' => array(
+		'label' => __( 'Image Tags', 'foogallery-migrate' ),
+		'view'  => 'view-migrate-tab-image-tags.php',
+	),
+	'log'       => array(
+		'label'   => __( 'Log', 'foogallery-migrate' ),
+		'view'    => 'view-migrate-tab-log.php',
+		'enabled' => $has_log_tab,
+	),
+	'debug'     => array(
+		'label'   => __( 'Debug', 'foogallery-migrate' ),
+		'view'    => 'view-migrate-tab-debug.php',
+		'enabled' => $show_debug_tab,
+	),
+	'settings'  => array(
+		'label' => __( 'Settings', 'foogallery-migrate' ),
+		'view'  => 'view-migrate-tab-settings.php',
+	),
+);
+$active_tab = 'sources';
+if ( array_key_exists( 'tab', $_GET ) ) {
+	$requested_tab = sanitize_key( wp_unslash( $_GET['tab'] ) );
+	if ( isset( $tabs[ $requested_tab ] ) && ( ! isset( $tabs[ $requested_tab ]['enabled'] ) || $tabs[ $requested_tab ]['enabled'] ) ) {
+		$active_tab = $requested_tab;
+	}
+}
 ?>
 <div class="wrap">
 	<h2><?php esc_html_e( 'FooGallery Migrate!', 'foogallery-migrate' ); ?></h2>
 
 	<h2 class="foo-nav-tabs nav-tab-wrapper">
-		<a href="#sources" data-tab="foogallery_migrate_sources" class="nav-tab nav-tab-active"><?php esc_html_e( 'Plugins', 'foogallery-migrate' ); ?></a>
-		<a href="#galleries" data-tab="foogallery_migrate_galleries" class="nav-tab"><?php esc_html_e( 'Galleries', 'foogallery-migrate' ); ?></a>
-		<a href="#albums" data-tab="foogallery_migrate_albums" class="nav-tab"><?php esc_html_e( 'Albums', 'foogallery-migrate' ); ?></a>
-		<a href="#shortcodes" data-tab="foogallery_migrate_content" class="nav-tab"><?php esc_html_e( 'Blocks / Shortcodes', 'foogallery-migrate' ); ?></a>
-		<?php if ( $has_log_tab ) { ?>
-			<a href="#log" data-tab="foogallery_migrate_log" class="nav-tab"><?php esc_html_e( 'Log', 'foogallery-migrate' ); ?></a>
+		<?php foreach ( $tabs as $tab_key => $tab ) { ?>
+			<?php if ( isset( $tab['enabled'] ) && ! $tab['enabled'] ) { continue; } ?>
+			<a href="<?php echo esc_url( foogallery_migrate_admin_url( $tab_key ) ); ?>" class="nav-tab <?php echo $active_tab === $tab_key ? 'nav-tab-active' : ''; ?>"><?php echo esc_html( $tab['label'] ); ?></a>
 		<?php } ?>
-		<?php if ( $show_debug_tab ) { ?>
-			<a href="#debug" data-tab="foogallery_migrate_debug" class="nav-tab"><?php esc_html_e( 'Debug', 'foogallery-migrate' ); ?></a>
-		<?php } ?>
-		<a href="#settings" data-tab="foogallery_migrate_settings" class="nav-tab"><?php esc_html_e( 'Settings', 'foogallery-migrate' ); ?></a>
 	</h2>
-    <div class="foogallery_migrate_container" id="foogallery_migrate_sources">
-        <?php require_once 'view-migrate-tab-sources.php'; ?>
-    </div>
-	<div class="foogallery_migrate_container" id="foogallery_migrate_galleries" style="display: none">
-        <?php require_once 'view-migrate-tab-galleries.php'; ?>
-	</div>
-	<div class="foogallery_migrate_container" id="foogallery_migrate_albums" style="display: none">
-        <?php require_once 'view-migrate-tab-albums.php'; ?>
-	</div>
-	<div class="foogallery_migrate_container" id="foogallery_migrate_content" style="display: none">
-        <?php require_once 'view-migrate-tab-content.php'; ?>
-	</div>
-	<?php if ( $has_log_tab ) { ?>
-		<div class="foogallery_migrate_container" id="foogallery_migrate_log" style="display: none">
-			<?php require_once 'view-migrate-tab-log.php'; ?>
-		</div>
-	<?php } ?>
-	<?php if ( $show_debug_tab ) { ?>
-		<div class="foogallery_migrate_container" id="foogallery_migrate_debug" style="display: none">
-			<?php require_once 'view-migrate-tab-debug.php'; ?>
-		</div>
-	<?php } ?>
-	<div class="foogallery_migrate_container" id="foogallery_migrate_settings" style="display: none">
-		<?php require_once 'view-migrate-tab-settings.php'; ?>
+	<div class="foogallery_migrate_container" id="foogallery_migrate_<?php echo esc_attr( $active_tab ); ?>">
+		<?php require_once $tabs[ $active_tab ]['view']; ?>
 	</div>
 </div>

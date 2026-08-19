@@ -1,4 +1,7 @@
 <?php
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
 /**
  * Contains all the Global common functions used throughout the plugin
  */
@@ -124,4 +127,28 @@ function foogallery_migrate_get_available_plugins() {
     $plugins[] = new \FooPlugins\FooGalleryMigrate\Plugins\WordPressCore();
 
     return $plugins;
+}
+
+/**
+ * Build an admin URL for the FooGallery Migrate screen.
+ *
+ * @param string $tab  Optional active tab.
+ * @param array  $args Optional extra query arguments.
+ * @return string
+ */
+function foogallery_migrate_admin_url( $tab = '', $args = array() ) {
+    $query_args = array(
+        'post_type' => defined( 'FOOGALLERY_CPT_GALLERY' ) ? FOOGALLERY_CPT_GALLERY : 'foogallery',
+        'page'      => 'foogallery-migrate',
+    );
+
+    if ( '' !== $tab ) {
+        $query_args['tab'] = sanitize_key( $tab );
+    }
+
+    if ( is_array( $args ) && ! empty( $args ) ) {
+        $query_args = array_merge( $query_args, $args );
+    }
+
+    return add_query_arg( $query_args, admin_url( 'edit.php' ) );
 }

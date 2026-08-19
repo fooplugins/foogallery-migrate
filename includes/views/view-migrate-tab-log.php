@@ -1,4 +1,7 @@
 <?php
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
 $migrator = foogallery_migrate_migrator_instance();
 $summary = $migrator->get_migrated_objects_summary();
 $migrated_objects = $migrator->get_migrated_objects();
@@ -64,7 +67,7 @@ foreach ( $migrated_objects as $object_id => $object ) {
 	$filtered_objects[ $object_id ] = $object;
 }
 
-$url = add_query_arg( 'page', 'foogallery-migrate' );
+$url = foogallery_migrate_admin_url( 'log' );
 $page = 1;
 if ( array_key_exists( 'log_paged', $_GET ) ) {
 	$page = absint( wp_unslash( $_GET['log_paged'] ) );
@@ -73,7 +76,7 @@ if ( $page < 1 ) {
 	$page = 1;
 }
 $url = add_query_arg( 'log_type', $log_type, $url );
-$url = add_query_arg( 'log_paged', $page, $url ) . '#log';
+$url = add_query_arg( 'log_paged', $page, $url );
 $page_size = (int) apply_filters( 'foogallery_migrate_log_page_size', 100 );
 $migrated_objects_count = count( $filtered_objects );
 
@@ -113,9 +116,11 @@ $paginated_objects = array_slice( $filtered_objects, $pagination->start, $pagina
 
 <div style="display: flex; align-items: center; gap: 10px; margin: 1em 0;">
 	<h3 style="margin: 0;"><?php esc_html_e( 'Migrated Objects', 'foogallery-migrate' ); ?></h3>
-	<form method="get" action="<?php echo esc_url( admin_url( 'admin.php#log' ) ); ?>" style="margin: 0;">
+	<form method="get" action="<?php echo esc_url( admin_url( 'edit.php' ) ); ?>" style="margin: 0;">
 		<label for="foogallery_migrate_log_type" class="screen-reader-text"><?php esc_html_e( 'Filter by type', 'foogallery-migrate' ); ?></label>
+		<input type="hidden" name="post_type" value="<?php echo esc_attr( defined( 'FOOGALLERY_CPT_GALLERY' ) ? FOOGALLERY_CPT_GALLERY : 'foogallery' ); ?>">
 		<input type="hidden" name="page" value="foogallery-migrate">
+		<input type="hidden" name="tab" value="log">
 		<select id="foogallery_migrate_log_type" name="log_type" onchange="this.form.submit()">
 			<?php foreach ( $available_types as $type_value => $type_label ) { ?>
 				<option value="<?php echo esc_attr( $type_value ); ?>" <?php selected( $log_type, $type_value ); ?>>
@@ -197,8 +202,8 @@ $paginated_objects = array_slice( $filtered_objects, $pagination->start, $pagina
 			}
 		}
 
-		$status_key = $object->migration_status ?? '';
-		$status_label = $status_options[ $status_key ] ?? $status_key;
+		$status_key = isset( $object->migration_status ) ? $object->migration_status : '';
+		$status_label = array_key_exists( $status_key, $status_options ) ? $status_options[ $status_key ] : $status_key;
 
 		$error_message = '';
 		if ( method_exists( $object, 'has_error' ) && $object->has_error() && method_exists( $object, 'get_error_message' ) ) {

@@ -27,10 +27,33 @@ function foogm_test_attachment( $label ) {
     );
 }
 
+function foogm_test_scan_all_content( $content_migrator, $reset = true ) {
+    $progress = $content_migrator->scan_content_batch( $reset );
+    $batches = 1;
+    while ( empty( $progress['complete'] ) && $batches < 1000 ) {
+        $progress = $content_migrator->scan_content_batch( false );
+        $batches++;
+    }
+    foogm_test_assert( ! empty( $progress['complete'] ), 'The bounded content scan must complete.' );
+    return $content_migrator->scan_content();
+}
+
+function foogm_test_set_content_items( $content_migrator, $items ) {
+    $content_migrator->set_setting(
+        \FooPlugins\FooGalleryMigrate\MigratorEngine::KEY_CONTENT . '_scan_state',
+        array(
+            'items'    => $items,
+            'progress' => $content_migrator->get_scan_progress(),
+        )
+    );
+}
+
 $created_posts = array();
 $created_attachments = array();
 $created_galleries = array();
 $failure = false;
+$migration_option_exists = false !== get_option( FOOGALLERY_MIGRATE_OPTION_DATA, false );
+$migration_option_backup = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
 
 try {
     $created_attachments[] = $first_id = foogm_test_attachment( 'First' );
@@ -135,7 +158,7 @@ try {
     foogm_test_assert( $second_id === (int) $galleries[0]->children[1]->migrated_id, 'Attachment order must preserve the second image.' );
     foogm_test_assert( '3' === (string) $galleries[0]->data['attributes']['columns'], 'Safely preservable shortcode attributes must remain available.' );
 
-    $items = $migrator->get_content_migrator()->scan_content( true );
+    $items = foogm_test_scan_all_content( $migrator->get_content_migrator() );
     $core_items = array();
     foreach ( $items as $key => $item ) {
         if ( 'WordPress Core' === $item['plugin_name'] && (int) $item['post_id'] === (int) $post_id ) {
@@ -174,12 +197,12 @@ try {
         )
     );
     $mixed_item_key = count( $mixed_items ) - 1;
-    $migrator->get_content_migrator()->set_setting( 'content', $mixed_items );
+    foogm_test_set_content_items( $migrator->get_content_migrator(), $mixed_items );
     $gallery_count_before_mixed_attempt = (int) wp_count_posts( FOOGALLERY_CPT_GALLERY )->publish;
     $mixed_result = $migrator->get_content_migrator()->migrate_and_replace_content( array( $identical_keys[0], $mixed_item_key ) );
     foogm_test_assert( 0 === $mixed_result['success'] && ! empty( $mixed_result['errors'] ), 'A stale mixed-selection item must fail the complete preflight.' );
     foogm_test_assert( $gallery_count_before_mixed_attempt === (int) wp_count_posts( FOOGALLERY_CPT_GALLERY )->publish, 'Mixed-selection preflight failure must not create a core FooGallery entity.' );
-    $migrator->get_content_migrator()->set_setting( 'content', $items );
+    foogm_test_set_content_items( $migrator->get_content_migrator(), $items );
 
     $gallery_count_before_stale_attempt = (int) wp_count_posts( FOOGALLERY_CPT_GALLERY )->publish;
     $stale_item = $core_items[ $identical_keys[0] ];
@@ -190,7 +213,7 @@ try {
     foogm_test_assert( $gallery_count_before_stale_attempt === (int) wp_count_posts( FOOGALLERY_CPT_GALLERY )->publish, 'A stale occurrence must not create a FooGallery entity.' );
 
     wp_update_post( array( 'ID' => $post_id, 'post_content' => $content ) );
-    $items = $migrator->get_content_migrator()->scan_content( true );
+    $items = foogm_test_scan_all_content( $migrator->get_content_migrator() );
     $identical_keys = array();
     foreach ( $items as $key => $item ) {
         if ( 'WordPress Core' === $item['plugin_name'] && (int) $item['post_id'] === (int) $post_id && $identical === $item['original_content'] ) {
@@ -206,7 +229,7 @@ try {
     foogm_test_assert( $gallery_count_before_draft_attempt === (int) wp_count_posts( FOOGALLERY_CPT_GALLERY )->publish, 'A draft source must not create a FooGallery entity.' );
     wp_update_post( array( 'ID' => $post_id, 'post_status' => 'publish' ) );
 
-    $items = $migrator->get_content_migrator()->scan_content( true );
+    $items = foogm_test_scan_all_content( $migrator->get_content_migrator() );
     $identical_keys = array();
     foreach ( $items as $key => $item ) {
         if ( 'WordPress Core' === $item['plugin_name'] && (int) $item['post_id'] === (int) $post_id && $identical === $item['original_content'] ) {
@@ -251,6 +274,9 @@ foreach ( array_unique( $created_attachments ) as $attachment_id ) {
     }
 }
 delete_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+if ( $migration_option_exists ) {
+    update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $migration_option_backup );
+}
 
 if ( $failure ) {
     throw $failure;
