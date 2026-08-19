@@ -1,0 +1,353 @@
+<?php
+/**
+ * Integration regression for WP core gallery migration.
+ *
+ * Run inside a disposable WordPress site with:
+ * wp eval-file tests/integration/core-gallery-migration.php
+ */
+
+if ( ! defined( 'ABSPATH' ) ) {
+    throw new RuntimeException( 'WordPress must be loaded.' );
+}
+
+function foogm_test_assert( $condition, $message ) {
+    if ( ! $condition ) {
+        throw new RuntimeException( $message );
+    }
+}
+
+function foogm_test_attachment( $label ) {
+    return wp_insert_attachment(
+        array(
+            'post_title'     => 'FooGallery Migrate Test ' . $label,
+            'post_status'    => 'inherit',
+            'post_mime_type' => 'image/png',
+            'guid'           => trailingslashit( wp_get_upload_dir()['baseurl'] ) . 'foogm-test-' . strtolower( $label ) . '.png',
+        )
+    );
+}
+
+function foogm_test_scan_all_content( $content_migrator, $reset = true ) {
+    $progress = $content_migrator->scan_content_batch( $reset );
+    $batches = 1;
+    while ( empty( $progress['complete'] ) && $batches < 1000 ) {
+        $progress = $content_migrator->scan_content_batch( false );
+        $batches++;
+    }
+    foogm_test_assert( ! empty( $progress['complete'] ), 'The bounded content scan must complete.' );
+    return $content_migrator->scan_content();
+}
+
+function foogm_test_set_content_items( $content_migrator, $items ) {
+    $content_migrator->set_setting(
+        \FooPlugins\FooGalleryMigrate\MigratorEngine::KEY_CONTENT . '_scan_state',
+        array(
+            'items'    => $items,
+            'progress' => $content_migrator->get_scan_progress(),
+        )
+    );
+}
+
+function foogm_test_find_core_plugin( $plugins ) {
+    foreach ( $plugins as $plugin ) {
+        if ( 'WordPress Core' === $plugin->name() ) {
+            return $plugin;
+        }
+    }
+    return false;
+}
+
+$created_posts = array();
+$created_attachments = array();
+$created_galleries = array();
+$failure = false;
+$migration_option_exists = false !== get_option( FOOGALLERY_MIGRATE_OPTION_DATA, false );
+$migration_option_backup = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+
+try {
+    $created_attachments[] = $first_id = foogm_test_attachment( 'First' );
+    $created_attachments[] = $second_id = foogm_test_attachment( 'Second' );
+    $missing_id = 99999999;
+
+    $shortcode = '[gallery ids="' . $first_id . ',' . $second_id . ',' . $first_id . ',' . $missing_id . '" columns="3" link="file" size="medium" orderby="post__in"]';
+    $identical = '[gallery ids="' . $second_id . ',' . $first_id . '" columns="2"]';
+    $block = '<!-- wp:group --><div class="wp-block-group"><!-- wp:gallery {"columns":2,"imageCrop":false,"linkTo":"media"} --><figure class="wp-block-gallery has-nested-images columns-2"><!-- wp:image {"id":' . $second_id . ',"sizeSlug":"large"} --><figure class="wp-block-image size-large"></figure><!-- /wp:image --><!-- wp:image {"id":' . $first_id . ',"sizeSlug":"large"} --><figure class="wp-block-image size-large"></figure><!-- /wp:image --></figure><!-- /wp:gallery --></div><!-- /wp:group -->';
+    $content = 'Escaped mention: [[gallery ids="' . $first_id . '"]]' . "\n\n" . $shortcode . "\n\n" . $block . "\n\n" . $identical . "\n\n" . $identical;
+
+    $created_posts[] = $post_id = wp_insert_post(
+        array(
+            'post_title'   => 'FooGallery Migrate Integration Fixture',
+            'post_type'    => 'post',
+            'post_status'  => 'publish',
+            'post_content' => $content,
+        )
+    );
+    $created_posts[] = wp_insert_post(
+        array(
+            'post_title'   => 'FooGallery Migrate Draft Fixture',
+            'post_type'    => 'post',
+            'post_status'  => 'draft',
+            'post_content' => $shortcode,
+        )
+    );
+    $created_posts[] = wp_insert_post(
+        array(
+            'post_title'   => 'FooGallery Migrate Malformed Fixture',
+            'post_type'    => 'page',
+            'post_status'  => 'publish',
+            'post_content' => '[gallery ids=""] <!-- wp:gallery --><p>empty</p><!-- /wp:gallery -->',
+        )
+    );
+    $created_posts[] = $attached_post_id = wp_insert_post(
+        array(
+            'post_title'   => 'FooGallery Migrate Attached Images Fixture',
+            'post_type'    => 'page',
+            'post_status'  => 'publish',
+            'post_content' => '[gallery columns="2" exclude="' . $missing_id . '"]',
+        )
+    );
+    wp_update_post( array( 'ID' => $first_id, 'post_parent' => $attached_post_id, 'menu_order' => 1 ) );
+    wp_update_post( array( 'ID' => $second_id, 'post_parent' => $attached_post_id, 'menu_order' => 2 ) );
+
+    delete_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+    $migrator = foogallery_migrate_migrator_instance();
+    $plugins = $migrator->run_detection();
+    $core_plugin = foogm_test_find_core_plugin( $plugins );
+
+    foogm_test_assert( false !== $core_plugin, 'WP core must be a first-class migration source.' );
+    foogm_test_assert( $core_plugin->is_detected, 'Published WP core galleries must be detected.' );
+    $test_init = new \FooPlugins\FooGalleryMigrate\Init();
+    foogm_test_assert( false !== has_action( 'admin_post_foogallery_migrate_detect_wordpress_core' ), 'The no-JS core detection handler must be registered.' );
+    foogm_test_assert( false !== has_action( 'admin_post_foogallery_migrate_content' ), 'The no-JS content migration handler must be registered.' );
+
+    ob_start();
+    require FOOGM_DIR . '/includes/views/view-migrate-tab-sources.php';
+    $source_view = ob_get_clean();
+    foogm_test_assert( false !== strpos( $source_view, 'Detect WordPress Galleries' ), 'The Plugins tab must provide a clear core gallery detection action.' );
+    foogm_test_assert( false !== strpos( $source_view, 'admin-post.php' ), 'Core detection must work without JavaScript.' );
+    foogm_test_assert( false !== strpos( $source_view, 'Replace with dynamic FooGalleries' ), 'The Plugins tab must explain dynamic replacement mode.' );
+    foogm_test_assert( false !== strpos( $source_view, 'Create reusable FooGallery records' ), 'The Plugins tab must explain reusable FooGallery mode.' );
+    foogm_test_assert( false !== strpos( $source_view, 'name="wordpress_gallery_mode"' ), 'The mode chooser must submit an explicit WordPress gallery mode.' );
+
+    $attached_occurrences = $core_plugin->find_content_occurrences( get_post( $attached_post_id ) );
+    foogm_test_assert( 1 === count( $attached_occurrences ), 'A classic [gallery] without explicit IDs must resolve attached images.' );
+    foogm_test_assert( array( $first_id, $second_id ) === $attached_occurrences[0]['attachment_ids'], 'Attached-image gallery order must follow menu order.' );
+
+    $spaced_block = '<!-- wp:gallery { "ids" : [' . $second_id . ', ' . $first_id . '], "columns" : 2 } /-->';
+    $hybrid_block = '<!-- wp:gallery {"ids":[' . $first_id . ',' . $second_id . ']} --><figure class="wp-block-gallery"><!-- wp:image {"id":' . $second_id . '} --><figure></figure><!-- /wp:image --><!-- wp:image {"id":' . $first_id . '} --><figure></figure><!-- /wp:image --></figure><!-- /wp:gallery -->';
+    $ordered_shortcode = '[gallery include="' . $first_id . ',' . $second_id . '" orderby="ID" order="DESC"]';
+    $created_posts[] = $formatting_post_id = wp_insert_post(
+        array(
+            'post_title'   => 'FooGallery Migrate Formatting Fixture',
+            'post_type'    => 'page',
+            'post_status'  => 'publish',
+            'post_content' => $spaced_block . "\n" . $spaced_block . "\n" . $hybrid_block . "\n" . $ordered_shortcode,
+        )
+    );
+    $formatting_occurrences = $core_plugin->find_content_occurrences( get_post( $formatting_post_id ) );
+    foogm_test_assert( 4 === count( $formatting_occurrences ), 'Noncanonical and repeated gallery blocks must be detected exactly.' );
+    foogm_test_assert( $spaced_block === $formatting_occurrences[0]['original_content'], 'Stored block formatting must remain exact.' );
+    foogm_test_assert( $formatting_occurrences[0]['match_offset'] !== $formatting_occurrences[1]['match_offset'], 'Repeated blocks must have distinct offsets.' );
+    foogm_test_assert( array( $second_id, $first_id ) === $formatting_occurrences[0]['attachment_ids'], 'Block image order must follow source IDs.' );
+    foogm_test_assert( array( $second_id, $first_id ) === $formatting_occurrences[2]['attachment_ids'], 'Nested image order must override conflicting legacy parent IDs.' );
+    foogm_test_assert( array( max( $first_id, $second_id ), min( $first_id, $second_id ) ) === $formatting_occurrences[3]['attachment_ids'], 'Shortcode orderby and order attributes must match WordPress core.' );
+
+    $galleries = array();
+    foreach ( $core_plugin->find_galleries() as $gallery ) {
+        if ( isset( $gallery->data['post_id'] ) && (int) $gallery->data['post_id'] === (int) $post_id ) {
+            $galleries[] = $gallery;
+        }
+    }
+    foogm_test_assert( 4 === count( $galleries ), 'Expected shortcode, nested block, and two identical shortcode occurrences; got ' . count( $galleries ) . '.' );
+    foogm_test_assert( 2 === count( $galleries[0]->children ), 'Missing and duplicate attachment IDs must be removed.' );
+    foogm_test_assert( $first_id === (int) $galleries[0]->children[0]->migrated_id, 'Attachment order must preserve the first image.' );
+    foogm_test_assert( $second_id === (int) $galleries[0]->children[1]->migrated_id, 'Attachment order must preserve the second image.' );
+    foogm_test_assert( '3' === (string) $galleries[0]->data['attributes']['columns'], 'Safely preservable shortcode attributes must remain available.' );
+
+    $migrator->set_migrator_setting(
+        \FooPlugins\FooGalleryMigrate\Plugins\WordPressCore::SETTING_MODE,
+        \FooPlugins\FooGalleryMigrate\Plugins\WordPressCore::MODE_DYNAMIC
+    );
+    $plugins = $migrator->run_detection();
+    $core_plugin = foogm_test_find_core_plugin( $plugins );
+    foogm_test_assert( \FooPlugins\FooGalleryMigrate\Plugins\WordPressCore::MODE_DYNAMIC === $core_plugin->get_migration_mode(), 'Dynamic mode must be persisted.' );
+    foogm_test_assert( array() === $core_plugin->find_galleries(), 'Dynamic mode must not add WordPress Core rows to the Galleries tab.' );
+
+    $dynamic_items = foogm_test_scan_all_content( $migrator->get_content_migrator() );
+    $dynamic_keys = array();
+    $dynamic_shortcode_item = false;
+    $dynamic_block_item = false;
+    foreach ( $dynamic_items as $key => $item ) {
+        if ( 'WordPress Core' !== $item['plugin_name'] || (int) $item['post_id'] !== (int) $post_id ) {
+            continue;
+        }
+        if ( false === $dynamic_shortcode_item && $shortcode === $item['original_content'] ) {
+            $dynamic_shortcode_item = $item;
+            $dynamic_keys[] = $key;
+        } elseif ( false === $dynamic_block_item && 'block' === $item['type'] ) {
+            $dynamic_block_item = $item;
+            $dynamic_keys[] = $key;
+        }
+    }
+    foogm_test_assert( 2 === count( $dynamic_keys ), 'Dynamic mode must expose the fixture shortcode and block as direct replacements.' );
+    foogm_test_assert( 'dynamic_gallery' === $dynamic_shortcode_item['object_type'], 'Dynamic shortcode items must be labeled as dynamic galleries.' );
+    $dynamic_shortcode_expected = '[foogallery attachment_ids="' . $first_id . ',' . $second_id . '"';
+    $dynamic_override_template = $migrator->get_override_gallery_template();
+    if ( ! empty( $dynamic_override_template ) ) {
+        $dynamic_shortcode_expected .= ' template="' . sanitize_key( $dynamic_override_template ) . '"';
+    }
+    $dynamic_shortcode_expected .= ' lightbox="foobox"]';
+    foogm_test_assert( $dynamic_shortcode_expected === $dynamic_shortcode_item['replacement_content'], 'Dynamic shortcode replacement must preserve normalized image order, the selected layout override, and lightbox behavior; got ' . $dynamic_shortcode_item['replacement_content'] . '.' );
+    foogm_test_assert( false !== strpos( $dynamic_block_item['replacement_content'], '"attachment_ids":[' . $second_id . ',' . $first_id . ']' ), 'Dynamic block replacement must preserve nested image order.' );
+
+    ob_start();
+    require FOOGM_DIR . '/includes/views/view-migrate-tab-content.php';
+    $dynamic_content_view = ob_get_clean();
+    foogm_test_assert( false !== strpos( $dynamic_content_view, 'Dynamic replacement mode' ), 'The content tab must identify dynamic mode.' );
+    foogm_test_assert( false !== strpos( $dynamic_content_view, 'Ready to replace' ), 'Dynamic core occurrences must be ready for direct replacement.' );
+
+    $gallery_count_before_dynamic = (int) wp_count_posts( FOOGALLERY_CPT_GALLERY )->publish;
+    $dynamic_result = $migrator->get_content_migrator()->migrate_and_replace_content( $dynamic_keys );
+    foogm_test_assert( 2 === $dynamic_result['success'], 'Dynamic mode must replace the selected shortcode and block.' );
+    foogm_test_assert( $gallery_count_before_dynamic === (int) wp_count_posts( FOOGALLERY_CPT_GALLERY )->publish, 'Dynamic mode must not create FooGallery records.' );
+    $dynamic_content = get_post( $post_id )->post_content;
+    foogm_test_assert( false === strpos( $dynamic_content, $shortcode ), 'The selected WordPress shortcode must be removed in dynamic mode.' );
+    foogm_test_assert( false === strpos( $dynamic_content, '<!-- wp:gallery' ), 'The selected WordPress Gallery block must be removed in dynamic mode.' );
+    foogm_test_assert( false !== strpos( $dynamic_content, $dynamic_shortcode_item['replacement_content'] ), 'The dynamic FooGallery shortcode must be stored in the post.' );
+    foogm_test_assert( false !== strpos( $dynamic_content, $dynamic_block_item['replacement_content'] ), 'The dynamic FooGallery block must be stored in the post.' );
+
+    wp_update_post( array( 'ID' => $post_id, 'post_content' => $content ) );
+    $migrator->set_migrator_setting(
+        \FooPlugins\FooGalleryMigrate\Plugins\WordPressCore::SETTING_MODE,
+        \FooPlugins\FooGalleryMigrate\Plugins\WordPressCore::MODE_CREATE
+    );
+    $plugins = $migrator->run_detection();
+    $core_plugin = foogm_test_find_core_plugin( $plugins );
+    foogm_test_assert( \FooPlugins\FooGalleryMigrate\Plugins\WordPressCore::MODE_CREATE === $core_plugin->get_migration_mode(), 'Reusable FooGallery mode must be persisted.' );
+
+    $items = foogm_test_scan_all_content( $migrator->get_content_migrator() );
+    $core_items = array();
+    foreach ( $items as $key => $item ) {
+        if ( 'WordPress Core' === $item['plugin_name'] && (int) $item['post_id'] === (int) $post_id ) {
+            $core_items[ $key ] = $item;
+        }
+    }
+    foogm_test_assert( 4 === count( $core_items ), 'Blocks / Shortcodes must list every valid core occurrence.' );
+    foogm_test_assert( 'block' === array_values( $core_items )[1]['type'], 'Nested core/gallery must be listed as a block.' );
+    foogm_test_assert( ! empty( array_values( $core_items )[0]['source_context'] ), 'Each occurrence must include source context.' );
+
+    ob_start();
+    require FOOGM_DIR . '/includes/views/view-migrate-tab-content.php';
+    $content_view = ob_get_clean();
+    foogm_test_assert( false !== strpos( $content_view, 'Migrate &amp; Replace Selected' ), 'Core occurrences must expose a batch migrate-and-replace action.' );
+    foogm_test_assert( false !== strpos( $content_view, 'admin-post.php' ), 'Content migration must submit to the admin-post controller without JavaScript.' );
+    foogm_test_assert( false !== strpos( $content_view, 'value="foogallery_migrate_content"' ), 'Content migration must retain a no-JS submit action.' );
+    foogm_test_assert( false !== strpos( $content_view, 'Gallery shortcode' ), 'The content table must show per-occurrence source context.' );
+    foogm_test_assert( false !== strpos( $content_view, 'Reusable FooGallery mode' ), 'The content tab must identify reusable mode.' );
+
+    $identical_keys = array();
+    foreach ( $core_items as $key => $item ) {
+        if ( $identical === $item['original_content'] ) {
+            $identical_keys[] = $key;
+        }
+    }
+    foogm_test_assert( 2 === count( $identical_keys ), 'Both identical shortcode occurrences must be independently addressable.' );
+
+    $mixed_items = $items;
+    $mixed_items[] = array_merge(
+        $mixed_items[ $identical_keys[0] ],
+        array(
+            'plugin_name'             => 'Legacy Fixture',
+            'original_content'        => '[stale-legacy-gallery]',
+            'match_offset'            => 0,
+            'migrated'                => true,
+            'migrated_foogallery_id'  => 1,
+        )
+    );
+    $mixed_item_key = count( $mixed_items ) - 1;
+    foogm_test_set_content_items( $migrator->get_content_migrator(), $mixed_items );
+    $gallery_count_before_mixed_attempt = (int) wp_count_posts( FOOGALLERY_CPT_GALLERY )->publish;
+    $mixed_result = $migrator->get_content_migrator()->migrate_and_replace_content( array( $identical_keys[0], $mixed_item_key ) );
+    foogm_test_assert( 0 === $mixed_result['success'] && ! empty( $mixed_result['errors'] ), 'A stale mixed-selection item must fail the complete preflight.' );
+    foogm_test_assert( $gallery_count_before_mixed_attempt === (int) wp_count_posts( FOOGALLERY_CPT_GALLERY )->publish, 'Mixed-selection preflight failure must not create a core FooGallery entity.' );
+    foogm_test_set_content_items( $migrator->get_content_migrator(), $items );
+
+    $gallery_count_before_stale_attempt = (int) wp_count_posts( FOOGALLERY_CPT_GALLERY )->publish;
+    $stale_item = $core_items[ $identical_keys[0] ];
+    $stale_content = substr_replace( $content, '[gallery ids="changed"]', $stale_item['match_offset'], strlen( $stale_item['original_content'] ) );
+    wp_update_post( array( 'ID' => $post_id, 'post_content' => $stale_content ) );
+    $stale_result = $migrator->get_content_migrator()->migrate_and_replace_content( array( $identical_keys[0] ) );
+    foogm_test_assert( 0 === $stale_result['success'] && ! empty( $stale_result['errors'] ), 'Changed content must fail preflight before migration.' );
+    foogm_test_assert( $gallery_count_before_stale_attempt === (int) wp_count_posts( FOOGALLERY_CPT_GALLERY )->publish, 'A stale occurrence must not create a FooGallery entity.' );
+
+    wp_update_post( array( 'ID' => $post_id, 'post_content' => $content ) );
+    $items = foogm_test_scan_all_content( $migrator->get_content_migrator() );
+    $identical_keys = array();
+    foreach ( $items as $key => $item ) {
+        if ( 'WordPress Core' === $item['plugin_name'] && (int) $item['post_id'] === (int) $post_id && $identical === $item['original_content'] ) {
+            $identical_keys[] = $key;
+        }
+    }
+    foogm_test_assert( 2 === count( $identical_keys ), 'Restored identical occurrences must be rescanned.' );
+
+    $gallery_count_before_draft_attempt = (int) wp_count_posts( FOOGALLERY_CPT_GALLERY )->publish;
+    wp_update_post( array( 'ID' => $post_id, 'post_status' => 'draft' ) );
+    $draft_result = $migrator->get_content_migrator()->migrate_and_replace_content( array( $identical_keys[0] ) );
+    foogm_test_assert( 0 === $draft_result['success'] && ! empty( $draft_result['errors'] ), 'A post that is no longer published must fail migration preflight.' );
+    foogm_test_assert( $gallery_count_before_draft_attempt === (int) wp_count_posts( FOOGALLERY_CPT_GALLERY )->publish, 'A draft source must not create a FooGallery entity.' );
+    wp_update_post( array( 'ID' => $post_id, 'post_status' => 'publish' ) );
+
+    $items = foogm_test_scan_all_content( $migrator->get_content_migrator() );
+    $identical_keys = array();
+    foreach ( $items as $key => $item ) {
+        if ( 'WordPress Core' === $item['plugin_name'] && (int) $item['post_id'] === (int) $post_id && $identical === $item['original_content'] ) {
+            $identical_keys[] = $key;
+        }
+    }
+    foogm_test_assert( 2 === count( $identical_keys ), 'Republished occurrences must be rescanned.' );
+
+    $result = $migrator->get_content_migrator()->migrate_and_replace_content( array( $identical_keys[0] ) );
+    foogm_test_assert( 1 === $result['success'], 'One selected occurrence must migrate and replace successfully.' );
+    $after_first = get_post( $post_id )->post_content;
+    foogm_test_assert( 1 === substr_count( $after_first, $identical ), 'Replacing one occurrence must not replace an identical sibling.' );
+    foogm_test_assert( 1 === substr_count( $after_first, '[foogallery id="' ), 'The exact selected occurrence must become one FooGallery reference.' );
+
+    $gallery_count = (int) wp_count_posts( FOOGALLERY_CPT_GALLERY )->publish;
+    $retry = $migrator->get_content_migrator()->migrate_and_replace_content( array( $identical_keys[0] ) );
+    foogm_test_assert( 0 === $retry['success'], 'Retrying a replaced occurrence must be a no-op.' );
+    foogm_test_assert( $gallery_count === (int) wp_count_posts( FOOGALLERY_CPT_GALLERY )->publish, 'Retry must not duplicate FooGallery entities.' );
+
+    foreach ( $migrator->get_migrated_objects() as $object ) {
+        if ( is_object( $object ) && 'gallery' === $object->type() && 'WordPress Core' === $object->plugin->name() ) {
+            $created_galleries[] = (int) $object->migrated_id;
+        }
+    }
+} catch ( Exception $exception ) {
+    $failure = $exception;
+}
+
+foreach ( array_unique( $created_galleries ) as $gallery_id ) {
+    if ( $gallery_id > 0 ) {
+        wp_delete_post( $gallery_id, true );
+    }
+}
+foreach ( array_unique( $created_posts ) as $post_id ) {
+    if ( $post_id > 0 ) {
+        wp_delete_post( $post_id, true );
+    }
+}
+foreach ( array_unique( $created_attachments ) as $attachment_id ) {
+    if ( $attachment_id > 0 ) {
+        wp_delete_attachment( $attachment_id, true );
+    }
+}
+delete_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+if ( $migration_option_exists ) {
+    update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $migration_option_backup );
+}
+
+if ( $failure ) {
+    throw $failure;
+}
+
+echo "PASS: WP core gallery detection, dynamic replacement, reusable migration, exact replacement, order, attributes, and idempotency.\n";
