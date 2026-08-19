@@ -80,6 +80,7 @@ Update now to get all the latest features, bug fixes and improvements!
 == Changelog ==
 
 = 1.14 =
+* Added migration support for built-in WordPress Gallery blocks and [gallery] shortcodes, with a choice between reusable FooGallery records and dynamic replacements stored directly in content.
 * Fixed large content migrations running out of memory or timing out by scanning and migrating content in bounded batches.
 * Added regression coverage for batched content scanning, AJAX migration progress, and hardened database queries.
 
