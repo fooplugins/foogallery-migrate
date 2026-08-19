@@ -4,7 +4,7 @@ Tags: gallery, image gallery, photo gallery, wordpress gallery plugin, migrate
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 5.4
-Stable tag: 1.13
+Stable tag: 1.14
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -87,7 +87,6 @@ Update now to get all the latest features, bug fixes and improvements!
 * Added regression coverage for batched content scanning, AJAX migration progress, and hardened database queries.
 
 = 1.13 =
-* Added two migration modes for built-in WordPress galleries: reusable FooGallery records or direct dynamic FooGallery replacements.
 * Added direct-access guards to plugin include and view files.
 * Hardened legacy NextGEN and 10Web album queries with sanitized IDs and prepared SQL.
 * Escaped migrated album edit links on the album migration screen.
