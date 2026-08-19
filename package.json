@@ -1,7 +1,7 @@
 {
   "name": "foogallery-migrate",
   "description": "FooGallery Migrate",
-  "version": "1.13",
+  "version": "1.14",
   "author": "Brad Vincent",
   "repository": {
     "type": "git",

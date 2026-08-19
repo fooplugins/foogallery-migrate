@@ -79,6 +79,10 @@ Update now to get all the latest features, bug fixes and improvements!
 
 == Changelog ==
 
+= 1.14 =
+* Fixed large content migrations running out of memory or timing out by scanning and migrating content in bounded batches.
+* Added regression coverage for batched content scanning, AJAX migration progress, and hardened database queries.
+
 = 1.13 =
 * Added direct-access guards to plugin include and view files.
 * Hardened legacy NextGEN and 10Web album queries with sanitized IDs and prepared SQL.
