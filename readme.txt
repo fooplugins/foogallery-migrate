@@ -26,12 +26,14 @@ Migrate to FooGallery from other gallery plugins, including:
 *	Photo Gallery by 10Web
 *	Robo Gallery
 *	Album and Image Gallery Plus Lightbox (plugin was closed Apr 2026 due to being compromised)
+*	Built-in WordPress Gallery blocks and [gallery] shortcodes
 
 Features:
 
 * Migrate images and galleries
 * Migrate albums
 * Migrate blocks / shortcodes in post & page content
+* Choose whether built-in WordPress galleries create reusable FooGallery records or become dynamic FooGalleries stored directly in content
 
 = Test It First =
 
@@ -80,6 +82,7 @@ Update now to get all the latest features, bug fixes and improvements!
 == Changelog ==
 
 = 1.13 =
+* Added two migration modes for built-in WordPress galleries: reusable FooGallery records or direct dynamic FooGallery replacements.
 * Added direct-access guards to plugin include and view files.
 * Hardened legacy NextGEN and 10Web album queries with sanitized IDs and prepared SQL.
 * Escaped migrated album edit links on the album migration screen.

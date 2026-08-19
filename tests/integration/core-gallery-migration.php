@@ -48,6 +48,15 @@ function foogm_test_set_content_items( $content_migrator, $items ) {
     );
 }
 
+function foogm_test_find_core_plugin( $plugins ) {
+    foreach ( $plugins as $plugin ) {
+        if ( 'WordPress Core' === $plugin->name() ) {
+            return $plugin;
+        }
+    }
+    return false;
+}
+
 $created_posts = array();
 $created_attachments = array();
 $created_galleries = array();
@@ -103,13 +112,7 @@ try {
     delete_option( FOOGALLERY_MIGRATE_OPTION_DATA );
     $migrator = foogallery_migrate_migrator_instance();
     $plugins = $migrator->run_detection();
-    $core_plugin = false;
-    foreach ( $plugins as $plugin ) {
-        if ( 'WordPress Core' === $plugin->name() ) {
-            $core_plugin = $plugin;
-            break;
-        }
-    }
+    $core_plugin = foogm_test_find_core_plugin( $plugins );
 
     foogm_test_assert( false !== $core_plugin, 'WP core must be a first-class migration source.' );
     foogm_test_assert( $core_plugin->is_detected, 'Published WP core galleries must be detected.' );
@@ -122,6 +125,9 @@ try {
     $source_view = ob_get_clean();
     foogm_test_assert( false !== strpos( $source_view, 'Detect WordPress Galleries' ), 'The Plugins tab must provide a clear core gallery detection action.' );
     foogm_test_assert( false !== strpos( $source_view, 'admin-post.php' ), 'Core detection must work without JavaScript.' );
+    foogm_test_assert( false !== strpos( $source_view, 'Replace with dynamic FooGalleries' ), 'The Plugins tab must explain dynamic replacement mode.' );
+    foogm_test_assert( false !== strpos( $source_view, 'Create reusable FooGallery records' ), 'The Plugins tab must explain reusable FooGallery mode.' );
+    foogm_test_assert( false !== strpos( $source_view, 'name="wordpress_gallery_mode"' ), 'The mode chooser must submit an explicit WordPress gallery mode.' );
 
     $attached_occurrences = $core_plugin->find_content_occurrences( get_post( $attached_post_id ) );
     foogm_test_assert( 1 === count( $attached_occurrences ), 'A classic [gallery] without explicit IDs must resolve attached images.' );
@@ -158,6 +164,67 @@ try {
     foogm_test_assert( $second_id === (int) $galleries[0]->children[1]->migrated_id, 'Attachment order must preserve the second image.' );
     foogm_test_assert( '3' === (string) $galleries[0]->data['attributes']['columns'], 'Safely preservable shortcode attributes must remain available.' );
 
+    $migrator->set_migrator_setting(
+        \FooPlugins\FooGalleryMigrate\Plugins\WordPressCore::SETTING_MODE,
+        \FooPlugins\FooGalleryMigrate\Plugins\WordPressCore::MODE_DYNAMIC
+    );
+    $plugins = $migrator->run_detection();
+    $core_plugin = foogm_test_find_core_plugin( $plugins );
+    foogm_test_assert( \FooPlugins\FooGalleryMigrate\Plugins\WordPressCore::MODE_DYNAMIC === $core_plugin->get_migration_mode(), 'Dynamic mode must be persisted.' );
+    foogm_test_assert( array() === $core_plugin->find_galleries(), 'Dynamic mode must not add WordPress Core rows to the Galleries tab.' );
+
+    $dynamic_items = foogm_test_scan_all_content( $migrator->get_content_migrator() );
+    $dynamic_keys = array();
+    $dynamic_shortcode_item = false;
+    $dynamic_block_item = false;
+    foreach ( $dynamic_items as $key => $item ) {
+        if ( 'WordPress Core' !== $item['plugin_name'] || (int) $item['post_id'] !== (int) $post_id ) {
+            continue;
+        }
+        if ( false === $dynamic_shortcode_item && $shortcode === $item['original_content'] ) {
+            $dynamic_shortcode_item = $item;
+            $dynamic_keys[] = $key;
+        } elseif ( false === $dynamic_block_item && 'block' === $item['type'] ) {
+            $dynamic_block_item = $item;
+            $dynamic_keys[] = $key;
+        }
+    }
+    foogm_test_assert( 2 === count( $dynamic_keys ), 'Dynamic mode must expose the fixture shortcode and block as direct replacements.' );
+    foogm_test_assert( 'dynamic_gallery' === $dynamic_shortcode_item['object_type'], 'Dynamic shortcode items must be labeled as dynamic galleries.' );
+    $dynamic_shortcode_expected = '[foogallery attachment_ids="' . $first_id . ',' . $second_id . '"';
+    $dynamic_override_template = $migrator->get_override_gallery_template();
+    if ( ! empty( $dynamic_override_template ) ) {
+        $dynamic_shortcode_expected .= ' template="' . sanitize_key( $dynamic_override_template ) . '"';
+    }
+    $dynamic_shortcode_expected .= ' lightbox="foobox"]';
+    foogm_test_assert( $dynamic_shortcode_expected === $dynamic_shortcode_item['replacement_content'], 'Dynamic shortcode replacement must preserve normalized image order, the selected layout override, and lightbox behavior; got ' . $dynamic_shortcode_item['replacement_content'] . '.' );
+    foogm_test_assert( false !== strpos( $dynamic_block_item['replacement_content'], '"attachment_ids":[' . $second_id . ',' . $first_id . ']' ), 'Dynamic block replacement must preserve nested image order.' );
+
+    ob_start();
+    require FOOGM_DIR . '/includes/views/view-migrate-tab-content.php';
+    $dynamic_content_view = ob_get_clean();
+    foogm_test_assert( false !== strpos( $dynamic_content_view, 'Dynamic replacement mode' ), 'The content tab must identify dynamic mode.' );
+    foogm_test_assert( false !== strpos( $dynamic_content_view, 'Ready to replace' ), 'Dynamic core occurrences must be ready for direct replacement.' );
+
+    $gallery_count_before_dynamic = (int) wp_count_posts( FOOGALLERY_CPT_GALLERY )->publish;
+    $dynamic_result = $migrator->get_content_migrator()->migrate_and_replace_content( $dynamic_keys );
+    foogm_test_assert( 2 === $dynamic_result['success'], 'Dynamic mode must replace the selected shortcode and block.' );
+    foogm_test_assert( $gallery_count_before_dynamic === (int) wp_count_posts( FOOGALLERY_CPT_GALLERY )->publish, 'Dynamic mode must not create FooGallery records.' );
+    $dynamic_content = get_post( $post_id )->post_content;
+    foogm_test_assert( false === strpos( $dynamic_content, $shortcode ), 'The selected WordPress shortcode must be removed in dynamic mode.' );
+    foogm_test_assert( false === strpos( $dynamic_content, '<!-- wp:gallery' ), 'The selected WordPress Gallery block must be removed in dynamic mode.' );
+    foogm_test_assert( false !== strpos( $dynamic_content, $dynamic_shortcode_item['replacement_content'] ), 'The dynamic FooGallery shortcode must be stored in the post.' );
+    foogm_test_assert( false !== strpos( $dynamic_content, $dynamic_block_item['replacement_content'] ), 'The dynamic FooGallery block must be stored in the post.' );
+
+    wp_update_post( array( 'ID' => $post_id, 'post_content' => $content ) );
+    $migrator->set_migrator_setting(
+        \FooPlugins\FooGalleryMigrate\Plugins\WordPressCore::SETTING_MODE,
+        \FooPlugins\FooGalleryMigrate\Plugins\WordPressCore::MODE_CREATE
+    );
+    $plugins = $migrator->run_detection();
+    $core_plugin = foogm_test_find_core_plugin( $plugins );
+    foogm_test_assert( \FooPlugins\FooGalleryMigrate\Plugins\WordPressCore::MODE_CREATE === $core_plugin->get_migration_mode(), 'Reusable FooGallery mode must be persisted.' );
+
     $items = foogm_test_scan_all_content( $migrator->get_content_migrator() );
     $core_items = array();
     foreach ( $items as $key => $item ) {
@@ -176,6 +243,7 @@ try {
     foogm_test_assert( false !== strpos( $content_view, 'admin-post.php' ), 'Content migration must submit to the admin-post controller without JavaScript.' );
     foogm_test_assert( false !== strpos( $content_view, 'value="foogallery_migrate_content"' ), 'Content migration must retain a no-JS submit action.' );
     foogm_test_assert( false !== strpos( $content_view, 'Gallery shortcode' ), 'The content table must show per-occurrence source context.' );
+    foogm_test_assert( false !== strpos( $content_view, 'Reusable FooGallery mode' ), 'The content tab must identify reusable mode.' );
 
     $identical_keys = array();
     foreach ( $core_items as $key => $item ) {
@@ -282,4 +350,4 @@ if ( $failure ) {
     throw $failure;
 }
 
-echo "PASS: WP core gallery detection, parsing, exact replacement, order, attributes, and idempotency.\n";
+echo "PASS: WP core gallery detection, dynamic replacement, reusable migration, exact replacement, order, attributes, and idempotency.\n";

@@ -17,6 +17,31 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\WordPressCore' ) ) {
      */
     class WordPressCore extends Plugin {
 
+        const SETTING_MODE = 'wordpress-core-mode';
+        const MODE_CREATE = 'create';
+        const MODE_DYNAMIC = 'dynamic';
+
+        /**
+         * Normalize the saved migration mode.
+         *
+         * @param string $mode Candidate mode.
+         * @return string
+         */
+        static function normalize_mode( $mode ) {
+            return self::MODE_DYNAMIC === $mode ? self::MODE_DYNAMIC : self::MODE_CREATE;
+        }
+
+        /**
+         * Return the selected WordPress core gallery migration mode.
+         *
+         * @return string
+         */
+        function get_migration_mode() {
+            return self::normalize_mode(
+                foogallery_migrate_migrator_instance()->get_migrator_setting( self::SETTING_MODE, self::MODE_CREATE )
+            );
+        }
+
         /**
          * Source name.
          *
@@ -48,6 +73,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\WordPressCore' ) ) {
          */
         function find_galleries() {
             $galleries = array();
+
+            if ( self::MODE_DYNAMIC === $this->get_migration_mode() ) {
+                return $galleries;
+            }
 
             foreach ( $this->get_eligible_posts() as $post ) {
                 foreach ( $this->find_content_occurrences( $post ) as $occurrence ) {
@@ -218,10 +247,68 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\WordPressCore' ) ) {
                     $number,
                     count( $occurrence['attachment_ids'] )
                 );
+                if ( self::MODE_DYNAMIC === $this->get_migration_mode() ) {
+                    $occurrence['replacement_content'] = $this->build_dynamic_replacement( $occurrence );
+                }
                 $occurrences[] = $occurrence;
             }
 
             return $occurrences;
+        }
+
+        /**
+         * Dynamic mode replaces source content without creating FooGallery posts.
+         *
+         * @param string $original_content Original shortcode or block markup.
+         * @param string $block_name Source block name.
+         * @return string
+         */
+        function get_content_object_type( $original_content, $block_name = '' ) {
+            return self::MODE_DYNAMIC === $this->get_migration_mode() ? 'dynamic_gallery' : 'gallery';
+        }
+
+        /**
+         * Build a dynamic FooGallery shortcode or block for one source occurrence.
+         *
+         * @param array $occurrence Parsed WordPress gallery occurrence.
+         * @return string
+         */
+        private function build_dynamic_replacement( $occurrence ) {
+            $attachment_ids = isset( $occurrence['attachment_ids'] ) ? array_values( array_map( 'absint', $occurrence['attachment_ids'] ) ) : array();
+            if ( empty( $attachment_ids ) ) {
+                return '';
+            }
+
+            $attributes = isset( $occurrence['attributes'] ) && is_array( $occurrence['attributes'] ) ? $occurrence['attributes'] : array();
+            $dynamic_options = array();
+            $template = foogallery_migrate_migrator_instance()->get_override_gallery_template();
+            if ( ! empty( $template ) ) {
+                $dynamic_options['template'] = sanitize_key( $template );
+            }
+
+            $link = isset( $attributes['link'] ) ? $attributes['link'] : ( isset( $attributes['linkTo'] ) ? $attributes['linkTo'] : '' );
+            if ( in_array( $link, array( 'file', 'media' ), true ) ) {
+                $dynamic_options['lightbox'] = 'foobox';
+            } elseif ( 'none' === $link ) {
+                $dynamic_options['lightbox'] = 'none';
+            }
+
+            if ( 'block' === $occurrence['type'] ) {
+                $block_attributes = array_merge(
+                    array( 'attachment_ids' => $attachment_ids ),
+                    $dynamic_options
+                );
+                return '<!-- wp:fooplugins/foogallery ' . wp_json_encode( $block_attributes ) . ' /-->';
+            }
+
+            $shortcode_attributes = array(
+                'attachment_ids="' . implode( ',', $attachment_ids ) . '"',
+            );
+            foreach ( $dynamic_options as $key => $value ) {
+                $shortcode_attributes[] = sanitize_key( $key ) . '="' . esc_attr( $value ) . '"';
+            }
+
+            return '[foogallery ' . implode( ' ', $shortcode_attributes ) . ']';
         }
 
         /**

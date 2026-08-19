@@ -53,6 +53,12 @@ if ( ! defined( 'ABSPATH' ) ) {
 $wordpress_gallery_detected = isset( $_GET['wordpress-gallery-detected'] ) ? sanitize_key( wp_unslash( $_GET['wordpress-gallery-detected'] ) ) : '';
 $wordpress_gallery_count = isset( $_GET['wordpress-gallery-count'] ) ? absint( wp_unslash( $_GET['wordpress-gallery-count'] ) ) : 0;
 $wordpress_scan_complete = isset( $_GET['wordpress-scan-complete'] ) ? sanitize_key( wp_unslash( $_GET['wordpress-scan-complete'] ) ) : '';
+$wordpress_gallery_mode = \FooPlugins\FooGalleryMigrate\Plugins\WordPressCore::normalize_mode(
+    $migrator->get_migrator_setting(
+        \FooPlugins\FooGalleryMigrate\Plugins\WordPressCore::SETTING_MODE,
+        \FooPlugins\FooGalleryMigrate\Plugins\WordPressCore::MODE_CREATE
+    )
+);
 if ( '' !== $wordpress_gallery_detected && '0' === $wordpress_scan_complete ) {
     echo '<div class="notice notice-info inline"><p>';
     printf(
@@ -73,14 +79,60 @@ if ( '' !== $wordpress_gallery_detected && '0' === $wordpress_scan_complete ) {
     echo '</p></div>';
 }
 ?>
-<div class="notice notice-info inline">
+<style>
+    .foogallery-wordpress-detection summary {
+        cursor: pointer;
+        display: inline-block;
+    }
+    .foogallery-wordpress-detection summary::marker,
+    .foogallery-wordpress-detection summary::-webkit-details-marker {
+        display: none;
+        content: '';
+    }
+    .foogallery-wordpress-mode-options {
+        margin: 16px 0 12px;
+        max-width: 760px;
+    }
+    .foogallery-wordpress-mode-option {
+        border-top: 1px solid #dcdcde;
+        display: grid;
+        gap: 4px 8px;
+        grid-template-columns: 20px 1fr;
+        padding: 12px 0;
+    }
+    .foogallery-wordpress-mode-option input {
+        margin-top: 2px;
+    }
+    .foogallery-wordpress-mode-option .description {
+        grid-column: 2;
+        margin: 0;
+    }
+</style>
+<div class="notice notice-info inline foogallery-wordpress-detection">
     <p><strong><?php esc_html_e( 'Built-in WordPress galleries', 'foogallery-migrate' ); ?></strong></p>
     <p><?php esc_html_e( 'Scan published posts and pages for valid [gallery] shortcodes and core Gallery blocks. Detection does not change content.', 'foogallery-migrate' ); ?></p>
-    <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
-        <input type="hidden" name="action" value="foogallery_migrate_detect_wordpress_core">
-        <?php wp_nonce_field( 'foogallery_migrate_detect_wordpress_core' ); ?>
-        <button type="submit" class="button button-primary"><?php esc_html_e( 'Detect WordPress Galleries', 'foogallery-migrate' ); ?></button>
-    </form>
+    <details>
+        <summary class="button button-primary"><?php esc_html_e( 'Detect WordPress Galleries', 'foogallery-migrate' ); ?></summary>
+        <form method="post" action="<?php echo esc_url( admin_url( 'admin-post.php' ) ); ?>">
+            <input type="hidden" name="action" value="foogallery_migrate_detect_wordpress_core">
+            <?php wp_nonce_field( 'foogallery_migrate_detect_wordpress_core' ); ?>
+            <fieldset class="foogallery-wordpress-mode-options">
+                <legend><strong><?php esc_html_e( 'Choose how WordPress galleries should be migrated', 'foogallery-migrate' ); ?></strong></legend>
+                <label class="foogallery-wordpress-mode-option">
+                    <input type="radio" name="wordpress_gallery_mode" value="<?php echo esc_attr( \FooPlugins\FooGalleryMigrate\Plugins\WordPressCore::MODE_DYNAMIC ); ?>" <?php checked( $wordpress_gallery_mode, \FooPlugins\FooGalleryMigrate\Plugins\WordPressCore::MODE_DYNAMIC ); ?>>
+                    <strong><?php esc_html_e( 'Replace with dynamic FooGalleries', 'foogallery-migrate' ); ?></strong>
+                    <span class="description"><?php esc_html_e( 'Stores the image selection directly in each post or page. No FooGallery records are created, and results appear only in Blocks / Shortcodes.', 'foogallery-migrate' ); ?></span>
+                </label>
+                <label class="foogallery-wordpress-mode-option">
+                    <input type="radio" name="wordpress_gallery_mode" value="<?php echo esc_attr( \FooPlugins\FooGalleryMigrate\Plugins\WordPressCore::MODE_CREATE ); ?>" <?php checked( $wordpress_gallery_mode, \FooPlugins\FooGalleryMigrate\Plugins\WordPressCore::MODE_CREATE ); ?>>
+                    <strong><?php esc_html_e( 'Create reusable FooGallery records', 'foogallery-migrate' ); ?></strong>
+                    <span class="description"><?php esc_html_e( 'Creates an editable FooGallery for each occurrence, then replaces the source content with its ID. Results appear in Galleries and Blocks / Shortcodes.', 'foogallery-migrate' ); ?></span>
+                </label>
+            </fieldset>
+            <p class="description"><?php esc_html_e( 'Changing mode does not delete FooGalleries created by an earlier migration.', 'foogallery-migrate' ); ?></p>
+            <p><button type="submit" class="button button-primary"><?php esc_html_e( 'Scan WordPress Galleries', 'foogallery-migrate' ); ?></button></p>
+        </form>
+    </details>
 </div>
 <ul>
     <?php

@@ -374,6 +374,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 							if ( ! empty( $occurrence['attributes'] ) ) {
 								$item['attributes'] = $occurrence['attributes'];
 							}
+							if ( ! empty( $occurrence['replacement_content'] ) && is_string( $occurrence['replacement_content'] ) ) {
+								$item['replacement_content'] = $occurrence['replacement_content'];
+							}
 							if ( isset( $occurrence['match_offset'] ) ) {
 								$item['match_offset'] = (int) $occurrence['match_offset'];
 							}
@@ -1406,7 +1409,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				$preflight_post_contents[ (int) $post->ID ] = $post->post_content;
 
 				$is_core = isset( $item['plugin_name'] ) && 'WordPress Core' === $item['plugin_name'];
-				if ( $is_core && ( empty( $item['migrated'] ) || empty( $item['migrated_foogallery_id'] ) ) ) {
+				$has_direct_replacement = isset( $item['replacement_content'] ) && is_string( $item['replacement_content'] ) && '' !== trim( $item['replacement_content'] );
+				if ( $has_direct_replacement ) {
+					continue;
+				} elseif ( $is_core && ( empty( $item['migrated'] ) || empty( $item['migrated_foogallery_id'] ) ) ) {
 					$core_source_ids[ (string) $item['gallery_id'] ] = true;
 				} elseif ( ! $is_core && ( empty( $item['migrated'] ) || empty( $item['migrated_foogallery_id'] ) ) ) {
 					$preflight_errors[] = sprintf(
@@ -1508,6 +1514,33 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			$scan_paused = $has_scanned_content && ! $progress['complete'];
 
 			wp_nonce_field( 'foogallery_content_migrate', 'foogallery_content_migrate', false );
+
+			$core_dynamic_items = array_filter(
+				$content_items,
+				function( $item ) {
+					return is_array( $item )
+						&& isset( $item['plugin_name'] )
+						&& 'WordPress Core' === $item['plugin_name']
+						&& ! empty( $item['replacement_content'] );
+				}
+			);
+			$core_reusable_items = array_filter(
+				$content_items,
+				function( $item ) {
+					return is_array( $item )
+						&& isset( $item['plugin_name'] )
+						&& 'WordPress Core' === $item['plugin_name']
+						&& empty( $item['replacement_content'] );
+				}
+			);
+
+			if ( ! empty( $core_dynamic_items ) ) {
+				echo '<div class="notice notice-info inline"><p><strong>' . esc_html__( 'WordPress galleries: Dynamic replacement mode', 'foogallery-migrate' ) . '</strong><br>';
+				echo esc_html__( 'Selected occurrences will be replaced with dynamic FooGalleries. No FooGallery records will be created.', 'foogallery-migrate' ) . '</p></div>';
+			} elseif ( ! empty( $core_reusable_items ) ) {
+				echo '<div class="notice notice-info inline"><p><strong>' . esc_html__( 'WordPress galleries: Reusable FooGallery mode', 'foogallery-migrate' ) . '</strong><br>';
+				echo esc_html__( 'Selected occurrences will create editable FooGallery records before the source content is replaced.', 'foogallery-migrate' ) . '</p></div>';
+			}
 
 			if ( $scan_paused ) {
 				echo '<div class="notice notice-warning inline"><p>';
@@ -1683,10 +1716,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 							<td>
 								<?php if ( $is_migrated ) { ?>
 									<span style="color: #080;"><?php esc_html_e( 'Migrated', 'foogallery-migrate' ); ?></span>
+								<?php } else if ( $is_direct_replacement ) { ?>
+									<span style="color: #080;"><?php esc_html_e( 'Ready to replace', 'foogallery-migrate' ); ?></span>
 								<?php } elseif ( $is_core ) { ?>
 									<span style="color: #2271b1;"><?php esc_html_e( 'Ready to migrate', 'foogallery-migrate' ); ?></span>
-								<?php } else if ( $is_direct_replacement ) { ?>
-									<span style="color: #080;"><?php esc_html_e( 'Ready', 'foogallery-migrate' ); ?></span>
 								<?php } else { ?>
 									<span style="color: #f60;"><?php esc_html_e( 'Not Migrated', 'foogallery-migrate' ); ?></span>
 								<?php } ?>

@@ -141,6 +141,13 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             check_admin_referer( 'foogallery_migrate_detect_wordpress_core' );
 
             $migrator = foogallery_migrate_migrator_instance();
+            $mode = isset( $_POST['wordpress_gallery_mode'] ) ? sanitize_key( wp_unslash( $_POST['wordpress_gallery_mode'] ) ) : '';
+            if ( ! in_array( $mode, array( Plugins\WordPressCore::MODE_CREATE, Plugins\WordPressCore::MODE_DYNAMIC ), true ) ) {
+                wp_die( esc_html__( 'Choose a valid WordPress gallery migration mode.', 'foogallery-migrate' ) );
+            }
+            if ( false === $migrator->set_migrator_setting( Plugins\WordPressCore::SETTING_MODE, $mode ) ) {
+                wp_die( esc_html__( 'The WordPress gallery migration mode could not be saved.', 'foogallery-migrate' ) );
+            }
             $migrator->run_detection();
             $migrator->get_gallery_migrator()->get_objects_to_migrate( true );
             $content_migrator = $migrator->get_content_migrator();
@@ -158,6 +165,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                     'wordpress-gallery-count'    => $count,
                     'wordpress-gallery-detected' => $count > 0 ? '1' : '0',
                     'wordpress-scan-complete'    => ! empty( $progress['complete'] ) ? '1' : '0',
+                    'wordpress-gallery-mode'     => $mode,
                 ),
                 foogallery_migrate_admin_url( $count > 0 || empty( $progress['complete'] ) ? 'content' : 'sources' )
             );
