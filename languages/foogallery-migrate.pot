@@ -8,7 +8,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Language-Team: FooPlugins <info@fooplugins.com>\n"
 "Last-Translator: Brad Vincent <brad@fooplugins.com>\n"
-"POT-Creation-Date: 2026-06-30 09:58+0000\n"
+"POT-Creation-Date: 2026-08-19 13:34+0000\n"
 "Report-Msgid-Bugs-To: https://fooplugins.com\n"
 "X-Poedit-Basepath: ..\n"
 "X-Poedit-KeywordsList: __;_e;_ex:1,2c;_n:1,2;_n_noop:1,2;_nx:1,2,4c;_nx_noop:1,2,3c;_x:1,2c;esc_attr__;esc_attr_e;esc_attr_x:1,2c;esc_html__;esc_html_e;esc_html_x:1,2c\n"
@@ -25,11 +25,11 @@ msgstr ""
 msgid "The FooGallery plugin is required for the FooGallery Migrate plugin to work. Activate it now if you have it installed, or "
 msgstr ""
 
-#: includes/class-init.php:115, includes/class-init.php:199, includes/class-init.php:234, includes/class-init.php:254, includes/class-init.php:271, includes/class-init.php:297, includes/class-init.php:317, includes/class-init.php:336, includes/class-init.php:360, includes/class-init.php:395, includes/class-init.php:415, includes/class-init.php:434, includes/class-init.php:458, includes/class-init.php:503, includes/class-init.php:525, includes/class-init.php:582, includes/views/view-migrate-tab-sources.php:25
+#: includes/class-init.php:115, includes/class-init.php:199, includes/class-init.php:234, includes/class-init.php:254, includes/class-init.php:271, includes/class-init.php:297, includes/class-init.php:317, includes/class-init.php:336, includes/class-init.php:360, includes/class-init.php:395, includes/class-init.php:415, includes/class-init.php:434, includes/class-init.php:458, includes/class-init.php:507, includes/class-init.php:552, includes/class-init.php:609, includes/views/view-migrate-tab-sources.php:25
 msgid "Unauthorized."
 msgstr ""
 
-#: includes/class-init.php:293, includes/class-init.php:522, includes/class-init.php:579
+#: includes/class-init.php:293, includes/class-init.php:502, includes/class-init.php:549, includes/class-init.php:606
 msgid "Invalid request."
 msgstr ""
 
@@ -41,35 +41,39 @@ msgstr ""
 msgid "Errors:"
 msgstr ""
 
-#: includes/class-init.php:548
+#: includes/class-init.php:536, includes/views/view-migrate-tab-content.php:9
+msgid "The content scan stopped before completion. Previously saved results are safe; use the scan button to retry."
+msgstr ""
+
+#: includes/class-init.php:575
 msgid "Invalid status update."
 msgstr ""
 
-#: includes/class-init.php:559, includes/objects/class-migratable.php:268, includes/views/view-migrate-tab-log.php:10
+#: includes/class-init.php:586, includes/objects/class-migratable.php:268, includes/views/view-migrate-tab-log.php:10
 msgid "Not migrated"
 msgstr ""
 
-#: includes/class-init.php:560
+#: includes/class-init.php:587
 msgid "Queued"
 msgstr ""
 
-#: includes/class-init.php:561
+#: includes/class-init.php:588
 msgid "Started"
 msgstr ""
 
-#: includes/class-init.php:562, includes/views/view-migrate-tab-log.php:13
+#: includes/class-init.php:589, includes/views/view-migrate-tab-log.php:13
 msgid "Completed"
 msgstr ""
 
-#: includes/class-init.php:563, includes/views/view-migrate-tab-log.php:14
+#: includes/class-init.php:590, includes/views/view-migrate-tab-log.php:14
 msgid "Nothing to migrate"
 msgstr ""
 
-#: includes/class-init.php:564, includes/migrators/class-gallery-migrator.php:236, includes/views/view-migrate-tab-log.php:15, includes/views/view-migrate-tab-log.php:148, includes/views/view-migrate.php:110
+#: includes/class-init.php:591, includes/migrators/class-gallery-migrator.php:236, includes/views/view-migrate-tab-log.php:15, includes/views/view-migrate-tab-log.php:148, includes/views/view-migrate.php:110
 msgid "Error"
 msgstr ""
 
-#: includes/class-init.php:591
+#: includes/class-init.php:618
 msgid "Invalid object."
 msgstr ""
 
@@ -109,11 +113,11 @@ msgstr ""
 msgid "One or more images are missing after migration."
 msgstr ""
 
-#: includes/class-migrator-settings.php:685, includes/class-migrator-settings.php:701, includes/objects/class-migratable.php:349
+#: includes/class-migrator-settings.php:690, includes/class-migrator-settings.php:706, includes/objects/class-migratable.php:349
 msgid "Unknown Error"
 msgstr ""
 
-#: includes/class-migrator-settings.php:743
+#: includes/class-migrator-settings.php:748
 msgid "(no title) #%d"
 msgstr ""
 
@@ -129,11 +133,11 @@ msgstr ""
 msgid "Update WordPress now."
 msgstr ""
 
-#: includes/migrators/class-album-migrator.php:64, includes/migrators/class-content-migrator.php:1203, includes/migrators/class-gallery-migrator.php:62
+#: includes/migrators/class-album-migrator.php:64, includes/migrators/class-content-migrator.php:1379, includes/migrators/class-gallery-migrator.php:62
 msgid "Select All"
 msgstr ""
 
-#: includes/migrators/class-album-migrator.php:69, includes/migrators/class-content-migrator.php:976
+#: includes/migrators/class-album-migrator.php:69, includes/migrators/class-content-migrator.php:1151
 msgid "Album"
 msgstr ""
 
@@ -191,107 +195,96 @@ msgstr ""
 msgid "Refresh Albums"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:980
+#: includes/migrators/class-content-migrator.php:1155
 msgid "Image"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:984
+#: includes/migrators/class-content-migrator.php:1159
 msgid "Dynamic Gallery"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:987, includes/migrators/class-gallery-migrator.php:67
+#: includes/migrators/class-content-migrator.php:1162, includes/migrators/class-gallery-migrator.php:67
 msgid "Gallery"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1014
+#: includes/migrators/class-content-migrator.php:1189
 msgid "%1$s %2$d from %3$s in post \"%4$s\" has not been migrated yet."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1028
+#: includes/migrators/class-content-migrator.php:1203
 msgid "Post %d not found."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1080
+#: includes/migrators/class-content-migrator.php:1255
 msgid "Error updating post \"%s\": %s"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1207
+#. translators: %d is the number of posts and pages already scanned.
+#: includes/migrators/class-content-migrator.php:1291
+msgid "Content scan paused after %d posts/pages. Use Resume Scan to continue from the saved position."
+msgstr ""
+
+#: includes/migrators/class-content-migrator.php:1383
 msgid "Post/Page"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1210
+#: includes/migrators/class-content-migrator.php:1386
 msgid "Source Plugin"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1213
+#: includes/migrators/class-content-migrator.php:1389
 msgid "Source ID"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1216, includes/views/view-migrate-tab-log.php:143
+#: includes/migrators/class-content-migrator.php:1392, includes/views/view-migrate-tab-log.php:143
 msgid "Type"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1219
+#: includes/migrators/class-content-migrator.php:1395
 msgid "Migrated ID"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1222, includes/views/view-migrate-tab-log.php:147
+#: includes/migrators/class-content-migrator.php:1398, includes/views/view-migrate-tab-log.php:147
 msgid "Status"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1287
+#: includes/migrators/class-content-migrator.php:1463
 msgid "Not Migrated"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1285
+#: includes/migrators/class-content-migrator.php:1461
 msgid "Ready"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1283, includes/views/view-migrate-tab-log.php:146
+#: includes/migrators/class-content-migrator.php:1459, includes/views/view-migrate-tab-log.php:146
 msgid "Migrated"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1126
+#: includes/migrators/class-content-migrator.php:1302
 msgid "Content has not been scanned yet."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1127
-msgid "Start a scan to find gallery shortcodes and blocks in published posts and pages."
-msgstr ""
-
-#: includes/migrators/class-content-migrator.php:1117
+#: includes/migrators/class-content-migrator.php:1300
 msgid "No gallery shortcodes or blocks found in your content."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1118
-msgid "Make sure your posts/pages are published and contain gallery shortcodes like [envira-gallery id=\"1\"] or [nggallery id=\"2\"]"
+#: includes/migrators/class-content-migrator.php:1304
+msgid "Scan published posts and pages for gallery shortcodes and blocks."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1120
-msgid "Tips:"
-msgstr ""
-
-#: includes/migrators/class-content-migrator.php:1121
-msgid "Ensure your post/page is published (not draft)"
-msgstr ""
-
-#: includes/migrators/class-content-migrator.php:1122
-msgid "Check that the gallery plugins are detected in the Plugins tab"
-msgstr ""
-
-#: includes/migrators/class-content-migrator.php:1123
-msgid "Try clicking \"Refresh Scan\" button to force a new scan"
-msgstr ""
-
-#: includes/migrators/class-content-migrator.php:1309
+#: includes/migrators/class-content-migrator.php:1485
 msgid "Replace Selected"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1312
+#: includes/migrators/class-content-migrator.php:1489, includes/views/view-migrate-tab-content.php:12
+msgid "Resume Scan"
+msgstr ""
+
+#: includes/migrators/class-content-migrator.php:1489
 msgid "Refresh Scan"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1312
+#: includes/migrators/class-content-migrator.php:1489
 msgid "Scan Content"
 msgstr ""
 
@@ -435,15 +428,20 @@ msgstr ""
 msgid "Please enable the Albums feature from FooGallery -> Features before you migrate any albums!"
 msgstr ""
 
-#: includes/views/view-migrate-tab-content.php:9
-msgid "Something went wrong with the content migration and the page will now reload."
+#. translators: %d is the number of posts and pages already scanned.
+#: includes/views/view-migrate-tab-content.php:11
+msgid "Scanning content: %d posts/pages checked."
 msgstr ""
 
-#: includes/views/view-migrate-tab-content.php:10
+#: includes/views/view-migrate-tab-content.php:13
+msgid "Retry Scan"
+msgstr ""
+
+#: includes/views/view-migrate-tab-content.php:14
 msgid "Please select at least one item to replace."
 msgstr ""
 
-#: includes/views/view-migrate-tab-content.php:11
+#: includes/views/view-migrate-tab-content.php:15
 msgid "Are you sure you want to replace the selected shortcodes/blocks? This will update your post/page content."
 msgstr ""
 

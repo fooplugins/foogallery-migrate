@@ -62,10 +62,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          *
          * @param $name
          * @param $value
-         * @return void
+         * @return bool Whether the setting was persisted.
          */
         public function set_migrator_setting( $name, $value ) {
-            $this->settings()->set_migrator_setting( $name, $value );
+            return $this->settings()->set_migrator_setting( $name, $value );
         }
 
         /**
