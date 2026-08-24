@@ -505,6 +505,31 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		}
 
 		/**
+		 * Reconcile an action item while lazily building only the indexes it needs.
+		 *
+		 * @param array $item Saved content occurrence.
+		 * @param array|null $lookup Migrated-object indexes shared by the action.
+		 * @param array|null $plugins Detected plugins shared by the action.
+		 * @return array Reconciled content occurrence.
+		 */
+		private function reconcile_action_content_item_status( $item, &$lookup, &$plugins ) {
+			if ( isset( $item['replacement_content'] ) && is_string( $item['replacement_content'] ) && '' !== trim( $item['replacement_content'] ) ) {
+				return $item;
+			}
+
+			if ( null === $lookup ) {
+				$lookup = $this->build_migrated_object_lookup();
+			}
+
+			$object_type = isset( $item['object_type'] ) ? $item['object_type'] : 'gallery';
+			if ( 'image' === $object_type && null === $plugins ) {
+				$plugins = $this->get_plugins_by_name();
+			}
+
+			return $this->reconcile_content_item_status( $item, $lookup, is_array( $plugins ) ? $plugins : array() );
+		}
+
+		/**
 		 * Build a lookup key for migrated galleries and albums.
 		 *
 		 * @param string $object_type Migrated object type.
@@ -1476,6 +1501,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			$content_items = $this->get_content_items();
 			$replaced_count = 0;
 			$errors = array();
+			$status_lookup = null;
+			$status_plugins = null;
 
 			$posts_to_update = array();
 
@@ -1484,7 +1511,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 					continue;
 				}
 
-				$item = $content_items[ $item_key ];
+				$item = $this->reconcile_action_content_item_status( $content_items[ $item_key ], $status_lookup, $status_plugins );
 				$object_type = isset( $item['object_type'] ) && in_array( $item['object_type'], array( 'album', 'gallery', 'image', 'dynamic_gallery' ), true ) ? $item['object_type'] : 'gallery';
 				$has_direct_replacement = isset( $item['replacement_content'] ) && is_string( $item['replacement_content'] ) && '' !== trim( $item['replacement_content'] );
 
@@ -1646,6 +1673,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			$preflight_errors = array();
 			$preflight_post_contents = array();
 			$selected_item_keys = array_unique( array_map( 'absint', (array) $selected_items ) );
+			$status_lookup = null;
+			$status_plugins = null;
 
 			foreach ( $selected_item_keys as $item_key ) {
 				if ( ! isset( $content_items[ $item_key ] ) || ! is_array( $content_items[ $item_key ] ) ) {
@@ -1653,7 +1682,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 					continue;
 				}
 
-				$item = $content_items[ $item_key ];
+				$item = $this->reconcile_action_content_item_status( $content_items[ $item_key ], $status_lookup, $status_plugins );
 				$post = isset( $item['post_id'] ) ? get_post( $item['post_id'] ) : false;
 				$offset = isset( $item['match_offset'] ) ? (int) $item['match_offset'] : false;
 				$original_content = isset( $item['original_content'] ) ? (string) $item['original_content'] : '';
