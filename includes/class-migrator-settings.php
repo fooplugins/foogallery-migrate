@@ -28,6 +28,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		const KEY_GALLERIES = 'galleries';
 		const KEY_ALBUMS = 'albums';
 		const KEY_MIGRATED = 'migrated';
+		const KEY_MIGRATED_REVISION = 'migrated-revision';
 		const COMPACT_MARKER = '_foogallery_migrate_compact';
 		const COMPACT_VERSION = 1;
 		const SETTING_OVERRIDE_GALLERY_LAYOUT = 'override_gallery_layout';
@@ -66,7 +67,16 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 				$settings = array();
 			}
 
-			$settings[ $name ] = $this->compact_migrator_setting( $name, $value );
+			$previous_value = array_key_exists( $name, $settings ) ? $settings[ $name ] : null;
+			$compacted_value = $this->compact_migrator_setting( $name, $value );
+			$settings[ $name ] = $compacted_value;
+
+			if ( self::KEY_MIGRATED === $name && $previous_value !== $compacted_value ) {
+				$current_revision = isset( $settings[ self::KEY_MIGRATED_REVISION ] )
+					? absint( $settings[ self::KEY_MIGRATED_REVISION ] )
+					: ( $this->raw_setting_has_items( $previous_value ) ? 1 : 0 );
+				$settings[ self::KEY_MIGRATED_REVISION ] = $current_revision + 1;
+			}
 
 			if ( update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $settings, false ) ) {
 				return true;
@@ -112,8 +122,16 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 				return false;
 			}
 
-			$value = $settings[ $name ];
+			return $this->raw_setting_has_items( $settings[ $name ] );
+		}
 
+		/**
+		 * Check a raw setting payload for stored items without hydrating it.
+		 *
+		 * @param mixed $value Raw setting value.
+		 * @return bool
+		 */
+		private function raw_setting_has_items( $value ) {
 			if ( $this->is_compact_payload( $value ) ) {
 				return isset( $value['items'] ) && is_array( $value['items'] ) && count( $value['items'] ) > 0;
 			}

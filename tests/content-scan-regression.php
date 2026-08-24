@@ -11,6 +11,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 $GLOBALS['test_batch_size'] = 2;
 $GLOBALS['test_time_limit'] = 30;
+$GLOBALS['test_status_batch_size'] = 2;
 
 function apply_filters( $hook, $value ) {
 	if ( 'foogallery_migrate_content_scan_batch_size' === $hook ) {
@@ -19,7 +20,14 @@ function apply_filters( $hook, $value ) {
 	if ( 'foogallery_migrate_content_scan_time_limit' === $hook ) {
 		return $GLOBALS['test_time_limit'];
 	}
+	if ( 'foogallery_migrate_content_status_batch_size' === $hook ) {
+		return $GLOBALS['test_status_batch_size'];
+	}
 	return $value;
+}
+
+function absint( $value ) {
+	return abs( (int) $value );
 }
 
 function parse_blocks( $content ) {
@@ -133,6 +141,7 @@ class FakePlugin {
 class FakeEngine {
 	public $settings = array();
 	public $fail_next_write = false;
+	public $migration_revision = 0;
 	private $plugin;
 	private $migrated_objects = array();
 
@@ -162,6 +171,18 @@ class FakeEngine {
 
 	public function get_migrated_objects() {
 		return $this->migrated_objects;
+	}
+
+	public function get_migrated_revision() {
+		return $this->migration_revision;
+	}
+
+	public function set_migrated_ids( $ids ) {
+		$this->migrated_objects = array();
+		foreach ( $ids as $id ) {
+			$this->migrated_objects[] = new FakeMigratedObject( $id, $this->plugin );
+		}
+		$this->migration_revision++;
 	}
 }
 
@@ -291,5 +312,35 @@ assert_same( 2, $slow_progress['cursor'], 'time cutoff advances only through suc
 assert_same( false, $slow_progress['complete'], 'time cutoff remains resumable' );
 $slow_plugin->delay_microseconds = 0;
 assert_same( true, $slow_migrator->scan_content_batch()['complete'], 'a later request resumes after the time cutoff' );
+
+// Migrated-object revisions make saved statuses stale and reconcile without rescanning posts.
+$GLOBALS['test_batch_size'] = 5;
+$status_engine = new FakeEngine( $plugin, array() );
+$status_wpdb = new FakeWpdb( make_posts( range( 1, 5 ) ) );
+$GLOBALS['wpdb'] = $status_wpdb;
+$status_migrator = new ContentMigrator( $status_engine, 'content' );
+$status_migrator->scan_content_batch( true );
+assert_same( false, $status_migrator->is_migration_status_stale(), 'a fresh content scan starts with current statuses' );
+assert_same( array( false, false, false, false, false ), array_column( $status_engine->settings['content_scan_state']['items'], 'migrated' ), 'unmigrated scan items start false' );
+
+$status_engine->set_migrated_ids( range( 1, 5 ) );
+assert_same( true, $status_migrator->is_migration_status_stale(), 'a migrated-object revision change makes the saved statuses stale' );
+$status_progress = $status_migrator->refresh_migration_status_batch( true );
+assert_same( 2, $status_progress['cursor'], 'status refresh processes only the configured batch size' );
+assert_same( false, $status_progress['complete'], 'status refresh remains resumable between batches' );
+assert_same( array( true, true, false, false, false ), array_column( $status_engine->settings['content_scan_state']['items'], 'migrated' ), 'the first status batch updates only its bounded slice' );
+$status_migrator->refresh_migration_status_batch();
+$status_progress = $status_migrator->refresh_migration_status_batch();
+assert_same( true, $status_progress['complete'], 'the final status batch completes reconciliation' );
+assert_same( array( true, true, true, true, true ), array_column( $status_engine->settings['content_scan_state']['items'], 'migrated' ), 'status reconciliation records every migrated gallery' );
+assert_same( array( 1001, 1002, 1003, 1004, 1005 ), array_column( $status_engine->settings['content_scan_state']['items'], 'migrated_foogallery_id' ), 'status reconciliation records destination FooGallery IDs' );
+assert_same( false, $status_migrator->is_migration_status_stale(), 'completed reconciliation records the current migrated revision' );
+
+$status_engine->set_migrated_ids( array() );
+assert_same( true, $status_migrator->is_migration_status_stale(), 'deleting migrated mappings also makes statuses stale' );
+$status_migrator->refresh_migration_status_batch( true );
+$status_migrator->refresh_migration_status_batch();
+$status_migrator->refresh_migration_status_batch();
+assert_same( array( false, false, false, false, false ), array_column( $status_engine->settings['content_scan_state']['items'], 'migrated' ), 'status reconciliation clears deleted migration mappings' );
 
 fwrite( STDOUT, "PASS: atomic bounded content scan regression tests\n" );

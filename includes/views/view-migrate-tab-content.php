@@ -28,9 +28,15 @@ if ( ! defined( 'ABSPATH' ) ) {
         var retryScanMessage = <?php echo wp_json_encode( __( 'Retry Scan', 'foogallery-migrate' ) ); ?>;
         var selectItemMessage = <?php echo wp_json_encode( __( 'Please select at least one item to replace.', 'foogallery-migrate' ) ); ?>;
         var replaceConfirmMessage = <?php echo wp_json_encode( __( 'Migrate the selected galleries and replace these exact shortcode/block occurrences? This will update your post/page content.', 'foogallery-migrate' ) ); ?>;
+        var statusErrorMessage = <?php echo wp_json_encode( __( 'The status refresh stopped before completion. Previously saved results are safe; use Refresh Status to retry.', 'foogallery-migrate' ) ); ?>;
+        <?php // translators: 1: checked occurrence count, 2: total occurrence count. ?>
+        var statusProgressMessage = <?php echo wp_json_encode( __( 'Refreshing gallery statuses: %1$d of %2$d occurrences checked.', 'foogallery-migrate' ) ); ?>;
+        var refreshStatusMessage = <?php echo wp_json_encode( __( 'Refresh Status', 'foogallery-migrate' ) ); ?>;
+        var resumeStatusMessage = <?php echo wp_json_encode( __( 'Resume Status Refresh', 'foogallery-migrate' ) ); ?>;
 
         var $form = $('#foogallery_migrate_content_form');
         var scanInProgress = false;
+        var statusRefreshInProgress = false;
 
         function setBusy(isBusy) {
             if (isBusy) {
@@ -118,6 +124,61 @@ if ( ! defined( 'ABSPATH' ) ) {
             });
         }
 
+        function stopStatusRefresh(message, reset) {
+            statusRefreshInProgress = false;
+            setBusy(false);
+            $form.find('.refresh_content_status').attr('data-reset', reset ? '1' : '0').text(reset ? refreshStatusMessage : resumeStatusMessage);
+            window.alert(message || statusErrorMessage);
+        }
+
+        function refreshStatusBatch(reset) {
+            var data = $form.serialize();
+            statusRefreshInProgress = true;
+            setBusy(true);
+
+            $.ajax({
+                type: "POST",
+                url: ajaxurl,
+                dataType: "json",
+                data: data + "&action=foogallery_content_refresh_status&reset=" + (reset ? "1" : "0"),
+                success: function(response) {
+                    if (!response || !response.success || !response.data || !response.data.progress) {
+                        var message = response && response.data && response.data.message ? response.data.message : statusErrorMessage;
+                        stopStatusRefresh(message, reset);
+                        return;
+                    }
+
+                    var progress = response.data.progress;
+                    $('#foogallery_migrate_content_progress').text(
+                        statusProgressMessage.replace('%1$d', progress.cursor).replace('%2$d', progress.total)
+                    );
+                    $form.find('.refresh_content_status').attr('data-reset', '0').text(resumeStatusMessage);
+
+                    if (progress.complete) {
+                        statusRefreshInProgress = false;
+                        if (typeof response.data.html === 'string') {
+                            $form.html(response.data.html);
+                        }
+                        setBusy(false);
+                        return;
+                    }
+
+                    window.setTimeout(function() {
+                        refreshStatusBatch(false);
+                    }, 50);
+                },
+                error: function(xhr) {
+                    var message = xhr.responseJSON && xhr.responseJSON.data && xhr.responseJSON.data.message ? xhr.responseJSON.data.message : statusErrorMessage;
+                    stopStatusRefresh(message, reset);
+                },
+                complete: function() {
+                    if (!statusRefreshInProgress) {
+                        setBusy(false);
+                    }
+                }
+            });
+        }
+
         $form.on('click', '.replace_content', function (e) {
             e.preventDefault();
 
@@ -139,6 +200,11 @@ if ( ! defined( 'ABSPATH' ) ) {
         $form.on('click', '.refresh_content', function (e) {
             e.preventDefault();
             scanContentBatch($(this).attr('data-reset') === '1');
+        });
+
+        $form.on('click', '.refresh_content_status', function (e) {
+            e.preventDefault();
+            refreshStatusBatch($(this).attr('data-reset') === '1');
         });
 
         $(document).on('change', '#foogallery_migrate_content_form #cb-select-all-content', function() {

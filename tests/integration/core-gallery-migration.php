@@ -204,7 +204,8 @@ try {
     require FOOGM_DIR . '/includes/views/view-migrate-tab-content.php';
     $dynamic_content_view = ob_get_clean();
     foogm_test_assert( false !== strpos( $dynamic_content_view, 'Dynamic replacement mode' ), 'The content tab must identify dynamic mode.' );
-    foogm_test_assert( false !== strpos( $dynamic_content_view, 'Ready to replace' ), 'Dynamic core occurrences must be ready for direct replacement.' );
+    foogm_test_assert( false !== strpos( $dynamic_content_view, 'Ready for dynamic replacement' ), 'Dynamic core occurrences must be identified as dynamic replacements.' );
+    foogm_test_assert( false !== strpos( $dynamic_content_view, 'No FooGallery record will be created.' ), 'Dynamic status help must explain that no FooGallery record is created.' );
 
     $gallery_count_before_dynamic = (int) wp_count_posts( FOOGALLERY_CPT_GALLERY )->publish;
     $dynamic_result = $migrator->get_content_migrator()->migrate_and_replace_content( $dynamic_keys );
@@ -244,6 +245,10 @@ try {
     foogm_test_assert( false !== strpos( $content_view, 'value="foogallery_migrate_content"' ), 'Content migration must retain a no-JS submit action.' );
     foogm_test_assert( false !== strpos( $content_view, 'Gallery shortcode' ), 'The content table must show per-occurrence source context.' );
     foogm_test_assert( false !== strpos( $content_view, 'Reusable FooGallery mode' ), 'The content tab must identify reusable mode.' );
+    foogm_test_assert( false !== strpos( $content_view, 'Ready to migrate &amp; replace' ), 'Unmigrated core occurrences must describe the combined action.' );
+    foogm_test_assert( false !== strpos( $content_view, 'Rescan Content' ), 'A completed scan must offer the clearer Rescan Content action.' );
+    foogm_test_assert( false !== strpos( $content_view, 'Rescan after changing post content' ), 'The rescan help must explain when content should be rescanned.' );
+    foogm_test_assert( false === strpos( $content_view, 'Visible statuses update automatically.' ), 'The rescan help must avoid unnecessary implementation detail.' );
 
     $identical_keys = array();
     foreach ( $core_items as $key => $item ) {

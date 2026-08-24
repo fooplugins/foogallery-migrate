@@ -28,6 +28,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         const KEY_ALBUMS = 'albums';
         const KEY_CONTENT = 'block-shortcode';
         const KEY_MIGRATED = 'migrated';
+        const KEY_MIGRATED_REVISION = 'migrated-revision';
         const KEY_IMAGE_TAG_SYNC = 'image-tag-sync';
 
         /**
@@ -807,6 +808,23 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 $objects = array();
             }
             return $objects;
+        }
+
+        /**
+         * Return the revision of the migrated-object map.
+         *
+         * Existing installations with migrated objects predate revision tracking,
+         * so they start at revision one and make legacy content scans stale once.
+         *
+         * @return int
+         */
+        public function get_migrated_revision() {
+            $revision = $this->get_migrator_setting( self::KEY_MIGRATED_REVISION, false );
+            if ( false !== $revision ) {
+                return absint( $revision );
+            }
+
+            return $this->has_migrated_objects() ? 1 : 0;
         }
 
         /**

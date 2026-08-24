@@ -91,10 +91,16 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * @throws \RuntimeException When the batch state cannot be persisted.
 		 */
 		function scan_content_batch( $reset = false ) {
-			$state = $reset ? array(
-				'items' => array(),
-				'progress' => $this->default_scan_progress(),
-			) : $this->get_scan_state();
+			if ( $reset ) {
+				$progress = $this->default_scan_progress();
+				$progress['migrated_revision'] = $this->get_migrated_revision();
+				$state = array(
+					'items' => array(),
+					'progress' => $progress,
+				);
+			} else {
+				$state = $this->get_scan_state();
+			}
 			$content_items = $state['items'];
 			$progress = $state['progress'];
 
@@ -189,6 +195,94 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		}
 
 		/**
+		 * Return true when the migrated-object map changed after the content scan.
+		 *
+		 * @return bool
+		 */
+		function is_migration_status_stale() {
+			$state = $this->get_scan_state();
+			if ( empty( $state['items'] ) || empty( $state['progress']['started'] ) ) {
+				return false;
+			}
+
+			return absint( $state['progress']['migrated_revision'] ) !== $this->get_migrated_revision();
+		}
+
+		/**
+		 * Return saved status-refresh progress.
+		 *
+		 * @return array
+		 */
+		function get_status_refresh_progress() {
+			$state = $this->get_scan_state();
+			return $state['progress']['status_refresh'];
+		}
+
+		/**
+		 * Reconcile one bounded batch of saved content statuses with migrated objects.
+		 *
+		 * This deliberately does not parse post content. It only updates the cached
+		 * migrated flag and destination ID for already-discovered occurrences.
+		 *
+		 * @param bool $reset Start the status refresh again from the first item.
+		 * @return array Status refresh progress.
+		 * @throws \RuntimeException When the updated state cannot be persisted.
+		 */
+		function refresh_migration_status_batch( $reset = false ) {
+			$state = $this->get_scan_state();
+			$content_items = $state['items'];
+			$progress = $state['progress'];
+			$current_revision = $this->get_migrated_revision();
+			$status_progress = $progress['status_refresh'];
+
+			if (
+				$reset ||
+				empty( $status_progress['started'] ) ||
+				! empty( $status_progress['complete'] ) ||
+				absint( $status_progress['target_revision'] ) !== $current_revision
+			) {
+				$status_progress = array(
+					'started' => true,
+					'cursor' => 0,
+					'total' => count( $content_items ),
+					'target_revision' => $current_revision,
+					'complete' => false,
+				);
+			}
+
+			$batch_size = (int) apply_filters( 'foogallery_migrate_content_status_batch_size', 100 );
+			$batch_size = max( 1, min( 500, $batch_size ) );
+			$start = min( absint( $status_progress['cursor'] ), count( $content_items ) );
+			$end = min( $start + $batch_size, count( $content_items ) );
+			$lookup = $this->build_migrated_object_lookup();
+			$plugins = $this->get_plugins_by_name();
+
+			for ( $counter = $start; $counter < $end; $counter++ ) {
+				if ( ! isset( $content_items[ $counter ] ) || ! is_array( $content_items[ $counter ] ) ) {
+					continue;
+				}
+
+				$item = $content_items[ $counter ];
+				if ( isset( $item['replacement_content'] ) && is_string( $item['replacement_content'] ) && '' !== trim( $item['replacement_content'] ) ) {
+					continue;
+				}
+
+				$content_items[ $counter ] = $this->reconcile_content_item_status( $item, $lookup, $plugins );
+			}
+
+			$status_progress['cursor'] = $end;
+			$status_progress['total'] = count( $content_items );
+			$status_progress['complete'] = $end >= count( $content_items );
+			if ( $status_progress['complete'] ) {
+				$progress['migrated_revision'] = $current_revision;
+			}
+			$progress['status_refresh'] = $status_progress;
+			$this->persist_scan_state( $content_items, $progress );
+
+			return $status_progress;
+		}
+
+		/**
 		 * Get the atomic content scan state, importing legacy separate settings when present.
 		 *
 		 * @return array
@@ -197,6 +291,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			$state = $this->get_setting( $this->type . '_scan_state', false );
 			if ( is_array( $state ) && isset( $state['items'], $state['progress'] ) && is_array( $state['items'] ) && is_array( $state['progress'] ) ) {
 				$state['progress'] = array_merge( $this->default_scan_progress(), $state['progress'] );
+				$state['progress']['status_refresh'] = array_merge(
+					$this->default_status_refresh_progress(),
+					is_array( $state['progress']['status_refresh'] ) ? $state['progress']['status_refresh'] : array()
+				);
 				return $state;
 			}
 
@@ -253,7 +351,169 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				'cursor' => 0,
 				'scanned' => 0,
 				'complete' => false,
+				'migrated_revision' => 0,
+				'status_refresh' => $this->default_status_refresh_progress(),
 			);
+		}
+
+		/**
+		 * Return a new status-refresh progress record.
+		 *
+		 * @return array
+		 */
+		private function default_status_refresh_progress() {
+			return array(
+				'started' => false,
+				'cursor' => 0,
+				'total' => 0,
+				'target_revision' => 0,
+				'complete' => true,
+			);
+		}
+
+		/**
+		 * Return the current migrated-object map revision.
+		 *
+		 * @return int
+		 */
+		private function get_migrated_revision() {
+			if ( method_exists( $this->migrator_engine, 'get_migrated_revision' ) ) {
+				return absint( $this->migrator_engine->get_migrated_revision() );
+			}
+
+			return 0;
+		}
+
+		/**
+		 * Build migrated-object indexes once for a status refresh batch.
+		 *
+		 * @return array
+		 */
+		private function build_migrated_object_lookup() {
+			$lookup = array(
+				'objects' => array(),
+				'images' => array(),
+			);
+			$migrated_objects = $this->migrator_engine->get_migrated_objects();
+
+			foreach ( $migrated_objects as $identifier => $object ) {
+				if (
+					! is_object( $object ) ||
+					! method_exists( $object, 'type' ) ||
+					empty( $object->migrated ) ||
+					empty( $object->migrated_id )
+				) {
+					continue;
+				}
+
+				$object_type = $object->type();
+				if ( 'image' === $object_type ) {
+					$lookup['images'][ (string) $identifier ] = absint( $object->migrated_id );
+					continue;
+				}
+
+				if (
+					! in_array( $object_type, array( 'album', 'gallery' ), true ) ||
+					! isset( $object->plugin ) ||
+					! is_object( $object->plugin ) ||
+					! method_exists( $object->plugin, 'name' ) ||
+					! isset( $object->ID )
+				) {
+					continue;
+				}
+
+				$key = $this->migrated_lookup_key( $object_type, $object->plugin->name(), $object->ID );
+				$lookup['objects'][ $key ] = absint( $object->migrated_id );
+			}
+
+			return $lookup;
+		}
+
+		/**
+		 * Index detected plugins by display name.
+		 *
+		 * @return array
+		 */
+		private function get_plugins_by_name() {
+			$plugins = array();
+			foreach ( $this->migrator_engine->get_plugins() as $plugin ) {
+				if ( is_object( $plugin ) && method_exists( $plugin, 'name' ) ) {
+					$plugins[ $plugin->name() ] = $plugin;
+				}
+			}
+
+			return $plugins;
+		}
+
+		/**
+		 * Resolve one content item's current migrated destination ID.
+		 *
+		 * @param array $item Content item.
+		 * @param array $lookup Migrated-object indexes.
+		 * @param array $plugins Detected plugins indexed by name.
+		 * @return int|false|null Destination ID, false when not migrated, or null when unverifiable.
+		 */
+		private function get_item_migrated_id_from_lookup( $item, $lookup, $plugins ) {
+			$object_type = isset( $item['object_type'] ) ? $item['object_type'] : 'gallery';
+			$plugin_name = isset( $item['plugin_name'] ) ? (string) $item['plugin_name'] : '';
+			$source_id = isset( $item['gallery_id'] ) ? $item['gallery_id'] : '';
+
+			if ( 'image' === $object_type ) {
+				if ( ! isset( $plugins[ $plugin_name ] ) || ! method_exists( $plugins[ $plugin_name ], 'get_content_image_identifier' ) ) {
+					return null;
+				}
+
+				$identifier = $plugins[ $plugin_name ]->get_content_image_identifier( $source_id );
+				return is_string( $identifier ) && isset( $lookup['images'][ $identifier ] )
+					? $lookup['images'][ $identifier ]
+					: false;
+			}
+
+			if ( ! in_array( $object_type, array( 'album', 'gallery' ), true ) ) {
+				return null;
+			}
+
+			$key = $this->migrated_lookup_key( $object_type, $plugin_name, $source_id );
+			return isset( $lookup['objects'][ $key ] ) ? $lookup['objects'][ $key ] : false;
+		}
+
+		/**
+		 * Reconcile one saved occurrence with the current migrated-object lookup.
+		 *
+		 * Direct replacements do not depend on a migrated FooGallery object. Items
+		 * that cannot be verified retain their saved status instead of being changed.
+		 *
+		 * @param array $item Saved content occurrence.
+		 * @param array $lookup Migrated-object indexes.
+		 * @param array $plugins Detected plugins indexed by name.
+		 * @return array Reconciled content occurrence.
+		 */
+		private function reconcile_content_item_status( $item, $lookup, $plugins ) {
+			if ( isset( $item['replacement_content'] ) && is_string( $item['replacement_content'] ) && '' !== trim( $item['replacement_content'] ) ) {
+				return $item;
+			}
+
+			$migrated_id = $this->get_item_migrated_id_from_lookup( $item, $lookup, $plugins );
+			if ( null === $migrated_id ) {
+				return $item;
+			}
+
+			$item['migrated'] = false !== $migrated_id;
+			$item['migrated_foogallery_id'] = false !== $migrated_id ? $migrated_id : false;
+
+			return $item;
+		}
+
+		/**
+		 * Build a lookup key for migrated galleries and albums.
+		 *
+		 * @param string $object_type Migrated object type.
+		 * @param string $plugin_name Source plugin name.
+		 * @param mixed $source_id Source object ID.
+		 * @return string
+		 */
+		private function migrated_lookup_key( $object_type, $plugin_name, $source_id ) {
+			return serialize( array( $object_type, $plugin_name, (string) $source_id ) );
 		}
 
 		/**
@@ -1512,6 +1772,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			$progress = $state['progress'];
 			$has_scanned_content = ! empty( $progress['started'] );
 			$scan_paused = $has_scanned_content && ! $progress['complete'];
+			$status_stale = $has_scanned_content && ! empty( $content_items ) && absint( $progress['migrated_revision'] ) !== $this->get_migrated_revision();
+			$status_progress = $progress['status_refresh'];
+			$status_refresh_paused = $status_stale && ! empty( $status_progress['started'] ) && empty( $status_progress['complete'] );
 
 			wp_nonce_field( 'foogallery_content_migrate', 'foogallery_content_migrate', false );
 
@@ -1613,6 +1876,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				$enabled_count = 0;
 				$checked_count = 0;
 				$paginated_items = array();
+				$status_lookup = $this->build_migrated_object_lookup();
+				$status_plugins = $this->get_plugins_by_name();
 
 				for ( $counter = $start; $counter <= $end; $counter++ ) {
 					if ( $counter >= $content_items_count ) {
@@ -1625,6 +1890,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 					if ( ! is_array( $item ) || ! isset( $item['post_id'] ) ) {
 						continue;
 					}
+					$item = $this->reconcile_content_item_status( $item, $status_lookup, $status_plugins );
 					$paginated_items[ $counter ] = $item;
 					$is_actionable = $this->is_content_item_replaceable( $item ) || ( isset( $item['plugin_name'] ) && 'WordPress Core' === $item['plugin_name'] );
 					if ( $is_actionable ) {
@@ -1715,13 +1981,18 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 							</td>
 							<td>
 								<?php if ( $is_migrated ) { ?>
-									<span style="color: #080;"><?php esc_html_e( 'Migrated', 'foogallery-migrate' ); ?></span>
+									<span style="color: #080;"><?php esc_html_e( 'Ready to replace', 'foogallery-migrate' ); ?></span>
+									<br><small><?php esc_html_e( 'The destination FooGallery is ready.', 'foogallery-migrate' ); ?></small>
+								<?php } else if ( $is_direct_replacement && $is_core ) { ?>
+									<span style="color: #080;"><?php esc_html_e( 'Ready for dynamic replacement', 'foogallery-migrate' ); ?></span>
+									<br><small><?php esc_html_e( 'No FooGallery record will be created.', 'foogallery-migrate' ); ?></small>
 								<?php } else if ( $is_direct_replacement ) { ?>
 									<span style="color: #080;"><?php esc_html_e( 'Ready to replace', 'foogallery-migrate' ); ?></span>
 								<?php } elseif ( $is_core ) { ?>
-									<span style="color: #2271b1;"><?php esc_html_e( 'Ready to migrate', 'foogallery-migrate' ); ?></span>
+									<span style="color: #2271b1;"><?php esc_html_e( 'Ready to migrate & replace', 'foogallery-migrate' ); ?></span>
 								<?php } else { ?>
-									<span style="color: #f60;"><?php esc_html_e( 'Not Migrated', 'foogallery-migrate' ); ?></span>
+									<span style="color: #b26200;"><?php esc_html_e( 'Migrate source gallery first', 'foogallery-migrate' ); ?></span>
+									<br><small><?php esc_html_e( 'Migrate it from the Galleries tab.', 'foogallery-migrate' ); ?></small>
 								<?php } ?>
 							</td>
 						</tr>
@@ -1739,15 +2010,38 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				echo '<input type="hidden" name="foogallery_content_migrate_paged" value="' . esc_attr( $page ) . '" />';
 				echo '<input type="hidden" name="foogallery_content_migrate_url" value="' . esc_url( $url ) . '" />';
 			}
+
+			if ( $status_stale ) {
+				echo '<div class="notice notice-warning inline"><p><strong>' . esc_html__( 'Gallery migration statuses are out of date.', 'foogallery-migrate' ) . '</strong><br>';
+				echo esc_html__( 'More galleries have been migrated since this content scan. Use Refresh Status to update the saved statuses without rescanning post content.', 'foogallery-migrate' ) . '</p></div>';
+			}
+
+			if ( $status_refresh_paused ) {
+				echo '<div class="notice notice-warning inline"><p>';
+				printf(
+					/* translators: 1: checked occurrence count, 2: total occurrence count. */
+					esc_html__( 'Status refresh paused after %1$d of %2$d occurrences. Use Resume Status Refresh to continue.', 'foogallery-migrate' ),
+					absint( $status_progress['cursor'] ),
+					absint( $status_progress['total'] )
+				);
+				echo '</p></div>';
+			}
 			?>
 			<p>
 				<button name="action" value="foogallery_migrate_content"
 						class="button button-primary replace_content"><?php esc_html_e( 'Migrate & Replace Selected', 'foogallery-migrate' ); ?></button>
+				<?php if ( $status_stale ) { ?>
+					<button name="action" value="foogallery_migrate_refresh_content_status"
+							class="button refresh_content_status" data-reset="<?php echo $status_refresh_paused ? '0' : '1'; ?>">
+						<?php echo $status_refresh_paused ? esc_html__( 'Resume Status Refresh', 'foogallery-migrate' ) : esc_html__( 'Refresh Status', 'foogallery-migrate' ); ?>
+					</button>
+				<?php } ?>
 				<button name="action" value="foogallery_migrate_refresh_content"
 						class="button refresh_content" data-reset="<?php echo $scan_paused ? '0' : '1'; ?>">
-					<?php echo $scan_paused ? esc_html__( 'Resume Scan', 'foogallery-migrate' ) : ( $has_scanned_content ? esc_html__( 'Refresh Scan', 'foogallery-migrate' ) : esc_html__( 'Scan Content', 'foogallery-migrate' ) ); ?>
+					<?php echo $scan_paused ? esc_html__( 'Resume Scan', 'foogallery-migrate' ) : ( $has_scanned_content ? esc_html__( 'Rescan Content', 'foogallery-migrate' ) : esc_html__( 'Scan Content', 'foogallery-migrate' ) ); ?>
 				</button>
 			</p>
+			<p class="description"><?php esc_html_e( 'Rescan after changing post content; replaced occurrences will disappear from these results.', 'foogallery-migrate' ); ?></p>
 			<p id="foogallery_migrate_content_progress" aria-live="polite"></p>
 			<div id="foogallery_migrate_content_spinner" style="width:20px; display: inline-block;">
 				<span class="spinner"></span>
