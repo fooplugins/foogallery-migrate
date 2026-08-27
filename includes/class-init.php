@@ -318,6 +318,30 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
         }
 
         /**
+         * Read a submitted migration title, including PHP-normalized field names.
+         *
+         * PHP converts spaces and dots in top-level request keys to underscores.
+         * Source identifiers can contain plugin names with spaces, so check both
+         * the literal form field name and the normalized key received by PHP.
+         *
+         * @param string $object_id Source object identifier.
+         * @param string $prefix Form field prefix.
+         * @return string|false
+         */
+        private function get_migration_title_from_request( $object_id, $prefix = 'foogallery-title-' ) {
+            $field_name = $prefix . $object_id;
+            $request_key = $field_name;
+            if ( ! array_key_exists( $request_key, $_POST ) ) {
+                $request_key = str_replace( array( ' ', '.' ), '_', $field_name );
+            }
+            if ( ! array_key_exists( $request_key, $_POST ) ) {
+                return false;
+            }
+
+            return $_POST[ $request_key ];
+        }
+
+        /**
          * Start the gallery migration!
          *
          * @return void
@@ -342,8 +366,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                             'migrated' => false,
                             'current' => false,
                         );
-                        if ( array_key_exists( 'foogallery-title-' . $gallery_id, $_POST ) ) {
-                            $migrations[$gallery_id]['title'] = sanitize_text_field( wp_unslash( $_POST[ 'foogallery-title-' . $gallery_id ] ) );
+                        $submitted_title = $this->get_migration_title_from_request( $gallery_id );
+                        if ( false !== $submitted_title ) {
+                            $migrations[$gallery_id]['title'] = sanitize_text_field( wp_unslash( $submitted_title ) );
                         }
                     }
 
@@ -503,8 +528,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                             'migrated' => false,
                             'current' => false,
                         );
-                        if ( array_key_exists( 'foogallery-album-title-' . $album_id, $_POST ) ) {
-                            $migrations[$album_id]['title'] = sanitize_text_field( wp_unslash( $_POST[ 'foogallery-album-title-' . $album_id ] ) );
+                        $submitted_title = $this->get_migration_title_from_request( $album_id, 'foogallery-album-title-' );
+                        if ( false !== $submitted_title ) {
+                            $migrations[$album_id]['title'] = sanitize_text_field( wp_unslash( $submitted_title ) );
                         }
                     }
 

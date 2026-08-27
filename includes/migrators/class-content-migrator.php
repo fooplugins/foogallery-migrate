@@ -384,6 +384,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 						}
 					}
 
+					if ( method_exists( $plugin, 'uses_exclusive_content_occurrences' ) && $plugin->uses_exclusive_content_occurrences() ) {
+						continue;
+					}
+
 					$block_patterns = $plugin->get_block_patterns();
 					if ( ! empty( $block_patterns ) && is_array( $block_patterns ) && ! empty( $all_blocks ) ) {
 						foreach ( $block_patterns as $block_name => $pattern ) {
@@ -558,6 +562,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		private function extract_gallery_id_from_match( $match, $plugin ) {
 			$extracted_id = false;
 
+			if ( method_exists( $plugin, 'get_content_match_identifier' ) ) {
+				return $plugin->get_content_match_identifier( $match );
+			}
+
 			$id = $this->get_first_numeric_match( $match );
 			if ( false !== $id ) {
 				$extracted_id = $id;
@@ -721,6 +729,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 */
 		private function extract_gallery_id_from_block( $block, $plugin ) {
 			$extracted_id = false;
+
+			if ( method_exists( $plugin, 'get_content_block_identifier' ) ) {
+				return $plugin->get_content_block_identifier( $block );
+			}
 
 			if ( isset( $block['attrs'] ) && is_array( $block['attrs'] ) ) {
 				$attrs = $block['attrs'];

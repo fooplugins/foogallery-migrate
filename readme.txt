@@ -26,6 +26,7 @@ Migrate to FooGallery from other gallery plugins, including:
 *	Photo Gallery by 10Web
 *	Robo Gallery
 *	Album and Image Gallery Plus Lightbox (plugin was closed Apr 2026 due to being compromised)
+*	WP Photo Album Plus
 *	Built-in WordPress Gallery blocks and [gallery] shortcodes
 
 Features:
@@ -57,6 +58,16 @@ FooGallery free has 7 gallery styles and a load of different settings to customi
 = Migrate Away From "Album and Image Gallery Plus Lightbox" =
 
 FooGallery Migrate can detect "Album and Image Gallery Plus Lightbox" galleries directly from WordPress database records, so the source plugin does not need to be active or loaded during migration.
+
+= Migrate Away From "WP Photo Album Plus" =
+
+FooGallery Migrate detects the exact current-site WP Photo Album Plus database tables even when WP Photo Album Plus is inactive. It creates one FooGallery gallery for each source album containing a supported, public local image and preserves image titles, descriptions/captions, alternative text, valid dates and deterministic source order.
+
+WP Photo Album Plus stores images outside the WordPress Media Library. FooGallery Migrate supports its current flat and tree upload layouts and imports canonical local JPG, JPEG, PNG, GIF and WebP display files. WebP files require image inspection support in the site's PHP runtime; when unavailable they are skipped safely. Missing or malformed files, invalid rows, trashed/deleted items, capability-restricted albums, non-public or unknown statuses, and video, audio, PDF or other unsupported payloads are skipped rather than creating broken attachments.
+
+Nested WP Photo Album Plus albums cannot be represented exactly because FooGallery albums contain galleries, not other albums. A source album with child albums is therefore offered as a FooGallery album containing its own non-empty gallery and all non-empty descendant galleries in a flattened list. Empty branches are omitted.
+
+Only WP Photo Album Plus shortcodes and blocks containing one explicit positive numeric `album` value can be replaced automatically. Dynamic or virtual expressions (including names, encrypted IDs, `#last`, tag/search/query selectors and combined album expressions) are intentionally left unchanged for manual review. Random or unknown WP Photo Album Plus image order is converted to stable source-ID order; supported configured order modes use source IDs as deterministic tie-breakers.
 
 == Installation ==
 
