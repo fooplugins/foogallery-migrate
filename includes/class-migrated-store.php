@@ -111,6 +111,32 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratedStore' ) ) {
 		}
 
 		/**
+		 * Removes only the current site's dedicated store and store-owned options.
+		 *
+		 * @return bool
+		 */
+		public function uninstall_schema() {
+			if ( ! $this->wpdb ) {
+				return false;
+			}
+
+			$table = $this->table_name();
+			if ( ! preg_match( '/^[A-Za-z0-9_]+$/', $table ) ) {
+				return false;
+			}
+
+			if ( false === $this->wpdb->query( 'DROP TABLE IF EXISTS `' . $table . '`' ) ) {
+				return false;
+			}
+
+			delete_option( self::SCHEMA_OPTION );
+			delete_option( self::MIGRATION_OPTION );
+			delete_option( self::LEGACY_BACKUP_OPTION );
+
+			return true;
+		}
+
+		/**
 		 * Converts an external identifier to the indexed storage key.
 		 *
 		 * @param string $key External object identifier.

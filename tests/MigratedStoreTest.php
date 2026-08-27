@@ -132,6 +132,20 @@ class MigratedStoreTest extends TestCase {
 		$this->assertSame( $legacy, get_option( MigratedStore::LEGACY_BACKUP_OPTION ) );
 	}
 
+	public function test_uninstall_drops_only_the_current_sites_prefixed_store_table(): void {
+		$wpdb = new RecordingStoreWpdb( 'wp_42_' );
+		$store = new MigratedStore( $wpdb, new MigratorSettings() );
+		$GLOBALS['foogallery_migrate_test_options'][ MigratedStore::SCHEMA_OPTION ] = MigratedStore::SCHEMA_VERSION;
+		$GLOBALS['foogallery_migrate_test_options'][ MigratedStore::MIGRATION_OPTION ] = MigratedStore::SCHEMA_VERSION;
+		$GLOBALS['foogallery_migrate_test_options'][ MigratedStore::LEGACY_BACKUP_OPTION ] = array( 'legacy' );
+
+		$this->assertTrue( $store->uninstall_schema() );
+		$this->assertSame( array( 'DROP TABLE IF EXISTS `wp_42_foogallery_migrate_objects`' ), $wpdb->queries );
+		$this->assertFalse( get_option( MigratedStore::SCHEMA_OPTION, false ) );
+		$this->assertFalse( get_option( MigratedStore::MIGRATION_OPTION, false ) );
+		$this->assertFalse( get_option( MigratedStore::LEGACY_BACKUP_OPTION, false ) );
+	}
+
 	private function image( StoreSourcePlugin $plugin, string $url, int $migrated_id ): Image {
 		$image = new Image( $plugin );
 		$image->ID = $migrated_id;

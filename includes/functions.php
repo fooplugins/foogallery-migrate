@@ -7,6 +7,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
+use FooPlugins\FooGalleryMigrate\MigratedStore;
 
 /**
  * Custom Autoloader used throughout FooGallery Migrate
@@ -77,6 +78,77 @@ function foogallery_migrate_migrator_instance() {
     }
 
     return $foogallery_migrate_engine_instance;
+}
+
+/**
+ * Installs/upgrades and migrates the current site's dedicated object store.
+ *
+ * @return bool
+ */
+function foogallery_migrate_install_store_current_site() {
+    $store = new MigratedStore();
+
+    return $store->install_schema() && $store->migrate_legacy();
+}
+
+/**
+ * Activates the store for one site or every site in a network.
+ *
+ * @param bool $network_wide Whether the plugin is network activated.
+ * @return void
+ */
+function foogallery_migrate_activate( $network_wide = false ) {
+    if ( $network_wide && function_exists( 'is_multisite' ) && is_multisite() ) {
+        $site_ids = get_sites( array( 'fields' => 'ids', 'number' => 0 ) );
+        foreach ( $site_ids as $site_id ) {
+            switch_to_blog( $site_id );
+            foogallery_migrate_install_store_current_site();
+            restore_current_blog();
+        }
+        return;
+    }
+
+    foogallery_migrate_install_store_current_site();
+}
+
+/**
+ * Runs inexpensive schema/version checks on admin requests.
+ *
+ * @return void
+ */
+function foogallery_migrate_upgrade_store() {
+    $data = get_option( FOOGALLERY_MIGRATE_OPTION_DATA, array() );
+    $legacy_pending = is_array( $data ) && array_key_exists( \FooPlugins\FooGalleryMigrate\MigratorSettings::KEY_MIGRATED, $data );
+
+    if (
+        MigratedStore::SCHEMA_VERSION !== (int) get_option( MigratedStore::SCHEMA_OPTION, 0 ) ||
+        MigratedStore::SCHEMA_VERSION !== (int) get_option( MigratedStore::MIGRATION_OPTION, 0 ) ||
+        $legacy_pending
+    ) {
+        foogallery_migrate_install_store_current_site();
+    }
+}
+
+/**
+ * Removes store-owned data for one site or every site in a network.
+ *
+ * @param bool $network_wide Whether the plugin is network active.
+ * @return void
+ */
+function foogallery_migrate_uninstall( $network_wide = false ) {
+    if ( $network_wide && function_exists( 'is_multisite' ) && is_multisite() ) {
+        $site_ids = get_sites( array( 'fields' => 'ids', 'number' => 0 ) );
+        foreach ( $site_ids as $site_id ) {
+            switch_to_blog( $site_id );
+            $store = new MigratedStore();
+            $store->uninstall_schema();
+            restore_current_blog();
+        }
+        return;
+    }
+
+    $store = new MigratedStore();
+    $store->uninstall_schema();
 }
 
 function foogallery_migrate_array_to_table($arr, $first=true, $sub_arr=false){
