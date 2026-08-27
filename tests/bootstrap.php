@@ -509,8 +509,13 @@ function wp_remote_retrieve_response_code( $response ) {
 }
 
 function wp_get_upload_dir() {
+	$environment_basedir = getenv( 'FOOGALLERY_MIGRATE_TEST_UPLOAD_DIR' );
+	$basedir = isset( $GLOBALS['foogallery_migrate_test_upload_dir'] )
+		? $GLOBALS['foogallery_migrate_test_upload_dir']
+		: ( is_string( $environment_basedir ) && '' !== $environment_basedir ? $environment_basedir : '/tmp/uploads' );
+
 	return array(
-		'basedir' => '/tmp/uploads',
+		'basedir' => $basedir,
 		'baseurl' => 'https://example.test/wp-content/uploads',
 	);
 }
