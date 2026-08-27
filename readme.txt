@@ -4,7 +4,7 @@ Tags: gallery, image gallery, photo gallery, wordpress gallery plugin, migrate
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 5.4
-Stable tag: 1.15
+Stable tag: 1.16
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -91,6 +91,9 @@ Update now to get all the latest features, bug fixes and improvements!
 [Contact us](https://fooplugins.com/support/) and we will build an importer to help you migrate to FooGallery.
 
 == Changelog ==
+
+= 1.16 =
+* Added WP Photo Album Plus migration for galleries, nested albums, locally stored images and metadata, plus supported numeric-album shortcodes and blocks; the source plugin can remain inactive, and migration form actions are now handled reliably.
 
 = 1.15 =
 * Added stale-status detection for Blocks / Shortcodes when the migrated gallery map changes after a content scan.
