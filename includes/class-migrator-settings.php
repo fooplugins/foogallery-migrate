@@ -286,6 +286,28 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		}
 
 		/**
+		 * Compacts one migrated object for table storage.
+		 *
+		 * Child records are stored independently and linked by parent_key.
+		 *
+		 * @param mixed $object Migratable object.
+		 * @return mixed
+		 */
+		public function compact_migrated_object( $object ) {
+			return $this->compact_migratable_object( $object, false );
+		}
+
+		/**
+		 * Hydrates one compact table record.
+		 *
+		 * @param mixed $record Compact record.
+		 * @return mixed
+		 */
+		public function hydrate_migrated_object( $record ) {
+			return $this->hydrate_migratable_object( $record );
+		}
+
+		/**
 		 * Compacts large migration settings before they are persisted.
 		 *
 		 * @param string $name Setting name.
@@ -489,7 +511,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @param mixed $object Migratable object.
 		 * @return mixed
 		 */
-		protected function compact_migratable_object( $object ) {
+		protected function compact_migratable_object( $object, $include_children = true ) {
 			if ( ! is_object( $object ) || ! method_exists( $object, 'type' ) ) {
 				return $this->compact_plain_value( $object );
 			}
@@ -534,10 +556,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 				$record['settings'] = $this->compact_plain_value( $object->settings );
 			}
 
-			if ( isset( $object->children ) && is_array( $object->children ) && count( $object->children ) > 0 ) {
+			if ( $include_children && isset( $object->children ) && is_array( $object->children ) && count( $object->children ) > 0 ) {
 				$children = array();
 				foreach ( $object->children as $child ) {
-					$children[] = $this->compact_migratable_object( $child );
+					$children[] = $this->compact_migratable_object( $child, $include_children );
 				}
 				$record['children'] = $children;
 			}

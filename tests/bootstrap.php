@@ -93,6 +93,7 @@ $GLOBALS['foogallery_migrate_test_remote_head'] = array();
 $GLOBALS['foogallery_migrate_test_gallery_templates'] = array();
 $GLOBALS['foogallery_migrate_test_taxonomies'] = array();
 $GLOBALS['foogallery_migrate_test_foogallery_fs'] = null;
+$GLOBALS['foogallery_migrate_test_dbdelta'] = array();
 
 class FooGalleryMigrateTestFreemius {
 	private $can_use_premium_code;
@@ -150,6 +151,11 @@ function update_option( $name, $value, $autoload = null ) {
 function delete_option( $name ) {
 	unset( $GLOBALS['foogallery_migrate_test_options'][ $name ] );
 	return true;
+}
+
+function dbDelta( $sql ) {
+	$GLOBALS['foogallery_migrate_test_dbdelta'][] = $sql;
+	return array( 'created' );
 }
 
 function absint( $maybeint ) {
