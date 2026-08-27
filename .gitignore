@@ -59,6 +59,7 @@ Thumbs.db
 wpcs/
 /vendor/
 composer.phar
+.phpunit.result.cache
 
 # Bower #
 ##########

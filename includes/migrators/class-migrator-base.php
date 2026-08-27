@@ -7,6 +7,10 @@
 
 namespace FooPlugins\FooGalleryMigrate\Migrators;
 
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
 use FooPlugins\FooGalleryMigrate\Objects\Gallery;
 use FooPlugins\FooGalleryMigrate\Objects\Migratable;

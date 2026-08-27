@@ -7,6 +7,10 @@
 
 namespace FooPlugins\FooGalleryMigrate\Objects;
 
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
 if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
 
     /**
@@ -16,8 +20,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
      */
     class Image extends Migratable {
 
-        function __construct() {
+        function __construct( $plugin = null ) {
             $this->migrated = false;
+            $this->plugin = $plugin;
+            $this->ID = 0;
             $this->migrated_id = 0;
             $this->migrated_title = '';
             $this->title = '';
@@ -70,6 +76,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
             $existing_attachment_id = $this->check_image_already_uploaded();
             if ( $existing_attachment_id !== 0 ) {
                 $this->migrated_id = $existing_attachment_id;
+                if ( ! $this->apply_image_tags_to_attachment() ) {
+                    return;
+                }
                 $this->migrated = true;
                 return;
             }
@@ -84,8 +93,6 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
 			wp_raise_memory_limit( 'image' );
 
             // Use local file paths where possible to avoid HTTP and memory spikes.
-            require_once( ABSPATH . 'wp-admin/includes/file.php' );
-
             $file = '';
             $guid = '';
             $source_parts = wp_parse_url( $this->source_url );
@@ -130,6 +137,13 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
             }
 
             if ( empty( $file ) ) {
+                $imported_with_foogallery = $this->import_tagged_image_with_foogallery();
+                if ( null !== $imported_with_foogallery ) {
+                    return;
+                }
+
+                $this->include_file_helpers();
+
                 $validated_url = wp_http_validate_url( $this->source_url );
                 if ( ! $validated_url ) {
                     $this->mark_error( new \WP_Error( 'foogallery_migrate_invalid_source_url', __( 'Invalid source URL for migration.', 'foogallery-migrate' ) ) );
@@ -160,6 +174,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
                 $uploads = isset( $uploads ) ? $uploads : wp_get_upload_dir();
                 $uploads_basedir = wp_normalize_path( trailingslashit( $uploads['basedir'] ) );
                 if ( 0 !== strpos( wp_normalize_path( $file ), $uploads_basedir ) ) {
+                    $this->include_file_helpers();
+
                     $tmp = wp_tempnam( $file );
                     if ( ! $tmp || ! @copy( $file, $tmp ) ) {
                         if ( $tmp ) {
@@ -200,7 +216,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
             );
 
             // Include image.php so we can call wp_generate_attachment_metadata()
-            require_once(ABSPATH . 'wp-admin/includes/image.php');
+            if ( ! function_exists( 'wp_generate_attachment_metadata' ) ) {
+                require_once(ABSPATH . 'wp-admin/includes/image.php');
+            }
 
             // Insert the attachment
             $this->migrated_id = wp_insert_attachment( $attachment, $file, 0 );
@@ -221,6 +239,134 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
                 $this->mark_error( new \WP_Error( 'foogallery_migrate_missing_file', __( 'Attachment file is missing after migration.', 'foogallery-migrate' ) ) );
                 return;
             }
+
+            $this->apply_image_tags_to_attachment();
+        }
+
+        /**
+         * Imports a tagged image through FooGallery's attachment import helper.
+         *
+         * FooGallery already supports assigning FOOGALLERY_ATTACHMENT_TAXONOMY_TAG terms
+         * from a `tags` array during its import flow, so use that path when available.
+         *
+         * @return bool|null True/error handled when used, null when skipped.
+         */
+        private function import_tagged_image_with_foogallery() {
+            $image_tags = $this->get_image_tags();
+            if ( empty( $image_tags ) || ! function_exists( 'foogallery_import_attachment' ) || ! $this->can_assign_foogallery_image_tags() ) {
+                return null;
+            }
+
+            $attachment_id = foogallery_import_attachment(
+                array(
+                    'url'         => $this->source_url,
+                    'title'       => $this->title,
+                    'caption'     => $this->caption,
+                    'description' => $this->description,
+                    'alt'         => $this->alt,
+                    'tags'        => $image_tags,
+                )
+            );
+
+            if ( is_wp_error( $attachment_id ) ) {
+                $this->mark_error( $attachment_id );
+                return false;
+            }
+
+            $attachment_id = absint( $attachment_id );
+            if ( $attachment_id < 1 ) {
+                $this->mark_error( new \WP_Error( 'foogallery_migrate_import_failed', __( 'Image import failed.', 'foogallery-migrate' ) ) );
+                return false;
+            }
+
+            $this->migrated_id = $attachment_id;
+            if ( ! empty( $this->date ) ) {
+                wp_update_post(
+                    array(
+                        'ID'        => $this->migrated_id,
+                        'post_date' => $this->date,
+                    )
+                );
+            }
+
+            if ( ! $this->apply_image_tags_to_attachment() ) {
+                return false;
+            }
+
+            return true;
+        }
+
+        /**
+         * Applies source image tag names to the migrated FooGallery attachment.
+         *
+         * @return bool True when term migration completed or was skipped.
+         */
+        private function apply_image_tags_to_attachment() {
+            $image_tags = $this->get_image_tags();
+            if ( $this->migrated_id < 1 || empty( $image_tags ) || ! $this->can_assign_foogallery_image_tags() ) {
+                return true;
+            }
+
+            $result = wp_set_object_terms( $this->migrated_id, $image_tags, FOOGALLERY_ATTACHMENT_TAXONOMY_TAG, false );
+            if ( is_wp_error( $result ) ) {
+                $this->mark_error( $result );
+                return false;
+            }
+
+            return true;
+        }
+
+        /**
+         * Includes WordPress file helpers when the migration needs sideloading.
+         *
+         * @return void
+         */
+        private function include_file_helpers() {
+            if ( ! function_exists( 'wp_handle_sideload' ) || ! function_exists( 'download_url' ) ) {
+                require_once( ABSPATH . 'wp-admin/includes/file.php' );
+            }
+        }
+
+        /**
+         * Gets source image tag names from the owning source plugin.
+         *
+         * @return array Tag names.
+         */
+        private function get_image_tags() {
+            if ( ! isset( $this->plugin ) || ! is_object( $this->plugin ) || ! method_exists( $this->plugin, 'get_image_tags' ) ) {
+                return array();
+            }
+
+            $tags = $this->plugin->get_image_tags( $this );
+            if ( ! is_array( $tags ) ) {
+                return array();
+            }
+
+            $normalized_tags = array();
+            foreach ( $tags as $tag ) {
+                if ( ! is_scalar( $tag ) ) {
+                    continue;
+                }
+
+                $tag = trim( (string) $tag );
+                if ( '' !== $tag && ! in_array( $tag, $normalized_tags, true ) ) {
+                    $normalized_tags[] = $tag;
+                }
+            }
+
+            return $normalized_tags;
+        }
+
+        /**
+         * Returns true when FooGallery media tags can be assigned.
+         *
+         * @return bool
+         */
+        private function can_assign_foogallery_image_tags() {
+            return defined( 'FOOGALLERY_ATTACHMENT_TAXONOMY_TAG' ) &&
+                function_exists( 'taxonomy_exists' ) &&
+                taxonomy_exists( FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ) &&
+                function_exists( 'wp_set_object_terms' );
         }
     }
 }

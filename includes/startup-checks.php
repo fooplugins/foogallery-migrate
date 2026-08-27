@@ -1,4 +1,7 @@
 <?php
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
 /**
  * Does some preliminary checks before the plugin is loaded
  */

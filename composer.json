@@ -13,7 +13,7 @@
             "vendor/{$name}/": ["type:wordpress-plugin"]
         }
     },
-    "license": "GPL 3.0",
+    "license": "GPL-2.0-or-later",
     "authors": [
         {
             "name": "Brad Vincent"
@@ -24,7 +24,12 @@
             "composer/installers": true
         }
     },
-    "require": {
-        "composer/installers": "^2.1"
+    "scripts": {
+        "test": "phpunit"
+    },
+    "require-dev": {
+        "composer/installers": "^2.1",
+        "phpunit/phpunit": "^9.6",
+        "doctrine/instantiator": "^1.5"
     }
 }

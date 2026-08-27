@@ -4,7 +4,7 @@ Tags: gallery, image gallery, photo gallery, wordpress gallery plugin, migrate
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 5.4
-Stable tag: 1.7
+Stable tag: 1.16
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -26,12 +26,15 @@ Migrate to FooGallery from other gallery plugins, including:
 *	Photo Gallery by 10Web
 *	Robo Gallery
 *	Album and Image Gallery Plus Lightbox (plugin was closed Apr 2026 due to being compromised)
+*	WP Photo Album Plus
+*	Built-in WordPress Gallery blocks and [gallery] shortcodes
 
 Features:
 
 * Migrate images and galleries
 * Migrate albums
 * Migrate blocks / shortcodes in post & page content
+* Choose whether built-in WordPress galleries create reusable FooGallery records or become dynamic FooGalleries stored directly in content
 
 = Test It First =
 
@@ -56,6 +59,16 @@ FooGallery free has 7 gallery styles and a load of different settings to customi
 
 FooGallery Migrate can detect "Album and Image Gallery Plus Lightbox" galleries directly from WordPress database records, so the source plugin does not need to be active or loaded during migration.
 
+= Migrate Away From "WP Photo Album Plus" =
+
+FooGallery Migrate detects the exact current-site WP Photo Album Plus database tables even when WP Photo Album Plus is inactive. It creates one FooGallery gallery for each source album containing a supported, public local image and preserves image titles, descriptions/captions, alternative text, valid dates and deterministic source order.
+
+WP Photo Album Plus stores images outside the WordPress Media Library. FooGallery Migrate supports its current flat and tree upload layouts and imports canonical local JPG, JPEG, PNG, GIF and WebP display files. WebP files require image inspection support in the site's PHP runtime; when unavailable they are skipped safely. Missing or malformed files, invalid rows, trashed/deleted items, capability-restricted albums, non-public or unknown statuses, and video, audio, PDF or other unsupported payloads are skipped rather than creating broken attachments.
+
+Nested WP Photo Album Plus albums cannot be represented exactly because FooGallery albums contain galleries, not other albums. A source album with child albums is therefore offered as a FooGallery album containing its own non-empty gallery and all non-empty descendant galleries in a flattened list. Empty branches are omitted.
+
+Only WP Photo Album Plus shortcodes and blocks containing one explicit positive numeric `album` value can be replaced automatically. Dynamic or virtual expressions (including names, encrypted IDs, `#last`, tag/search/query selectors and combined album expressions) are intentionally left unchanged for manual review. Random or unknown WP Photo Album Plus image order is converted to stable source-ID order; supported configured order modes use source IDs as deterministic tie-breakers.
+
 == Installation ==
 
 1. Upload the zip file to the `/wp-content/plugins/` folder and then unzip.
@@ -78,6 +91,64 @@ Update now to get all the latest features, bug fixes and improvements!
 [Contact us](https://fooplugins.com/support/) and we will build an importer to help you migrate to FooGallery.
 
 == Changelog ==
+
+= 1.16 =
+* Added WP Photo Album Plus migration for galleries, nested albums, locally stored images and metadata, plus supported numeric-album shortcodes and blocks; the source plugin can remain inactive, and migration form actions are now handled reliably.
+
+= 1.15 =
+* Added stale-status detection for Blocks / Shortcodes when the migrated gallery map changes after a content scan.
+* Added a resumable Refresh Status action that reconciles saved occurrence statuses without rescanning post content.
+* Fixed stale saved statuses preventing gallery occurrences shown as ready from being migrated and replaced.
+* Added backward-compatible revision handling for scans and migrated-object maps created by older versions.
+
+= 1.14 =
+* Added migration support for built-in WordPress Gallery blocks and [gallery] shortcodes, with a choice between reusable FooGallery records and dynamic replacements stored directly in content.
+* Fixed large content migrations running out of memory or timing out by scanning and migrating content in bounded batches.
+* Added regression coverage for batched content scanning, AJAX migration progress, and hardened database queries.
+
+= 1.13 =
+* Added direct-access guards to plugin include and view files.
+* Hardened legacy NextGEN and 10Web album queries with sanitized IDs and prepared SQL.
+* Escaped migrated album edit links on the album migration screen.
+* Verified the release package with WordPress Plugin Check security checks.
+
+= 1.12 =
+* Improved migration page performance by loading each tab from its own query arg instead of rendering every tab on first load.
+* Moved image tag migration into a dedicated Image Tags tab.
+* Improved large NextGEN library handling by using lightweight detection queries and deferring image row loading until migration runs.
+* Stopped automatic content scans and migrated log hydration during normal migration page loads.
+* Improved NextGEN image tag reads when NextGEN is installed but inactive.
+
+= 1.11 =
+* Added support for migrating NextGEN tag-based gallery shortcodes to FooGallery media tag shortcodes.
+* Added NextGEN image tag migration so imported attachments can receive matching FooGallery media tags, including when NextGEN is installed but inactive.
+* Added a Sync Image Tags tool to bring NextGEN tags across for images that were already imported.
+* Improved existing migrated image matching so image tags can be synced from saved migration state or detected NextGEN records.
+* Preserved existing FooGallery media tags when syncing migrated NextGEN image tags.
+
+= 1.10 =
+* Added support for replacing NextGEN singlepic shortcodes with standard WordPress captioned image content that links to the full-size attachment.
+* Improved NextGEN shortcode detection for legacy gallery formats and modern [ngg src="galleries" ids="..."] shortcodes.
+* Preserved NextGEN singlepic alignment and explicit width/height settings during content migration.
+* Defaulted migrated NextGEN singlepic output to the attachment thumbnail when no size is specified.
+* Imported NextGEN image descriptions into WordPress attachment captions for captioned single-image replacements.
+
+= 1.9 =
+* Added Override Gallery Settings and Override Album Settings options to inherit settings from existing FooGallery galleries and albums during migration.
+* Migrated albums can now inherit album template, settings, sort order and custom CSS from a selected source album while preserving the migrated child gallery list.
+* Migrated galleries can now inherit settings and custom CSS from a selected source gallery while preserving migrated attachments and source-plugin migration mappings.
+* Fixed migrated albums so edited album names entered in the migration form are used for the created FooGallery album.
+
+= 1.8 =
+* Added repo-local PHPUnit coverage for migration discovery, queueing, progress, resume behavior, retry handling, migrated object tracking and album migration.
+* Reduced the size of newly written migration state by compacting persisted plugin, gallery, album, image and migrated object data while keeping legacy state readable.
+* Improved migration AJAX error responses with clearer action details and debug output.
+* Optimized Album and Image Gallery Plus Lightbox discovery for large migrations by bulk-loading attachment metadata and deferring gallery image child loading.
+* Updated Album and Image Gallery Plus Lightbox album migration to create FooGallery albums from aigpl_cat terms and gallery relationships instead of one-gallery album wrappers.
+* Moved migrator settings and migration state storage logic into a dedicated settings class.
+* Added an Images Per Turn setting to import multiple images during each migration AJAX request.
+* Added gallery and album totals below their migration tables.
+* Added preflight reporting for selected galleries, albums, child galleries and images before migration starts.
 
 = 1.7 =
 * Added a Settings tab to the migration Page.

@@ -7,6 +7,10 @@
 
 namespace FooPlugins\FooGalleryMigrate\Plugins;
 
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
 use FooPlugins\FooGalleryMigrate\Objects\Gallery;
 use FooPlugins\FooGalleryMigrate\Objects\Image;
 use FooPlugins\FooGalleryMigrate\Objects\Plugin;
@@ -44,11 +48,12 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Envira' ) ) {
                 // Do some checks even if the plugin is not activated.
                 global $wpdb;
 
-                if ( !$wpdb->get_var( 'SELECT count(*) FROM ' . $wpdb->prefix . 'posts WHERE `post_type` = "envira"' ) ) {
-                    return false;
-                } else {
-                    return true;
-                }
+                return (bool) $wpdb->get_var(
+                    $wpdb->prepare(
+                        "SELECT 1 FROM {$wpdb->posts} WHERE post_type = %s LIMIT 1",
+                        FM_ENVIRA_POST_TYPE
+                    )
+                );
             }
         }
 
