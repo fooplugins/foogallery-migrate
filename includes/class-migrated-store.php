@@ -210,6 +210,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratedStore' ) ) {
 			delete_option( self::MIGRATION_OPTION );
 			delete_option( self::LEGACY_BACKUP_OPTION );
 			delete_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+			delete_option( FOOGALLERY_MIGRATE_OPTION_SETTINGS );
 
 			return true;
 		}

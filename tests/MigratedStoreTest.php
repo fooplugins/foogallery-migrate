@@ -157,6 +157,7 @@ class MigratedStoreTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_options'][ MigratedStore::MIGRATION_OPTION ] = MigratedStore::SCHEMA_VERSION;
 		$GLOBALS['foogallery_migrate_test_options'][ MigratedStore::LEGACY_BACKUP_OPTION ] = array( 'legacy' );
 		$GLOBALS['foogallery_migrate_test_options'][ FOOGALLERY_MIGRATE_OPTION_DATA ] = array( 'plugins' => array() );
+		$GLOBALS['foogallery_migrate_test_options'][ FOOGALLERY_MIGRATE_OPTION_SETTINGS ] = array( 'template' => 'default' );
 
 		$this->assertTrue( $store->uninstall_schema() );
 		$this->assertSame( array( 'DROP TABLE IF EXISTS `wp_42_foogallery_migrate_objects`' ), $wpdb->queries );
@@ -164,6 +165,7 @@ class MigratedStoreTest extends TestCase {
 		$this->assertFalse( get_option( MigratedStore::MIGRATION_OPTION, false ) );
 		$this->assertFalse( get_option( MigratedStore::LEGACY_BACKUP_OPTION, false ) );
 		$this->assertFalse( get_option( FOOGALLERY_MIGRATE_OPTION_DATA, false ) );
+		$this->assertFalse( get_option( FOOGALLERY_MIGRATE_OPTION_SETTINGS, false ) );
 	}
 
 	public function test_network_activation_installs_each_sites_prefixed_table(): void {
