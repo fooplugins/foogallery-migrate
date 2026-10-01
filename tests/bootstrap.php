@@ -140,6 +140,17 @@ if ( ! class_exists( 'WP_Error' ) ) {
 	}
 }
 
+class FooGalleryMigrateTestJsonResponse extends RuntimeException {
+	public $data;
+	public $status_code;
+
+	public function __construct( $data, $status_code ) {
+		parent::__construct( isset( $data['message'] ) ? $data['message'] : '' );
+		$this->data = $data;
+		$this->status_code = $status_code;
+	}
+}
+
 function get_option( $name, $default = false ) {
 	return array_key_exists( $name, $GLOBALS['foogallery_migrate_test_options'] )
 		? $GLOBALS['foogallery_migrate_test_options'][ $name ]
@@ -213,6 +224,68 @@ function _n( $single, $plural, $number, $domain = 'default' ) {
 
 function is_wp_error( $thing ) {
 	return $thing instanceof WP_Error;
+}
+
+function check_admin_referer( $action = -1, $query_arg = '_wpnonce' ) {
+	return true;
+}
+
+function current_user_can( $capability, ...$args ) {
+	return true;
+}
+
+function wp_unslash( $value ) {
+	return $value;
+}
+
+function wp_json_encode( $value, $flags = 0, $depth = 512 ) {
+	return json_encode( $value, $flags, $depth );
+}
+
+function wp_send_json_error( $data = null, $status_code = null, $flags = 0 ) {
+	throw new FooGalleryMigrateTestJsonResponse( $data, $status_code );
+}
+
+function sanitize_text_field( $value ) {
+	return is_scalar( $value ) ? trim( (string) $value ) : '';
+}
+
+function esc_html( $text ) {
+	return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
+}
+
+function esc_html__( $text, $domain = 'default' ) {
+	return esc_html( $text );
+}
+
+function esc_html_e( $text, $domain = 'default' ) {
+	echo esc_html__( $text, $domain );
+}
+
+function esc_attr_e( $text, $domain = 'default' ) {
+	echo esc_attr( $text );
+}
+
+function admin_url( $path = '' ) {
+	return 'https://example.test/wp-admin/' . ltrim( $path, '/' );
+}
+
+function wp_nonce_field( $action = -1, $name = '_wpnonce', $referer = true, $display = true ) {
+	$field = '<input type="hidden" name="' . esc_attr( $name ) . '" value="test-nonce">';
+	if ( $display ) {
+		echo $field;
+	}
+
+	return $field;
+}
+
+function checked( $checked, $current = true, $display = true ) {
+	$result = $checked === $current ? ' checked="checked"' : '';
+	if ( $display ) {
+		echo $result;
+	}
+
+	return $result;
 }
 
 function apply_filters( $hook_name, $value ) {
