@@ -94,6 +94,9 @@ $GLOBALS['foogallery_migrate_test_gallery_templates'] = array();
 $GLOBALS['foogallery_migrate_test_taxonomies'] = array();
 $GLOBALS['foogallery_migrate_test_foogallery_fs'] = null;
 $GLOBALS['foogallery_migrate_test_dbdelta'] = array();
+$GLOBALS['foogallery_migrate_test_is_multisite'] = false;
+$GLOBALS['foogallery_migrate_test_site_ids'] = array();
+$GLOBALS['foogallery_migrate_test_blog_prefix_stack'] = array();
 
 class FooGalleryMigrateTestFreemius {
 	private $can_use_premium_code;
@@ -144,6 +147,10 @@ function get_option( $name, $default = false ) {
 }
 
 function update_option( $name, $value, $autoload = null ) {
+	if ( array_key_exists( $name, $GLOBALS['foogallery_migrate_test_options'] ) && $GLOBALS['foogallery_migrate_test_options'][ $name ] === $value ) {
+		return false;
+	}
+
 	$GLOBALS['foogallery_migrate_test_options'][ $name ] = $value;
 	return true;
 }
@@ -156,6 +163,23 @@ function delete_option( $name ) {
 function dbDelta( $sql ) {
 	$GLOBALS['foogallery_migrate_test_dbdelta'][] = $sql;
 	return array( 'created' );
+}
+
+function is_multisite() {
+	return ! empty( $GLOBALS['foogallery_migrate_test_is_multisite'] );
+}
+
+function get_sites( $args = array() ) {
+	return $GLOBALS['foogallery_migrate_test_site_ids'];
+}
+
+function switch_to_blog( $site_id ) {
+	$GLOBALS['foogallery_migrate_test_blog_prefix_stack'][] = $GLOBALS['wpdb']->prefix;
+	$GLOBALS['wpdb']->prefix = 'wp_' . (int) $site_id . '_';
+}
+
+function restore_current_blog() {
+	$GLOBALS['wpdb']->prefix = array_pop( $GLOBALS['foogallery_migrate_test_blog_prefix_stack'] );
 }
 
 function absint( $maybeint ) {
@@ -371,11 +395,17 @@ function get_posts( $args = array() ) {
 }
 
 function add_post_meta( $post_id, $meta_key, $meta_value, $unique = false ) {
+	if ( $unique && isset( $GLOBALS['foogallery_migrate_test_post_meta'][ $post_id ] ) && array_key_exists( $meta_key, $GLOBALS['foogallery_migrate_test_post_meta'][ $post_id ] ) ) {
+		return false;
+	}
+
+	$GLOBALS['foogallery_migrate_test_post_meta'][ $post_id ][ $meta_key ] = $meta_value;
 	$GLOBALS['foogallery_migrate_test_post_meta_updates'][] = compact( 'post_id', 'meta_key', 'meta_value', 'unique' );
 	return true;
 }
 
 function update_post_meta( $post_id, $meta_key, $meta_value ) {
+	$GLOBALS['foogallery_migrate_test_post_meta'][ $post_id ][ $meta_key ] = $meta_value;
 	$GLOBALS['foogallery_migrate_test_post_meta_updates'][] = compact( 'post_id', 'meta_key', 'meta_value' );
 	return true;
 }

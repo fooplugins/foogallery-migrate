@@ -21,11 +21,5 @@ require_once FOOGM_PATH . 'vendor/autoload.php';
 
 spl_autoload_register( 'foogallery_migrate_autoloader' );
 
-$network_wide = false;
-if ( function_exists( 'is_multisite' ) && is_multisite() ) {
-	if ( ! function_exists( 'is_plugin_active_for_network' ) ) {
-		require_once ABSPATH . 'wp-admin/includes/plugin.php';
-	}
-	$network_wide = is_plugin_active_for_network( plugin_basename( FOOGM_PATH . 'migrate.php' ) );
-}
-foogallery_migrate_uninstall( $network_wide );
+$all_sites = function_exists( 'is_multisite' ) && is_multisite();
+foogallery_migrate_uninstall( $all_sites );

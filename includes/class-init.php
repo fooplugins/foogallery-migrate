@@ -348,7 +348,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                     }
 
                     // Queue the galleries for migration.
-                    $migrator->get_gallery_migrator()->queue_objects_for_migration( $migrations );
+                    if ( ! $migrator->get_gallery_migrator()->queue_objects_for_migration( $migrations ) ) {
+                        $this->send_json_error( __( 'Migration state could not be saved. Please retry.', 'foogallery-migrate' ), 500 );
+                    }
                 }
 
                 $migrator->get_gallery_migrator()->render_gallery_form();
@@ -368,7 +370,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
 
                     if ('foogallery_migrate_continue' === $action) {
                         $migrator = foogallery_migrate_migrator_instance();
-                        $migrator->get_gallery_migrator()->migrate();
+                        if ( ! $migrator->get_gallery_migrator()->migrate() ) {
+                            $this->send_json_error( __( 'Migration state could not be saved. Please retry.', 'foogallery-migrate' ), 500 );
+                        }
                         $migrator->get_gallery_migrator()->render_gallery_form();
                     }
                 }
@@ -509,7 +513,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                     }
 
                     // Queue the albums for migration.
-                    $migrator->get_album_migrator()->queue_objects_for_migration( $migrations );
+                    if ( ! $migrator->get_album_migrator()->queue_objects_for_migration( $migrations ) ) {
+                        $this->send_json_error( __( 'Migration state could not be saved. Please retry.', 'foogallery-migrate' ), 500 );
+                    }
                 }
 
                 $migrator->get_album_migrator()->render_album_form();
@@ -529,7 +535,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
 
                     if ('foogallery_album_migrate_continue' === $action) {
                         $migrator = foogallery_migrate_migrator_instance();
-                        $migrator->get_album_migrator()->migrate();
+                        if ( ! $migrator->get_album_migrator()->migrate() ) {
+                            $this->send_json_error( __( 'Migration state could not be saved. Please retry.', 'foogallery-migrate' ), 500 );
+                        }
                         $migrator->get_album_migrator()->render_album_form();
                     }
                 }

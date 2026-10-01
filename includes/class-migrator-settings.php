@@ -79,10 +79,14 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		/**
 		 * Clear migrator settings.
 		 *
-		 * @return void
+		 * @return bool Whether the settings were cleared.
 		 */
 		public function clear_migrator_setting() {
-			update_option( FOOGALLERY_MIGRATE_OPTION_DATA, array(), false );
+			if ( update_option( FOOGALLERY_MIGRATE_OPTION_DATA, array(), false ) ) {
+				return true;
+			}
+
+			return array() === get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
 		}
 
 		/**
@@ -516,9 +520,17 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 				return $this->compact_plain_value( $object );
 			}
 
+			if ( 'gallery' === $object->type() ) {
+				$include_children = false;
+			}
+
 			$record = array(
 				'object_type' => $object->type(),
 			);
+
+			if ( 'gallery' === $object->type() && method_exists( $object, 'get_children_errors' ) ) {
+				$record['children_errors'] = $object->get_children_errors();
+			}
 
 			if ( isset( $object->plugin ) && is_object( $object->plugin ) && method_exists( $object->plugin, 'name' ) ) {
 				$record['plugin_name'] = $object->plugin->name();
@@ -629,6 +641,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 				'migrated_id',
 				'migrated_title',
 				'children_count',
+				'children_errors',
 			);
 
 			foreach ( $properties as $property ) {

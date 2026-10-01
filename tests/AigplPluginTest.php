@@ -2,9 +2,13 @@
 
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
+use FooPlugins\FooGalleryMigrate\MigratedStore;
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
+use FooPlugins\FooGalleryMigrate\MigratorSettings;
 use FooPlugins\FooGalleryMigrate\Objects\Album;
 use FooPlugins\FooGalleryMigrate\Objects\Gallery;
+use FooPlugins\FooGalleryMigrate\Objects\Image;
+use FooPlugins\FooGalleryMigrate\Objects\Migratable;
 use FooPlugins\FooGalleryMigrate\Plugins\Aigpl;
 use PHPUnit\Framework\TestCase;
 
@@ -17,7 +21,7 @@ class AigplPluginTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_plugins'] = array();
 		$GLOBALS['foogallery_migrate_test_posts'] = array();
 		$GLOBALS['foogallery_migrate_test_post_meta'] = array();
-		$GLOBALS['foogallery_migrate_engine_instance'] = new MigratorEngine();
+		$GLOBALS['foogallery_migrate_engine_instance'] = new MigratorEngine( new MigratedStore( false, new MigratorSettings() ) );
 		$GLOBALS['wpdb'] = new FakeAigplWpdb();
 	}
 
@@ -118,6 +122,145 @@ class AigplPluginTest extends TestCase {
 		);
 	}
 
+	public function test_204_image_turn_stays_bounded_with_thousands_of_migrated_records(): void {
+		$plugin = new Aigpl();
+		$store = new MigratedStore( false, new MigratorSettings() );
+		$engine = new MigratorEngine( $store );
+		$GLOBALS['foogallery_migrate_engine_instance'] = $engine;
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+
+		$history = array();
+		for ( $i = 1; $i <= 5000; $i++ ) {
+			$image = new Image( $plugin );
+			$image->source_url = 'https://history.example.test/' . $i . '.jpg';
+			$image->migrated = true;
+			$image->migrated_id = 10000 + $i;
+			$image->migration_status = Migratable::PROGRESS_COMPLETED;
+			$history[] = array( 'object' => $image, 'parent_key' => 'gallery_AIGPL_history' );
+		}
+		$this->assertSame( 5000, $store->upsert_batch( $history ) );
+
+		$this->configure_large_gallery( 204, 204 );
+		$engine->run_detection();
+		$migrator = $engine->get_gallery_migrator();
+		$galleries = $migrator->get_objects_to_migrate( true );
+		$gallery_key = $galleries[0]->unique_identifier();
+		$migrator->queue_objects_for_migration(
+			array(
+				$gallery_key => array( 'title' => 'AIGPL 204' ),
+			)
+		);
+
+		$raw = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+		$this->assertArrayNotHasKey( 'children', $raw[ MigratorEngine::KEY_GALLERIES ]['items'][0] );
+		$this->assertSame( 204, $raw[ MigratorEngine::KEY_GALLERIES ]['items'][0]['children_count'] );
+
+		$store->reset_diagnostics();
+		$migrator->migrate();
+		$diagnostics = $store->diagnostics();
+
+		$this->assertSame( 1, $diagnostics['write_queries'] );
+		$this->assertSame( 5, $diagnostics['rows_written'] );
+		// One bulk parent lookup plus at most one indexed lookup per five-item turn.
+		$this->assertLessThanOrEqual( 8, $diagnostics['read_queries'] );
+		$this->assertSame( 0, $diagnostics['full_history_hydrations'] );
+		$this->assertCount( 5, $store->get_by_parent( $gallery_key ) );
+		$this->assertSame( 5005, $store->count() );
+	}
+
+	public function test_retry_targets_one_204_image_gallery_and_only_its_error_records(): void {
+		$plugin = new Aigpl();
+		$store = new MigratedStore( false, new MigratorSettings() );
+		$engine = new MigratorEngine( $store );
+		$GLOBALS['foogallery_migrate_engine_instance'] = $engine;
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$this->configure_large_gallery( 305, 204 );
+
+		$engine->run_detection();
+		$migrator = $engine->get_gallery_migrator();
+		$gallery = $migrator->get_objects_to_migrate( true )[0];
+		$gallery_key = $gallery->unique_identifier();
+		$children = $plugin->load_object_children( $gallery );
+		$records = array();
+		foreach ( $children as $index => $child ) {
+			$child->migrated = true;
+			$child->migrated_id = 20000 + $index;
+			$child->migration_status = Migratable::PROGRESS_COMPLETED;
+			if ( 203 === $index ) {
+				$child->migration_status = Migratable::PROGRESS_ERROR;
+				$child->error = new \WP_Error( 'forced', 'Retry this image.' );
+			}
+			$records[] = array( 'object' => $child, 'parent_key' => $gallery_key );
+		}
+
+		$gallery->children = array();
+		$gallery->children_count = 204;
+		$gallery->migrated = true;
+		$gallery->migrated_id = 3305;
+		$gallery->migrated_child_count = 204;
+		$gallery->progress = 100;
+		$gallery->migration_status = Migratable::PROGRESS_ERROR;
+		$gallery->error = new \WP_Error( 'child_error', 'One image failed.' );
+		$records[] = array( 'object' => $gallery, 'parent_key' => null );
+		$this->assertSame( 205, $store->upsert_batch( $records ) );
+		$engine->set_migrator_setting( MigratorEngine::KEY_GALLERIES, array( $gallery ) );
+
+		$store->reset_diagnostics();
+		$this->assertTrue( $engine->retry_gallery_migration( $gallery_key ) );
+		$diagnostics = $store->diagnostics();
+
+		$this->assertLessThanOrEqual( 4, $diagnostics['read_queries'] );
+		$this->assertSame( 2, $diagnostics['write_queries'] );
+		$this->assertSame( 4, $diagnostics['rows_written'] );
+		$this->assertSame( 0, $diagnostics['full_history_hydrations'] );
+		$this->assertCount( 204, $store->get_by_parent( $gallery_key ) );
+		$this->assertSame( Migratable::PROGRESS_COMPLETED, $store->get( $gallery_key )->migration_status );
+	}
+
+	public function test_error_check_reads_and_updates_only_one_204_image_gallery(): void {
+		$plugin = new Aigpl();
+		$store = new MigratedStore( false, new MigratorSettings() );
+		$engine = new MigratorEngine( $store );
+		$GLOBALS['foogallery_migrate_engine_instance'] = $engine;
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$this->configure_large_gallery( 406, 204 );
+
+		$engine->run_detection();
+		$migrator = $engine->get_gallery_migrator();
+		$gallery = $migrator->get_objects_to_migrate( true )[0];
+		$gallery_key = $gallery->unique_identifier();
+		$children = $plugin->load_object_children( $gallery );
+		$records = array();
+		foreach ( $children as $index => $child ) {
+			$child->migrated = true;
+			$child->migrated_id = 30000 + $index;
+			$child->migration_status = Migratable::PROGRESS_COMPLETED;
+			$records[] = array( 'object' => $child, 'parent_key' => $gallery_key );
+		}
+		$gallery->children = array();
+		$gallery->children_count = 204;
+		$gallery->migrated = true;
+		$gallery->migrated_id = 4406;
+		$gallery->migrated_child_count = 204;
+		$gallery->progress = 100;
+		$gallery->migration_status = Migratable::PROGRESS_COMPLETED;
+		$records[] = array( 'object' => $gallery, 'parent_key' => null );
+		$this->assertSame( 205, $store->upsert_batch( $records ) );
+		$engine->set_migrator_setting( MigratorEngine::KEY_GALLERIES, array( $gallery ) );
+
+		$store->reset_diagnostics();
+		$result = $engine->check_gallery_migration_errors( $gallery_key );
+		$diagnostics = $store->diagnostics();
+
+		$this->assertSame( array( 'checked' => 204, 'errors' => 204 ), $result );
+		$this->assertLessThanOrEqual( 2, $diagnostics['read_queries'] );
+		$this->assertSame( 1, $diagnostics['write_queries'] );
+		$this->assertSame( 205, $diagnostics['rows_written'] );
+		$this->assertSame( 0, $diagnostics['full_history_hydrations'] );
+		$this->assertSame( Migratable::PROGRESS_ERROR, $store->get( $gallery_key )->migration_status );
+		$this->assertSame( Migratable::PROGRESS_ERROR, $store->get_by_parent( $gallery_key )[0]->migration_status );
+	}
+
 	public function object_id( $object ): int {
 		return (int) $object->ID;
 	}
@@ -150,6 +293,20 @@ class AigplPluginTest extends TestCase {
 			'post_date'     => '2026-05-21 10:00:00',
 			'attached_file' => '2026/05/' . $file,
 			'alt'           => '',
+		);
+	}
+
+	private function configure_large_gallery( int $gallery_id, int $image_count ): void {
+		$wpdb = $GLOBALS['wpdb'];
+		$wpdb->gallery_posts = array( $this->post( $gallery_id, 'AIGPL Large Gallery', '2026-05-20 10:00:00' ) );
+		$image_ids = array();
+		for ( $i = 1; $i <= $image_count; $i++ ) {
+			$attachment_id = $gallery_id * 1000 + $i;
+			$image_ids[] = $attachment_id;
+			$wpdb->attachments[ $attachment_id ] = $this->attachment( $attachment_id, 'large-' . $i . '.jpg' );
+		}
+		$GLOBALS['foogallery_migrate_test_post_meta'][ $gallery_id ] = array(
+			Aigpl::META_GALLERY_IMAGES => $image_ids,
 		);
 	}
 

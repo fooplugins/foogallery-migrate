@@ -163,6 +163,18 @@ class FakeEngine {
 	public function get_migrated_objects() {
 		return $this->migrated_objects;
 	}
+
+	public function get_migrated_object( $identifier ) {
+		foreach ( $this->migrated_objects as $object ) {
+			$type = method_exists( $object, 'type' ) ? $object->type() : 'gallery';
+			$candidate = $type . '_' . $object->plugin->name() . '_' . $object->ID;
+			if ( $identifier === $candidate ) {
+				return $object;
+			}
+		}
+
+		return false;
+	}
 }
 
 function assert_same( $expected, $actual, $message ) {

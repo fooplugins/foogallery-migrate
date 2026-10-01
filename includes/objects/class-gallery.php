@@ -42,17 +42,34 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Gallery' ) ) {
         }
 
         function create_new_migrated_object() {
-            // Create an empty foogallery
-            $foogallery_args = array(
-                'post_title' => $this->title,
-                'post_type' => FOOGALLERY_CPT_GALLERY,
-                'post_status' => 'publish',
+            $existing = get_posts(
+                array(
+                    'post_type'      => FOOGALLERY_CPT_GALLERY,
+                    'post_status'    => 'any',
+                    'posts_per_page' => 1,
+                    'numberposts'    => 1,
+                    'fields'         => 'ids',
+                    'meta_key'       => self::META_SOURCE_KEY,
+                    'meta_value'     => $this->unique_identifier(),
+                )
             );
-            $this->migrated_id = wp_insert_post( $foogallery_args );
+
+            if ( is_array( $existing ) && ! empty( $existing ) ) {
+                $this->migrated_id = absint( reset( $existing ) );
+            } else {
+                // Create an empty foogallery.
+                $foogallery_args = array(
+                    'post_title'  => $this->title,
+                    'post_type'   => FOOGALLERY_CPT_GALLERY,
+                    'post_status' => 'publish',
+                );
+                $this->migrated_id = wp_insert_post( $foogallery_args );
+            }
 
             if ( is_wp_error( $this->migrated_id ) ) {
                 $this->migration_status = self::PROGRESS_ERROR;
             } else {
+				update_post_meta( $this->migrated_id, self::META_SOURCE_KEY, $this->unique_identifier() );
 
                 // Determine the best possible gallery template.
                 $gallery_template = $this->plugin->get_migration_gallery_template( $this );
@@ -62,7 +79,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Gallery' ) ) {
                 }
 
                 // Set the gallery template.
-                add_post_meta( $this->migrated_id, FOOGALLERY_META_TEMPLATE, $gallery_template, true );
+                update_post_meta( $this->migrated_id, FOOGALLERY_META_TEMPLATE, $gallery_template );
 
                 $gallery_settings = $this->get_initial_gallery_settings();
 
@@ -70,7 +87,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Gallery' ) ) {
                 $gallery_settings = $this->plugin->get_gallery_settings( $this, $gallery_settings );
 
                 // Set the gallery settings.
-                add_post_meta( $this->migrated_id, FOOGALLERY_META_SETTINGS, $gallery_settings, true );
+                update_post_meta( $this->migrated_id, FOOGALLERY_META_SETTINGS, $gallery_settings );
 
                 $this->inherit_gallery_custom_css();
             }

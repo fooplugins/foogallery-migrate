@@ -86,9 +86,7 @@ function foogallery_migrate_migrator_instance() {
  * @return bool
  */
 function foogallery_migrate_install_store_current_site() {
-    $store = new MigratedStore();
-
-    return $store->install_schema() && $store->migrate_legacy();
+    return MigratedStore::install_current_site();
 }
 
 /**
@@ -98,17 +96,7 @@ function foogallery_migrate_install_store_current_site() {
  * @return void
  */
 function foogallery_migrate_activate( $network_wide = false ) {
-    if ( $network_wide && function_exists( 'is_multisite' ) && is_multisite() ) {
-        $site_ids = get_sites( array( 'fields' => 'ids', 'number' => 0 ) );
-        foreach ( $site_ids as $site_id ) {
-            switch_to_blog( $site_id );
-            foogallery_migrate_install_store_current_site();
-            restore_current_blog();
-        }
-        return;
-    }
-
-    foogallery_migrate_install_store_current_site();
+    MigratedStore::activate( $network_wide );
 }
 
 /**
@@ -136,19 +124,7 @@ function foogallery_migrate_upgrade_store() {
  * @return void
  */
 function foogallery_migrate_uninstall( $network_wide = false ) {
-    if ( $network_wide && function_exists( 'is_multisite' ) && is_multisite() ) {
-        $site_ids = get_sites( array( 'fields' => 'ids', 'number' => 0 ) );
-        foreach ( $site_ids as $site_id ) {
-            switch_to_blog( $site_id );
-            $store = new MigratedStore();
-            $store->uninstall_schema();
-            restore_current_blog();
-        }
-        return;
-    }
-
-    $store = new MigratedStore();
-    $store->uninstall_schema();
+    MigratedStore::uninstall( $network_wide );
 }
 
 function foogallery_migrate_array_to_table($arr, $first=true, $sub_arr=false){

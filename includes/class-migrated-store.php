@@ -105,9 +105,86 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratedStore' ) ) {
 			) {$charset_collate};";
 
 			dbDelta( $sql );
+			if ( ! $this->schema_is_ready() ) {
+				return false;
+			}
+
 			update_option( self::SCHEMA_OPTION, self::SCHEMA_VERSION, false );
 
 			return (int) get_option( self::SCHEMA_OPTION, 0 ) === self::SCHEMA_VERSION;
+		}
+
+		/**
+		 * Confirms that dbDelta created the table shape required by runtime queries.
+		 *
+		 * @return bool
+		 */
+		private function schema_is_ready() {
+			$table = $this->table_name();
+			$found = $this->wpdb->get_var( $this->wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) );
+			if ( $table !== $found ) {
+				return false;
+			}
+
+			$columns = $this->wpdb->get_results( 'SHOW COLUMNS FROM `' . $table . '`', ARRAY_A );
+			$indexes = $this->wpdb->get_results( 'SHOW INDEX FROM `' . $table . '`', ARRAY_A );
+			$column_names = array();
+			$index_names = array();
+
+			foreach ( is_array( $columns ) ? $columns : array() as $column ) {
+				if ( isset( $column['Field'] ) ) {
+					$column_names[] = $column['Field'];
+				}
+			}
+			foreach ( is_array( $indexes ) ? $indexes : array() as $index ) {
+				if ( isset( $index['Key_name'] ) ) {
+					$index_names[] = $index['Key_name'];
+				}
+			}
+
+			$required_columns = array( 'object_key', 'parent_key', 'object_type', 'plugin_name', 'status', 'payload', 'created_at', 'updated_at' );
+			$required_indexes = array( 'PRIMARY', 'parent_key', 'object_type', 'plugin_name', 'status' );
+
+			return empty( array_diff( $required_columns, array_unique( $column_names ) ) ) &&
+				empty( array_diff( $required_indexes, array_unique( $index_names ) ) );
+		}
+
+		/** @return bool */
+		public static function install_current_site() {
+			$store = new self();
+			return $store->install_schema() && $store->migrate_legacy();
+		}
+
+		/** @return void */
+		public static function activate( $network_wide = false ) {
+			if ( $network_wide && function_exists( 'is_multisite' ) && is_multisite() ) {
+				$site_ids = get_sites( array( 'fields' => 'ids', 'number' => 0 ) );
+				foreach ( $site_ids as $site_id ) {
+					switch_to_blog( $site_id );
+					self::install_current_site();
+					restore_current_blog();
+				}
+				return;
+			}
+
+			self::install_current_site();
+		}
+
+		/** @return void */
+		public static function uninstall( $network_wide = false ) {
+			if ( $network_wide && function_exists( 'is_multisite' ) && is_multisite() ) {
+				$site_ids = get_sites( array( 'fields' => 'ids', 'number' => 0 ) );
+				foreach ( $site_ids as $site_id ) {
+					switch_to_blog( $site_id );
+					$store = new self();
+					$store->uninstall_schema();
+					restore_current_blog();
+				}
+				return;
+			}
+
+			$store = new self();
+			$store->uninstall_schema();
 		}
 
 		/**
@@ -132,6 +209,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratedStore' ) ) {
 			delete_option( self::SCHEMA_OPTION );
 			delete_option( self::MIGRATION_OPTION );
 			delete_option( self::LEGACY_BACKUP_OPTION );
+			delete_option( FOOGALLERY_MIGRATE_OPTION_DATA );
 
 			return true;
 		}
@@ -203,6 +281,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratedStore' ) ) {
 				foreach ( $rows as $row ) {
 					if ( isset( $this->memory_rows[ $row['object_key'] ]['created_at'] ) ) {
 						$row['created_at'] = $this->memory_rows[ $row['object_key'] ]['created_at'];
+						if ( null === $row['parent_key'] ) {
+							$row['parent_key'] = $this->memory_rows[ $row['object_key'] ]['parent_key'];
+						}
 					}
 					$this->memory_rows[ $row['object_key'] ] = $row;
 				}
@@ -219,7 +300,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratedStore' ) ) {
 				$sql = 'INSERT INTO ' . $this->table_name() .
 					' (object_key,parent_key,object_type,plugin_name,status,payload,created_at,updated_at) VALUES ' .
 					implode( ',', $placeholders ) .
-					' ON DUPLICATE KEY UPDATE parent_key=VALUES(parent_key),object_type=VALUES(object_type),plugin_name=VALUES(plugin_name),status=VALUES(status),payload=VALUES(payload),updated_at=VALUES(updated_at)';
+					' ON DUPLICATE KEY UPDATE parent_key=COALESCE(VALUES(parent_key),parent_key),object_type=VALUES(object_type),plugin_name=VALUES(plugin_name),status=VALUES(status),payload=VALUES(payload),updated_at=VALUES(updated_at)';
 				$prepared = call_user_func_array( array( $this->wpdb, 'prepare' ), array_merge( array( $sql ), $values ) );
 				if ( false === $this->wpdb->query( $prepared ) ) {
 					return false;
@@ -252,7 +333,206 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratedStore' ) ) {
 				$row = $this->wpdb->get_row( $sql, ARRAY_A );
 			}
 
-			return $this->hydrate_row( $row );
+			$object = $this->hydrate_row( $row );
+			if ( false !== $object || ! $this->legacy_fallback_needed() ) {
+				return $object;
+			}
+
+			$legacy = $this->settings->get_migrator_setting( MigratorSettings::KEY_MIGRATED, array() );
+			return is_array( $legacy ) && isset( $legacy[ $object_key ] ) && is_object( $legacy[ $object_key ] )
+				? $legacy[ $object_key ]
+				: false;
+		}
+
+		/** @return bool */
+		public function has( $object_key ) {
+			$storage_key = $this->storage_key( $object_key );
+			$this->diagnostics['read_queries']++;
+
+			if ( ! $this->wpdb ) {
+				if ( isset( $this->memory_rows[ $storage_key ] ) ) {
+					return true;
+				}
+				return false !== $this->get( $object_key );
+			}
+
+			$sql = $this->wpdb->prepare(
+				'SELECT 1 FROM ' . $this->table_name() . ' WHERE object_key = %s LIMIT 1',
+				$storage_key
+			);
+
+			if ( (bool) $this->wpdb->get_var( $sql ) ) {
+				return true;
+			}
+
+			return false !== $this->get( $object_key );
+		}
+
+		/** @return bool */
+		private function legacy_fallback_needed() {
+			if ( self::SCHEMA_VERSION === (int) get_option( self::MIGRATION_OPTION, 0 ) ) {
+				return false;
+			}
+
+			$data = get_option( FOOGALLERY_MIGRATE_OPTION_DATA, array() );
+			return is_array( $data ) && array_key_exists( MigratorSettings::KEY_MIGRATED, $data );
+		}
+
+		/**
+		 * Loads only records belonging to one parent.
+		 *
+		 * @param string $parent_key External parent identifier.
+		 * @return array
+		 */
+		public function get_by_parent( $parent_key ) {
+			$storage_key = $this->storage_key( $parent_key );
+			$this->diagnostics['read_queries']++;
+			$rows = array();
+
+			if ( ! $this->wpdb ) {
+				foreach ( $this->memory_rows as $row ) {
+					if ( isset( $row['parent_key'] ) && $storage_key === $row['parent_key'] ) {
+						$rows[] = $row;
+					}
+				}
+			} else {
+				$sql = $this->wpdb->prepare(
+					'SELECT payload FROM ' . $this->table_name() . ' WHERE parent_key = %s ORDER BY object_key',
+					$storage_key
+				);
+				$rows = $this->wpdb->get_results( $sql, ARRAY_A );
+			}
+
+			return $this->hydrate_rows( $rows );
+		}
+
+		/**
+		 * Loads the complete history for explicit log/export operations only.
+		 *
+		 * @param string $object_type Optional type filter.
+		 * @return array
+		 */
+		public function get_all( $object_type = '' ) {
+			$this->diagnostics['read_queries']++;
+			$this->diagnostics['full_history_hydrations']++;
+			$rows = array();
+
+			if ( ! $this->wpdb ) {
+				foreach ( $this->memory_rows as $row ) {
+					if ( '' === $object_type || $object_type === $row['object_type'] ) {
+						$rows[] = $row;
+					}
+				}
+			} else if ( '' === $object_type ) {
+				$rows = $this->wpdb->get_results( 'SELECT payload FROM ' . $this->table_name() . ' ORDER BY created_at, object_key', ARRAY_A );
+			} else {
+				$sql = $this->wpdb->prepare(
+					'SELECT payload FROM ' . $this->table_name() . ' WHERE object_type = %s ORDER BY created_at, object_key',
+					$object_type
+				);
+				$rows = $this->wpdb->get_results( $sql, ARRAY_A );
+			}
+
+			return $this->hydrate_rows( $rows, true );
+		}
+
+		/** @return int */
+		public function count() {
+			$this->diagnostics['read_queries']++;
+			if ( ! $this->wpdb ) {
+				return count( $this->memory_rows );
+			}
+
+			return (int) $this->wpdb->get_var( 'SELECT COUNT(*) FROM ' . $this->table_name() );
+		}
+
+		/** @return array */
+		public function summary() {
+			$this->diagnostics['read_queries']++;
+			$summary = array();
+			if ( ! $this->wpdb ) {
+				foreach ( $this->memory_rows as $row ) {
+					$type = $row['object_type'];
+					if ( ! isset( $summary[ $type ] ) ) {
+						$summary[ $type ] = array( 'count' => 0, 'errors' => 0 );
+					}
+					$summary[ $type ]['count']++;
+					if ( 'error' === $row['status'] ) {
+						$summary[ $type ]['errors']++;
+					}
+				}
+				return $summary;
+			}
+
+			$rows = $this->wpdb->get_results(
+				"SELECT object_type, COUNT(*) AS object_count, SUM(status = 'error') AS error_count FROM " . $this->table_name() . ' GROUP BY object_type',
+				ARRAY_A
+			);
+			foreach ( $rows as $row ) {
+				$summary[ $row['object_type'] ] = array(
+					'count'  => (int) $row['object_count'],
+					'errors' => (int) $row['error_count'],
+				);
+			}
+
+			return $summary;
+		}
+
+		/** @return bool */
+		public function delete( $object_key ) {
+			$storage_key = $this->storage_key( $object_key );
+			if ( ! $this->wpdb ) {
+				if ( ! isset( $this->memory_rows[ $storage_key ] ) ) {
+					return false;
+				}
+				unset( $this->memory_rows[ $storage_key ] );
+			} else {
+				$sql = $this->wpdb->prepare( 'DELETE FROM ' . $this->table_name() . ' WHERE object_key = %s', $storage_key );
+				if ( false === $this->wpdb->query( $sql ) ) {
+					return false;
+				}
+			}
+			$this->diagnostics['write_queries']++;
+			return true;
+		}
+
+		/**
+		 * Removes one gallery and only its errored child rows for retry.
+		 *
+		 * @param string $gallery_key Gallery identifier.
+		 * @return bool
+		 */
+		public function delete_for_retry( $gallery_key ) {
+			$storage_key = $this->storage_key( $gallery_key );
+			if ( ! $this->wpdb ) {
+				foreach ( $this->memory_rows as $key => $row ) {
+					if ( $key === $storage_key || ( isset( $row['parent_key'] ) && $storage_key === $row['parent_key'] && 'error' === $row['status'] ) ) {
+						unset( $this->memory_rows[ $key ] );
+					}
+				}
+			} else {
+				$sql = $this->wpdb->prepare(
+					"DELETE FROM " . $this->table_name() . " WHERE object_key = %s OR (parent_key = %s AND status = 'error')",
+					$storage_key,
+					$storage_key
+				);
+				if ( false === $this->wpdb->query( $sql ) ) {
+					return false;
+				}
+			}
+			$this->diagnostics['write_queries']++;
+			return true;
+		}
+
+		/** @return bool */
+		public function clear() {
+			if ( ! $this->wpdb ) {
+				$this->memory_rows = array();
+			} else if ( false === $this->wpdb->query( 'DELETE FROM ' . $this->table_name() ) ) {
+				return false;
+			}
+			$this->diagnostics['write_queries']++;
+			return true;
 		}
 
 		/**
@@ -323,9 +603,14 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratedStore' ) ) {
 				return false;
 			}
 
-			unset( $active[ MigratorSettings::KEY_MIGRATED ] );
-			update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $active, false );
-			if ( get_option( FOOGALLERY_MIGRATE_OPTION_DATA, array() ) !== $active ) {
+			$latest = get_option( FOOGALLERY_MIGRATE_OPTION_DATA, array() );
+			if ( ! is_array( $latest ) || ! array_key_exists( MigratorSettings::KEY_MIGRATED, $latest ) || $latest[ MigratorSettings::KEY_MIGRATED ] !== $legacy_payload ) {
+				return false;
+			}
+
+			unset( $latest[ MigratorSettings::KEY_MIGRATED ] );
+			update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $latest, false );
+			if ( get_option( FOOGALLERY_MIGRATE_OPTION_DATA, array() ) !== $latest ) {
 				return false;
 			}
 
@@ -335,7 +620,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratedStore' ) ) {
 		}
 
 		/**
-		 * Verifies all migrated keys without hydrating their payloads.
+		 * Verifies all migrated keys and confirms each stored payload is readable.
 		 *
 		 * @param array $records Migrated records.
 		 * @return bool
@@ -353,20 +638,27 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratedStore' ) ) {
 				return empty( $records );
 			}
 
-			if ( ! $this->wpdb ) {
-				return count( array_intersect_key( $this->memory_rows, $keys ) ) === count( $keys );
-			}
-
-			$verified = 0;
+			$verified = array();
 			foreach ( array_chunk( array_keys( $keys ), 500 ) as $chunk ) {
-				$placeholders = implode( ',', array_fill( 0, count( $chunk ), '%s' ) );
-				$sql = 'SELECT COUNT(*) FROM ' . $this->table_name() . ' WHERE object_key IN (' . $placeholders . ')';
-				$prepared = call_user_func_array( array( $this->wpdb, 'prepare' ), array_merge( array( $sql ), $chunk ) );
-				$verified += (int) $this->wpdb->get_var( $prepared );
-				$this->diagnostics['read_queries']++;
+				if ( ! $this->wpdb ) {
+					$rows = array_intersect_key( $this->memory_rows, array_fill_keys( $chunk, true ) );
+				} else {
+					$placeholders = implode( ',', array_fill( 0, count( $chunk ), '%s' ) );
+					$sql = 'SELECT object_key,payload FROM ' . $this->table_name() . ' WHERE object_key IN (' . $placeholders . ')';
+					$prepared = call_user_func_array( array( $this->wpdb, 'prepare' ), array_merge( array( $sql ), $chunk ) );
+					$rows = $this->wpdb->get_results( $prepared, ARRAY_A );
+					$this->diagnostics['read_queries']++;
+				}
+
+				foreach ( is_array( $rows ) ? $rows : array() as $row ) {
+					if ( empty( $row['object_key'] ) || false === $this->hydrate_row( $row ) ) {
+						return false;
+					}
+					$verified[ $row['object_key'] ] = true;
+				}
 			}
 
-			return $verified === count( $keys );
+			return count( array_intersect_key( $verified, $keys ) ) === count( $keys );
 		}
 
 		/**
@@ -388,6 +680,28 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratedStore' ) ) {
 			$object = $this->settings->hydrate_migrated_object( $record );
 
 			return is_object( $object ) ? $object : false;
+		}
+
+		/** @return array */
+		private function hydrate_rows( $rows, $preserve_keys = false ) {
+			$objects = array();
+			if ( ! is_array( $rows ) ) {
+				return $objects;
+			}
+
+			foreach ( $rows as $row ) {
+				$object = $this->hydrate_row( $row );
+				if ( false === $object ) {
+					continue;
+				}
+				if ( $preserve_keys && method_exists( $object, 'unique_identifier' ) ) {
+					$objects[ $object->unique_identifier() ] = $object;
+				} else {
+					$objects[] = $object;
+				}
+			}
+
+			return $objects;
 		}
 
 		/** @return array */

@@ -833,7 +833,6 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * @return object|false Migrated object or false if not found.
 		 */
 		private function find_migrated_object( $plugin, $gallery_id, $object_type = 'gallery' ) {
-			$migrated_objects = $this->migrator_engine->get_migrated_objects();
 			$gallery_id = (string) $gallery_id;
 			$plugin_name = $plugin->name();
 			if ( ! in_array( $object_type, array( 'album', 'gallery', 'image' ), true ) ) {
@@ -844,38 +843,21 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				return $this->find_migrated_image_object( $plugin, $gallery_id );
 			}
 
-			foreach ( $migrated_objects as $migrated_object ) {
-				if ( $migrated_object->type() !== $object_type ) {
-					continue;
-				}
-
-				if ( ! isset( $migrated_object->plugin ) || ! is_object( $migrated_object->plugin ) ) {
-					continue;
-				}
-
-				$migrated_plugin_name = $migrated_object->plugin->name();
-				if ( $migrated_plugin_name !== $plugin_name ) {
-					continue;
-				}
-
-				$migrated_id = isset( $migrated_object->ID ) ? (string) $migrated_object->ID : '';
-
-				if ( $migrated_id !== $gallery_id ) {
-					continue;
-				}
-
-				if ( ! isset( $migrated_object->migrated ) || ! $migrated_object->migrated ) {
-					continue;
-				}
-
-				if ( ! isset( $migrated_object->migrated_id ) || (int) $migrated_object->migrated_id <= 0 ) {
-					continue;
-				}
-
-				return $migrated_object;
+			$identifier = $object_type . '_' . $plugin_name . '_' . $gallery_id;
+			$migrated_object = $this->migrator_engine->get_migrated_object( $identifier );
+			if ( false === $migrated_object || ! method_exists( $migrated_object, 'type' ) || $object_type !== $migrated_object->type() ) {
+				return false;
 			}
 
-			return false;
+			if ( ! isset( $migrated_object->migrated ) || ! $migrated_object->migrated ) {
+				return false;
+			}
+
+			if ( ! isset( $migrated_object->migrated_id ) || (int) $migrated_object->migrated_id <= 0 ) {
+				return false;
+			}
+
+			return $migrated_object;
 		}
 
 		/**
@@ -895,12 +877,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				return false;
 			}
 
-			$migrated_objects = $this->migrator_engine->get_migrated_objects();
-			if ( ! isset( $migrated_objects[ $identifier ] ) || ! is_object( $migrated_objects[ $identifier ] ) ) {
+			$migrated_object = $this->migrator_engine->get_migrated_object( $identifier );
+			if ( false === $migrated_object || ! is_object( $migrated_object ) ) {
 				return false;
 			}
-
-			$migrated_object = $migrated_objects[ $identifier ];
 			if ( ! method_exists( $migrated_object, 'type' ) || 'image' !== $migrated_object->type() ) {
 				return false;
 			}

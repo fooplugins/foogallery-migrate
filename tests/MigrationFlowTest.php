@@ -2,6 +2,7 @@
 
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
+use FooPlugins\FooGalleryMigrate\MigratedStore;
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
 use FooPlugins\FooGalleryMigrate\Objects\Album;
@@ -35,7 +36,7 @@ class MigrationFlowTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_gallery_templates'] = array();
 		$GLOBALS['foogallery_migrate_test_taxonomies']        = array();
 		$GLOBALS['foogallery_migrate_test_foogallery_fs']     = null;
-		$GLOBALS['foogallery_migrate_engine_instance']        = new MigratorEngine();
+		$GLOBALS['foogallery_migrate_engine_instance'] = new MigratorEngine( new MigratedStore( false, new MigratorSettings() ) );
 		unset( $GLOBALS['wpdb'] );
 	}
 
@@ -370,35 +371,18 @@ class MigrationFlowTest extends TestCase {
 		$this->assertStringNotContainsString( 'bad-value', $GLOBALS['wpdb']->gallery_query );
 	}
 
-	public function test_has_migrated_objects_checks_raw_saved_items(): void {
+	public function test_has_migrated_objects_checks_table_store_rows(): void {
 		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
 
 		$this->assertFalse( $engine->has_migrated_objects() );
-
-		$GLOBALS['foogallery_migrate_test_options'][ FOOGALLERY_MIGRATE_OPTION_DATA ] = array(
-			MigratorEngine::KEY_MIGRATED => array(
-				MigratorSettings::COMPACT_MARKER => MigratorSettings::COMPACT_VERSION,
-				'type'                           => 'migratable',
-				'items'                          => array(
-					'image_NextGen_701' => array(
-						'object_type' => 'image',
-						'source_url'  => 'https://example.test/wp-content/gallery/bridges/bridge-one.jpg',
-					),
-				),
-			),
-		);
-
+		$image = $this->create_image( 'https://example.test/store-row.jpg' );
+		$image->migrated = true;
+		$image->migrated_id = 701;
+		$image->migration_status = Migratable::PROGRESS_COMPLETED;
+		$this->assertTrue( $engine->add_migrated_object( $image ) );
 		$this->assertTrue( $engine->has_migrated_objects() );
-
-		$GLOBALS['foogallery_migrate_test_options'][ FOOGALLERY_MIGRATE_OPTION_DATA ][ MigratorEngine::KEY_MIGRATED ]['items'] = array();
+		$this->assertTrue( $engine->delete_migrated_object( $image->unique_identifier() ) );
 		$this->assertFalse( $engine->has_migrated_objects() );
-
-		$GLOBALS['foogallery_migrate_test_options'][ FOOGALLERY_MIGRATE_OPTION_DATA ][ MigratorEngine::KEY_MIGRATED ] = array(
-			'image_NextGen_701' => (object) array(
-				'source_url' => 'https://example.test/wp-content/gallery/bridges/bridge-one.jpg',
-			),
-		);
-		$this->assertTrue( $engine->has_migrated_objects() );
 	}
 
 	public function test_image_tag_plan_warning_requires_tagged_images_without_foogallery_expert(): void {
@@ -477,10 +461,14 @@ class MigrationFlowTest extends TestCase {
 		$this->assertArrayNotHasKey( 'data', $raw['galleries']['items'][0] );
 		$this->assertArrayNotHasKey( 'plugin', $raw['galleries']['items'][0] );
 		$this->assertArrayNotHasKey( 'foogallery_title', $raw['galleries']['items'][0] );
+		$this->assertArrayNotHasKey( 'children', $raw['galleries']['items'][0] );
+		$this->assertSame( 1, $raw['galleries']['items'][0]['children_count'] );
 
 		$hydrated = $migrator->get_objects_to_migrate();
 		$this->assertInstanceOf( Gallery::class, $hydrated[0] );
 		$this->assertInstanceOf( FakeSourcePlugin::class, $hydrated[0]->plugin );
+		$this->assertSame( array(), $hydrated[0]->children );
+		$hydrated[0]->ensure_children_loaded();
 		$this->assertInstanceOf( Image::class, $hydrated[0]->children[0] );
 		$this->assertInstanceOf( FakeSourcePlugin::class, $hydrated[0]->children[0]->plugin );
 		$this->assertSame( 'Compact Gallery', $hydrated[0]->title );
@@ -694,6 +682,15 @@ class MigrationFlowTest extends TestCase {
 			$GLOBALS['foogallery_migrate_test_object_terms'][ FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ][ $image->migrated_id ]
 		);
 		$this->assertSame( '2026-05-21 12:00:00', $GLOBALS['foogallery_migrate_test_posts'][ $image->migrated_id ]->post_date );
+
+		$first_attachment_id = $image->migrated_id;
+		$retry_image = clone $image;
+		$retry_image->migrated = false;
+		$retry_image->migrated_id = 0;
+		$retry_image->create_new_migrated_object();
+
+		$this->assertSame( $first_attachment_id, $retry_image->migrated_id );
+		$this->assertCount( 1, $GLOBALS['foogallery_migrate_test_imported_attachments'] );
 	}
 
 	public function test_nextgen_image_migration_applies_tags_to_existing_attachment(): void {
@@ -915,6 +912,8 @@ class MigrationFlowTest extends TestCase {
 	}
 
 	public function test_content_migration_replaces_gallery_shortcodes_and_singlepic_images(): void {
+		$store = new MigratedStore( false, new MigratorSettings() );
+		$GLOBALS['foogallery_migrate_engine_instance'] = new MigratorEngine( $store );
 		$plugin = new FakeSourcePlugin();
 		$plugin->shortcode_patterns = array(
 			'/\[ngg\b[^\]]*\bids\s*=\s*["\']?(\d+)(?:\s*,\s*\d+)*["\']?[^\]]*\]/i',
@@ -976,9 +975,13 @@ class MigrationFlowTest extends TestCase {
 		$this->create_test_post( 501, 'post', 'Legacy Shortcodes', $original_content );
 
 		$content_migrator = $engine->get_content_migrator();
+		$store->reset_diagnostics();
 		$content_items = $this->find_content_items( $content_migrator, get_post( 501 ), array( $plugin ) );
+		$diagnostics = $store->diagnostics();
 
 		$this->assertCount( 3, $content_items );
+		$this->assertSame( 0, $diagnostics['full_history_hydrations'] );
+		$this->assertLessThanOrEqual( 12, $diagnostics['read_queries'] );
 		$this->assertSame( 'gallery', $content_items[0]['object_type'] );
 		$this->assertSame( 199, $content_items[0]['migrated_foogallery_id'] );
 		$this->assertSame( 'image', $content_items[1]['object_type'] );
@@ -1059,6 +1062,101 @@ class MigrationFlowTest extends TestCase {
 		$this->assertSame( 'Before [foogallery id="177"] between [foogallery-album id="188"] after', $updated_content );
 	}
 
+	public function test_gallery_creation_reuses_the_source_marker_after_state_persistence_failure(): void {
+		$plugin = new FakeSourcePlugin();
+		$gallery = $this->create_gallery( $plugin, 951, 'Retry-safe gallery', array() );
+		$gallery->create_new_migrated_object();
+		$first_gallery_id = $gallery->migrated_id;
+
+		$retry_gallery = $this->create_gallery( $plugin, 951, 'Retry-safe gallery', array() );
+		$retry_gallery->create_new_migrated_object();
+
+		$this->assertSame( $first_gallery_id, $retry_gallery->migrated_id );
+		$this->assertCount( 1, $GLOBALS['foogallery_migrate_test_posts'] );
+	}
+
+	public function test_child_lookup_falls_back_to_its_key_when_parent_association_belongs_to_another_gallery(): void {
+		$store = new MigratedStore( false, new MigratorSettings() );
+		$engine = new MigratorEngine( $store );
+		$GLOBALS['foogallery_migrate_engine_instance'] = $engine;
+		$plugin = new FakeSourcePlugin();
+
+		$stored_image = $this->create_image( 'https://example.test/shared.jpg' );
+		$stored_image->migrated = true;
+		$stored_image->migration_status = Migratable::PROGRESS_COMPLETED;
+		$stored_image->migrated_id = 7654;
+		$store->upsert_batch(
+			array(
+				array(
+					'object'     => $stored_image,
+					'parent_key' => 'gallery_fake_952',
+				),
+			)
+		);
+
+		$gallery = $this->create_gallery(
+			$plugin,
+			951,
+			'First gallery',
+			array( $this->create_image( 'https://example.test/shared.jpg' ) )
+		);
+		$engine->apply_migrated_children( $gallery );
+		$child = $gallery->get_children()[0];
+
+		$this->assertFalse( property_exists( $child, 'migration_store_checked' ) );
+		$child->migrate();
+		$this->assertTrue( $child->migrated );
+		$this->assertSame( 7654, $child->migrated_id );
+	}
+
+	public function test_gallery_migration_reports_a_store_write_failure_without_advancing_saved_state(): void {
+		$store = new ToggleFailingMigratedStore( false, new MigratorSettings() );
+		$engine = new MigratorEngine( $store );
+		$GLOBALS['foogallery_migrate_engine_instance'] = $engine;
+		$plugin = new FakeSourcePlugin();
+		$plugin->galleries = array(
+			$this->create_gallery(
+				$plugin,
+				901,
+				'Write Failure Gallery',
+				array( $this->create_image( 'https://example.test/write-failure.jpg' ) )
+			)
+		);
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+
+		$engine->run_detection();
+		$migrator = $engine->get_gallery_migrator();
+		$gallery = $migrator->get_objects_to_migrate( true )[0];
+		$migrator->queue_objects_for_migration(
+			array(
+				$gallery->unique_identifier() => array( 'title' => 'Write Failure Gallery' ),
+			)
+		);
+		$store->fail_writes = true;
+
+		$this->assertFalse( $migrator->migrate() );
+		$saved = $migrator->get_objects_to_migrate();
+		$this->assertSame( Migratable::PROGRESS_QUEUED, $saved[0]->migration_status );
+		$this->assertFalse( $saved[0]->migrated );
+	}
+
+	public function test_retry_reports_a_store_write_failure(): void {
+		$store = new ToggleFailingMigratedStore( false, new MigratorSettings() );
+		$engine = new MigratorEngine( $store );
+		$GLOBALS['foogallery_migrate_engine_instance'] = $engine;
+		$plugin = new FakeSourcePlugin();
+		$plugin->galleries = array( $this->create_gallery( $plugin, 902, 'Retry Failure Gallery', array() ) );
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+
+		$engine->run_detection();
+		$gallery = $engine->get_gallery_migrator()->get_objects_to_migrate( true )[0];
+		$store->fail_writes = true;
+		$result = $engine->retry_gallery_migration( $gallery->unique_identifier() );
+
+		$this->assertInstanceOf( \WP_Error::class, $result );
+		$this->assertSame( 'foogallery_migrate_store_write_failed', $result->get_error_code() );
+	}
+
 	private function create_test_post( int $id, string $post_type, string $title, string $content = '' ): void {
 		$GLOBALS['foogallery_migrate_test_posts'][ $id ] = (object) array(
 			'ID' => $id,
@@ -1073,7 +1171,9 @@ class MigrationFlowTest extends TestCase {
 
 	private function find_content_items( $content_migrator, $post, array $plugins ): array {
 		$method = new \ReflectionMethod( $content_migrator, 'find_shortcodes_and_blocks_in_content' );
-		$method->setAccessible( true );
+		if ( PHP_VERSION_ID < 80100 ) {
+			$method->setAccessible( true );
+		}
 
 		return $method->invoke( $content_migrator, $post, $plugins );
 	}
@@ -1151,6 +1251,14 @@ class MigrationFlowTest extends TestCase {
 		}
 
 		return false;
+	}
+}
+
+class ToggleFailingMigratedStore extends MigratedStore {
+	public $fail_writes = false;
+
+	public function upsert_batch( $records ) {
+		return $this->fail_writes ? false : parent::upsert_batch( $records );
 	}
 }
 

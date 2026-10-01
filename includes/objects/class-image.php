@@ -57,7 +57,24 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
          * @return int
          */
         function check_image_already_uploaded() {
-            return attachment_url_to_postid( $this->source_url );
+			$attachment_id = attachment_url_to_postid( $this->source_url );
+			if ( $attachment_id > 0 || ! function_exists( 'get_posts' ) ) {
+				return $attachment_id;
+			}
+
+			$attachments = get_posts(
+				array(
+					'post_type'      => 'attachment',
+					'post_status'    => 'inherit',
+					'posts_per_page' => 1,
+					'numberposts'    => 1,
+					'fields'         => 'ids',
+					'meta_key'       => self::META_SOURCE_KEY,
+					'meta_value'     => $this->unique_identifier(),
+				)
+			);
+
+			return is_array( $attachments ) && ! empty( $attachments ) ? absint( reset( $attachments ) ) : 0;
         }
 
         protected function mark_error( $error ) {
@@ -240,6 +257,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
                 return;
             }
 
+			update_post_meta( $this->migrated_id, self::META_SOURCE_KEY, $this->unique_identifier() );
             $this->apply_image_tags_to_attachment();
         }
 
@@ -280,6 +298,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
             }
 
             $this->migrated_id = $attachment_id;
+			update_post_meta( $this->migrated_id, self::META_SOURCE_KEY, $this->unique_identifier() );
             if ( ! empty( $this->date ) ) {
                 wp_update_post(
                     array(
