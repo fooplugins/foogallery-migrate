@@ -30,8 +30,12 @@ if ( ! defined( 'ABSPATH' ) ) {
             }
         } else if ( isset( $_POST['check_migration_errors'] ) ) {
             if ( check_admin_referer( 'foogallery_migrate_detect', 'foogallery_migrate_detect' ) ) {
-                $migrator->check_for_migration_errors();
-				$migrator->get_gallery_migrator()->get_objects_to_migrate(true);
+                $migration_error_check_result = $migrator->check_for_migration_errors();
+                if ( is_wp_error( $migration_error_check_result ) ) {
+                    echo '<div class="notice notice-error inline"><p>' . esc_html( $migration_error_check_result->get_error_message() ) . '</p></div>';
+                } else {
+					$migrator->get_gallery_migrator()->get_objects_to_migrate(true);
+                }
             }
         } else {
             if ( check_admin_referer( 'foogallery_migrate_detect', 'foogallery_migrate_detect' ) ) {

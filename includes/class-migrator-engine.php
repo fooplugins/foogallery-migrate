@@ -36,6 +36,27 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          */
         protected $settings;
 
+        /** @var MigratedStore */
+        protected $migrated_store;
+
+        /** @var array Records queued for one request-level upsert. */
+        protected $pending_migrated_objects = array();
+
+        /** @var bool */
+        protected $migrated_batch_active = false;
+
+        /** @var array Request-local compact records keyed by migrated object identifier. */
+        protected $migrated_object_records = array();
+
+        /**
+         * @param MigratedStore|null $migrated_store Optional injected store.
+         */
+        public function __construct( $migrated_store = null ) {
+            if ( $migrated_store instanceof MigratedStore ) {
+                $this->migrated_store = $migrated_store;
+            }
+        }
+
         /**
          * Returns the migrator settings handler.
          *
@@ -47,6 +68,15 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
             }
 
             return $this->settings;
+        }
+
+        /** @return MigratedStore */
+        protected function migrated_store() {
+            if ( ! isset( $this->migrated_store ) ) {
+                $this->migrated_store = new MigratedStore( null, $this->settings() );
+            }
+
+            return $this->migrated_store;
         }
 
         /**
@@ -175,7 +205,11 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return void
          */
         public function clear_migrator_setting() {
-            $this->settings()->clear_migrator_setting();
+			if ( ! $this->migrated_store()->clear() ) {
+				return false;
+			}
+
+			return $this->settings()->clear_migrator_setting();
         }
 
         /**
@@ -774,17 +808,110 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         }
 
         /**
+         * Returns true when a migrated object differs from its request-local record.
+         *
+         * @param Migratable $object Migrated object candidate.
+         * @return bool
+         */
+        private function migrated_object_has_changed( $object ) {
+            $key = (string) $object->unique_identifier();
+            if ( ! array_key_exists( $key, $this->migrated_object_records ) ) {
+                return true;
+            }
+
+            return $this->migrated_object_records[ $key ] !== $this->settings()->compact_migrated_object( $object );
+        }
+
+        /**
+         * Cache one migrated object record without querying the full store.
+         *
+         * @param Migratable $object Migrated object.
+         * @return void
+         */
+        private function remember_migrated_object( $object ) {
+            if ( is_object( $object ) && method_exists( $object, 'unique_identifier' ) ) {
+                $this->migrated_object_records[ (string) $object->unique_identifier() ] = $this->settings()->compact_migrated_object( $object );
+            }
+        }
+
+        /**
+         * Advance the scalar migrated-object revision without restoring the legacy map.
+         *
+         * @return bool Whether the revision was persisted.
+         */
+        private function increment_migrated_revision() {
+            return $this->set_migrator_setting( self::KEY_MIGRATED_REVISION, $this->get_migrated_revision() + 1 );
+        }
+
+        /**
          * Store a migrated object, so that it does not get migrated twice.
          *
          * @param $object Migratable
          * @return void
          */
         public function add_migrated_object( $object ) {
-            $objects = $this->get_migrated_objects();
-            if ( !array_key_exists( $object->unique_identifier(), $objects ) ) {
-                $objects[$object->unique_identifier()] = $object;
-                $this->set_migrator_setting(self::KEY_MIGRATED, $objects);
+            if ( ! is_object( $object ) || ! method_exists( $object, 'unique_identifier' ) ) {
+                return false;
             }
+
+            $key = (string) $object->unique_identifier();
+            $record = array(
+                'object'     => $object,
+                'parent_key' => isset( $object->migration_parent_key ) ? $object->migration_parent_key : null,
+            );
+
+            if ( $this->migrated_batch_active ) {
+                $this->pending_migrated_objects[ $key ] = $record;
+                return true;
+            }
+
+            $changed = $this->migrated_object_has_changed( $object );
+            if ( $changed && ! $this->increment_migrated_revision() ) {
+                return false;
+            }
+
+            if ( false === $this->migrated_store()->upsert_batch( array( $record ) ) ) {
+                return false;
+            }
+
+            $this->remember_migrated_object( $object );
+            return true;
+        }
+
+        /** @return void */
+        public function begin_migrated_object_batch() {
+            $this->pending_migrated_objects = array();
+            $this->migrated_batch_active = true;
+        }
+
+        /** @return bool */
+        public function flush_migrated_object_batch() {
+            $records = array_values( $this->pending_migrated_objects );
+			$changed = false;
+			foreach ( $records as $record ) {
+				if ( isset( $record['object'] ) && $this->migrated_object_has_changed( $record['object'] ) ) {
+					$changed = true;
+					break;
+				}
+			}
+
+			if ( $changed && ! $this->increment_migrated_revision() ) {
+				return false;
+			}
+
+			if ( ! empty( $records ) && false === $this->migrated_store()->upsert_batch( $records ) ) {
+				return false;
+			}
+
+			foreach ( $records as $record ) {
+				if ( isset( $record['object'] ) ) {
+					$this->remember_migrated_object( $record['object'] );
+				}
+			}
+
+			$this->pending_migrated_objects = array();
+			$this->migrated_batch_active = false;
+			return true;
         }
 
         /**
@@ -794,7 +921,11 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return bool
          */
         public function has_object_been_migrated( $unique_identifier ) {
-            return array_key_exists( $unique_identifier, $this->get_migrated_objects() );
+            if ( isset( $this->pending_migrated_objects[ $unique_identifier ] ) ) {
+                return true;
+            }
+
+            return $this->migrated_store()->has( $unique_identifier );
         }
 
         /**
@@ -803,10 +934,11 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array<Migratable>
          */
         public function get_migrated_objects() {
-            $objects = $this->get_migrator_setting( self::KEY_MIGRATED );
-            if ( $objects === false ) {
-                $objects = array();
+            $objects = $this->migrated_store()->get_all();
+            foreach ( $objects as $object ) {
+                $this->remember_migrated_object( $object );
             }
+
             return $objects;
         }
 
@@ -835,19 +967,19 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return Migratable|\WP_Error
          */
         public function update_migrated_object_status( $unique_identifier, $status ) {
-            $objects = $this->get_migrated_objects();
-            if ( ! array_key_exists( $unique_identifier, $objects ) ) {
+            $object = $this->get_migrated_object( $unique_identifier );
+            if ( false === $object ) {
                 return new \WP_Error( 'foogallery_migrate_missing_object', __( 'Migrated object not found.', 'foogallery-migrate' ) );
             }
 
-            $object = $objects[ $unique_identifier ];
             if ( ! is_object( $object ) ) {
                 return new \WP_Error( 'foogallery_migrate_invalid_object', __( 'Invalid migrated object.', 'foogallery-migrate' ) );
             }
 
             $object->migration_status = $status;
-            $objects[ $unique_identifier ] = $object;
-            $this->set_migrator_setting( self::KEY_MIGRATED, $objects );
+            if ( false === $this->add_migrated_object( $object ) ) {
+                return new \WP_Error( 'foogallery_migrate_store_write_failed', __( 'Migrated object could not be updated.', 'foogallery-migrate' ) );
+            }
 
             return $object;
         }
@@ -859,14 +991,19 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return bool|\WP_Error
          */
         public function delete_migrated_object( $unique_identifier ) {
-            $objects = $this->get_migrated_objects();
-            if ( ! array_key_exists( $unique_identifier, $objects ) ) {
+            if ( ! $this->has_object_been_migrated( $unique_identifier ) ) {
                 return new \WP_Error( 'foogallery_migrate_missing_object', __( 'Migrated object not found.', 'foogallery-migrate' ) );
             }
 
-            unset( $objects[ $unique_identifier ] );
-            $this->set_migrator_setting( self::KEY_MIGRATED, $objects );
+            if ( ! $this->increment_migrated_revision() ) {
+                return false;
+            }
 
+            if ( ! $this->migrated_store()->delete( $unique_identifier ) ) {
+                return false;
+            }
+
+            unset( $this->migrated_object_records[ $unique_identifier ] );
             return true;
         }
 
@@ -876,10 +1013,16 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return Migratable|bool
          */
         public function get_migrated_object( $unique_identifier ) {
-            if ( $this->has_object_been_migrated( $unique_identifier ) ) {
-                return $this->get_migrated_objects()[$unique_identifier];
+            if ( isset( $this->pending_migrated_objects[ $unique_identifier ] ) ) {
+                return $this->pending_migrated_objects[ $unique_identifier ]['object'];
             }
-            return false;
+
+            $object = $this->migrated_store()->get( $unique_identifier );
+            if ( false !== $object ) {
+                $this->remember_migrated_object( $object );
+            }
+
+            return $object;
         }
 
         /**
@@ -888,7 +1031,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return bool
          */
         public function has_migrated_objects() {
-            return $this->settings()->has_migrator_setting_items( self::KEY_MIGRATED );
+            return $this->migrated_store()->count() > 0 || $this->settings()->has_migrator_setting_items( self::KEY_MIGRATED );
         }
 
         /**
@@ -897,22 +1040,42 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array
          */
         public function get_migrated_objects_summary() {
-			$summary = array();
-			
-            foreach( $this->get_migrated_objects() as $object ) {
-                if ( !array_key_exists( $object->type(), $summary ) ) {
-                    $summary[$object->type()] = array(
-						'count' => 0,
-						'errors' => 0,
-					);
-                }
+            return $this->migrated_store()->summary();
+        }
 
-                $summary[$object->type()]['count']++;
-				if ( Migratable::PROGRESS_ERROR === $object->migration_status  ) {
-					$summary[$object->type()]['errors']++;
-				}
+        /**
+         * Overlays one parent's request-local children from one indexed query.
+         *
+         * @param object $parent Parent migratable object.
+         * @return void
+         */
+        public function apply_migrated_children( $parent ) {
+            if ( ! is_object( $parent ) || ! method_exists( $parent, 'unique_identifier' ) || ! method_exists( $parent, 'get_children' ) ) {
+                return;
             }
-            return $summary;
+
+            $parent_key = (string) $parent->unique_identifier();
+            $stored = array();
+            foreach ( $this->migrated_store()->get_by_parent( $parent_key ) as $object ) {
+                if ( is_object( $object ) && method_exists( $object, 'unique_identifier' ) ) {
+                    $stored[ (string) $object->unique_identifier() ] = $object;
+                }
+            }
+
+            $children = $parent->get_children();
+            foreach ( $children as $index => $child ) {
+                if ( ! is_object( $child ) || ! method_exists( $child, 'unique_identifier' ) ) {
+                    continue;
+                }
+                $child_key = (string) $child->unique_identifier();
+                if ( isset( $stored[ $child_key ] ) ) {
+                    $child = $stored[ $child_key ];
+					$child->migration_store_checked = true;
+                }
+                $child->migration_parent_key = $parent_key;
+                $children[ $index ] = $child;
+            }
+            $parent->children = $children;
         }
 
         /**
@@ -943,11 +1106,9 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 return new \WP_Error( 'foogallery_migrate_missing_gallery', __( 'Gallery not found.', 'foogallery-migrate' ) );
             }
 
-            $migrated_objects = $this->get_migrated_objects();
-
-            if ( array_key_exists( $unique_identifier, $migrated_objects ) ) {
-                unset( $migrated_objects[ $unique_identifier ] );
-            }
+            $gallery->ensure_children_loaded();
+            $this->apply_migrated_children( $gallery );
+			$reset_records = array();
 
             if ( method_exists( $gallery, 'has_children' ) && $gallery->has_children() ) {
                 $children = $gallery->get_children();
@@ -956,7 +1117,6 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                         continue;
                     }
 
-                    $child_key = $child->unique_identifier();
                     $child_has_error = false;
                     if ( method_exists( $child, 'has_error' ) && $child->has_error() ) {
                         $child_has_error = true;
@@ -969,10 +1129,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                         $child->migration_status = Migratable::PROGRESS_NOT_STARTED;
                         $child->error = false;
                         $child->migrated_id = 0;
-
-                        if ( array_key_exists( $child_key, $migrated_objects ) ) {
-                            unset( $migrated_objects[ $child_key ] );
-                        }
+						$reset_records[] = array( 'object' => $child, 'parent_key' => $unique_identifier );
                     }
 
                     $children[ $index ] = $child;
@@ -988,12 +1145,17 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
             if ( property_exists( $gallery, 'error' ) ) {
                 $gallery->error = false;
             }
+			$reset_records[] = array( 'object' => $gallery, 'parent_key' => null );
+			if ( false === $this->migrated_store()->upsert_batch( $reset_records ) ) {
+				return new \WP_Error( 'foogallery_migrate_store_write_failed', __( 'Migrated gallery state could not be reset.', 'foogallery-migrate' ) );
+			}
 
             $galleries[ $gallery_index ] = $gallery;
-            $this->set_migrator_setting( self::KEY_GALLERIES, $galleries );
-            $this->set_migrator_setting( self::KEY_MIGRATED, $migrated_objects );
+            if ( ! $this->set_migrator_setting( self::KEY_GALLERIES, $galleries ) ) {
+				return new \WP_Error( 'foogallery_migrate_store_write_failed', __( 'Migrated gallery state could not be saved.', 'foogallery-migrate' ) );
+			}
 
-            $gallery_migrator->queue_objects_for_migration(
+            if ( ! $gallery_migrator->queue_objects_for_migration(
                 array(
                     $unique_identifier => array(
                         'id'       => $unique_identifier,
@@ -1002,8 +1164,12 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                         'title'    => isset( $gallery->title ) ? $gallery->title : '',
                     ),
                 )
-            );
-            $gallery_migrator->migrate();
+            ) ) {
+				return new \WP_Error( 'foogallery_migrate_store_write_failed', __( 'Migrated gallery state could not be saved.', 'foogallery-migrate' ) );
+			}
+			if ( false === $gallery_migrator->migrate() ) {
+				return new \WP_Error( 'foogallery_migrate_store_write_failed', __( 'Migrated gallery state could not be saved.', 'foogallery-migrate' ) );
+			}
 
             return true;
         }
@@ -1017,10 +1183,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         public function check_for_migration_errors( $unique_identifier = '' ) {
             $gallery_migrator = $this->get_gallery_migrator();
             $galleries = $gallery_migrator->get_objects_to_migrate();
-            $migrated_objects = $this->get_migrated_objects();
             $checked = 0;
             $errors = 0;
             $found_gallery = false;
+			$this->begin_migrated_object_batch();
 
             foreach ( $galleries as $index => $gallery ) {
                 if ( ! is_object( $gallery ) || ! method_exists( $gallery, 'unique_identifier' ) ) {
@@ -1032,19 +1198,25 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 }
 
                 $found_gallery = true;
-                $result = $this->check_gallery_for_missing_files( $gallery, $migrated_objects );
+				$gallery->ensure_children_loaded();
+				$this->apply_migrated_children( $gallery );
+                $result = $this->check_gallery_for_missing_files( $gallery );
                 $galleries[ $index ] = $result['gallery'];
-                $migrated_objects = $result['migrated_objects'];
                 $checked += $result['checked'];
                 $errors += $result['errors'];
             }
 
             if ( '' !== $unique_identifier && ! $found_gallery ) {
+				$this->flush_migrated_object_batch();
                 return new \WP_Error( 'foogallery_migrate_missing_gallery', __( 'Gallery not found.', 'foogallery-migrate' ) );
             }
 
-            $this->set_migrator_setting( self::KEY_GALLERIES, $galleries );
-            $this->set_migrator_setting( self::KEY_MIGRATED, $migrated_objects );
+			if ( ! $this->flush_migrated_object_batch() ) {
+				return new \WP_Error( 'foogallery_migrate_store_write_failed', __( 'Migrated gallery state could not be saved.', 'foogallery-migrate' ) );
+			}
+            if ( ! $this->set_migrator_setting( self::KEY_GALLERIES, $galleries ) ) {
+				return new \WP_Error( 'foogallery_migrate_store_write_failed', __( 'Migrated gallery state could not be saved.', 'foogallery-migrate' ) );
+            }
 
             return array(
                 'checked' => $checked,
@@ -1056,10 +1228,9 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * Checks a gallery's children for missing attachment files and marks errors.
          *
          * @param object $gallery
-         * @param array $migrated_objects
          * @return array
          */
-        private function check_gallery_for_missing_files( $gallery, $migrated_objects ) {
+        private function check_gallery_for_missing_files( $gallery ) {
             $checked = 0;
             $errors = 0;
             $has_child_error = false;
@@ -1069,11 +1240,6 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 foreach ( $children as $index => $child ) {
                     if ( ! is_object( $child ) || ! method_exists( $child, 'unique_identifier' ) ) {
                         continue;
-                    }
-
-                    $child_key = $child->unique_identifier();
-                    if ( isset( $migrated_objects[ $child_key ] ) && is_object( $migrated_objects[ $child_key ] ) ) {
-                        $child = $migrated_objects[ $child_key ];
                     }
 
                     if ( isset( $child->migration_status ) && Migratable::PROGRESS_ERROR === $child->migration_status ) {
@@ -1140,7 +1306,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                     }
 
                     $children[ $index ] = $child;
-                    $migrated_objects[ $child_key ] = $child;
+					$this->add_migrated_object( $child );
                 }
 
                 $gallery->children = $children;
@@ -1153,12 +1319,11 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 );
                 $gallery->migration_status = Migratable::PROGRESS_ERROR;
                 $gallery->migrated = true;
-				$migrated_objects[ $gallery->unique_identifier() ] = $gallery;
+				$this->add_migrated_object( $gallery );
             }
 
             return array(
                 'gallery'          => $gallery,
-                'migrated_objects' => $migrated_objects,
                 'checked'          => $checked,
                 'errors'           => $errors,
             );

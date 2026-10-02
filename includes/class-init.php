@@ -393,7 +393,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                     }
 
                     // Queue the galleries for migration.
-                    $migrator->get_gallery_migrator()->queue_objects_for_migration( $migrations );
+                    if ( ! $migrator->get_gallery_migrator()->queue_objects_for_migration( $migrations ) ) {
+                        $this->send_json_error( __( 'Migration state could not be saved. Please retry.', 'foogallery-migrate' ), 500 );
+                    }
                 }
 
                 $migrator->get_gallery_migrator()->render_gallery_form();
@@ -413,7 +415,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
 
                     if ('foogallery_migrate_continue' === $action) {
                         $migrator = foogallery_migrate_migrator_instance();
-                        $migrator->get_gallery_migrator()->migrate();
+                        if ( ! $migrator->get_gallery_migrator()->migrate() ) {
+                            $this->send_json_error( __( 'Migration state could not be saved. Please retry.', 'foogallery-migrate' ), 500 );
+                        }
                         $migrator->get_gallery_migrator()->render_gallery_form();
                     }
                 }
@@ -431,7 +435,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
 
                 if ( array_key_exists( 'foogallery_migrate_retry_gallery_id', $_POST ) ) {
                     $gallery_id = sanitize_text_field( wp_unslash( $_POST['foogallery_migrate_retry_gallery_id'] ) );
-                    $migrator->retry_gallery_migration( $gallery_id );
+                    $result = $migrator->retry_gallery_migration( $gallery_id );
+                    if ( is_wp_error( $result ) ) {
+                        $this->send_json_error( $result->get_error_message(), 500 );
+                    }
                 }
 
                 $migrator->get_gallery_migrator()->render_gallery_form();
@@ -448,7 +455,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 $migrator = foogallery_migrate_migrator_instance();
                 if ( array_key_exists( 'foogallery_migrate_check_gallery_id', $_POST ) ) {
                     $gallery_id = sanitize_text_field( wp_unslash( $_POST['foogallery_migrate_check_gallery_id'] ) );
-                    $migrator->check_gallery_migration_errors( $gallery_id );
+                    $result = $migrator->check_gallery_migration_errors( $gallery_id );
+                    if ( is_wp_error( $result ) ) {
+                        $this->send_json_error( $result->get_error_message(), 500 );
+                    }
                 }
 
                 $migrator->get_gallery_migrator()->get_objects_to_migrate( true );
@@ -555,7 +565,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                     }
 
                     // Queue the albums for migration.
-                    $migrator->get_album_migrator()->queue_objects_for_migration( $migrations );
+                    if ( ! $migrator->get_album_migrator()->queue_objects_for_migration( $migrations ) ) {
+                        $this->send_json_error( __( 'Migration state could not be saved. Please retry.', 'foogallery-migrate' ), 500 );
+                    }
                 }
 
                 $migrator->get_album_migrator()->render_album_form();
@@ -575,7 +587,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
 
                     if ('foogallery_album_migrate_continue' === $action) {
                         $migrator = foogallery_migrate_migrator_instance();
-                        $migrator->get_album_migrator()->migrate();
+                        if ( ! $migrator->get_album_migrator()->migrate() ) {
+                            $this->send_json_error( __( 'Migration state could not be saved. Please retry.', 'foogallery-migrate' ), 500 );
+                        }
                         $migrator->get_album_migrator()->render_album_form();
                     }
                 }

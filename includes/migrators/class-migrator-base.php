@@ -60,10 +60,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
          *
          * @param $name
          * @param $value
-         * @return void
+         * @return bool Whether the setting was persisted.
          */
         public function set_setting( $name, $value ) {
-            $this->migrator_engine->set_migrator_setting( $name, $value );
+            return $this->migrator_engine->set_migrator_setting( $name, $value );
         }
 
         /**
@@ -95,7 +95,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
          * Mark a specific gallery for migration.
          *
          * @param $id_array
-         * @return void
+         * @return bool Whether the queue and its summary state were persisted.
          */
         function queue_objects_for_migration( $id_array ) {
 
@@ -123,17 +123,19 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
                 }
             }
 
-            $this->calculate_migration_state( $objects );
+            $state_saved = $this->calculate_migration_state( $objects );
 
             // Save the objects to migrate.
-            $this->set_setting( $this->type, $objects );
+            $objects_saved = $this->set_setting( $this->type, $objects );
+
+			return $state_saved && $objects_saved;
         }
 
         /**
          * Calculates the state of the current migration.
          *
          * @param $objects array<Migratable>
-         * @return void
+         * @return bool Whether the summary state was persisted.
          */
         function calculate_migration_state( $objects ) {
             $queued_count = 0;
@@ -158,7 +160,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
                 $progress = ( $completed_count + $error_count ) / $queued_count * 100;
             }
 
-            $this->set_state( array(
+            return $this->set_state( array(
                 'queued' => $queued_count,
                 'completed' => $completed_count,
                 'progress' => $progress
@@ -195,10 +197,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
          * Sets the migration state.
          *
          * @param $value
-         * @return void
+         * @return bool Whether the state was persisted.
          */
         protected function set_state( $value ) {
-            $this->set_setting( $this->type . '-state', $value );
+            return $this->set_setting( $this->type . '-state', $value );
         }
 
         /**
@@ -213,10 +215,12 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
         /**
          * Continue the migration!
          *
-         * @return void
+         * @return bool Whether the migrated batch and option state were persisted.
          */
         function migrate() {
             $objects = $this->get_objects_to_migrate();
+
+            $this->migrator_engine->begin_migrated_object_batch();
 
             foreach ( $objects as $object ) {
 
@@ -227,10 +231,16 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
                 }
             }
 
-            $this->calculate_migration_state( $objects );
+            if ( ! $this->migrator_engine->flush_migrated_object_batch() ) {
+                return false;
+            }
+
+            $state_saved = $this->calculate_migration_state( $objects );
 
             // Save the migration objects.
-            $this->set_setting( $this->type, $objects );
-        }
+			$objects_saved = $this->set_setting( $this->type, $objects );
+
+			return $state_saved && $objects_saved;
+		}
     }
 }

@@ -41,7 +41,10 @@ if ( require_once FOOGM_PATH . 'includes/startup-checks.php' ) {
 
     spl_autoload_register( 'foogallery_migrate_autoloader' );
 
+    register_activation_hook( FOOGM_FILE, 'foogallery_migrate_activate' );
+
     if ( is_admin() ) {
+        add_action( 'admin_init', 'foogallery_migrate_upgrade_store', 1 );
         // Start the plugin!
         new FooPlugins\FooGalleryMigrate\Init();
     }

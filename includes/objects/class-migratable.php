@@ -22,6 +22,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
      */
     abstract class Migratable extends \stdClass {
 
+        const META_SOURCE_KEY = '_foogallery_migrate_source_key';
         const PROGRESS_NOT_STARTED = 'not_started';
         const PROGRESS_QUEUED = 'queued';
         const PROGRESS_STARTED = 'started';
@@ -99,6 +100,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
         function migrate_next_child() {
             if ( !$this->has_children() ) { return; }
             $this->ensure_children_loaded();
+            foogallery_migrate_migrator_instance()->apply_migrated_children( $this );
             if ( $this->migrated_child_count < $this->get_children_count() && $this->migrated_id > 0 ) {
                 $children_attempted = 0;
                 $children_per_turn = max( 1, absint( $this->get_children_per_turn() ) );
@@ -183,8 +185,11 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
          * @return void
          */
         function migrate() {
-            $migrated_object = foogallery_migrate_migrator_instance()->get_migrated_object( $this->unique_identifier() );
-            if ( false !== $migrated_object ) {
+            $migrated_object = false;
+            if ( empty( $this->migration_store_checked ) ) {
+                $migrated_object = foogallery_migrate_migrator_instance()->get_migrated_object( $this->unique_identifier() );
+            }
+            if ( false !== $migrated_object && ! empty( $migrated_object->migrated ) ) {
 				$this->migration_status = self::PROGRESS_COMPLETED;
 				$this->migrated = true;
                 $this->migrated_id = $migrated_object->migrated_id;
@@ -311,12 +316,17 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
 
 		function get_children_errors() {
 			$errors = array();
+			$children = $this->get_children();
+
+			if ( empty( $children ) && isset( $this->children_errors ) && is_array( $this->children_errors ) ) {
+				return $this->children_errors;
+			}
 
 			if ( !$this->has_children() ) {
 				return $errors;
 			}
 
-			foreach ( $this->get_children() as $child ) {
+			foreach ( $children as $child ) {
                 if ( $child->has_error() ) {
                     $errors[] = $child->get_error_message();
                 }

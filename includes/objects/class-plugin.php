@@ -87,6 +87,51 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Plugin' ) ) {
         }
 
         /**
+         * Loads one object's children for adapters that still discover eagerly.
+         * Efficient adapters can override this method with a targeted source query.
+         *
+         * @param Migratable $object Source object.
+         * @return array
+         */
+        function load_object_children( $object ) {
+            if ( ! is_object( $object ) || ! method_exists( $object, 'unique_identifier' ) ) {
+                return array();
+            }
+
+            $type = method_exists( $object, 'type' ) && 'album' === $object->type() ? 'albums' : 'galleries';
+            foreach ( $this->find_objects( $type ) as $candidate ) {
+                if (
+                    is_object( $candidate ) &&
+                    method_exists( $candidate, 'unique_identifier' ) &&
+                    $candidate->unique_identifier() === $object->unique_identifier() &&
+                    method_exists( $candidate, 'get_children' )
+                ) {
+                    return $candidate->get_children();
+                }
+            }
+
+            if ( 'galleries' === $type ) {
+                foreach ( $this->find_albums() as $album ) {
+                    if ( ! is_object( $album ) || ! method_exists( $album, 'get_children' ) ) {
+                        continue;
+                    }
+                    foreach ( $album->get_children() as $candidate ) {
+                        if (
+                            is_object( $candidate ) &&
+                            method_exists( $candidate, 'unique_identifier' ) &&
+                            $candidate->unique_identifier() === $object->unique_identifier() &&
+                            method_exists( $candidate, 'get_children' )
+                        ) {
+                            return $candidate->get_children();
+                        }
+                    }
+                }
+            }
+
+            return array();
+        }
+
+        /**
          * Returns the gallery object
          * @param $data array
          * @return $gallery
@@ -95,9 +140,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Plugin' ) ) {
             $gallery = new Gallery( $this );
             $gallery->ID = $data['ID'];
 
-            $migrated_object = foogallery_migrate_migrator_instance()->has_object_been_migrated( $gallery->unique_identifier() );
-            if ( $migrated_object ) {
-                $gallery = foogallery_migrate_migrator_instance()->get_migrated_objects()[$gallery->unique_identifier()];
+            $migrated_object = foogallery_migrate_migrator_instance()->get_migrated_object( $gallery->unique_identifier() );
+            if ( false !== $migrated_object ) {
+                $gallery = $migrated_object;
             } else {
                 $gallery->title = $data['title'];
                 $gallery->foogallery_title = $data['title'];
@@ -124,9 +169,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Plugin' ) ) {
             $album = new Album( $this );
             $album->ID = $data['ID'];
 
-            $migrated_object = foogallery_migrate_migrator_instance()->has_object_been_migrated( $album->unique_identifier() );
-            if ( $migrated_object ) {
-                $album = foogallery_migrate_migrator_instance()->get_migrated_objects()[$album->unique_identifier()];
+            $migrated_object = foogallery_migrate_migrator_instance()->get_migrated_object( $album->unique_identifier() );
+            if ( false !== $migrated_object ) {
+                $album = $migrated_object;
             } else {
                 $album->title = $data['title'];
                 $album->data = $data['data'];
@@ -142,36 +187,30 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Plugin' ) ) {
          * @return $image
          */
         function get_image( $data = array() ) {
-
-            $migrated_object = foogallery_migrate_migrator_instance()->has_object_been_migrated( $data['source_url'] );
-            if ( $migrated_object ) {
-                $image = foogallery_migrate_migrator_instance()->get_migrated_objects()[$data['source_url']];
-            } else {
-                $image = new Image( $this );
-                if ( array_key_exists( 'ID', $data ) ) {
-                    $image->ID = absint( $data['ID'] );
-                } else if ( isset( $data['data'] ) && is_object( $data['data'] ) && isset( $data['data']->pid ) ) {
-                    $image->ID = absint( $data['data']->pid );
-                } else if ( isset( $data['data'] ) && is_object( $data['data'] ) && isset( $data['data']->id ) ) {
-                    $image->ID = absint( $data['data']->id );
-                }
-                $image->source_url = $data['source_url'];
-                if ( array_key_exists( 'slug', $data ) ) {
-                    $image->slug = $data['slug'];
-                }
-                if ( array_key_exists( 'title', $data ) ) {
-                    $image->title = $data['title'];
-                }
-                if ( array_key_exists( 'caption', $data ) ) {
-                    $image->caption = $data['caption'];
-                }
-                if ( array_key_exists( 'description', $data ) ) {
-                    $image->description = $data['description'];
-                }
-                $image->alt = $data['alt'];
-                $image->date = $data['date'];
-                $image->data = $data['data'];
+            $image = new Image( $this );
+            if ( array_key_exists( 'ID', $data ) ) {
+                $image->ID = absint( $data['ID'] );
+            } else if ( isset( $data['data'] ) && is_object( $data['data'] ) && isset( $data['data']->pid ) ) {
+                $image->ID = absint( $data['data']->pid );
+            } else if ( isset( $data['data'] ) && is_object( $data['data'] ) && isset( $data['data']->id ) ) {
+                $image->ID = absint( $data['data']->id );
             }
+            $image->source_url = $data['source_url'];
+            if ( array_key_exists( 'slug', $data ) ) {
+                $image->slug = $data['slug'];
+            }
+            if ( array_key_exists( 'title', $data ) ) {
+                $image->title = $data['title'];
+            }
+            if ( array_key_exists( 'caption', $data ) ) {
+                $image->caption = $data['caption'];
+            }
+            if ( array_key_exists( 'description', $data ) ) {
+                $image->description = $data['description'];
+            }
+            $image->alt = $data['alt'];
+            $image->date = $data['date'];
+            $image->data = $data['data'];
 
             return $image;
         }
