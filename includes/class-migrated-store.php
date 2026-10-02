@@ -170,6 +170,24 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratedStore' ) ) {
 			self::install_current_site();
 		}
 
+		/**
+		 * Deactivation deliberately retains history and resumable state.
+		 *
+		 * @return void
+		 */
+		public static function deactivate( $network_wide = false ) {
+			// No writes, schema changes, site enumeration or history export.
+		}
+
+		/**
+		 * Retained as a no-op for callers of the superseded deactivation API.
+		 *
+		 * @return bool
+		 */
+		public function deactivate_schema() {
+			return true;
+		}
+
 		/** @return void */
 		public static function uninstall( $network_wide = false ) {
 			if ( $network_wide && function_exists( 'is_multisite' ) && is_multisite() ) {
@@ -193,16 +211,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratedStore' ) ) {
 		 * @return bool
 		 */
 		public function uninstall_schema() {
-			if ( ! $this->wpdb ) {
-				return false;
-			}
-
-			$table = $this->table_name();
-			if ( ! preg_match( '/^[A-Za-z0-9_]+$/', $table ) ) {
-				return false;
-			}
-
-			if ( false === $this->wpdb->query( 'DROP TABLE IF EXISTS `' . $table . '`' ) ) {
+			if ( ! $this->drop_table() ) {
 				return false;
 			}
 
@@ -213,6 +222,20 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratedStore' ) ) {
 			delete_option( FOOGALLERY_MIGRATE_OPTION_SETTINGS );
 
 			return true;
+		}
+
+		/** @return bool */
+		private function drop_table() {
+			if ( ! $this->wpdb ) {
+				return false;
+			}
+
+			$table = $this->table_name();
+			if ( ! preg_match( '/^[A-Za-z0-9_]+$/', $table ) ) {
+				return false;
+			}
+
+			return false !== $this->wpdb->query( 'DROP TABLE IF EXISTS `' . $table . '`' );
 		}
 
 		/**

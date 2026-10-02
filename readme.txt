@@ -86,6 +86,12 @@ Update now to get all the latest features, bug fixes and improvements!
 
 == Frequently Asked Questions ==
 
+= What happens when I deactivate FooGallery Migrate? =
+
+Deactivation retains migrated history, preferences and operational state so that you can reactivate the plugin and resume. It does not delete or roll back migrated FooGallery galleries, albums, media, source-plugin data or replaced post content. Network deactivation also retains each site's state.
+
+Uninstall removes plugin-owned internal storage, including retained history and preferences. It does not undo migrations or delete source or destination content. Back up your database before uninstalling if you need to retain migration state.
+
 = I need to import from another plugin. How can I request that? =
 
 [Contact us](https://fooplugins.com/support/) and we will build an importer to help you migrate to FooGallery.

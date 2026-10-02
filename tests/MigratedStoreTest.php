@@ -168,6 +168,77 @@ class MigratedStoreTest extends TestCase {
 		$this->assertFalse( get_option( FOOGALLERY_MIGRATE_OPTION_SETTINGS, false ) );
 	}
 
+	public function test_deactivation_retains_history_and_all_other_state(): void {
+		$GLOBALS['wpdb'] = new RecordingStoreWpdb( 'wp_42_' );
+		$data = array( 'plugins' => array(), 'migrated-revision' => 8, 'block-shortcode_scan_state' => array( 'items' => array() ) );
+		update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $data );
+		update_option( FOOGALLERY_MIGRATE_OPTION_SETTINGS, array( 'template' => 'default' ) );
+		update_option( MigratedStore::LEGACY_BACKUP_OPTION, array( 'legacy' ) );
+		update_option( MigratedStore::SCHEMA_OPTION, 1 );
+		update_option( MigratedStore::MIGRATION_OPTION, 1 );
+
+		MigratedStore::deactivate( false );
+
+		$this->assertSame( array(), $GLOBALS['wpdb']->queries );
+		$this->assertSame( 1, get_option( MigratedStore::SCHEMA_OPTION ) );
+		$this->assertSame( 1, get_option( MigratedStore::MIGRATION_OPTION ) );
+		$this->assertSame( $data, get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) );
+		$this->assertSame( array( 'template' => 'default' ), get_option( FOOGALLERY_MIGRATE_OPTION_SETTINGS ) );
+		$this->assertSame( array( 'legacy' ), get_option( MigratedStore::LEGACY_BACKUP_OPTION ) );
+	}
+
+	public function test_deactivation_is_repeatable_without_schema_or_option_changes(): void {
+		$GLOBALS['wpdb'] = new RecordingStoreWpdb();
+		update_option( MigratedStore::SCHEMA_OPTION, 1 );
+		update_option( MigratedStore::MIGRATION_OPTION, 1 );
+		$options = $GLOBALS['foogallery_migrate_test_options'];
+		MigratedStore::deactivate( false );
+		MigratedStore::deactivate( false );
+		$this->assertSame( array(), $GLOBALS['wpdb']->queries );
+		$this->assertSame( array(), $GLOBALS['foogallery_migrate_test_dbdelta'] );
+		$this->assertSame( $options, $GLOBALS['foogallery_migrate_test_options'] );
+	}
+
+	public function test_network_deactivation_does_not_iterate_sites_or_change_context(): void {
+		$GLOBALS['foogallery_migrate_test_is_multisite'] = true;
+		$GLOBALS['foogallery_migrate_test_site_ids'] = array( 2, 7 );
+		$GLOBALS['wpdb'] = new RecordingStoreWpdb( 'wp_' );
+		MigratedStore::deactivate( true );
+		$this->assertSame( array(), $GLOBALS['wpdb']->queries );
+		$this->assertSame( 'wp_', $GLOBALS['wpdb']->prefix );
+		$this->assertSame( array(), $GLOBALS['foogallery_migrate_test_blog_prefix_stack'] );
+		$GLOBALS['wpdb']->queries = array();
+		$GLOBALS['wpdb']->prefix = 'wp_7_';
+		MigratedStore::deactivate( false );
+		$this->assertSame( array(), $GLOBALS['wpdb']->queries );
+	}
+
+	public function test_deactivation_never_uses_the_database_connection(): void {
+		update_option( MigratedStore::SCHEMA_OPTION, 1 );
+		update_option( MigratedStore::MIGRATION_OPTION, 1 );
+		update_option( FOOGALLERY_MIGRATE_OPTION_DATA, array( 'migrated-revision' => 8 ) );
+		$options = $GLOBALS['foogallery_migrate_test_options'];
+		$db = new RecordingStoreWpdb();
+		$db->query_result = false;
+		$this->assertTrue( ( new MigratedStore( $db ) )->deactivate_schema() );
+		$this->assertSame( array(), $db->queries );
+		$this->assertSame( $options, $GLOBALS['foogallery_migrate_test_options'] );
+		$db = new RecordingStoreWpdb( 'wp_`; DROP TABLE wp_posts; --' );
+		$this->assertTrue( ( new MigratedStore( $db ) )->deactivate_schema() );
+		$this->assertSame( array(), $db->queries );
+		$this->assertSame( $options, $GLOBALS['foogallery_migrate_test_options'] );
+	}
+
+	public function test_uninstall_after_deactivation_still_removes_owned_options(): void {
+		$GLOBALS['wpdb'] = new RecordingStoreWpdb();
+		update_option( MigratedStore::LEGACY_BACKUP_OPTION, array( 'legacy' ) );
+		update_option( FOOGALLERY_MIGRATE_OPTION_SETTINGS, array( 'template' => 'default' ) );
+		MigratedStore::deactivate( false );
+		MigratedStore::uninstall( false );
+		$this->assertSame( array(), $GLOBALS['foogallery_migrate_test_options'] );
+		$this->assertCount( 1, $GLOBALS['wpdb']->queries );
+	}
+
 	public function test_network_activation_installs_each_sites_prefixed_table(): void {
 		$GLOBALS['foogallery_migrate_test_is_multisite'] = true;
 		$GLOBALS['foogallery_migrate_test_site_ids'] = array( 2, 7 );
@@ -220,6 +291,7 @@ class FailingMigratedStore extends MigratedStore {
 class RecordingStoreWpdb {
 	public $prefix;
 	public $queries = array();
+	public $query_result = 1;
 	private $schema_ready;
 
 	public function __construct( $prefix = 'wp_', $schema_ready = true ) {
@@ -245,7 +317,7 @@ class RecordingStoreWpdb {
 
 	public function query( $query ) {
 		$this->queries[] = $query;
-		return 1;
+		return $this->query_result;
 	}
 
 	public function get_var( $query ) {

@@ -100,6 +100,16 @@ function foogallery_migrate_activate( $network_wide = false ) {
 }
 
 /**
+ * Retains all migration state for later reactivation and resume.
+ *
+ * @param bool $network_wide Whether the plugin is network deactivated.
+ * @return void
+ */
+function foogallery_migrate_deactivate( $network_wide = false ) {
+    MigratedStore::deactivate( $network_wide );
+}
+
+/**
  * Runs inexpensive schema/version checks on admin requests.
  *
  * @return void
