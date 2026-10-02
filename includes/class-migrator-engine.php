@@ -54,6 +54,11 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         public function __construct( $migrated_store = null ) {
             if ( $migrated_store instanceof MigratedStore ) {
                 $this->migrated_store = $migrated_store;
+                return;
+            }
+            $error = StorageAuthority::option_mode_error();
+            if ( is_wp_error( $error ) ) {
+                throw new \RuntimeException( $error->get_error_message() );
             }
         }
 
@@ -73,7 +78,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         /** @return MigratedStore */
         protected function migrated_store() {
             if ( ! isset( $this->migrated_store ) ) {
-                $this->migrated_store = new MigratedStore( null, $this->settings() );
+                $this->migrated_store = new OptionMigratedStore( null, $this->settings() );
             }
 
             return $this->migrated_store;
@@ -840,6 +845,9 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return bool Whether the revision was persisted.
          */
         private function increment_migrated_revision() {
+            if ( $this->migrated_store()->manages_revision() ) {
+                return true;
+            }
             return $this->set_migrator_setting( self::KEY_MIGRATED_REVISION, $this->get_migrated_revision() + 1 );
         }
 

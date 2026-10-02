@@ -45,7 +45,6 @@ if ( require_once FOOGM_PATH . 'includes/startup-checks.php' ) {
     register_deactivation_hook( FOOGM_FILE, 'foogallery_migrate_deactivate' );
 
     if ( is_admin() ) {
-        add_action( 'admin_init', 'foogallery_migrate_upgrade_store', 1 );
         // Start the plugin!
         new FooPlugins\FooGalleryMigrate\Init();
     }

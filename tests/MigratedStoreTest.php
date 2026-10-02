@@ -239,7 +239,7 @@ class MigratedStoreTest extends TestCase {
 		$this->assertCount( 1, $GLOBALS['wpdb']->queries );
 	}
 
-	public function test_network_activation_installs_each_sites_prefixed_table(): void {
+	public function test_network_activation_is_storage_neutral(): void {
 		$GLOBALS['foogallery_migrate_test_is_multisite'] = true;
 		$GLOBALS['foogallery_migrate_test_site_ids'] = array( 2, 7 );
 		$GLOBALS['foogallery_migrate_test_dbdelta'] = array();
@@ -247,9 +247,9 @@ class MigratedStoreTest extends TestCase {
 
 		MigratedStore::activate( true );
 
-		$this->assertCount( 2, $GLOBALS['foogallery_migrate_test_dbdelta'] );
-		$this->assertStringContainsString( 'wp_2_foogallery_migrate_objects', $GLOBALS['foogallery_migrate_test_dbdelta'][0] );
-		$this->assertStringContainsString( 'wp_7_foogallery_migrate_objects', $GLOBALS['foogallery_migrate_test_dbdelta'][1] );
+		$this->assertSame( array(), $GLOBALS['foogallery_migrate_test_dbdelta'] );
+		$this->assertSame( array(), $GLOBALS['wpdb']->queries );
+		$this->assertSame( array(), $GLOBALS['foogallery_migrate_test_options'] );
 		$this->assertSame( 'wp_', $GLOBALS['wpdb']->prefix );
 	}
 

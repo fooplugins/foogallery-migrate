@@ -5,6 +5,7 @@ namespace FooPlugins\FooGalleryMigrate\Tests;
 use FooPlugins\FooGalleryMigrate\MigratedStore;
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
+use FooPlugins\FooGalleryMigrate\OptionMigratedStore;
 use FooPlugins\FooGalleryMigrate\Objects\Album;
 use FooPlugins\FooGalleryMigrate\Objects\Gallery;
 use FooPlugins\FooGalleryMigrate\Objects\Image;
@@ -120,6 +121,37 @@ class AigplPluginTest extends TestCase {
 			),
 			$matches
 		);
+	}
+
+	public function test_option_mode_204_image_job_resumes_across_new_engines(): void {
+		$plugin = new Aigpl();
+		$store = new OptionMigratedStore();
+		$engine = new MigratorEngine( $store );
+		$GLOBALS['foogallery_migrate_engine_instance'] = $engine;
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$this->configure_large_gallery( 204, 204 );
+		$engine->run_detection();
+		$migrator = $engine->get_gallery_migrator();
+		$gallery_key = $migrator->get_objects_to_migrate( true )[0]->unique_identifier();
+		$migrator->queue_objects_for_migration( array( $gallery_key => array( 'title' => 'AIGPL option 204' ) ) );
+		for ( $turn = 0; $turn < 50; $turn++ ) {
+			$engine = new MigratorEngine( new OptionMigratedStore() );
+			$GLOBALS['foogallery_migrate_engine_instance'] = $engine;
+			$migrator = $engine->get_gallery_migrator();
+			$this->assertTrue( $migrator->migrate() );
+			if ( 100 === (int) $migrator->get_state()['progress'] ) {
+				break;
+			}
+		}
+		$this->assertLessThan( 50, $turn, 'The compatible option path must finish, not lose its cursor on reload.' );
+		$finished = ( new OptionMigratedStore() )->get( $gallery_key );
+		$this->assertSame( Migratable::PROGRESS_COMPLETED, $finished->migration_status );
+		$this->assertSame( 204, $finished->migrated_child_count );
+		$this->assertSame( 205, ( new OptionMigratedStore() )->count() );
+		$this->assertCount( 204, $GLOBALS['foogallery_migrate_test_post_meta'][ $finished->migrated_id ][ FOOGALLERY_META_ATTACHMENTS ] );
+		$before = $GLOBALS['foogallery_migrate_test_posts'];
+		$this->assertTrue( $migrator->migrate() );
+		$this->assertSame( $before, $GLOBALS['foogallery_migrate_test_posts'], 'A completed job must not create destinations again.' );
 	}
 
 	public function test_204_image_turn_stays_bounded_with_thousands_of_migrated_records(): void {

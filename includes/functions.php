@@ -74,6 +74,13 @@ function foogallery_migrate_migrator_instance() {
     global $foogallery_migrate_engine_instance;
 
     if ( !isset( $foogallery_migrate_engine_instance ) ) {
+        $error = \FooPlugins\FooGalleryMigrate\StorageAuthority::option_mode_error();
+        if ( is_wp_error( $error ) ) {
+            if ( defined( 'DOING_AJAX' ) && DOING_AJAX ) {
+                wp_send_json_error( array( 'message' => $error->get_error_message(), 'code' => $error->get_error_code() ), 409 );
+            }
+            wp_die( esc_html( $error->get_error_message() ), esc_html__( 'Migration storage recovery required', 'foogallery-migrate' ), array( 'response' => 409 ) );
+        }
         $foogallery_migrate_engine_instance = new MigratorEngine();
     }
 
@@ -115,16 +122,7 @@ function foogallery_migrate_deactivate( $network_wide = false ) {
  * @return void
  */
 function foogallery_migrate_upgrade_store() {
-    $data = get_option( FOOGALLERY_MIGRATE_OPTION_DATA, array() );
-    $legacy_pending = is_array( $data ) && array_key_exists( \FooPlugins\FooGalleryMigrate\MigratorSettings::KEY_MIGRATED, $data );
-
-    if (
-        MigratedStore::SCHEMA_VERSION !== (int) get_option( MigratedStore::SCHEMA_OPTION, 0 ) ||
-        MigratedStore::SCHEMA_VERSION !== (int) get_option( MigratedStore::MIGRATION_OPTION, 0 ) ||
-        $legacy_pending
-    ) {
-        foogallery_migrate_install_store_current_site();
-    }
+    // Automatic conversion is forbidden. Kept for compatibility with old hooks.
 }
 
 /**

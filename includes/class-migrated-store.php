@@ -19,6 +19,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratedStore' ) ) {
 	class MigratedStore {
 
 		const SCHEMA_VERSION = 1;
+		const TABLE_SUFFIX = 'foogallery_migrate_objects';
 		const SCHEMA_OPTION = 'foogallery-migrate-store-schema-version';
 		const MIGRATION_OPTION = 'foogallery-migrate-store-migration-version';
 		const LEGACY_BACKUP_OPTION = 'foogallery-migrate-migrated-legacy-backup';
@@ -62,7 +63,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratedStore' ) ) {
 		public function table_name() {
 			$prefix = $this->wpdb && isset( $this->wpdb->prefix ) ? $this->wpdb->prefix : '';
 
-			return $prefix . 'foogallery_migrate_objects';
+			return $prefix . self::TABLE_SUFFIX;
 		}
 
 		/**
@@ -151,23 +152,18 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratedStore' ) ) {
 
 		/** @return bool */
 		public static function install_current_site() {
-			$store = new self();
-			return $store->install_schema() && $store->migrate_legacy();
+			// Tables may only be installed by an explicit verified opt-in.
+			return true;
+		}
+
+		/** Whether history and its revision are committed by this backend. */
+		public function manages_revision() {
+			return false;
 		}
 
 		/** @return void */
 		public static function activate( $network_wide = false ) {
-			if ( $network_wide && function_exists( 'is_multisite' ) && is_multisite() ) {
-				$site_ids = get_sites( array( 'fields' => 'ids', 'number' => 0 ) );
-				foreach ( $site_ids as $site_id ) {
-					switch_to_blog( $site_id );
-					self::install_current_site();
-					restore_current_blog();
-				}
-				return;
-			}
-
-			self::install_current_site();
+			// Activation (including network activation) is storage-neutral.
 		}
 
 		/**

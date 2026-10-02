@@ -61,10 +61,14 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @return bool Whether the setting was persisted.
 		 */
 		public function set_migrator_setting( $name, $value ) {
-			$settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+			$missing = new \stdClass();
+			$settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA, $missing );
 
-			if ( ! isset( $settings ) || ! is_array( $settings ) ) {
+			if ( $missing === $settings ) {
 				$settings = array();
+			} else if ( ! is_array( $settings ) ) {
+				// A malformed persisted root is evidence, not an empty installation.
+				return false;
 			}
 
 			$previous_value = array_key_exists( $name, $settings ) ? $settings[ $name ] : null;
