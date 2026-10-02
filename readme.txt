@@ -4,7 +4,7 @@ Tags: gallery, image gallery, photo gallery, wordpress gallery plugin, migrate
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 5.4
-Stable tag: 1.14
+Stable tag: 1.16
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -26,6 +26,7 @@ Migrate to FooGallery from other gallery plugins, including:
 *	Photo Gallery by 10Web
 *	Robo Gallery
 *	Album and Image Gallery Plus Lightbox (plugin was closed Apr 2026 due to being compromised)
+*	WP Photo Album Plus
 *	Built-in WordPress Gallery blocks and [gallery] shortcodes
 
 Features:
@@ -58,6 +59,16 @@ FooGallery free has 7 gallery styles and a load of different settings to customi
 
 FooGallery Migrate can detect "Album and Image Gallery Plus Lightbox" galleries directly from WordPress database records, so the source plugin does not need to be active or loaded during migration.
 
+= Migrate Away From "WP Photo Album Plus" =
+
+FooGallery Migrate detects the exact current-site WP Photo Album Plus database tables even when WP Photo Album Plus is inactive. It creates one FooGallery gallery for each source album containing a supported, public local image and preserves image titles, descriptions/captions, alternative text, valid dates and deterministic source order.
+
+WP Photo Album Plus stores images outside the WordPress Media Library. FooGallery Migrate supports its current flat and tree upload layouts and imports canonical local JPG, JPEG, PNG, GIF and WebP display files. WebP files require image inspection support in the site's PHP runtime; when unavailable they are skipped safely. Missing or malformed files, invalid rows, trashed/deleted items, capability-restricted albums, non-public or unknown statuses, and video, audio, PDF or other unsupported payloads are skipped rather than creating broken attachments.
+
+Nested WP Photo Album Plus albums cannot be represented exactly because FooGallery albums contain galleries, not other albums. A source album with child albums is therefore offered as a FooGallery album containing its own non-empty gallery and all non-empty descendant galleries in a flattened list. Empty branches are omitted.
+
+Only WP Photo Album Plus shortcodes and blocks containing one explicit positive numeric `album` value can be replaced automatically. Dynamic or virtual expressions (including names, encrypted IDs, `#last`, tag/search/query selectors and combined album expressions) are intentionally left unchanged for manual review. Random or unknown WP Photo Album Plus image order is converted to stable source-ID order; supported configured order modes use source IDs as deterministic tie-breakers.
+
 == Installation ==
 
 1. Upload the zip file to the `/wp-content/plugins/` folder and then unzip.
@@ -80,6 +91,15 @@ Update now to get all the latest features, bug fixes and improvements!
 [Contact us](https://fooplugins.com/support/) and we will build an importer to help you migrate to FooGallery.
 
 == Changelog ==
+
+= 1.16 =
+* Added WP Photo Album Plus migration for galleries, nested albums, locally stored images and metadata, plus supported numeric-album shortcodes and blocks; the source plugin can remain inactive, and migration form actions are now handled reliably.
+
+= 1.15 =
+* Added stale-status detection for Blocks / Shortcodes when the migrated gallery map changes after a content scan.
+* Added a resumable Refresh Status action that reconciles saved occurrence statuses without rescanning post content.
+* Fixed stale saved statuses preventing gallery occurrences shown as ready from being migrated and replaced.
+* Added backward-compatible revision handling for scans and migrated-object maps created by older versions.
 
 = 1.14 =
 * Added migration support for built-in WordPress Gallery blocks and [gallery] shortcodes, with a choice between reusable FooGallery records and dynamic replacements stored directly in content.

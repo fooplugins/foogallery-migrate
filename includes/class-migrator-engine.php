@@ -28,6 +28,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         const KEY_ALBUMS = 'albums';
         const KEY_CONTENT = 'block-shortcode';
         const KEY_MIGRATED = 'migrated';
+        const KEY_MIGRATED_REVISION = 'migrated-revision';
         const KEY_IMAGE_TAG_SYNC = 'image-tag-sync';
 
         /**
@@ -43,6 +44,9 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
 
         /** @var bool */
         protected $migrated_batch_active = false;
+
+        /** @var array Request-local compact records keyed by migrated object identifier. */
+        protected $migrated_object_records = array();
 
         /**
          * @param MigratedStore|null $migrated_store Optional injected store.
@@ -804,6 +808,42 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         }
 
         /**
+         * Returns true when a migrated object differs from its request-local record.
+         *
+         * @param Migratable $object Migrated object candidate.
+         * @return bool
+         */
+        private function migrated_object_has_changed( $object ) {
+            $key = (string) $object->unique_identifier();
+            if ( ! array_key_exists( $key, $this->migrated_object_records ) ) {
+                return true;
+            }
+
+            return $this->migrated_object_records[ $key ] !== $this->settings()->compact_migrated_object( $object );
+        }
+
+        /**
+         * Cache one migrated object record without querying the full store.
+         *
+         * @param Migratable $object Migrated object.
+         * @return void
+         */
+        private function remember_migrated_object( $object ) {
+            if ( is_object( $object ) && method_exists( $object, 'unique_identifier' ) ) {
+                $this->migrated_object_records[ (string) $object->unique_identifier() ] = $this->settings()->compact_migrated_object( $object );
+            }
+        }
+
+        /**
+         * Advance the scalar migrated-object revision without restoring the legacy map.
+         *
+         * @return bool Whether the revision was persisted.
+         */
+        private function increment_migrated_revision() {
+            return $this->set_migrator_setting( self::KEY_MIGRATED_REVISION, $this->get_migrated_revision() + 1 );
+        }
+
+        /**
          * Store a migrated object, so that it does not get migrated twice.
          *
          * @param $object Migratable
@@ -825,7 +865,17 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 return true;
             }
 
-            return false !== $this->migrated_store()->upsert_batch( array( $record ) );
+            $changed = $this->migrated_object_has_changed( $object );
+            if ( $changed && ! $this->increment_migrated_revision() ) {
+                return false;
+            }
+
+            if ( false === $this->migrated_store()->upsert_batch( array( $record ) ) ) {
+                return false;
+            }
+
+            $this->remember_migrated_object( $object );
+            return true;
         }
 
         /** @return void */
@@ -837,8 +887,26 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         /** @return bool */
         public function flush_migrated_object_batch() {
             $records = array_values( $this->pending_migrated_objects );
+			$changed = false;
+			foreach ( $records as $record ) {
+				if ( isset( $record['object'] ) && $this->migrated_object_has_changed( $record['object'] ) ) {
+					$changed = true;
+					break;
+				}
+			}
+
+			if ( $changed && ! $this->increment_migrated_revision() ) {
+				return false;
+			}
+
 			if ( ! empty( $records ) && false === $this->migrated_store()->upsert_batch( $records ) ) {
 				return false;
+			}
+
+			foreach ( $records as $record ) {
+				if ( isset( $record['object'] ) ) {
+					$this->remember_migrated_object( $record['object'] );
+				}
 			}
 
 			$this->pending_migrated_objects = array();
@@ -866,7 +934,29 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array<Migratable>
          */
         public function get_migrated_objects() {
-            return $this->migrated_store()->get_all();
+            $objects = $this->migrated_store()->get_all();
+            foreach ( $objects as $object ) {
+                $this->remember_migrated_object( $object );
+            }
+
+            return $objects;
+        }
+
+        /**
+         * Return the revision of the migrated-object map.
+         *
+         * Existing installations with migrated objects predate revision tracking,
+         * so they start at revision one and make legacy content scans stale once.
+         *
+         * @return int
+         */
+        public function get_migrated_revision() {
+            $revision = $this->get_migrator_setting( self::KEY_MIGRATED_REVISION, false );
+            if ( false !== $revision ) {
+                return absint( $revision );
+            }
+
+            return $this->has_migrated_objects() ? 1 : 0;
         }
 
         /**
@@ -905,7 +995,16 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 return new \WP_Error( 'foogallery_migrate_missing_object', __( 'Migrated object not found.', 'foogallery-migrate' ) );
             }
 
-            return $this->migrated_store()->delete( $unique_identifier );
+            if ( ! $this->increment_migrated_revision() ) {
+                return false;
+            }
+
+            if ( ! $this->migrated_store()->delete( $unique_identifier ) ) {
+                return false;
+            }
+
+            unset( $this->migrated_object_records[ $unique_identifier ] );
+            return true;
         }
 
         /**
@@ -918,7 +1017,12 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 return $this->pending_migrated_objects[ $unique_identifier ]['object'];
             }
 
-            return $this->migrated_store()->get( $unique_identifier );
+            $object = $this->migrated_store()->get( $unique_identifier );
+            if ( false !== $object ) {
+                $this->remember_migrated_object( $object );
+            }
+
+            return $object;
         }
 
         /**
@@ -927,7 +1031,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return bool
          */
         public function has_migrated_objects() {
-            return $this->migrated_store()->count() > 0;
+            return $this->migrated_store()->count() > 0 || $this->settings()->has_migrator_setting_items( self::KEY_MIGRATED );
         }
 
         /**

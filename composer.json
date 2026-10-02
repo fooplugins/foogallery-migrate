@@ -27,10 +27,8 @@
     "scripts": {
         "test": "phpunit"
     },
-    "require": {
-        "composer/installers": "^2.1"
-    },
     "require-dev": {
+        "composer/installers": "^2.1",
         "phpunit/phpunit": "^9.6",
         "doctrine/instantiator": "^1.5"
     }

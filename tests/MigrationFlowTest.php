@@ -385,6 +385,130 @@ class MigrationFlowTest extends TestCase {
 		$this->assertFalse( $engine->has_migrated_objects() );
 	}
 
+	public function test_migrated_revision_tracks_map_changes_without_duplicate_bumps(): void {
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$plugin = new FakeSourcePlugin();
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$gallery = $this->create_gallery( $plugin, 91, 'Revision Gallery', array() );
+		$gallery->migrated = true;
+		$gallery->migrated_id = 991;
+		$gallery->migration_status = Migratable::PROGRESS_COMPLETED;
+
+		$this->assertSame( 0, $engine->get_migrated_revision() );
+		$engine->add_migrated_object( $gallery );
+		$this->assertSame( 1, $engine->get_migrated_revision() );
+		$this->assertSame( 1, get_option( FOOGALLERY_MIGRATE_OPTION_DATA )[ MigratorEngine::KEY_MIGRATED_REVISION ] );
+
+		$engine->add_migrated_object( $gallery );
+		$this->assertSame( 1, $engine->get_migrated_revision(), 'Adding an already stored object must not mark content stale again.' );
+
+		$result = $engine->update_migrated_object_status( $gallery->unique_identifier(), Migratable::PROGRESS_ERROR );
+		$this->assertFalse( is_wp_error( $result ) );
+		$this->assertSame( 2, $engine->get_migrated_revision() );
+
+		$this->assertTrue( $engine->delete_migrated_object( $gallery->unique_identifier() ) );
+		$this->assertSame( 3, $engine->get_migrated_revision() );
+	}
+
+	public function test_legacy_migrated_map_starts_at_revision_one(): void {
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$GLOBALS['foogallery_migrate_test_options'][ FOOGALLERY_MIGRATE_OPTION_DATA ] = array(
+			MigratorEngine::KEY_MIGRATED => array(
+				MigratorSettings::COMPACT_MARKER => MigratorSettings::COMPACT_VERSION,
+				'type' => 'migratable',
+				'items' => array(
+					'image_NextGen_701' => array( 'object_type' => 'image' ),
+				),
+			),
+		);
+
+		$this->assertSame( 1, $engine->get_migrated_revision() );
+	}
+
+	public function test_content_item_status_reconciles_with_current_migrated_map(): void {
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$plugin = new FakeSourcePlugin();
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$gallery = $this->create_gallery( $plugin, 92, 'Reconciled Gallery', array() );
+		$gallery->migrated = true;
+		$gallery->migrated_id = 992;
+		$gallery->migration_status = Migratable::PROGRESS_COMPLETED;
+		$engine->add_migrated_object( $gallery );
+
+		$content_migrator = $engine->get_content_migrator();
+		$build_lookup = new \ReflectionMethod( $content_migrator, 'build_migrated_object_lookup' );
+		$build_lookup->setAccessible( true );
+		$get_plugins = new \ReflectionMethod( $content_migrator, 'get_plugins_by_name' );
+		$get_plugins->setAccessible( true );
+		$reconcile = new \ReflectionMethod( $content_migrator, 'reconcile_content_item_status' );
+		$reconcile->setAccessible( true );
+
+		$saved_item = array(
+			'plugin_name' => 'FakeSource',
+			'gallery_id' => 92,
+			'object_type' => 'gallery',
+			'migrated' => false,
+			'migrated_foogallery_id' => false,
+		);
+		$reconciled = $reconcile->invoke(
+			$content_migrator,
+			$saved_item,
+			$build_lookup->invoke( $content_migrator ),
+			$get_plugins->invoke( $content_migrator )
+		);
+
+		$this->assertTrue( $reconciled['migrated'] );
+		$this->assertSame( 992, $reconciled['migrated_foogallery_id'] );
+		$this->assertFalse( $saved_item['migrated'], 'Visible-page reconciliation must not mutate or persist the saved scan item.' );
+	}
+
+	public function test_stale_saved_status_does_not_block_selected_content_replacement(): void {
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$plugin = new FakeSourcePlugin();
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$gallery = $this->create_gallery( $plugin, 77, 'Stale Status Gallery', array() );
+		$gallery->migrated = true;
+		$gallery->migrated_id = 1077;
+		$gallery->migration_status = Migratable::PROGRESS_COMPLETED;
+		$engine->add_migrated_object( $gallery );
+
+		$source_content = '[fake-gallery id="77"]';
+		$this->create_test_post( 777, 'post', 'Stale Status Post', $source_content );
+		$engine->set_migrator_setting(
+			MigratorEngine::KEY_CONTENT . '_scan_state',
+			array(
+				'items' => array(
+					array(
+						'post_id' => 777,
+						'post_title' => 'Stale Status Post',
+						'post_type' => 'post',
+						'plugin_name' => 'FakeSource',
+						'gallery_id' => 77,
+						'object_type' => 'gallery',
+						'type' => 'shortcode',
+						'original_content' => $source_content,
+						'match_offset' => 0,
+						'migrated' => false,
+						'migrated_foogallery_id' => false,
+					),
+				),
+				'progress' => array(
+					'started' => true,
+					'cursor' => 777,
+					'scanned' => 1,
+					'complete' => true,
+					'migrated_revision' => 0,
+				),
+			)
+		);
+
+		$result = $engine->get_content_migrator()->migrate_and_replace_content( array( 0 ) );
+
+		$this->assertSame( 1, $result['success'] );
+		$this->assertSame( array(), $result['errors'] );
+		$this->assertSame( '[foogallery id="1077"]', get_post( 777 )->post_content );
+	}
+
 	public function test_image_tag_plan_warning_requires_tagged_images_without_foogallery_expert(): void {
 		$plugin = new FakeSourcePlugin();
 		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
