@@ -158,6 +158,9 @@ function get_option( $name, $default = false ) {
 }
 
 function update_option( $name, $value, $autoload = null ) {
+	if ( isset( $GLOBALS['foogallery_migrate_test_option_writes'] ) ) {
+		$GLOBALS['foogallery_migrate_test_option_writes'][] = array( $name, $autoload );
+	}
 	if ( ! empty( $GLOBALS['foogallery_migrate_test_failed_options'][ $name ] ) ) {
 		return false;
 	}

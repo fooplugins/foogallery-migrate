@@ -61,6 +61,22 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @return bool Whether the setting was persisted.
 		 */
 		public function set_migrator_setting( $name, $value ) {
+			return $this->set_migrator_settings( array( $name => $value ) );
+		}
+
+		/**
+		 * Persist one logical multi-key operation in one non-autoloaded option
+		 * update. History and its derived revision cannot be published separately.
+		 * Option mode retains its existing whole-option memory/concurrency costs.
+		 *
+		 * @param array $values Ordered setting-name/value changes.
+		 * @return bool Whether the complete operation was persisted.
+		 */
+		public function set_migrator_settings( $values ) {
+			if ( ! is_array( $values ) || ( array_key_exists( self::KEY_MIGRATED, $values ) &&
+				array_key_exists( self::KEY_MIGRATED_REVISION, $values ) ) ) {
+				return false;
+			}
 			$missing = new \stdClass();
 			$settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA, $missing );
 
@@ -71,11 +87,12 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 				return false;
 			}
 
-			$previous_value = array_key_exists( $name, $settings ) ? $settings[ $name ] : null;
-			$compacted_value = $this->compact_migrator_setting( $name, $value );
-			$settings[ $name ] = $compacted_value;
+			$previous_value = array_key_exists( self::KEY_MIGRATED, $settings ) ? $settings[ self::KEY_MIGRATED ] : null;
+			foreach ( $values as $name => $value ) {
+				$settings[ $name ] = $this->compact_migrator_setting( $name, $value );
+			}
 
-			if ( self::KEY_MIGRATED === $name && $previous_value !== $compacted_value ) {
+			if ( array_key_exists( self::KEY_MIGRATED, $values ) && $previous_value !== $settings[ self::KEY_MIGRATED ] ) {
 				$current_revision = isset( $settings[ self::KEY_MIGRATED_REVISION ] )
 					? absint( $settings[ self::KEY_MIGRATED_REVISION ] )
 					: ( $this->raw_setting_has_items( $previous_value ) ? 1 : 0 );
