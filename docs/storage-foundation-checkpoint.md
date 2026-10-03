@@ -70,3 +70,10 @@ The option path intentionally retains whole-history cost. No large-job bounded
 memory, exactly-once or never-OOM claim is made. A conversion lease must eventually
 protect every read/write path; the current engine bootstrap gate alone does not
 provide concurrent-writer draining.
+
+## Subsequent bounded checkpoint
+
+See `docs/legacy-storage-seams-checkpoint.md` for the next committed shared-schema,
+lossless compact-envelope and bounded read-only primitives slice. It does not
+supersede the remaining conversion/authority/acceptance gates above or release
+Milestone B. Both checkpoints are partial work on the same card.
