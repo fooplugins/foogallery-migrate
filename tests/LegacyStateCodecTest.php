@@ -5,6 +5,30 @@ use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
 use PHPUnit\Framework\TestCase;
 
 class LegacyStateCodecTest extends TestCase {
+	public function test_snapshot_digest_streams_ordered_logical_values_without_a_snapshot_byte_limit(): void {
+		$codec = new LegacyStateCodec( 1000 );
+		$state = array( 'galleries' => array_fill( 0, 100, array( 'ID' => '007', 'title' => str_repeat( 'x', 100 ) ) ),
+			'migrated-revision' => 7, 'unknown' => array( 9 => false, '009' => null ) );
+		$digest = $codec->snapshot_digest( $state );
+		$this->assertSame( 64, strlen( $digest ) );
+		$this->assertSame( $digest, ( new LegacyStateCodec() )->snapshot_digest( $state ) );
+		$this->assertNotSame( $digest, $codec->snapshot_digest( array_reverse( $state, true ) ) );
+		$state['migrated-revision'] = 8;
+		$this->assertNotSame( $digest, $codec->snapshot_digest( $state ) );
+		$this->assertNotSame( $codec->snapshot_digest( false ), $codec->snapshot_digest( null ) );
+		$this->assertNotSame( $codec->snapshot_digest( array( 9 => false ) ), $codec->snapshot_digest( array( '009' => false ) ) );
+		$this->assertSame( $codec->snapshot_digest( $state ), ( new LegacyStateCodec( 1000, 64, 1 ) )->snapshot_digest( $state ) );
+	}
+
+	public function test_snapshot_digest_retains_depth_and_scalar_safety_guards(): void {
+		foreach ( array( array( new LegacyStateCodec( 1000, 2 ), array( array( array( true ) ) ) ),
+			array( new LegacyStateCodec( 100 ), str_repeat( 'x', 101 ) ),
+			array( new LegacyStateCodec(), new \stdClass() ) ) as $case ) {
+			try { $case[0]->snapshot_digest( $case[1] ); $this->fail(); }
+			catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'storage', $error->getMessage() ); }
+		}
+	}
+
 	public function test_compact_values_round_trip_without_normalizing_keys_bytes_or_order(): void {
 		$codec = new LegacyStateCodec();
 		$value = array( 9 => false, '009' => null, -2 => "\xff\x00雪", '' => array(),

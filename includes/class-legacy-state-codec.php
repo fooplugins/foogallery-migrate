@@ -63,6 +63,37 @@ class LegacyStateCodec {
 		return hash( 'sha256', $this->encode( $value ) );
 	}
 
+	/**
+	 * Snapshot-only canonical digest. Traverse logical PHP state in its existing
+	 * order; do not encode a whole snapshot or include physical backend metadata.
+	 * No aggregate byte/node cap: snapshots intentionally span many records.
+	 * Depth and individual scalar byte limits still fail closed. Callers must
+	 * preflight serialized options BEFORE obtaining/decoding their logical value.
+	 * This domain is distinct from the physical envelope hash used above.
+	 */
+	public function snapshot_digest( $value ) {
+		$context = hash_init( 'sha256' );
+		hash_update( $context, "legacy-logical-v1\0" );
+		$this->digest_value( $context, $value, 0 );
+		return hash_final( $context );
+	}
+
+	private function digest_value( $context, $value, $depth ) {
+		if ( $depth > $this->max_depth ) {
+			$this->fail( 'Snapshot exceeds the depth budget.' );
+		}
+		if ( is_array( $value ) ) {
+			hash_update( $context, 'array:' . count( $value ) . ':' );
+			foreach ( $value as $key => $item ) {
+				$this->digest_value( $context, $key, $depth + 1 );
+				$this->digest_value( $context, $item, $depth + 1 );
+			}
+		} else {
+			$encoded = $this->encode( $value );
+			hash_update( $context, 'value:' . strlen( $encoded ) . ':' . $encoded );
+		}
+	}
+
 	public function key_value( $key ) {
 		if ( ! is_int( $key ) && ! is_string( $key ) ) {
 			$this->fail( 'Array keys must be exact integers or strings.' );

@@ -5,6 +5,10 @@ This continues the partial option-default foundation at 18c3d2f.
 This is NOT Milestone A acceptance or a selectable table backend. Do not release
 Milestone B, publish this checkpoint, or bypass existing authority markers.
 
+The next bounded slice is recorded in `legacy-record-codec-checkpoint.md`.
+It adds compact tree flatten/rebuild and logical digests; the limitations below
+describe this earlier primitives checkpoint, not full Milestone A acceptance.
+
 ## Delivered in this bounded slice
 
 - `LegacyStorageSchema`: the approved base-prefix `legacy_state` and

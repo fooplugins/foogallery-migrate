@@ -16,6 +16,7 @@ require_once $plugin_root . '/migrate.php';
 require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
+use FooPlugins\FooGalleryMigrate\LegacyRecordCodec;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyTableReader;
 use FooPlugins\FooGalleryMigrate\StorageAuthority;
@@ -129,13 +130,44 @@ try {
 		'logical_hash' => $codec->logical_hash( array( 'child' => true ) ), 'payload_bytes' => strlen( $child_payload ) + strlen( $child_mutable ) ) );
 	$check( '03' === $reader->record_page( 'migrated', 1, null, $parent )['rows'][0]['key'], 'bounded child page checks state and parent ancestry' );
 
+	// Standalone complete logical-record format, not a repository/authority path.
+	$records = new LegacyRecordCodec();
+	$logical = array( 'migration_status' => 'queued', 'object_type' => 'album', 'ID' => '009', 'migrated' => false,
+		'unknown' => array( 9 => false, '009' => null, 'bytes' => "\xff\x00雪" ),
+		'children' => array( '009' => array( 'object_type' => 'gallery', 'plugin_name' => 'MixedCase', 'ID' => 9,
+			'children' => array( -2 => array( 'object_type' => 'image', 'plugin_name' => 'MixedCase', 'ID' => '-007',
+				'error' => array( 'code' => 'failed', 'message' => "\xff" ), 'migrated_id' => 204, 'migrated' => true ) ) ), 9 => null ), 'progress' => -0.0 );
+	$rows = array();
+	$stats = $records->flatten_tree( 'albums', '009', $logical, 7, function ( $row ) use ( &$rows ) { $rows[] = $row; } );
+	$album_head = $insert( $tables[0], array( 'blog_id' => $blog, 'state_key_hash' => $codec->key_hash( 'albums' ),
+		'state_key_value' => $codec->key_value( 'albums' ), 'state_order' => 1, 'state_kind' => 'map', 'active_generation' => 2,
+		'revision' => 8, 'codec_version' => 1, 'record_count' => $stats['record_count'], 'payload_bytes' => $stats['payload_bytes'] ) );
+	foreach ( $rows as $row ) { $insert( $tables[1], array_merge( $row, array( 'blog_id' => $blog, 'state_id' => $album_head, 'generation' => 2 ) ) ); }
+	$columns = array();
+	foreach ( $definitions[ $tables[1] ]['columns'] as $name => $spec ) {
+		$columns[] = 'binary(32)' === $spec[0] ? 'HEX(`' . $name . '`) AS `' . $name . '`' : '`' . $name . '`';
+	}
+	$tree_sql = $wpdb->prepare( 'SELECT ' . implode( ', ', $columns ) . ' FROM `' . $tables[1] . '` WHERE blog_id = %d AND state_id = %d AND generation = 2 ORDER BY id ASC LIMIT %d', $blog, $album_head, count( $rows ) + 1 );
+	$stored = $wpdb->get_results( $tree_sql, ARRAY_A );
+	$rebuilt = $records->rebuild_tree( 'albums', $rows[0]['node_hash'], $stored );
+	$check( $logical === $rebuilt, 'real nested split records rebuild with exact types keys bytes and order' );
+	$check( pack( 'd', -0.0 ) === pack( 'd', $rebuilt['progress'] ), 'negative zero survives split LONGTEXT and binary hashes' );
+	$check( $codec->snapshot_digest( array( 'albums' => $logical, 'migrated-revision' => 17 ) ) === $codec->snapshot_digest( array( 'albums' => $rebuilt, 'migrated-revision' => 17 ) ), 'complete logical digest ignores physical row metadata and retains legacy revision' );
+	$check( 7 === (int) $stored[2]['source_id_numeric'] && $codec->encode( '-007' ) === $stored[2]['source_id_value'], 'numeric source alias and exact source ID remain separate after real DB storage' );
+	$tampered = $stored; $tampered[2]['migrated_id'] = '205';
+	$refuses( function () use ( $records, $rows, $tampered ) { $records->rebuild_tree( 'albums', $rows[0]['node_hash'], $tampered ); }, 'DB-shaped derived projection corruption is refused' );
+	$tampered = $stored; $mutable = $codec->decode( $tampered[2]['mutable_payload'] ); $mutable['migrated_title'] = 'tampered';
+	$tampered[2]['mutable_payload'] = $codec->encode( $mutable );
+	$tampered[2]['payload_bytes'] = strlen( $tampered[2]['payload'] ) + strlen( $tampered[2]['mutable_payload'] );
+	$refuses( function () use ( $records, $rows, $tampered ) { $records->rebuild_tree( 'albums', $rows[0]['node_hash'], $tampered ); }, 'DB-shaped mutable corruption is refused by full logical-record hash' );
+
 	$wpdb->query( $wpdb->prepare( 'UPDATE `' . $tables[1] . '` SET payload_hash = UNHEX(%s) WHERE blog_id = %d AND id = %d', str_repeat( '0', 64 ), $blog, $ids[ $blog ][0] ) );
 	$refuses( function () use ( $reader ) { $reader->record_page( 'migrated', 1 ); }, 'corrupt base payload hash fails closed' );
 	$wpdb->query( $wpdb->prepare( 'UPDATE `' . $tables[1] . '` SET payload = %s WHERE blog_id = %d AND id = %d', str_repeat( 'x', LegacyTableReader::MAX_RECORD_BYTES + 1 ), $blog, $ids[ $blog ][0] ) );
 	$refuses( function () use ( $reader ) { $reader->record_page( 'migrated', 1 ); }, 'oversized record is refused before payload fetch' );
 	$check( false === strpos( $wpdb->last_query, ', key_type, key_value' ) && false !== strpos( $wpdb->last_query, 'AS encoded_bytes' ), 'last SQL on size refusal only selected bounded metadata' );
 	$check( $schema->verify(), 'read/refusal paths do not modify schema health' );
-	$result = array( 'status' => 'pass', 'scope' => 'inert shared schema / lossless compact envelopes / bounded read primitives only; no conversion or authority flip',
+	$result = array( 'status' => 'pass', 'scope' => 'inert shared schema / compact split tree integrity / bounded read primitives only; no conversion or authority flip',
 		'wordpress' => get_bloginfo( 'version' ), 'php' => PHP_VERSION, 'database' => $wpdb->get_var( 'SELECT VERSION()' ),
 		'blog_id' => $blog, 'checks' => $checks, 'peak_bytes' => memory_get_peak_usage( true ) );
 } finally {
