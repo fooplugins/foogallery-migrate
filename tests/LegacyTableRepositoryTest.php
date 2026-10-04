@@ -52,6 +52,16 @@ class LegacyTableRepositoryTest extends TestCase {
 			catch ( \RuntimeException $error ) { $this->assertSame( array(), $db->queries ); }
 		}
 	}
+
+	public function test_invalid_multi_root_requests_precede_sql(): void {
+		$db = new RepositoryTestConnection(); $repo = new LegacyTableRepository( $db, 7 );
+		foreach ( array( array( 'a', 'a' ), array( true ), array( '9' ), array_fill( 0, 101, 'a' ), 'not-an-array' ) as $keys ) {
+			try { $repo->roots( 'history', $keys ); $this->fail(); }
+			catch ( \RuntimeException $error ) { $this->assertSame( array(), $db->queries ); }
+		}
+		$this->assertSame( array(), $repo->roots( 'history', array() ) );
+		$this->assertSame( array(), $db->queries );
+	}
 }
 
 class RepositoryTestConnection extends LegacyTransactionConnection {

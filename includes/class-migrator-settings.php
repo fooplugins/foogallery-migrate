@@ -44,13 +44,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @return mixed
 		 */
 		public function get_migrator_setting( $name, $default = false ) {
-			$settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
-
-			if ( isset( $settings ) && is_array( $settings ) && array_key_exists( $name, $settings ) ) {
-				return $this->hydrate_migrator_setting( $name, $settings[ $name ] );
-			}
-
-			return $default;
+			try { $setting = ( new LegacyOptionBackend() )->read( $name ); }
+			catch ( \RuntimeException $error ) { return $default; }
+			return $setting['found'] ? $this->hydrate_migrator_setting( $name, $setting['value'] ) : $default;
 		}
 
 		/**
@@ -77,34 +73,19 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 				array_key_exists( self::KEY_MIGRATED_REVISION, $values ) ) ) {
 				return false;
 			}
-			$missing = new \stdClass();
-			$settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA, $missing );
-
-			if ( $missing === $settings ) {
-				$settings = array();
-			} else if ( ! is_array( $settings ) ) {
-				// A malformed persisted root is evidence, not an empty installation.
-				return false;
-			}
-
-			$previous_value = array_key_exists( self::KEY_MIGRATED, $settings ) ? $settings[ self::KEY_MIGRATED ] : null;
-			foreach ( $values as $name => $value ) {
-				$settings[ $name ] = $this->compact_migrator_setting( $name, $value );
-			}
-
-			if ( array_key_exists( self::KEY_MIGRATED, $values ) && $previous_value !== $settings[ self::KEY_MIGRATED ] ) {
-				$current_revision = isset( $settings[ self::KEY_MIGRATED_REVISION ] )
-					? absint( $settings[ self::KEY_MIGRATED_REVISION ] )
-					: ( $this->raw_setting_has_items( $previous_value ) ? 1 : 0 );
-				$settings[ self::KEY_MIGRATED_REVISION ] = $current_revision + 1;
-			}
-
-			if ( update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $settings, false ) ) {
-				return true;
-			}
-
-			// update_option() also returns false when the requested value is already stored.
-			return $settings === get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+			return ( new LegacyOptionBackend() )->mutate( function ( $settings ) use ( $values ) {
+				$previous_value = array_key_exists( self::KEY_MIGRATED, $settings ) ? $settings[ self::KEY_MIGRATED ] : null;
+				foreach ( $values as $name => $value ) {
+					$settings[ $name ] = $this->compact_migrator_setting( $name, $value );
+				}
+				if ( array_key_exists( self::KEY_MIGRATED, $values ) && $previous_value !== $settings[ self::KEY_MIGRATED ] ) {
+					$current_revision = isset( $settings[ self::KEY_MIGRATED_REVISION ] )
+						? absint( $settings[ self::KEY_MIGRATED_REVISION ] )
+						: ( $this->raw_setting_has_items( $previous_value ) ? 1 : 0 );
+					$settings[ self::KEY_MIGRATED_REVISION ] = $current_revision + 1;
+				}
+				return $settings;
+			} );
 		}
 
 		/**
@@ -113,11 +94,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @return bool Whether the settings were cleared.
 		 */
 		public function clear_migrator_setting() {
-			if ( update_option( FOOGALLERY_MIGRATE_OPTION_DATA, array(), false ) ) {
-				return true;
-			}
-
-			return array() === get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+			return ( new LegacyOptionBackend() )->replace_all( array() );
 		}
 
 		/**
@@ -126,9 +103,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @return bool
 		 */
 		public function has_migrator_settings() {
-			$settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
-
-			return isset( $settings ) && is_array( $settings );
+			return ( new LegacyOptionBackend() )->exists();
 		}
 
 		/**
@@ -141,13 +116,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @return bool
 		 */
 		public function has_migrator_setting_items( $name ) {
-			$settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
-
-			if ( ! isset( $settings ) || ! is_array( $settings ) || ! array_key_exists( $name, $settings ) ) {
-				return false;
-			}
-
-			return $this->raw_setting_has_items( $settings[ $name ] );
+			try { $setting = ( new LegacyOptionBackend() )->read( $name ); }
+			catch ( \RuntimeException $error ) { return false; }
+			return $setting['found'] && $this->raw_setting_has_items( $setting['value'] );
 		}
 
 		/**

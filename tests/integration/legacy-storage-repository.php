@@ -4,7 +4,11 @@ use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTableRepository;
+use FooPlugins\FooGalleryMigrate\LegacyOptionBackend;
+use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
+use FooPlugins\FooGalleryMigrate\MigratorSettings;
+use FooPlugins\FooGalleryMigrate\OptionMigratedStore;
 
 if ( ! defined( 'FOOGM_STORAGE_TEST_DISPOSABLE' ) || true !== FOOGM_STORAGE_TEST_DISPOSABLE || ! defined( 'WP_CLI' ) || ! WP_CLI ) {
 	throw new RuntimeException( 'Explicit disposable WP-CLI opt-in required.' );
@@ -18,9 +22,14 @@ class FooGMRepositoryProbe extends LegacyTransactionConnection {
 	public $reads = array();
 	public $writes = array();
 	public $before_commit;
+	public $after_read;
 	public $fail_at_flip = 0;
 	private $flips = 0;
-	public function get_results( $sql, $format ) { $this->reads[] = $sql; return parent::get_results( $sql, $format ); }
+	public function get_results( $sql, $format ) {
+		$this->reads[] = $sql; $result = parent::get_results( $sql, $format );
+		if ( $this->after_read ) { call_user_func( $this->after_read, $sql ); }
+		return $result;
+	}
 	public function query( $sql ) {
 		$this->writes[] = $sql;
 		if ( 0 === strpos( $sql, 'UPDATE ' ) && false !== strpos( $sql, 'digest_status' ) && ++$this->flips === $this->fail_at_flip ) {
@@ -39,7 +48,7 @@ $expect_refusal = function ( $fn, $label ) use ( $check ) {
 	try { $fn(); } catch ( RuntimeException $error ) { $check( true, $label ); return; }
 	throw new RuntimeException( 'Expected refusal: ' . $label );
 };
-foreach ( array( 'LegacyTableRepository' => 'legacy-table-repository', 'LegacyTableSnapshot' => 'legacy-table-snapshot', 'LegacyTransactionConnection' => 'legacy-transaction-connection', 'MigratorSettings' => 'migrator-settings' ) as $class => $file ) {
+foreach ( array( 'LegacyOptionBackend' => 'legacy-option-backend', 'LegacyTableBackend' => 'legacy-table-backend', 'LegacyTableRepository' => 'legacy-table-repository', 'LegacyTableSnapshot' => 'legacy-table-snapshot', 'LegacyTransactionConnection' => 'legacy-transaction-connection', 'MigratorSettings' => 'migrator-settings' ) as $class => $file ) {
 	$reflection = new ReflectionClass( 'FooPlugins\\FooGalleryMigrate\\' . $class );
 	$check( realpath( $reflection->getFileName() ) === realpath( dirname( $plugin ) . '/includes/class-' . $file . '.php' ), 'Actual bootstrap loaded expected source/package class: ' . $class );
 }
@@ -63,6 +72,46 @@ try {
 		array( 'key' => 'checkpoint', 'order' => 1, 'expected_revision' => null, 'kind' => 'scalar', 'value' => false ) ) );
 	( new LegacyTableSnapshot( $probe, 2 ) )->replace_many( array( array( 'key' => 'history', 'order' => 0, 'expected_revision' => null, 'kind' => 'map', 'value' => array( '09' => null ) ) ) );
 	$repo = new LegacyTableRepository( $probe, 1 );
+	// WP option writes reject invalid UTF-8; table-only binary parity is checked below.
+	$common = $fixture; $common['09']['future'] = "valid\x00雪";
+	( new LegacyTableSnapshot( $probe, 4 ) )->replace_many( array(
+		array( 'key' => 'history', 'order' => 0, 'expected_revision' => null, 'kind' => 'map', 'value' => $common ),
+		array( 'key' => 'checkpoint', 'order' => 1, 'expected_revision' => null, 'kind' => 'scalar', 'value' => false ) ) );
+	$option_backend = new LegacyOptionBackend(); $table_backend = new LegacyTableBackend( $probe, 4 );
+	$check( $option_backend->replace_all( array( 'history' => $common, 'checkpoint' => false ) ), 'Disposable raw option fixture committed' );
+	$keys = array( 9, 'missing', '09' );
+	$check( $option_backend->roots( 'history', $keys ) === $table_backend->roots( 'history', $keys ), 'Common option/table raw roots preserve request order, missing and false' );
+	$check( $option_backend->read( 'checkpoint' ) === $table_backend->read( 'checkpoint' ), 'Common raw scalar false presence parity' );
+	$check( $option_backend->read( 'absent' ) === $table_backend->read( 'absent' ), 'Common missing raw scalar presence parity without option fallback' );
+	$expect_refusal( function () use ( $table_backend ) { $table_backend->read( 'history' ); }, 'Table backend refuses whole collection scalar facade' );
+	$expect_refusal( function () use ( $probe ) { ( new LegacyTableRepository( $probe, 1, 2 ) )->roots( 'history', array( '09', 9 ) ); }, 'Multi-root read shares aggregate row budget across complete trees' );
+	$legacy = new stdClass(); $legacy->unknown = array( '09' => null, 9 => false );
+	$check( $option_backend->replace_all( array( 'legacy' => $legacy ) ), 'Real WP serialized historical-object write succeeds' );
+	$settings = new MigratorSettings();
+	$check( $settings->set_migrator_settings( array( 'checkpoint' => 9 ) ) && $settings->set_migrator_settings( array( 'checkpoint' => 9 ) ), 'Real WP changed and same-value writes succeed with rehydrated historical objects' );
+	$check( serialize( $option_backend->read( 'legacy' )['value'] ) === serialize( $legacy ), 'Real WP historical object retains unknown typed fields across unrelated writes' );
+	delete_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+	$check( ( new OptionMigratedStore() )->clear() && ! $option_backend->exists(), 'Real WP empty-history clear preserves absent option' );
+	$check( $settings->clear_migrator_setting() && $option_backend->exists(), 'Explicit full settings clear still creates an empty option' );
+	if ( $options[FOOGALLERY_MIGRATE_OPTION_DATA] === $missing ) { delete_option( FOOGALLERY_MIGRATE_OPTION_DATA ); }
+	else { update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $options[FOOGALLERY_MIGRATE_OPTION_DATA], false ); }
+	$list = array( str_repeat( 'a', 1000 ), str_repeat( 'b', 1000 ) );
+	( new LegacyTableSnapshot( $probe, 3 ) )->replace_many( array( array( 'key' => 'list', 'order' => 0, 'expected_revision' => null, 'kind' => 'list', 'value' => $list ) ) );
+	$limited_list = new LegacyTableBackend( $probe, 3, 100, 2500 );
+	$check( $limited_list->roots( 'list', array( 0 ) )[0]['value'] === $list[0] && $limited_list->roots( 'list', array( 1 ) )[0]['value'] === $list[1], 'Each list root fits individual byte budget' );
+	$expect_refusal( function () use ( $limited_list ) { $limited_list->roots( 'list', array( 0, 1 ) ); }, 'Multi-root byte budget is aggregate, not multiplied by request length' );
+	$race = new FooGMRepositoryProbe( $wpdb ); $race_backend = new LegacyTableBackend( $race, 3 );
+	$race_writer = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST ); $race_writer->base_prefix = $wpdb->base_prefix;
+	$race_snapshot = new LegacyTableSnapshot( new LegacyTransactionConnection( $race_writer ), 3 ); $race_committed = false;
+	$race->after_read = function ( $sql ) use ( $race, $race_snapshot, $list, &$race_committed ) {
+		if ( false === strpos( $sql, '`payload`' ) ) { return; }
+		$race->after_read = null; $next = $list; $next[1] = 'new committed value';
+		$race_snapshot->replace_many( array( array( 'key' => 'list', 'order' => 0, 'expected_revision' => 1, 'kind' => 'list', 'value' => $next ) ) );
+		$race_committed = true;
+	};
+	$expect_refusal( function () use ( $race_backend ) { $race_backend->roots( 'list', array( 0, 1 ) ); }, 'Concurrent generation change refuses complete multi-root result' );
+	$check( $race_committed && $race->after_read === null && $race_backend->roots( 'list', array( 1 ) )[0]['value'] === 'new committed value', 'Independent writer committed and fresh bounded retry sees one generation' );
+	$race_writer->close();
 	$check( $repo->root( 'history', '09' ) === array( 'found' => true, 'key' => '09', 'value' => $root ), 'Exact compact tree, typed keys and opaque binary fields survive' );
 	$check( $repo->root( 'history', 9 )['value'] === false && ! $repo->root( 'history', 'missing' )['found'], 'Explicit false differs from missing and string key' );
 	$check( ( new LegacyTableRepository( $probe, 2 ) )->root( 'history', '09' )['value'] === null, 'Shared table operations are blog-scoped' );
@@ -136,8 +185,10 @@ try {
 	$wpdb->query( "UPDATE `{$tables['records']}` SET is_migrated=1 WHERE id=" . (int) $record['id'] );
 	$schema->verify();
 } finally {
+	if ( $options[FOOGALLERY_MIGRATE_OPTION_DATA] === $missing ) { delete_option( FOOGALLERY_MIGRATE_OPTION_DATA ); }
+	else { update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $options[FOOGALLERY_MIGRATE_OPTION_DATA], false ); }
 	foreach ( array_reverse( $tables ) as $table ) { $wpdb->query( "DROP TABLE IF EXISTS `{$table}`" ); }
 }
 foreach ( $tables as $table ) { $check( ! $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) ), 'Read-back confirms fixture table removed: ' . $table ); }
 foreach ( $options as $key => $value ) { $check( get_option( $key, $missing ) === $value, 'Read-back confirms option untouched: ' . $key ); }
-print json_encode( array( 'status' => 'pass', 'scope' => 'inert bounded affected-tree repository only', 'wordpress' => get_bloginfo( 'version' ), 'php' => PHP_VERSION, 'database' => $wpdb->get_var( 'SELECT VERSION()' ), 'checks' => $checks ), JSON_PRETTY_PRINT ) . "\n";
+print json_encode( array( 'status' => 'pass', 'scope' => 'raw option/table seam parity and inert bounded affected-tree repository only', 'wordpress' => get_bloginfo( 'version' ), 'php' => PHP_VERSION, 'database' => $wpdb->get_var( 'SELECT VERSION()' ), 'checks' => $checks ), JSON_PRETTY_PRINT ) . "\n";

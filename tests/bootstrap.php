@@ -152,6 +152,9 @@ class FooGalleryMigrateTestJsonResponse extends RuntimeException {
 }
 
 function get_option( $name, $default = false ) {
+	if ( ! empty( $GLOBALS['foogallery_migrate_test_serialized_reads'][$name] ) && array_key_exists( $name, $GLOBALS['foogallery_migrate_test_options'] ) ) {
+		return unserialize( serialize( $GLOBALS['foogallery_migrate_test_options'][$name] ) );
+	}
 	return array_key_exists( $name, $GLOBALS['foogallery_migrate_test_options'] )
 		? $GLOBALS['foogallery_migrate_test_options'][ $name ]
 		: $default;

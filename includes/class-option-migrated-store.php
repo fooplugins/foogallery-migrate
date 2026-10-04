@@ -22,10 +22,10 @@ class OptionMigratedStore extends MigratedStore {
 
 	/** @return array Raw compact records, preserving unknown records. */
 	private function records() {
-		$data = get_option( FOOGALLERY_MIGRATE_OPTION_DATA, array() );
-		if ( ! is_array( $data ) ) {
-			throw new \RuntimeException( 'Migration history options are unreadable. Restore a verified database backup before continuing.' );
-		}
+		return $this->records_from( ( new LegacyOptionBackend() )->read_all() );
+	}
+
+	private function records_from( $data ) {
 		$history = array_key_exists( MigratorSettings::KEY_MIGRATED, $data ) ? $data[ MigratorSettings::KEY_MIGRATED ] : array();
 		if ( ! is_array( $history ) ) {
 			throw new \RuntimeException( 'Migration history is unreadable. Restore a verified database backup before continuing.' );
@@ -43,24 +43,19 @@ class OptionMigratedStore extends MigratedStore {
 
 	/** @return bool */
 	private function save_records( $records ) {
-		$data = get_option( FOOGALLERY_MIGRATE_OPTION_DATA, array() );
-		if ( ! is_array( $data ) ) {
-			return false;
-		}
-		$previous = $this->records();
-		if ( $previous === $records ) {
-			return true;
-		}
-		$revision = array_key_exists( MigratorSettings::KEY_MIGRATED_REVISION, $data ) && false !== $data[ MigratorSettings::KEY_MIGRATED_REVISION ]
-			? absint( $data[ MigratorSettings::KEY_MIGRATED_REVISION ] ) : ( empty( $previous ) ? 0 : 1 );
-		$data[ MigratorSettings::KEY_MIGRATED ] = array(
-			MigratorSettings::COMPACT_MARKER => MigratorSettings::COMPACT_VERSION,
-			'type' => 'migratable',
-			'items' => $records,
-		);
-		$data[ MigratorSettings::KEY_MIGRATED_REVISION ] = $revision + 1;
-		update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $data, false );
-		return get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) === $data;
+		return ( new LegacyOptionBackend() )->mutate( function ( $data ) use ( $records ) {
+			$previous = $this->records_from( $data );
+			if ( $previous === $records ) { return true; }
+			$revision = array_key_exists( MigratorSettings::KEY_MIGRATED_REVISION, $data ) && false !== $data[ MigratorSettings::KEY_MIGRATED_REVISION ]
+				? absint( $data[ MigratorSettings::KEY_MIGRATED_REVISION ] ) : ( empty( $previous ) ? 0 : 1 );
+			$data[ MigratorSettings::KEY_MIGRATED ] = array(
+				MigratorSettings::COMPACT_MARKER => MigratorSettings::COMPACT_VERSION,
+				'type' => 'migratable',
+				'items' => $records,
+			);
+			$data[ MigratorSettings::KEY_MIGRATED_REVISION ] = $revision + 1;
+			return $data;
+		} );
 	}
 
 	private function hydrate( $record ) {

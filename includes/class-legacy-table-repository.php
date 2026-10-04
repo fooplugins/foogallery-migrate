@@ -45,25 +45,51 @@ class LegacyTableRepository {
 
 	/** Missing is distinct from a stored false/null. No full collection read. */
 	public function root( $state_key, $key ) {
-		$this->start_budget(); $this->typed_key( $state_key ); $this->typed_key( $key );
-		$head = $this->head( $state_key );
-		$this->collection( $head );
-		$tree = $this->tree( $state_key, $head, $key );
+		$rows = $this->roots( $state_key, array( $key ) );
+		return $rows[0];
+	}
+
+	/** One shared head and operation budget, NOT N independently bounded reads. */
+	public function roots( $state_key, $keys ) {
+		$this->start_budget(); $this->typed_key( $state_key );
+		if ( ! is_array( $keys ) || count( $keys ) > LegacyTableReader::MAX_ROWS ) { $this->fail( 'Need at most 100 exact root keys.' ); }
+		$seen = array();
+		foreach ( $keys as $key ) {
+			$this->typed_key( $key ); $hash = $this->codec->key_hash( $key );
+			if ( isset( $seen[$hash] ) ) { $this->fail( 'Duplicate root key.' ); }
+			$seen[$hash] = true;
+			$this->consume( 0, strlen( $this->codec->key_value( $key ) ) );
+		}
+		if ( ! count( $keys ) ) { return array(); }
+		$head = $this->head( $state_key ); $this->collection( $head ); $result = array();
+		foreach ( $keys as $key ) {
+			$tree = $this->tree( $state_key, $head, $key );
+			$result[] = array( 'found' => false !== $tree, 'key' => $key, 'value' => false === $tree ? null : $tree['value'] );
+		}
 		$this->unchanged( $state_key, $head );
-		return array( 'found' => false !== $tree, 'key' => $key, 'value' => false === $tree ? null : $tree['value'] );
+		return $result;
 	}
 
 	/** Existing small values/checkpoints only. Missing heads are health errors. */
 	public function scalar( $state_key ) {
+		$value = $this->read_scalar( $state_key );
+		if ( ! $value['found'] ) { $this->fail( 'Missing state head; no option fallback.' ); }
+		return $value['value'];
+	}
+
+	/** Physical presence only. Caller must verify the authoritative head manifest. */
+	public function read_scalar( $state_key ) {
 		$this->start_budget(); $this->typed_key( $state_key );
-		$head = $this->head( $state_key );
+		$head = $this->reader->head( $state_key ); $this->tick();
+		if ( false === $head ) { return array( 'found' => false, 'value' => null ); }
+		if ( $head['revision'] < 1 || $head['payload_bytes'] < $head['root_payload_bytes'] ) { $this->fail( 'Invalid scalar head.' ); }
 		$root = $this->root_metadata( $head );
 		if ( 'scalar' !== $head['state_kind'] || array_keys( $root ) !== array( 'version', 'kind', 'value' ) || 0 !== $head['record_count'] ) {
 			$this->fail( 'Not a scalar state head.' );
 		}
 		$this->verify_scalar( $head, $root['value'] );
 		$this->unchanged( $state_key, $head );
-		return $root['value'];
+		return array( 'found' => true, 'value' => $root['value'] );
 	}
 
 	/** Keyset page; cursor binds site, state, generation and revision exactly. */
