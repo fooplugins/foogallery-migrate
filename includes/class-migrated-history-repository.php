@@ -23,6 +23,7 @@ class MigratedHistoryRepository {
 	public function page_log( $type = '', $status = '', $limit = 100, $cursor = null ) { return $this->store->page_log( $type, $status, $limit, $cursor ); }
 	public function count() { return $this->store->count(); }
 	public function update_status( $identifier, $status ) { return $this->store->set_status( $identifier, $status ); }
+	public function set_status( $identifier, $status ) { return $this->update_status( $identifier, $status ); }
 	public function delete( $identifier ) { return $this->store->delete( $identifier ); }
 	public function delete_for_retry( $identifier ) { return $this->store->delete_for_retry( $identifier ); }
 	public function clear() { return $this->store->clear(); }
@@ -30,4 +31,9 @@ class MigratedHistoryRepository {
 	public function log_summary() { return $this->store->log_summary(); }
 	public function log_page( $type = '', $status = '', $offset = 0, $limit = 100 ) { return $this->store->log_page( $type, $status, $offset, $limit ); }
 	public function read_snapshot() { return $this->store->get_all(); }
+	// Existing engine compatibility names. OptionMigratedStore remains the sole owner.
+	public function get_all( $type = '' ) { return $this->store->get_all( $type ); }
+	public function get_by_parent( $identifier ) { return $this->store->get_by_parent( $identifier ); }
+	public function summary() { return $this->store->summary(); }
+	public function manages_revision() { return $this->store->manages_revision(); }
 }

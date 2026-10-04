@@ -36,7 +36,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          */
         protected $settings;
 
-        /** @var MigratedStore */
+        /** @var MigratedStore|MigratedHistoryRepository */
         protected $migrated_store;
 
         /** @var array Records queued for one request-level upsert. */
@@ -49,10 +49,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         protected $migrated_object_records = array();
 
         /**
-         * @param MigratedStore|null $migrated_store Optional injected store.
+         * @param MigratedStore|MigratedHistoryRepository|null $migrated_store Optional injected store.
          */
         public function __construct( $migrated_store = null ) {
-            if ( $migrated_store instanceof MigratedStore ) {
+            if ( $migrated_store instanceof MigratedStore || $migrated_store instanceof MigratedHistoryRepository ) {
                 $this->migrated_store = $migrated_store;
                 return;
             }
@@ -75,10 +75,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
             return $this->settings;
         }
 
-        /** @return MigratedStore */
+        /** @return MigratedStore|MigratedHistoryRepository */
         protected function migrated_store() {
             if ( ! isset( $this->migrated_store ) ) {
-                $this->migrated_store = new OptionMigratedStore( null, $this->settings() );
+                $this->migrated_store = new MigratedHistoryRepository( new LegacyOptionBackend(), $this->settings() );
             }
 
             return $this->migrated_store;
@@ -959,6 +959,9 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return int
          */
         public function get_migrated_revision() {
+            if ( $this->migrated_store()->manages_revision() ) {
+                return $this->migrated_store()->revision();
+            }
             $revision = $this->get_migrator_setting( self::KEY_MIGRATED_REVISION, false );
             if ( false !== $revision ) {
                 return absint( $revision );
@@ -984,8 +987,19 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 return new \WP_Error( 'foogallery_migrate_invalid_object', __( 'Invalid migrated object.', 'foogallery-migrate' ) );
             }
 
-            $object->migration_status = $status;
-            if ( false === $this->add_migrated_object( $object ) ) {
+            // Patch the exact stored key, not a re-derived identifier or a narrowed
+            // hydrated record. Preserve unknown raw fields and wrapper metadata.
+            if ( ! $this->migrated_batch_active && $this->migrated_store()->manages_revision() ) {
+                $saved = $this->migrated_store()->set_status( $unique_identifier, $status );
+                if ( $saved ) {
+                    $object->migration_status = $status;
+                    $this->remember_migrated_object( $object );
+                }
+            } else {
+                $object->migration_status = $status;
+                $saved = $this->add_migrated_object( $object );
+            }
+            if ( false === $saved ) {
                 return new \WP_Error( 'foogallery_migrate_store_write_failed', __( 'Migrated object could not be updated.', 'foogallery-migrate' ) );
             }
 

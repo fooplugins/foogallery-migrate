@@ -321,6 +321,28 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 			return $this->hydrate_migratable_object( $record );
 		}
 
+		/** Runtime codec bridge only; never use compaction as a raw conversion preflight. */
+		public function compact_state_value( $name, $value ) {
+			return $this->compact_migrator_setting( $name, $value );
+		}
+
+		/** Historical runtime objects are returned unchanged, without a read-time rewrite. */
+		public function hydrate_state_value( $name, $value ) {
+			return $this->hydrate_migrator_setting( $name, $value );
+		}
+
+		private function validate_compact_setting( $name, $value ) {
+			if ( ! $this->is_compact_payload( $value ) || ! in_array( $name,
+				array( self::KEY_PLUGINS, self::KEY_GALLERIES, self::KEY_ALBUMS, self::KEY_MIGRATED ), true ) ) {
+				return;
+			}
+			$type = self::KEY_PLUGINS === $name ? self::KEY_PLUGINS : 'migratable';
+			if ( self::COMPACT_VERSION !== $value[self::COMPACT_MARKER] || ! isset( $value['type'], $value['items'] ) ||
+				$type !== $value['type'] || ! is_array( $value['items'] ) ) {
+				throw new \RuntimeException( 'Unsupported compact state. No state was changed.' );
+			}
+		}
+
 		/**
 		 * Compacts large migration settings before they are persisted.
 		 *
@@ -329,6 +351,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @return mixed
 		 */
 		protected function compact_migrator_setting( $name, $value ) {
+			$this->validate_compact_setting( $name, $value );
 			if ( $this->is_compact_payload( $value ) ) {
 				return $value;
 			}
@@ -338,7 +361,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 					return $this->compact_plugins( $value );
 				case self::KEY_GALLERIES:
 				case self::KEY_ALBUMS:
-					return $this->compact_migratable_collection( $value, false );
+					return $this->compact_migratable_collection( $value, true );
 				case self::KEY_MIGRATED:
 					return $this->compact_migratable_collection( $value, true );
 			}
@@ -354,6 +377,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @return mixed
 		 */
 		protected function hydrate_migrator_setting( $name, $value ) {
+			$this->validate_compact_setting( $name, $value );
 			if ( ! $this->is_compact_payload( $value ) ) {
 				return $value;
 			}
@@ -363,7 +387,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 					return $this->hydrate_plugins( $value );
 				case self::KEY_GALLERIES:
 				case self::KEY_ALBUMS:
-					return $this->hydrate_migratable_collection( $value, false );
+					return $this->hydrate_migratable_collection( $value, true );
 				case self::KEY_MIGRATED:
 					return $this->hydrate_migratable_collection( $value, true );
 			}
@@ -393,7 +417,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @return bool
 		 */
 		protected function is_compact_payload( $value ) {
-			return is_array( $value ) && isset( $value[ self::COMPACT_MARKER ] );
+			return is_array( $value ) && array_key_exists( self::COMPACT_MARKER, $value );
 		}
 
 		/**
@@ -580,8 +604,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 
 			if ( $include_children && isset( $object->children ) && is_array( $object->children ) && count( $object->children ) > 0 ) {
 				$children = array();
-				foreach ( $object->children as $child ) {
-					$children[] = $this->compact_migratable_object( $child, $include_children );
+				foreach ( $object->children as $key => $child ) {
+					$children[$key] = $this->compact_migratable_object( $child, $include_children );
 				}
 				$record['children'] = $children;
 			}
@@ -666,8 +690,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 
 			if ( isset( $record['children'] ) && is_array( $record['children'] ) ) {
 				$children = array();
-				foreach ( $record['children'] as $child_record ) {
-					$children[] = $this->hydrate_migratable_object( $child_record );
+				foreach ( $record['children'] as $key => $child_record ) {
+					$children[$key] = $this->hydrate_migratable_object( $child_record );
 				}
 				$object->children = $children;
 

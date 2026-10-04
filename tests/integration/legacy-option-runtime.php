@@ -3,7 +3,8 @@
 if ( ! defined( 'ABSPATH' ) || ! defined( 'FOOGM_STORAGE_TEST_DISPOSABLE' ) || true !== FOOGM_STORAGE_TEST_DISPOSABLE ) {
 	throw new RuntimeException( 'Explicit disposable authorization required.' );
 }
-require_once dirname( dirname( __DIR__ ) ) . '/migrate.php';
+$plugin_root = defined( 'FOOGM_STORAGE_TEST_ROOT' ) ? FOOGM_STORAGE_TEST_ROOT : dirname( dirname( __DIR__ ) );
+require_once $plugin_root . '/migrate.php';
 require_once dirname( __DIR__ ) . '/fixtures/legacy-runtime-contract-fixtures.php';
 
 use FooPlugins\FooGalleryMigrate\LegacyOptionBackend;
@@ -15,11 +16,6 @@ use FooPlugins\FooGalleryMigrate\ImageTagQueueRepository;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
 use FooPlugins\FooGalleryMigrate\Tests\Fixtures;
 
-// Production facade delegates are deliberately left to the integration lane.
-class FooGMOptionRuntimeSettings extends MigratorSettings {
-	public function compact_state_value( $key, $value ) { return $this->compact_migrator_setting( $key, $value ); }
-	public function hydrate_state_value( $key, $value ) { return $this->hydrate_migrator_setting( $key, $value ); }
-}
 
 $missing = new stdClass();
 $before = get_option( FOOGALLERY_MIGRATE_OPTION_DATA, $missing );
@@ -36,7 +32,7 @@ $refuses = function ( $call, $label ) use ( $check ) {
 $observe = function ( $name ) use ( &$writes ) { if ( FOOGALLERY_MIGRATE_OPTION_DATA === $name ) { $writes++; } };
 $fail = function ( $value, $old ) { return $old; };
 $fixture = Fixtures\legacy_runtime_contract_fixture( false );
-$backend = new LegacyOptionBackend(); $settings = new FooGMOptionRuntimeSettings();
+$backend = new LegacyOptionBackend(); $settings = new MigratorSettings();
 $scalar = new ScalarStateRepository( $backend, $settings );
 $collections = new MigratableCollectionRepository( $backend, $settings );
 $history = new MigratedHistoryRepository( $backend, $settings );

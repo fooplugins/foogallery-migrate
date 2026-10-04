@@ -104,51 +104,51 @@ msgstr ""
 msgid "No image tag sync is queued."
 msgstr ""
 
-#: includes/class-migrator-engine.php:980, includes/class-migrator-engine.php:1003
+#: includes/class-migrator-engine.php:983, includes/class-migrator-engine.php:1017
 msgid "Migrated object not found."
 msgstr ""
 
-#: includes/class-migrator-engine.php:984
+#: includes/class-migrator-engine.php:987
 msgid "Invalid migrated object."
 msgstr ""
 
-#: includes/class-migrator-engine.php:989
+#: includes/class-migrator-engine.php:1003
 msgid "Migrated object could not be updated."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1114, includes/class-migrator-engine.php:1219
+#: includes/class-migrator-engine.php:1128, includes/class-migrator-engine.php:1233
 msgid "Gallery not found."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1158
+#: includes/class-migrator-engine.php:1172
 msgid "Migrated gallery state could not be reset."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1163, includes/class-migrator-engine.php:1176, includes/class-migrator-engine.php:1179, includes/class-migrator-engine.php:1223, includes/class-migrator-engine.php:1226
+#: includes/class-migrator-engine.php:1177, includes/class-migrator-engine.php:1190, includes/class-migrator-engine.php:1193, includes/class-migrator-engine.php:1237, includes/class-migrator-engine.php:1240
 msgid "Migrated gallery state could not be saved."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1270, includes/objects/class-image.php:256
+#: includes/class-migrator-engine.php:1284, includes/objects/class-image.php:256
 msgid "Attachment file is missing after migration."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1283
+#: includes/class-migrator-engine.php:1297
 msgid "Attachment file size could not be determined after migration."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1306
+#: includes/class-migrator-engine.php:1320
 msgid "Attachment file could not be loaded after migration."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1326
+#: includes/class-migrator-engine.php:1340
 msgid "One or more images are missing after migration."
 msgstr ""
 
-#: includes/class-migrator-settings.php:735, includes/class-migrator-settings.php:751, includes/objects/class-migratable.php:359
+#: includes/class-migrator-settings.php:759, includes/class-migrator-settings.php:775, includes/objects/class-migratable.php:359
 msgid "Unknown Error"
 msgstr ""
 
-#: includes/class-migrator-settings.php:793
+#: includes/class-migrator-settings.php:817
 msgid "(no title) #%d"
 msgstr ""
 

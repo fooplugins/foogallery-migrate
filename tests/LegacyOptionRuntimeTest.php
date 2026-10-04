@@ -15,10 +15,6 @@ use PHPUnit\Framework\TestCase;
 
 require_once __DIR__ . '/fixtures/legacy-runtime-contract-fixtures.php';
 
-class RuntimeContractSettings extends \FooPlugins\FooGalleryMigrate\MigratorSettings {
-	public function compact_state_value( $key, $value ) { return $this->compact_migrator_setting( $key, $value ); }
-	public function hydrate_state_value( $key, $value ) { return $this->hydrate_migrator_setting( $key, $value ); }
-}
 
 class LegacyOptionRuntimeTest extends TestCase {
 	private $backend;
@@ -30,7 +26,7 @@ class LegacyOptionRuntimeTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_option_writes'] = array();
 		$GLOBALS['foogallery_migrate_test_serialized_reads'] = array();
 		$this->backend = new LegacyOptionBackend();
-		$this->settings = new RuntimeContractSettings();
+		$this->settings = new MigratorSettings();
 		$this->fixture = Fixtures\legacy_runtime_contract_fixture();
 		$this->backend->replace_all( $this->fixture['logical'] );
 		$GLOBALS['foogallery_migrate_test_option_writes'] = array();
@@ -175,14 +171,13 @@ class LegacyOptionRuntimeTest extends TestCase {
 		$this->assertTrue( $repo->replace_snapshot( 'galleries', array( '09' => $this->fixture['historical'], 9 => null ) ) );
 		$before = $this->backend->read_all();
 		$child = clone $this->fixture['image']; $child->migrated_id = 72;
-		// Current facade compaction uses list positions; lossless typed codec integration is a later lane.
-		$this->assertTrue( $repo->update_record( 'galleries', array( 'root' => 0, 'path' => array( 0 ) ), $child ) );
+		$this->assertTrue( $repo->update_record( 'galleries', array( 'root' => '09', 'path' => array( '09' ) ), $child ) );
 		$after = $this->backend->read_all();
-		$this->assertSame( 72, $repo->read_snapshot( 'galleries' )[0]->children[0]->migrated_id );
-		$this->assertSame( array( 0, 1 ), array_keys( $repo->read_snapshot( 'galleries' ) ) );
-		$this->assertSame( $before['galleries']['items'][0]['settings'], $after['galleries']['items'][0]['settings'] );
-		$this->assertSame( $before['galleries']['items'][0]['children'][1], $after['galleries']['items'][0]['children'][1] );
-		$this->assertSame( $before['galleries']['items'][1], $after['galleries']['items'][1] );
+		$this->assertSame( 72, $repo->read_snapshot( 'galleries' )['09']->children['09']->migrated_id );
+		$this->assertSame( array( '09', 9 ), array_keys( $repo->read_snapshot( 'galleries' ) ) );
+		$this->assertSame( $before['galleries']['items']['09']['settings'], $after['galleries']['items']['09']['settings'] );
+		$this->assertSame( $before['galleries']['items']['09']['children'][9], $after['galleries']['items']['09']['children'][9] );
+		$this->assertSame( $before['galleries']['items'][9], $after['galleries']['items'][9] );
 		unset( $before['galleries'], $after['galleries'] );
 		$this->assertSame( serialize( $before ), serialize( $after ) );
 	}
