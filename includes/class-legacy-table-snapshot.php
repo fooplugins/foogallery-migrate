@@ -152,12 +152,12 @@ class LegacyTableSnapshot {
 		$stats = $this->generation_stats( $head['id'], $head['active_generation'] );
 		if ( $stats['record_count'] !== $head['record_count'] || $stats['payload_bytes'] + strlen( $head['root_payload'] ) !== $head['payload_bytes'] ||
 			$stats['record_count'] > $this->max_rows || $stats['encoded_bytes'] > $this->max_bytes - strlen( $head['root_payload'] ) - strlen( $this->codec->key_value( $key ) ) ) { $this->fail( 'Maintenance physical statistics or admission mismatch.' ); }
-		if ( ! is_array( $root ) || array_keys( $root ) !== array( 'version', 'kind', 'root_count' ) || 1 !== $root['version'] ||
-			$root['kind'] !== $head['state_kind'] || ! is_int( $root['root_count'] ) || $root['root_count'] < 0 ) { $this->fail( 'Invalid maintenance root.' ); }
+		$envelope = new LegacyCollectionEnvelope(); $envelope->validate( $root, $key );
+		if ( $root['kind'] !== $head['state_kind'] ) { $this->fail( 'Invalid maintenance root.' ); }
 		$bytes = strlen( $head['root_payload'] ) + strlen( $this->codec->key_value( $key ) );
 		if ( $head['record_count'] > $this->max_rows || $bytes > $this->max_bytes ) { $this->fail( 'Maintenance exceeds total row/byte budget.' ); }
 		$repository = new LegacyTableRepository( $this->wpdb, $this->blog_id, $this->max_rows, $this->max_bytes, $max_seconds );
-		$hash = hash_init( 'sha256' ); hash_update( $hash, "legacy-logical-v1\0" ); hash_update( $hash, 'array:' . $root['root_count'] . ':' );
+		$hash = hash_init( 'sha256' ); hash_update( $hash, "legacy-logical-v1\0" ); $envelope->begin_digest( $hash, $root );
 		$cursor = null; $roots = 0; $rows = 0; $payload = strlen( $head['root_payload'] );
 		do {
 			if ( microtime( true ) > $deadline ) { $this->fail( 'Maintenance time budget exceeded.' ); }
@@ -167,13 +167,13 @@ class LegacyTableSnapshot {
 			$rows += $page['record_count']; $payload += $page['payload_bytes']; $bytes += $page['encoded_bytes'];
 			foreach ( $page['rows'] as $item ) {
 				if ( $roots >= $root['root_count'] || ( 'list' === $head['state_kind'] && ( $item['key'] !== $roots || $page['cursor']['order'] !== $roots ) ) ) { $this->fail( 'List/root count parity failed.' ); }
-				$this->digest_stream( $hash, $item['key'], 1 ); $this->digest_stream( $hash, $item['value'], 1 ); ++$roots;
+				$envelope->digest_item( $hash, $root, $item['key'], $item['value'] ); ++$roots;
 			}
 			$cursor = $page['cursor'];
 		} while ( count( $page['rows'] ) );
 		if ( $roots !== $root['root_count'] || $rows !== $head['record_count'] || $payload !== $head['payload_bytes'] ||
 			$this->generation_stats( $head['id'], $head['active_generation'] ) !== $stats || $this->maintenance_head( $key ) !== $head ) { $this->fail( 'Maintenance physical parity or revision changed.' ); }
-		$digest = hash_final( $hash );
+		$envelope->end_digest( $hash, $root ); $digest = hash_final( $hash );
 		if ( 'current' === $head['digest_status'] && $digest !== $head['logical_digest'] ) { $this->fail( 'Current logical digest mismatch; not repairing corruption.' ); }
 		( new LegacyStorageSchema( $this->wpdb ) )->verify();
 		$mode = $this->read( 'SELECT @@SESSION.autocommit AS autocommit' );
@@ -213,14 +213,6 @@ class LegacyTableSnapshot {
 		$fields['logical_digest'] = strtolower( $fields['logical_digest'] ); return array_merge( $head, $fields );
 	}
 
-	/** Exact codec v1 canonical stream; shared codec bridge belongs to integration. */
-	private function digest_stream( $hash, $value, $depth ) {
-		if ( $depth > 64 ) { $this->fail( 'Maintenance exceeds canonical depth budget.' ); }
-		if ( is_array( $value ) ) {
-			hash_update( $hash, 'array:' . count( $value ) . ':' );
-			foreach ( $value as $key => $item ) { $this->digest_stream( $hash, $key, $depth + 1 ); $this->digest_stream( $hash, $item, $depth + 1 ); }
-		} else { $encoded = $this->codec->encode( $value ); hash_update( $hash, 'value:' . strlen( $encoded ) . ':' . $encoded ); }
-	}
 
 	private function preflight( $changes ) {
 		if ( ! is_array( $changes ) || ! count( $changes ) || count( $changes ) > 100 ) { $this->fail( 'Replacement needs 1 to 100 explicit changes.' ); }
@@ -238,8 +230,8 @@ class LegacyTableSnapshot {
 			if ( 'scalar' === $change['kind'] ) {
 				$root = array( 'version' => 1, 'kind' => 'scalar', 'value' => $change['value'] );
 			} else if ( in_array( $change['kind'], array( 'map', 'list' ), true ) && is_array( $change['value'] ) ) {
-				$value = $change['value'];
-				if ( 'list' === $change['kind'] && count( $value ) && array_keys( $value ) !== range( 0, count( $value ) - 1 ) ) { $this->fail( 'List keys are not a canonical ordered list.' ); }
+				$split = ( new LegacyCollectionEnvelope() )->split( $change['key'], $change['kind'], $change['value'] );
+				$value = $split['items']; $change['items'] = $value;
 				if ( count( $value ) > $this->max_rows - $total_rows ) { $this->fail( 'Snapshot exceeds the record budget.' ); }
 				$order = 0;
 				foreach ( $value as $key => $record ) {
@@ -248,9 +240,10 @@ class LegacyTableSnapshot {
 					foreach ( $stats as $field => $amount ) { $stats[ $field ] += $tree[ $field ]; }
 					if ( $stats['record_count'] > $this->max_rows - $total_rows || $stats['encoded_bytes'] > $this->max_bytes - $total_bytes ) { $this->fail( 'Snapshot exceeds the row/byte budget.' ); }
 				}
-				$root = array( 'version' => 1, 'kind' => $change['kind'], 'root_count' => count( $value ) );
+				$root = $split['root'];
 			} else { $this->fail( 'Unsupported snapshot kind or value.' ); }
 			$change['root_payload'] = $this->codec->encode( $root );
+			if ( strlen( $change['root_payload'] ) > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Root metadata exceeds the row byte budget.' ); }
 			$total_rows += $stats['record_count'];
 			$bytes = strlen( $change['root_payload'] ) + strlen( $this->codec->key_value( $change['key'] ) ) + $stats['encoded_bytes'];
 			if ( $bytes > $this->max_bytes - $total_bytes ) { $this->fail( 'Snapshot exceeds the encoded byte budget.' ); }
@@ -299,7 +292,7 @@ class LegacyTableSnapshot {
 		if ( $stats['record_count'] !== 0 ) { $this->fail( 'Inactive generation already contains rows; explicit recovery is required.' ); }
 		if ( 'scalar' !== $change['kind'] ) {
 			$repo = $this; $id = $head['id']; $order = 0;
-			foreach ( $change['value'] as $key => $record ) {
+			foreach ( $change['items'] as $key => $record ) {
 				$state_key = $change['key'];
 				$this->records->flatten_tree( $state_key, $key, $record, $order++, function ( $row ) use ( $repo, $id, $generation, $state_key ) {
 					$repo->insert_record( $id, $generation, $row, $state_key );
@@ -330,7 +323,7 @@ class LegacyTableSnapshot {
 			if ( array_keys( $metadata ) !== array( 'version', 'kind', 'value' ) || 0 !== $stats['record_count'] ) { $this->fail( 'Malformed scalar snapshot.' ); }
 			return $metadata['value'];
 		}
-		if ( ! in_array( $metadata['kind'], array( 'map', 'list' ), true ) || array_keys( $metadata ) !== array( 'version', 'kind', 'root_count' ) || ! is_int( $metadata['root_count'] ) || $metadata['root_count'] < 0 ) { $this->fail( 'Malformed collection metadata.' ); }
+		$envelope = new LegacyCollectionEnvelope(); $envelope->validate( $metadata, $key );
 		$columns = array();
 		foreach ( $this->definitions[ $this->record_table ]['columns'] as $name => $spec ) {
 			$columns[] = 'binary(32)' === $spec[0] ? 'HEX(`' . $name . '`) AS `' . $name . '`' : '`' . $name . '`';
@@ -365,7 +358,7 @@ class LegacyTableSnapshot {
 		}
 		if ( count( $visited ) !== count( $rows ) ) { $this->fail( 'Orphaned or cyclic snapshot rows.' ); }
 		if ( count( $result ) !== $metadata['root_count'] || ( 'list' === $metadata['kind'] && count( $result ) && array_keys( $result ) !== range( 0, count( $result ) - 1 ) ) ) { $this->fail( 'Root key/order/count parity failed.' ); }
-		return $result;
+		return $envelope->rebuild( $metadata, $result );
 	}
 
 	private function rebuild_root( $key, $hash, $tree, &$result ) {

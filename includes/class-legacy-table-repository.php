@@ -321,7 +321,14 @@ class LegacyTableRepository {
 				} else {
 					if ( ( $lists ? 'list' : 'map' ) !== $head['state_kind'] ) { $this->fail( 'Patch collection kind mismatch.' ); }
 					$root = $this->collection( $head );
+					$envelope = new LegacyCollectionEnvelope();
 					foreach ( $change['patches'] as $patch ) {
+						if ( array_key_exists( 'value', $patch ) ) {
+							// Account for the logical wrapper's extra depth BEFORE deleting
+							// any old rows. Hash only this affected item, never the history.
+							$admission = hash_init( 'sha256' );
+							$envelope->digest_item( $admission, $root, $patch['key'], $patch['value'] ); hash_final( $admission );
+						}
 						$old = $this->tree( $change['key'], $head, $patch['key'] );
 						$order = false === $old ? $this->append_order( $head ) : $old['order'];
 						if ( $lists && ( $patch['key'] > $root['root_count'] || $order !== $patch['key'] ||
@@ -437,8 +444,8 @@ class LegacyTableRepository {
 
 	private function collection( $head ) {
 		$root = $this->root_metadata( $head );
-		if ( ! in_array( $head['state_kind'], array( 'map', 'list' ), true ) || array_keys( $root ) !== array( 'version', 'kind', 'root_count' ) ||
-			! is_int( $root['root_count'] ) || $root['root_count'] < 0 || $root['root_count'] > $head['record_count'] ) { $this->fail( 'Invalid collection metadata.' ); }
+		( new LegacyCollectionEnvelope() )->validate( $root, $this->codec->decode( $head['state_key_value'] ) );
+		if ( $root['root_count'] > $head['record_count'] ) { $this->fail( 'Invalid collection metadata.' ); }
 		return $root;
 	}
 
