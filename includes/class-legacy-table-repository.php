@@ -1,9 +1,9 @@
 <?php
 /**
- * Inert bounded compact map/scalar repository on the approved shared schema.
+ * Inert bounded compact map/list/scalar repository on the approved shared schema.
  * No provisioning, authority selection, option fallback or runtime hydration.
  * Caller must own the manager's writer guard and this idle pinned connection.
- * This is not yet an admitted engine backend (lists/wrappers need integration).
+ * This is not yet an admitted engine backend (logical wrappers need integration).
  *
  * @package FooPlugins\FooGalleryMigrate
  */
@@ -26,6 +26,7 @@ class LegacyTableRepository {
 	private $deadline;
 	private $used_rows;
 	private $used_bytes;
+	private $byte_limit;
 	private $busy = false;
 	private $tainted = false;
 
@@ -93,17 +94,29 @@ class LegacyTableRepository {
 	}
 
 	/** Keyset page; cursor binds site, state, generation and revision exactly. */
-	public function page( $state_key, $limit, $cursor = null ) {
+	public function page( $state_key, $limit, $cursor = null ) { return $this->read_page( $state_key, $limit, $cursor, array(), false ); }
+
+	/** Filter-bound keyset cursor; never translate arbitrary offsets into full scans. */
+	public function filtered_page( $state_key, $limit, $filters, $cursor = null ) { return $this->read_page( $state_key, $limit, $cursor, $filters, true ); }
+
+	/** Explicit maintenance/export only; includes verified physical accounting. */
+	public function export_page( $state_key, $limit, $cursor = null ) { return $this->read_page( $state_key, $limit, $cursor, array(), false, true ); }
+
+	private function read_page( $state_key, $limit, $cursor, $filters, $filtered, $export = false ) {
 		$this->start_budget(); $this->typed_key( $state_key );
+		$this->byte_limit = min( $this->max_bytes, 4194304 );
+		$this->consume( 0, strlen( $this->codec->key_value( $state_key ) ) );
 		if ( ! is_int( $limit ) || $limit < 1 || $limit > LegacyTableReader::MAX_ROWS ) { $this->fail( 'Page limit must be 1 to 100.' ); }
+		$filter = $this->filters( $filters );
 		$head = $this->head( $state_key ); $this->collection( $head );
 		$identity = array( 'blog' => $this->blog, 'state' => $head['id'], 'generation' => $head['active_generation'], 'revision' => $head['revision'] );
-		$where = ''; $args = array( $this->blog, $head['id'], $head['active_generation'] );
+		if ( $filtered ) { $identity['filter'] = $filter['digest']; }
+		$where = $filter['sql']; $args = array_merge( array( $this->blog, $head['id'], $head['active_generation'] ), $filter['args'] );
 		if ( null !== $cursor ) {
-			if ( ! is_array( $cursor ) || array_keys( $cursor ) !== array( 'blog', 'state', 'generation', 'revision', 'order', 'id' ) ) { $this->fail( 'Malformed page cursor.' ); }
+			if ( ! is_array( $cursor ) || array_keys( $cursor ) !== array_merge( array_keys( $identity ), array( 'order', 'id' ) ) ) { $this->fail( 'Malformed page cursor.' ); }
 			foreach ( $identity as $field => $value ) { if ( $cursor[$field] !== $value ) { $this->fail( 'Stale or cross-scope cursor.' ); } }
 			if ( ! is_int( $cursor['order'] ) || $cursor['order'] < 0 || ! is_int( $cursor['id'] ) || $cursor['id'] < 1 ) { $this->fail( 'Invalid ordering cursor.' ); }
-			$where = ' AND (item_order > %d OR (item_order = %d AND id > %d))';
+			$where .= ' AND (item_order > %d OR (item_order = %d AND id > %d))';
 			$args = array_merge( $args, array( $cursor['order'], $cursor['order'], $cursor['id'] ) );
 		}
 		$args[] = $limit;
@@ -111,16 +124,145 @@ class LegacyTableRepository {
 			. 'WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL' . $where . ' ORDER BY item_order ASC, id ASC LIMIT %d', $args ) );
 		if ( count( $rows ) > $limit ) { $this->fail( 'Page row budget exceeded.' ); }
 		$result = array(); $next = $cursor; $last_order = null === $cursor ? -1 : $cursor['order'];
+		$record_count = 0; $payload_bytes = 0; $encoded_bytes = 0;
 		foreach ( $rows as $row ) {
 			$id = $this->number( $row['id'] ); $order = $this->number( $row['item_order'] );
 			if ( $id < 1 || $order <= $last_order ) { $this->fail( 'Duplicate or invalid root ordering.' ); }
 			$tree = $this->tree_hash( $state_key, $head, $this->hex( $row['node_hash'] ) );
 			if ( false === $tree || $tree['rows'][0]['id'] !== (string) $id && $tree['rows'][0]['id'] !== $id || $tree['order'] !== $order ) { $this->fail( 'Root changed during page read.' ); }
 			$result[] = array( 'key' => $tree['key'], 'value' => $tree['value'] );
+			$record_count = $this->add( $record_count, count( $tree['rows'] ) ); $payload_bytes = $this->add( $payload_bytes, $tree['payload_bytes'] );
+			$encoded_bytes = $this->add( $encoded_bytes, $tree['encoded_bytes'] );
 			$next = array_merge( $identity, array( 'order' => $order, 'id' => $id ) ); $last_order = $order;
 		}
 		$this->unchanged( $state_key, $head );
-		return array( 'rows' => $result, 'cursor' => $next, 'revision' => $head['revision'] );
+		$page = array( 'rows' => $result, 'cursor' => $next, 'revision' => $head['revision'] );
+		if ( $export ) { $page['record_count'] = $record_count; $page['payload_bytes'] = $payload_bytes; $page['encoded_bytes'] = $encoded_bytes; }
+		return $page;
+	}
+
+	/** Exact history map keys, via the approved legacy_identifier index. */
+	public function identifiers( $state_key, $keys ) { return $this->read_identifiers( $state_key, $keys, false ); }
+
+	/** Presence includes stored false/null; only sized root metadata is fetched. */
+	public function identifier_presence( $state_key, $keys ) { return $this->read_identifiers( $state_key, $keys, true ); }
+
+	private function read_identifiers( $state_key, $keys, $presence ) {
+		$this->start_budget(); $this->typed_key( $state_key );
+		$this->consume( 0, strlen( $this->codec->key_value( $state_key ) ) );
+		if ( 'migrated' !== $state_key || ! is_array( $keys ) || count( $keys ) > 100 ) { $this->fail( 'Need at most 100 migrated identifiers.' ); }
+		$seen = array();
+		foreach ( $keys as $key ) {
+			$this->typed_key( $key ); $hash = $this->codec->key_hash( $key );
+			if ( isset( $seen[$hash] ) ) { $this->fail( 'Duplicate identifier.' ); } $seen[$hash] = true;
+			$this->consume( 0, strlen( $this->codec->key_value( $key ) ) );
+		}
+		if ( ! count( $keys ) ) { return array(); }
+		$head = $this->head( $state_key ); $this->collection( $head ); $result = array();
+		foreach ( $keys as $key ) {
+			$rows = $this->read( $this->db->prepare( 'SELECT HEX(node_hash) AS node_hash FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d '
+				. 'AND legacy_identifier_hash = UNHEX(%s) AND parent_node_hash IS NULL LIMIT 2', array( $this->blog, $head['id'], $head['active_generation'], $this->codec->key_hash( $key ) ) ) );
+			if ( count( $rows ) > 1 ) { $this->fail( 'Duplicate history identifier.' ); }
+			if ( $presence ) {
+				$value = $this->codec->key_value( $key ); $node = $this->codec->node_hash( $this->codec->key_hash( $state_key ), null, $key );
+				$sql = 'SELECT CASE WHEN OCTET_LENGTH(legacy_identifier_value) = %d THEN legacy_identifier_value ELSE NULL END AS identifier, HEX(legacy_identifier_hash) AS identifier_hash, '
+					. 'CASE WHEN OCTET_LENGTH(key_value) = %d THEN key_value ELSE NULL END AS key_value, key_type FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d AND node_hash = UNHEX(%s) AND parent_node_hash IS NULL LIMIT 2';
+				$raw_key = base64_encode( (string) $key );
+				$meta = $this->read( $this->db->prepare( $sql, array( strlen( $value ), strlen( $raw_key ), $this->blog, $head['id'], $head['active_generation'], $node ) ) );
+				$this->consume( count( $meta ), strlen( $value ) + strlen( $raw_key ) );
+				if ( count( $meta ) !== count( $rows ) || ( count( $meta ) && ( $this->hex( $rows[0]['node_hash'] ) !== $node || $meta[0]['identifier'] !== $value ||
+					$this->hex( $meta[0]['identifier_hash'] ) !== $this->codec->key_hash( $key ) || $meta[0]['key_value'] !== $raw_key || $meta[0]['key_type'] !== ( is_int( $key ) ? 'integer' : 'string' ) ) ) ) { $this->fail( 'Identifier metadata collision or corruption.' ); }
+				$result[] = array( 'found' => count( $meta ) === 1, 'key' => $key ); continue;
+			}
+			$tree = count( $rows ) ? $this->tree_hash( $state_key, $head, $this->hex( $rows[0]['node_hash'] ) ) : false;
+			if ( count( $rows ) && ( false === $tree || $tree['key'] !== $key ) ) { $this->fail( 'Identifier collision or corruption.' ); }
+			// A missing projection must not silently hide an existing exact map key.
+			if ( ! count( $rows ) && false !== $this->tree( $state_key, $head, $key ) ) { $this->fail( 'Missing identifier projection.' ); }
+			$result[] = array( 'found' => false !== $tree, 'key' => $key, 'value' => false === $tree ? null : $tree['value'] );
+		}
+		$this->unchanged( $state_key, $head ); return $result;
+	}
+
+	/** First eligible root in legacy insertion order, exact or image absint semantics. */
+	public function source_identities( $state_key, $identities, $numeric = false ) {
+		$this->start_budget(); $this->typed_key( $state_key );
+		$this->consume( 0, strlen( $this->codec->key_value( $state_key ) ) );
+		if ( ! is_array( $identities ) || count( $identities ) > 100 || ! is_bool( $numeric ) ) { $this->fail( 'Need at most 100 source identities.' ); }
+		$prepared = array();
+		foreach ( $identities as $identity ) {
+			if ( ! is_array( $identity ) || array_keys( $identity ) !== array( 'type', 'plugin', 'id' ) || ! is_string( $identity['type'] ) || strlen( $identity['type'] ) > 32 ||
+				! is_string( $identity['plugin'] ) || ( ! is_scalar( $identity['id'] ) && null !== $identity['id'] ) || ( $numeric && 'image' !== $identity['type'] ) ) { $this->fail( 'Invalid source identity.' ); }
+			$id = $numeric ? absint( $identity['id'] ) : (string) $identity['id'];
+			if ( $numeric && ( ! is_int( $id ) || $id < 1 ) ) { $this->fail( 'Positive numeric image source required.' ); }
+			$identity['id'] = $id; $prepared[] = $identity;
+			$this->consume( 0, strlen( $this->codec->encode( $identity ) ) );
+		}
+		if ( ! count( $prepared ) ) { return array(); }
+		$head = $this->head( $state_key ); $this->collection( $head ); $result = array();
+		foreach ( $prepared as $identity ) {
+			$hash = $this->codec->snapshot_digest( array( $numeric ? 'source-image-numeric-v1' : 'source-exact-v1', $identity['type'], $identity['plugin'], $identity['id'] ) );
+			$column = $numeric ? 'source_numeric_identity_hash' : 'source_identity_hash';
+			$rows = $this->read( $this->db->prepare( 'SELECT HEX(node_hash) AS node_hash FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d '
+				. 'AND ' . $column . ' = UNHEX(%s) AND is_migrated = 1 AND migrated_id > 0 AND parent_node_hash IS NULL ORDER BY item_order ASC, id ASC LIMIT 1',
+				array( $this->blog, $head['id'], $head['active_generation'], $hash ) ) );
+			if ( count( $rows ) > 1 ) { $this->fail( 'Source lookup exceeded row limit.' ); }
+			$tree = count( $rows ) ? $this->tree_hash( $state_key, $head, $this->hex( $rows[0]['node_hash'] ) ) : false;
+			if ( count( $rows ) ) {
+				$v = false === $tree ? null : $tree['value'];
+				if ( ! is_array( $v ) || ! isset( $v['object_type'], $v['plugin_name'] ) || ! array_key_exists( 'ID', $v ) ||
+					$v['object_type'] !== $identity['type'] || $v['plugin_name'] !== $identity['plugin'] ||
+					( $numeric ? absint( $v['ID'] ) : (string) $v['ID'] ) !== $identity['id'] || empty( $v['migrated'] ) || empty( $v['migrated_id'] ) ) { $this->fail( 'Source hash collision or projection mismatch.' ); }
+			}
+			$result[] = array( 'found' => false !== $tree, 'key' => false === $tree ? null : $tree['key'], 'value' => false === $tree ? null : $tree['value'] );
+		}
+		$this->unchanged( $state_key, $head ); return $result;
+	}
+
+	/** SQL-only root projections; canonical consistency is established by verified writes/maintenance. */
+	public function aggregate( $state_key, $filters = array() ) {
+		$this->start_budget(); $this->typed_key( $state_key ); $filter = $this->filters( $filters );
+		$head = $this->head( $state_key ); $this->collection( $head );
+		$rows = $this->read( $this->db->prepare( 'SELECT COUNT(*) AS total, COALESCE(SUM(is_migrated),0) AS migrated, COALESCE(SUM(is_selected),0) AS selected, COALESCE(SUM(has_error),0) AS errors '
+			. 'FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL' . $filter['sql'],
+			array_merge( array( $this->blog, $head['id'], $head['active_generation'] ), $filter['args'] ) ) );
+		if ( count( $rows ) !== 1 ) { $this->fail( 'Invalid aggregate result.' ); }
+		foreach ( $rows[0] as $field => $value ) { $rows[0][$field] = $this->number( $value ); }
+		foreach ( array( 'migrated', 'selected', 'errors' ) as $field ) { if ( $rows[0][$field] > $rows[0]['total'] ) { $this->fail( 'Invalid aggregate projections.' ); } }
+		$this->unchanged( $state_key, $head ); return $rows[0];
+	}
+
+	/** Bounded distinct projection groups, ordered by first legacy root occurrence.
+	 * Raw physical counts, NOT hydration/default-aware public log semantics.
+	 */
+	public function projection_summary( $state_key ) {
+		$this->start_budget(); $this->typed_key( $state_key );
+		$head = $this->head( $state_key ); $this->collection( $head ); $result = array();
+		foreach ( array( 'object_type', 'migration_status' ) as $column ) {
+			$sql = 'SELECT `' . $column . '` AS value, COUNT(*) AS count, MIN(item_order) AS first_order FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL AND object_type <> %s GROUP BY `' . $column . '` ORDER BY first_order ASC LIMIT 101';
+			$rows = $this->read( $this->db->prepare( $sql, array( $this->blog, $head['id'], $head['active_generation'], '' ) ) );
+			if ( count( $rows ) > 100 ) { $this->fail( 'Projection summary exceeds distinct-group budget.' ); }
+			$this->consume( count( $rows ), count( $rows ) * 32 ); $counts = array();
+			foreach ( $rows as $row ) {
+				if ( ! is_string( $row['value'] ) || strlen( $row['value'] ) > 32 || array_key_exists( $row['value'], $counts ) ) { $this->fail( 'Invalid summary projection group.' ); }
+				$counts[$row['value']] = $this->number( $row['count'] );
+			}
+			$result[$column] = $counts;
+		}
+		$this->unchanged( $state_key, $head ); return $result;
+	}
+
+	private function filters( $filters ) {
+		if ( ! is_array( $filters ) ) { $this->fail( 'Invalid filters.' ); }
+		ksort( $filters, SORT_STRING ); $sql = ''; $args = array();
+		foreach ( $filters as $field => $value ) {
+			if ( in_array( $field, array( 'object_type', 'migration_status' ), true ) ) {
+				if ( ! is_string( $value ) || strlen( $value ) > 32 ) { $this->fail( 'Invalid indexed type/status filter.' ); } $sql .= ' AND ' . $field . ' = %s';
+			} else if ( in_array( $field, array( 'is_selected', 'is_migrated', 'has_error' ), true ) ) {
+				if ( ! is_int( $value ) || $value < 0 || $value > 1 ) { $this->fail( 'Invalid flag filter.' ); } $sql .= ' AND ' . $field . ' = %d';
+			} else { $this->fail( 'Unsupported filter.' ); }
+			$args[] = $value;
+		}
+		return array( 'sql' => $sql, 'args' => $args, 'digest' => $this->codec->snapshot_digest( $filters ) );
 	}
 
 	/** SQL-only root count; physical record_count includes nested children. */
@@ -140,8 +282,21 @@ class LegacyTableRepository {
 	 * All heads/companion checkpoints commit together. Digests become dirty;
 	 * no whole-history read/rehash. Lists and missing heads refuse, not normalize.
 	 */
-	public function patch_many( $changes ) {
+	public function patch_many( $changes ) { return $this->patch( $changes, false ); }
+
+	/** List updates/appends only; deletion/reindexing requires bounded staged replacement. */
+	public function patch_lists_and_scalars( $changes ) { return $this->patch( $changes, true ); }
+
+	private function patch( $changes, $lists ) {
 		$this->start_budget(); $prepared = $this->preflight( $changes );
+		if ( $lists ) {
+			foreach ( $prepared as $change ) {
+				if ( array_key_exists( 'value', $change ) ) { continue; }
+				foreach ( $change['patches'] as $patch ) {
+					if ( ! is_int( $patch['key'] ) || $patch['key'] < 0 || ! array_key_exists( 'value', $patch ) ) { $this->fail( 'Lists admit nonnegative index updates/appends only.' ); }
+				}
+			}
+		}
 		( new LegacyStorageSchema( $this->db ) )->verify();
 		$mode = $this->read( 'SELECT @@SESSION.autocommit AS autocommit' );
 		if ( count( $mode ) !== 1 || $this->number( $mode[0]['autocommit'] ) !== 1 ) { $this->fail( 'An idle autocommit connection is required.' ); }
@@ -164,11 +319,13 @@ class LegacyTableRepository {
 					$this->verify_scalar( $head, $root['value'] );
 					$root['value'] = $change['value'];
 				} else {
-					if ( 'map' !== $head['state_kind'] ) { $this->fail( 'Affected-root patches currently admit maps only.' ); }
+					if ( ( $lists ? 'list' : 'map' ) !== $head['state_kind'] ) { $this->fail( 'Patch collection kind mismatch.' ); }
 					$root = $this->collection( $head );
 					foreach ( $change['patches'] as $patch ) {
 						$old = $this->tree( $change['key'], $head, $patch['key'] );
 						$order = false === $old ? $this->append_order( $head ) : $old['order'];
+						if ( $lists && ( $patch['key'] > $root['root_count'] || $order !== $patch['key'] ||
+							( false === $old ) !== ( $patch['key'] === $root['root_count'] ) ) ) { $this->fail( 'Sparse or corrupt list; replacement required.' ); }
 						if ( false !== $old ) {
 							foreach ( $old['rows'] as $row ) {
 								if ( 1 !== $this->write( $this->db->prepare( 'DELETE FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d AND id = %d',
@@ -239,6 +396,7 @@ class LegacyTableRepository {
 					$this->consume( 0, strlen( $this->codec->key_value( $patch['key'] ) ) );
 					if ( array_key_exists( 'value', $patch ) ) {
 						$stats = $this->records->flatten_tree( $change['key'], $patch['key'], $patch['value'], 0, function () {} );
+						if ( 'migrated' === $change['key'] ) { $this->consume( 0, strlen( $this->codec->key_value( $patch['key'] ) ) ); }
 						$this->consume( $stats['record_count'], $stats['encoded_bytes'] );
 					}
 				}
@@ -347,7 +505,9 @@ class LegacyTableRepository {
 		$value = $this->records->rebuild_tree( $state_key, $hash, $rows );
 		$root = $rows[0]; $key_bytes = base64_decode( $root['key_value'], true );
 		$key = 'integer' === $root['key_type'] ? (int) $key_bytes : $key_bytes;
-		return array( 'key' => $key, 'value' => $value, 'rows' => $rows, 'order' => $this->number( $root['item_order'] ), 'payload_bytes' => $payload );
+		if ( 'migrated' === $state_key && ( $root['legacy_identifier_value'] !== $this->codec->key_value( $key ) ||
+			$this->hex( $root['legacy_identifier_hash'] ) !== $this->codec->key_hash( $key ) ) ) { $this->fail( 'History identifier projection mismatch.' ); }
+		return array( 'key' => $key, 'value' => $value, 'rows' => $rows, 'order' => $this->number( $root['item_order'] ), 'payload_bytes' => $payload, 'encoded_bytes' => $total );
 	}
 
 	private function append_order( $head ) {
@@ -358,6 +518,10 @@ class LegacyTableRepository {
 
 	private function insert_record( $head, $row ) {
 		if ( ! $this->busy || $this->tainted ) { $this->fail( 'Record writes require an owned transaction.' ); }
+		if ( $head['state_key_value'] === $this->codec->key_value( 'migrated' ) && null === $row['parent_node_hash'] ) {
+			$key = 'integer' === $row['key_type'] ? (int) base64_decode( $row['key_value'], true ) : base64_decode( $row['key_value'], true );
+			$row['legacy_identifier_value'] = $this->codec->key_value( $key ); $row['legacy_identifier_hash'] = $this->codec->key_hash( $key );
+		}
 		$row = array_merge( $row, array( 'blog_id' => $this->blog, 'state_id' => $head['id'], 'generation' => $head['active_generation'] ) );
 		$columns = array(); $expressions = array(); $args = array();
 		foreach ( $this->definitions[$this->table]['columns'] as $name => $spec ) {
@@ -384,12 +548,12 @@ class LegacyTableRepository {
 	private function hex( $value ) { if ( ! is_string( $value ) || ! preg_match( '/^[0-9a-f]{64}$/Di', $value ) ) { $this->fail( 'Invalid hash.' ); } return strtolower( $value ); }
 	private function start_budget() {
 		if ( $this->busy || $this->tainted ) { $this->fail( 'Busy or uncertain repository; reconcile on a fresh connection.' ); }
-		$this->deadline = microtime( true ) + $this->max_seconds; $this->used_rows = 0; $this->used_bytes = 0;
+		$this->deadline = microtime( true ) + $this->max_seconds; $this->used_rows = 0; $this->used_bytes = 0; $this->byte_limit = $this->max_bytes;
 	}
 	private function tick() { if ( microtime( true ) > $this->deadline ) { $this->fail( 'Operation time budget exceeded.' ); } }
 	private function consume( $rows, $bytes ) {
 		$this->tick();
-		if ( $rows > $this->max_rows - $this->used_rows || $bytes > $this->max_bytes - $this->used_bytes ) { $this->fail( 'Operation row/encoded byte budget exceeded.' ); }
+		if ( $rows > $this->max_rows - $this->used_rows || $bytes > $this->byte_limit - $this->used_bytes ) { $this->fail( 'Operation row/encoded byte budget exceeded.' ); }
 		$this->used_rows += $rows; $this->used_bytes += $bytes;
 	}
 	private function read( $sql ) {

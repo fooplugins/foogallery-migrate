@@ -29,6 +29,14 @@ class LegacyTableSnapshotTest extends TestCase {
 		catch ( \RuntimeException $error ) { $this->assertSame( array(), $db->queries ); }
 	}
 
+	public function test_dirty_maintenance_validates_admission_before_sql(): void {
+		$db = new SnapshotTestWpdb(); $repo = new LegacyTableSnapshot( $db, 7 );
+		foreach ( array( array( 'migrated', 0, 10 ), array( true, 1, 10 ), array( 'migrated', 1, 0 ) ) as $args ) {
+			try { call_user_func_array( array( $repo, 'verify_digest' ), $args ); $this->fail( 'Expected maintenance refusal.' ); }
+			catch ( \RuntimeException $error ) { $this->assertSame( array(), $db->queries ); }
+		}
+	}
+
 	/** @dataProvider invalidChanges */
 	public function test_preflight_refuses_before_sql( $changes ): void {
 		$db = new SnapshotTestWpdb();
