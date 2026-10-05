@@ -71,7 +71,7 @@ class LegacyHistoryReadContractTest extends TestCase {
 	public function test_unimplemented_operations_refuse_without_fallback_or_writes(): void {
 		$table = new HistoryReadTableBackend( $this->data() ); $history = new MigratedHistoryRepository( $table, new MigratorSettings() );
 		foreach ( array( function () use ( $history ) { $history->find_by_source_url( 'image', 'https://example.test/image.jpg' ); },
-			function () use ( $history ) { $history->upsert_batch( array() ); }, function () use ( $history ) { $history->log_summary(); },
+			function () use ( $history ) { $history->clear(); }, function () use ( $history ) { $history->log_summary(); },
 			function () use ( $history ) { $history->get_all(); } ) as $call ) {
 			try { $call(); $this->fail( 'Expected unsupported operation refusal.' ); }
 			catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'not admitted', $error->getMessage() ); }

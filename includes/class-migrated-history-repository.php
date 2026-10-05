@@ -2,8 +2,8 @@
 namespace FooPlugins\FooGalleryMigrate;
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
-/** Shared history shape. Table reads are explicitly injected, not authority selection.
- * OptionMigratedStore remains the sole option-history owner. Table mutations,
+/** Shared history shape. Table operations are explicitly injected, not authority selection.
+ * OptionMigratedStore remains the sole option-history owner. Bulk deletion,
  * complete exports and public engine adoption are not yet admitted.
  */
 class MigratedHistoryRepository {
@@ -41,7 +41,25 @@ class MigratedHistoryRepository {
 		$row = $read['result']; return $row['found'] ? $this->hydrate( $row['value'] ) : false;
 	}
 	public function find_by_source_url( $type, $source_url ) { return $this->option_store()->find_by_source_url( $type, $source_url ); }
-	public function upsert_batch( $records, $companions = array() ) { return $this->option_store()->upsert_batch( $records, $companions ); }
+	public function upsert_batch( $records, $companions = array() ) {
+		if ( null !== $this->store ) { return $this->store->upsert_batch( $records, $companions ); }
+		if ( ! is_array( $records ) || ! is_array( $companions ) || array_intersect( array_keys( $companions ),
+			array( MigratorSettings::KEY_MIGRATED, MigratorSettings::KEY_MIGRATED_REVISION, MigratorSettings::KEY_PLUGINS, MigratorSettings::KEY_GALLERIES, MigratorSettings::KEY_ALBUMS ) ) ) { return false; }
+		if ( count( $records ) > 100 || count( $companions ) > 98 ) { throw new \RuntimeException( 'History mutation exceeds the bounded batch size.' ); }
+		if ( ! count( $records ) && ! count( $companions ) ) { return 0; }
+		$request = array();
+		foreach ( $records as $record ) {
+			$object = is_array( $record ) && isset( $record['object'] ) ? $record['object'] : $record;
+			if ( ! is_object( $object ) || ! method_exists( $object, 'unique_identifier' ) || ! method_exists( $object, 'type' ) ) { return false; }
+			$key = (string) $object->unique_identifier(); if ( '' === $key ) { return false; }
+			// Object identifiers use the existing option map's PHP key semantics.
+			$key = array_keys( array( $key => true ) )[0];
+			$request[] = array( 'key' => $key, 'value' => $this->settings->compact_migrated_object( $object ),
+				'parent' => is_array( $record ) && ! empty( $record['parent_key'] ) ? (string) $record['parent_key'] : null,
+				'fallback_parent' => ! empty( $object->migration_parent_key ) ? (string) $object->migration_parent_key : null );
+		}
+		return $this->backend->history_mutate( 'upsert', $request, $companions );
+	}
 	public function upsert( $record, $companions = array() ) { return $this->upsert_batch( array( $record ), $companions ); }
 	public function upsert_many( $records, $companions = array() ) { return $this->upsert_batch( $records, $companions ); }
 	public function iterate_page( $limit = 100, $cursor = null ) { return $this->page_log( '', '', $limit, $cursor ); }
@@ -64,9 +82,19 @@ class MigratedHistoryRepository {
 		if ( null !== $this->store ) { return $this->store->count(); }
 		$read = $this->table_read( 'count' ); return $read['result'];
 	}
-	public function update_status( $identifier, $status ) { return $this->option_store()->set_status( $identifier, $status ); }
+	public function update_status( $identifier, $status ) {
+		if ( null !== $this->store ) { return $this->store->set_status( $identifier, $status ); }
+		if ( ! is_string( $status ) ) { return false; }
+		$this->identifier_keys( array( $identifier ) );
+		if ( strlen( $status ) > 32 ) { throw new \RuntimeException( 'Unindexed table status is not admitted.' ); }
+		return $this->backend->history_mutate( 'status', array( 'key' => $identifier, 'status' => $status ) );
+	}
 	public function set_status( $identifier, $status ) { return $this->update_status( $identifier, $status ); }
-	public function delete( $identifier ) { return $this->option_store()->delete( $identifier ); }
+	public function delete( $identifier ) {
+		if ( null !== $this->store ) { return $this->store->delete( $identifier ); }
+		$this->identifier_keys( array( $identifier ) );
+		return $this->backend->history_mutate( 'delete', array( 'key' => $identifier ) );
+	}
 	public function delete_for_retry( $identifier ) { return $this->option_store()->delete_for_retry( $identifier ); }
 	public function clear() { return $this->option_store()->clear(); }
 	public function revision() {
@@ -80,7 +108,7 @@ class MigratedHistoryRepository {
 	public function get_all( $type = '' ) { return $this->option_store()->get_all( $type ); }
 	public function get_by_parent( $identifier ) { return $this->option_store()->get_by_parent( $identifier ); }
 	public function summary() { return $this->option_store()->summary(); }
-	public function manages_revision() { return $this->option_store()->manages_revision(); }
+	public function manages_revision() { return true; }
 
 	private function option_store() {
 		if ( null === $this->store ) { throw new \RuntimeException( 'This table history operation is not admitted yet. No option fallback.' ); }

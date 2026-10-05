@@ -21,6 +21,7 @@ class LegacyTableBackend {
 	public function read( $key ) { return $this->repository->read_scalar( $key ); }
 	public function metadata_many( $keys ) { return $this->repository->metadata_many( $keys ); }
 	public function history_read( $operation, $request = array() ) { return $this->repository->history_read( $operation, $request ); }
+	public function history_mutate( $operation, $request, $companions = array() ) { return $this->repository->history_mutate( $operation, $request, $companions ); }
 	public function history_page( $key, $limit, $filters, $cursor = null ) { return $this->repository->history_page( $key, $limit, $filters, $cursor ); }
 	public function history_source_identity( $type, $plugin, $id ) { return $this->repository->history_source_identity( $type, $plugin, $id ); }
 	public function roots( $key, $keys ) { return $this->repository->roots( $key, $keys ); }

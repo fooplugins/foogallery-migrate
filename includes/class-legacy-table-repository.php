@@ -98,6 +98,81 @@ class LegacyTableRepository {
 		} finally { $this->history_read_active = false; }
 	}
 
+	/** Closed logical mutations over an admitted indexed history wrapper.
+	 * One budget spans metadata, old/new affected roots and atomic publication.
+	 * All read dependencies are locked/CAS-checked, even unchanged companions.
+	 */
+	public function history_mutate( $operation, $request, $companions = array() ) {
+		if ( $this->history_read_active || ! in_array( $operation, array( 'upsert', 'status', 'delete' ), true ) || ! is_array( $request ) ||
+			! is_array( $companions ) || count( $companions ) > 98 || ( 'upsert' !== $operation && count( $companions ) ) ) { $this->fail( 'Unsupported history mutation.' ); }
+		$this->start_budget(); $this->history_read_active = true;
+		try {
+			$keys = array( 'migrated', 'migrated-revision' ); $identifiers = array();
+			foreach ( $companions as $key => $value ) {
+				$this->typed_key( $key );
+				if ( in_array( $key, array( 'migrated', 'migrated-revision', 'plugins', 'galleries', 'albums' ), true ) ) { $this->fail( 'Reserved history companion.' ); }
+				// Reject objects/oversized indivisible values before fetching metadata.
+				$encoded = $this->codec->encode( array( 'version' => 1, 'kind' => 'scalar', 'value' => $value ) );
+				if ( strlen( $encoded ) > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Companion row byte budget exceeded.' ); }
+				$this->consume( 0, strlen( $encoded ) ); $keys[] = $key;
+			}
+			if ( 'upsert' === $operation ) {
+				if ( count( $request ) > 100 ) { $this->fail( 'Need at most 100 history records.' ); }
+				foreach ( $request as $record ) {
+					if ( ! is_array( $record ) || array_keys( $record ) !== array( 'key', 'value', 'parent', 'fallback_parent' ) || ! is_array( $record['value'] ) ||
+						( null !== $record['parent'] && ! is_string( $record['parent'] ) ) || ( null !== $record['fallback_parent'] && ! is_string( $record['fallback_parent'] ) ) ) { $this->fail( 'Malformed compact history upsert.' ); }
+					$this->typed_key( $record['key'] ); $identifiers[$this->codec->key_hash( $record['key'] )] = $record['key'];
+					$this->consume( 0, strlen( $this->codec->encode( $record ) ) );
+				}
+				if ( ! count( $request ) && ! count( $companions ) ) { return 0; }
+			} else {
+				if ( array_keys( $request ) !== ( 'status' === $operation ? array( 'key', 'status' ) : array( 'key' ) ) ) { $this->fail( 'Malformed history mutation key.' ); }
+				$this->typed_key( $request['key'] ); $identifiers[] = $request['key'];
+				if ( 'status' === $operation && ( ! is_string( $request['status'] ) || strlen( $request['status'] ) > 32 ) ) { $this->fail( 'Unindexed status is not admitted.' ); }
+			}
+			$context = $this->metadata_many( $keys ); $history = $context[0]; $revision = $context[1];
+			if ( 'map' !== $history['head']['state_kind'] || ! isset( $history['root']['wrapper'] ) ) { $this->fail( 'Indexed history wrapper required.' ); }
+			if ( 'scalar' !== $revision['head']['state_kind'] || ! is_int( $revision['root']['value'] ) || $revision['root']['value'] < 0 ) { $this->fail( 'Invalid logical history revision.' ); }
+			foreach ( array_slice( $context, 2 ) as $entry ) { if ( 'scalar' !== $entry['head']['state_kind'] ) { $this->fail( 'Existing scalar companion heads required.' ); } }
+			$old = $this->identifiers( 'migrated', array_values( $identifiers ) ); $working = array();
+			foreach ( $old as $row ) { $working[$row['key']] = $row; }
+			$result = 'upsert' === $operation ? count( $request ) : true;
+			if ( 'upsert' === $operation ) {
+				foreach ( $request as $record ) {
+					$previous = $working[$record['key']]['value']; $payload = $record['value'];
+					$parent = null !== $record['parent'] ? $record['parent'] :
+						( is_array( $previous ) && isset( $previous['migration_parent_key'] ) ? $previous['migration_parent_key'] : $record['fallback_parent'] );
+					if ( null !== $parent ) { $payload['migration_parent_key'] = $parent; }
+					$working[$record['key']] = array( 'found' => true, 'key' => $record['key'], 'value' => $payload );
+				}
+			} else {
+				$row = $old[0];
+				if ( ! $row['found'] || ( 'status' === $operation && ! is_array( $row['value'] ) ) ) { $result = false; }
+				elseif ( 'delete' === $operation ) { $working[$row['key']]['found'] = false; }
+				else { $working[$row['key']]['value']['migration_status'] = $request['status']; }
+			}
+			$patches = array();
+			foreach ( $old as $row ) {
+				$new = $working[$row['key']];
+				if ( $row['found'] === $new['found'] && serialize( $row['value'] ) === serialize( $new['value'] ) ) { continue; }
+				$patches[] = $new['found'] ? array( 'key' => $row['key'], 'value' => $new['value'] ) : array( 'key' => $row['key'], 'delete' => true );
+			}
+			$changes = array();
+			if ( count( $patches ) ) {
+				if ( $revision['root']['value'] >= PHP_INT_MAX ) { $this->fail( 'Logical history revision exhausted.' ); }
+				$changes[] = array( 'key' => 'migrated', 'expected_revision' => $history['head']['revision'], 'patches' => $patches );
+				$changes[] = array( 'key' => 'migrated-revision', 'expected_revision' => $revision['head']['revision'], 'value' => $revision['root']['value'] + 1 );
+			}
+			foreach ( array_slice( $context, 2 ) as $entry ) {
+				$value = $companions[$entry['key']];
+				if ( serialize( $entry['root']['value'] ) !== serialize( $value ) ) { $changes[] = array( 'key' => $entry['key'], 'expected_revision' => $entry['head']['revision'], 'value' => $value ); }
+			}
+			if ( $this->metadata_many( $keys ) !== $context ) { $this->fail( 'History changed during bounded mutation.' ); }
+			if ( count( $changes ) ) { $this->patch( $changes, false, $context ); }
+			return $result;
+		} finally { $this->history_read_active = false; }
+	}
+
 	/** Missing is distinct from a stored false/null. No full collection read. */
 	public function root( $state_key, $key ) {
 		$rows = $this->roots( $state_key, array( $key ) );
@@ -374,7 +449,7 @@ class LegacyTableRepository {
 	/** List updates/appends only; deletion/reindexing requires bounded staged replacement. */
 	public function patch_lists_and_scalars( $changes ) { return $this->patch( $changes, true ); }
 
-	private function patch( $changes, $lists ) {
+	private function patch( $changes, $lists, $guards = array() ) {
 		$this->start_budget(); $prepared = $this->preflight( $changes );
 		if ( $lists ) {
 			foreach ( $prepared as $change ) {
@@ -392,10 +467,23 @@ class LegacyTableRepository {
 		try { $this->write( 'START TRANSACTION' ); }
 		catch ( \Exception $error ) { $this->busy = false; $this->tainted = true; $this->fail( 'Transaction start uncertain; reconcile on a fresh connection.' ); }
 		try {
-			ksort( $prepared, SORT_STRING ); $heads = array();
-			// Lock every companion first, in the same hash order as snapshot writes.
-			foreach ( $prepared as $hash => $change ) {
-				$heads[$hash] = $this->lock_head( $change['key'], $change['expected_revision'] );
+			ksort( $prepared, SORT_STRING ); $heads = array(); $locks = $prepared; $expected = array();
+			foreach ( $guards as $entry ) {
+				$hash = $this->codec->key_hash( $entry['key'] ); $expected[$hash] = $entry['head'];
+				if ( ! isset( $locks[$hash] ) ) { $locks[$hash] = array( 'key' => $entry['key'], 'expected_revision' => $entry['head']['revision'] ); }
+			}
+			ksort( $locks, SORT_STRING );
+			// Acquire ALL locks before the first consistent head read establishes a
+			// REPEATABLE READ snapshot. A later lock must not validate against an
+			// earlier snapshot (including unchanged read-only companions).
+			$locked_ids = array();
+			foreach ( $locks as $hash => $change ) {
+				$locked_ids[$hash] = $this->lock_identity( $change['key'] );
+			}
+			foreach ( $locks as $hash => $change ) {
+				$heads[$hash] = $this->head( $change['key'] );
+				if ( $heads[$hash]['id'] !== $locked_ids[$hash] || $heads[$hash]['revision'] !== $change['expected_revision'] || $heads[$hash]['revision'] >= PHP_INT_MAX ) { $this->fail( 'Stale or exhausted revision.' ); }
+				if ( isset( $expected[$hash] ) && $heads[$hash] !== $expected[$hash] ) { $this->fail( 'History mutation read dependency changed.' ); }
 			}
 			$result = array();
 			foreach ( $prepared as $hash => $change ) {
@@ -500,14 +588,12 @@ class LegacyTableRepository {
 		return $result;
 	}
 
-	private function lock_head( $key, $revision ) {
+	private function lock_identity( $key ) {
 		$value = $this->codec->key_value( $key );
 		$rows = $this->read( $this->db->prepare( 'SELECT id, CASE WHEN OCTET_LENGTH(state_key_value) <= %d THEN state_key_value ELSE NULL END AS state_key_value '
 			. 'FROM `' . $this->state . '` WHERE blog_id = %d AND state_key_hash = UNHEX(%s) LIMIT 2 FOR UPDATE', array( strlen( $value ), $this->blog, $this->codec->key_hash( $key ) ) ) );
 		if ( count( $rows ) !== 1 || $rows[0]['state_key_value'] !== $value ) { $this->fail( 'Missing/colliding locked head.' ); }
-		$head = $this->head( $key );
-		if ( $head['id'] !== $this->number( $rows[0]['id'] ) || $head['revision'] !== $revision || $head['revision'] >= PHP_INT_MAX ) { $this->fail( 'Stale or exhausted revision.' ); }
-		return $head;
+		return $this->number( $rows[0]['id'] );
 	}
 
 	private function head( $key ) {
