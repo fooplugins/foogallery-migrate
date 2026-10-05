@@ -29,6 +29,7 @@ class LegacyTableRepository {
 	private $byte_limit;
 	private $busy = false;
 	private $tainted = false;
+	private $history_read_active = false;
 
 	/** Budgets span the complete call, including old AND new affected trees. */
 	public function __construct( $db, $blog, $max_rows = 10000, $max_bytes = 16777216, $max_seconds = 10 ) {
@@ -42,6 +43,59 @@ class LegacyTableRepository {
 		$this->reader = new LegacyTableReader( $db, $blog, $this->codec );
 		$this->definitions = ( new LegacyStorageSchema( $db ) )->definitions();
 		$tables = array_keys( $this->definitions ); $this->state = $tables[0]; $this->table = $tables[1];
+	}
+
+	/** Bounded head/root metadata, with one budget and coherent multi-head read.
+	 * Collection payloads are never fetched. Missing required heads fail closed.
+	 */
+	public function metadata_many( $keys ) {
+		$this->start_budget();
+		if ( ! is_array( $keys ) || ! count( $keys ) || count( $keys ) > min( $this->max_rows, LegacyTableReader::MAX_ROWS ) ) { $this->fail( 'Need 1 to 100 metadata keys within the shared row budget.' ); }
+		$this->consume( count( $keys ), 0 );
+		$seen = array();
+		foreach ( $keys as $key ) {
+			$this->typed_key( $key ); $hash = $this->codec->key_hash( $key );
+			if ( isset( $seen[$hash] ) ) { $this->fail( 'Duplicate metadata key.' ); } $seen[$hash] = true;
+			$this->consume( 0, strlen( $this->codec->key_value( $key ) ) );
+		}
+		$result = array();
+		foreach ( $keys as $key ) {
+			$head = $this->head( $key );
+			if ( 'scalar' === $head['state_kind'] ) {
+				$root = $this->root_metadata( $head );
+				if ( array_keys( $root ) !== array( 'version', 'kind', 'value' ) || 0 !== $head['record_count'] ) { $this->fail( 'Invalid scalar metadata.' ); }
+				$this->verify_scalar( $head, $root['value'] );
+			} else { $root = $this->collection( $head ); }
+			$result[] = array( 'key' => $key, 'head' => $head, 'root' => $root );
+		}
+		foreach ( $result as $entry ) { $this->unchanged( $entry['key'], $entry['head'] ); }
+		return $result;
+	}
+
+	/** One budget covers both metadata checks and the indexed history read.
+	 * Closed read primitives only: no callback or complete-history facade.
+	 */
+	public function history_read( $operation, $request = array() ) {
+		if ( $this->history_read_active || ! is_array( $request ) || ! in_array( $operation, array( 'identifiers', 'presence', 'source', 'page', 'count', 'revision' ), true ) ) { $this->fail( 'Unsupported history read.' ); }
+		$this->start_budget(); $this->history_read_active = true;
+		try {
+			$keys = array( 'migrated', 'migrated-revision' ); $context = $this->metadata_many( $keys );
+			if ( 'map' !== $context[0]['head']['state_kind'] || ! isset( $context[0]['root']['wrapper'] ) ) { $this->fail( 'Indexed history wrapper required; old header-root layouts are not admitted.' ); }
+			switch ( $operation ) {
+				case 'identifiers': $result = $this->identifiers( 'migrated', $request ); break;
+				case 'presence': $result = $this->identifier_presence( 'migrated', $request ); break;
+				case 'source':
+					if ( array_keys( $request ) !== array( 'type', 'plugin', 'id' ) ) { $this->fail( 'Malformed source request.' ); }
+					$result = $this->history_source_identity( $request['type'], $request['plugin'], $request['id'] ); break;
+				case 'page':
+					if ( array_keys( $request ) !== array( 'limit', 'filters', 'cursor' ) ) { $this->fail( 'Malformed page request.' ); }
+					$result = $this->history_page( 'migrated', $request['limit'], $request['filters'], $request['cursor'] ); break;
+				case 'count': $result = $this->count_roots( 'migrated' ); break;
+				default: $result = null;
+			}
+			if ( $this->metadata_many( $keys ) !== $context ) { $this->fail( 'History changed during bounded read.' ); }
+			return array( 'context' => $context, 'result' => $result );
+		} finally { $this->history_read_active = false; }
 	}
 
 	/** Missing is distinct from a stored false/null. No full collection read. */
@@ -99,10 +153,18 @@ class LegacyTableRepository {
 	/** Filter-bound keyset cursor; never translate arbitrary offsets into full scans. */
 	public function filtered_page( $state_key, $limit, $filters, $cursor = null ) { return $this->read_page( $state_key, $limit, $cursor, $filters, true ); }
 
+	/** Logical history pages need a terminal cursor, not an extra empty page.
+	 * Look ahead at one root's small selector only; never decode that tree.
+	 */
+	public function history_page( $state_key, $limit, $filters, $cursor = null ) {
+		if ( 'migrated' !== $state_key ) { $this->fail( 'History state required.' ); }
+		return $this->read_page( $state_key, $limit, $cursor, $filters, true, false, true );
+	}
+
 	/** Explicit maintenance/export only; includes verified physical accounting. */
 	public function export_page( $state_key, $limit, $cursor = null ) { return $this->read_page( $state_key, $limit, $cursor, array(), false, true ); }
 
-	private function read_page( $state_key, $limit, $cursor, $filters, $filtered, $export = false ) {
+	private function read_page( $state_key, $limit, $cursor, $filters, $filtered, $export = false, $terminal = false ) {
 		$this->start_budget(); $this->typed_key( $state_key );
 		$this->byte_limit = min( $this->max_bytes, 4194304 );
 		$this->consume( 0, strlen( $this->codec->key_value( $state_key ) ) );
@@ -119,10 +181,12 @@ class LegacyTableRepository {
 			$where .= ' AND (item_order > %d OR (item_order = %d AND id > %d))';
 			$args = array_merge( $args, array( $cursor['order'], $cursor['order'], $cursor['id'] ) );
 		}
-		$args[] = $limit;
+		$args[] = $limit + ( $terminal ? 1 : 0 );
 		$rows = $this->read( $this->db->prepare( 'SELECT id, item_order, HEX(node_hash) AS node_hash FROM `' . $this->table . '` '
 			. 'WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL' . $where . ' ORDER BY item_order ASC, id ASC LIMIT %d', $args ) );
-		if ( count( $rows ) > $limit ) { $this->fail( 'Page row budget exceeded.' ); }
+		if ( count( $rows ) > $limit + ( $terminal ? 1 : 0 ) ) { $this->fail( 'Page row budget exceeded.' ); }
+		$more = count( $rows ) > $limit;
+		if ( $more ) { array_pop( $rows ); }
 		$result = array(); $next = $cursor; $last_order = null === $cursor ? -1 : $cursor['order'];
 		$record_count = 0; $payload_bytes = 0; $encoded_bytes = 0;
 		foreach ( $rows as $row ) {
@@ -136,7 +200,7 @@ class LegacyTableRepository {
 			$next = array_merge( $identity, array( 'order' => $order, 'id' => $id ) ); $last_order = $order;
 		}
 		$this->unchanged( $state_key, $head );
-		$page = array( 'rows' => $result, 'cursor' => $next, 'revision' => $head['revision'] );
+		$page = array( 'rows' => $result, 'cursor' => $terminal && ! $more ? null : $next, 'revision' => $head['revision'] );
 		if ( $export ) { $page['record_count'] = $record_count; $page['payload_bytes'] = $payload_bytes; $page['encoded_bytes'] = $encoded_bytes; }
 		return $page;
 	}
@@ -185,6 +249,19 @@ class LegacyTableRepository {
 
 	/** First eligible root in legacy insertion order, exact or image absint semantics. */
 	public function source_identities( $state_key, $identities, $numeric = false ) {
+		return $this->read_source_identities( $state_key, $identities, $numeric, true );
+	}
+
+	/** Option history's exact identity policy requires a positive target, not
+	 * the independently stored migrated flag. Preserve physical API defaults.
+	 */
+	public function history_source_identity( $type, $plugin, $id ) {
+		if ( ! is_scalar( $id ) || '' === (string) $id ) { $this->fail( 'Ambiguous empty/null source ID is not admitted.' ); }
+		$rows = $this->read_source_identities( 'migrated', array( array( 'type' => $type, 'plugin' => $plugin, 'id' => $id ) ), false, false );
+		return $rows[0];
+	}
+
+	private function read_source_identities( $state_key, $identities, $numeric, $require_migrated ) {
 		$this->start_budget(); $this->typed_key( $state_key );
 		$this->consume( 0, strlen( $this->codec->key_value( $state_key ) ) );
 		if ( ! is_array( $identities ) || count( $identities ) > 100 || ! is_bool( $numeric ) ) { $this->fail( 'Need at most 100 source identities.' ); }
@@ -202,16 +279,26 @@ class LegacyTableRepository {
 		foreach ( $prepared as $identity ) {
 			$hash = $this->codec->snapshot_digest( array( $numeric ? 'source-image-numeric-v1' : 'source-exact-v1', $identity['type'], $identity['plugin'], $identity['id'] ) );
 			$column = $numeric ? 'source_numeric_identity_hash' : 'source_identity_hash';
-			$rows = $this->read( $this->db->prepare( 'SELECT HEX(node_hash) AS node_hash FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d '
-				. 'AND ' . $column . ' = UNHEX(%s) AND is_migrated = 1 AND migrated_id > 0 AND parent_node_hash IS NULL ORDER BY item_order ASC, id ASC LIMIT 1',
-				array( $this->blog, $head['id'], $head['active_generation'], $hash ) ) );
-			if ( count( $rows ) > 1 ) { $this->fail( 'Source lookup exceeded row limit.' ); }
+			$rows = array();
+			// Exact-source index places is_migrated before insertion order. Two
+			// fixed-flag LIMIT 1 selectors avoid sorting all duplicate identities.
+			foreach ( $require_migrated ? array( 1 ) : array( 0, 1 ) as $flag ) {
+				$selected = $this->read( $this->db->prepare( 'SELECT id, item_order, HEX(node_hash) AS node_hash FROM `' . $this->table . '`'
+					. ( $require_migrated ? '' : ' FORCE INDEX (`source_identity`)' ) . ' WHERE blog_id = %d AND state_id = %d AND generation = %d '
+					. 'AND ' . $column . ' = UNHEX(%s) AND is_migrated = %d AND migrated_id > 0 AND parent_node_hash IS NULL ORDER BY item_order ASC, id ASC LIMIT 1',
+					array( $this->blog, $head['id'], $head['active_generation'], $hash, $flag ) ) );
+				if ( count( $selected ) > 1 ) { $this->fail( 'Source lookup exceeded row limit.' ); }
+				if ( count( $selected ) ) {
+					$selected[0]['id'] = $this->number( $selected[0]['id'] ); $selected[0]['item_order'] = $this->number( $selected[0]['item_order'] );
+					if ( ! count( $rows ) || $selected[0]['item_order'] < $rows[0]['item_order'] || ( $selected[0]['item_order'] === $rows[0]['item_order'] && $selected[0]['id'] < $rows[0]['id'] ) ) { $rows = $selected; }
+				}
+			}
 			$tree = count( $rows ) ? $this->tree_hash( $state_key, $head, $this->hex( $rows[0]['node_hash'] ) ) : false;
 			if ( count( $rows ) ) {
 				$v = false === $tree ? null : $tree['value'];
-				if ( ! is_array( $v ) || ! isset( $v['object_type'], $v['plugin_name'] ) || ! array_key_exists( 'ID', $v ) ||
+				if ( ! is_array( $v ) || ! isset( $v['object_type'], $v['plugin_name'] ) || ! array_key_exists( 'ID', $v ) || ! is_scalar( $v['ID'] ) ||
 					$v['object_type'] !== $identity['type'] || $v['plugin_name'] !== $identity['plugin'] ||
-					( $numeric ? absint( $v['ID'] ) : (string) $v['ID'] ) !== $identity['id'] || empty( $v['migrated'] ) || empty( $v['migrated_id'] ) ) { $this->fail( 'Source hash collision or projection mismatch.' ); }
+					( $numeric ? absint( $v['ID'] ) : (string) $v['ID'] ) !== $identity['id'] || ( $require_migrated && empty( $v['migrated'] ) ) || (int) $v['migrated_id'] < 1 ) { $this->fail( 'Source hash collision or projection mismatch.' ); }
 			}
 			$result[] = array( 'found' => false !== $tree, 'key' => false === $tree ? null : $tree['key'], 'value' => false === $tree ? null : $tree['value'] );
 		}
@@ -554,6 +641,7 @@ class LegacyTableRepository {
 	private function add( $a, $b ) { if ( $a < 0 || $b < 0 || $b > PHP_INT_MAX - $a ) { $this->fail( 'Counter/order overflow.' ); } return $a + $b; }
 	private function hex( $value ) { if ( ! is_string( $value ) || ! preg_match( '/^[0-9a-f]{64}$/Di', $value ) ) { $this->fail( 'Invalid hash.' ); } return strtolower( $value ); }
 	private function start_budget() {
+		if ( $this->history_read_active ) { $this->tick(); return; }
 		if ( $this->busy || $this->tainted ) { $this->fail( 'Busy or uncertain repository; reconcile on a fresh connection.' ); }
 		$this->deadline = microtime( true ) + $this->max_seconds; $this->used_rows = 0; $this->used_bytes = 0; $this->byte_limit = $this->max_bytes;
 	}
