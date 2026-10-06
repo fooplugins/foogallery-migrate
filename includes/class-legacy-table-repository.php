@@ -76,7 +76,8 @@ class LegacyTableRepository {
 	 * Closed read primitives only: no callback or complete-history facade.
 	 */
 	public function history_read( $operation, $request = array() ) {
-		if ( $this->history_read_active || ! is_array( $request ) || ! in_array( $operation, array( 'identifiers', 'presence', 'source', 'page', 'count', 'revision' ), true ) ) { $this->fail( 'Unsupported history read.' ); }
+		if ( $this->history_read_active || ! is_array( $request ) || ! in_array( $operation, array( 'identifiers', 'presence', 'source', 'page', 'count', 'revision', 'log_summary' ), true ) ) { $this->fail( 'Unsupported history read.' ); }
+		if ( 'log_summary' === $operation && count( $request ) ) { $this->fail( 'Malformed log summary request.' ); }
 		$this->start_budget(); $this->history_read_active = true;
 		try {
 			$keys = array( 'migrated', 'migrated-revision' ); $context = $this->metadata_many( $keys );
@@ -91,6 +92,7 @@ class LegacyTableRepository {
 					if ( array_keys( $request ) !== array( 'limit', 'filters', 'cursor' ) ) { $this->fail( 'Malformed page request.' ); }
 					$result = $this->history_page( 'migrated', $request['limit'], $request['filters'], $request['cursor'] ); break;
 				case 'count': $result = $this->count_roots( 'migrated' ); break;
+				case 'log_summary': $result = $this->history_log_summary( $context[0] ); break;
 				default: $result = null;
 			}
 			if ( $this->metadata_many( $keys ) !== $context ) { $this->fail( 'History changed during bounded read.' ); }
@@ -411,6 +413,37 @@ class LegacyTableRepository {
 			$result[$column] = $counts;
 		}
 		$this->unchanged( $state_key, $head ); return $result;
+	}
+
+	/** Logical option log semantics, not physical flags/hydration defaults.
+	 * Empty projected statuses collapse absent/null/empty canonical values;
+	 * refuse that domain without scanning payloads or changing the schema.
+	 * Only verified projection writes/maintenance establish canonical parity.
+	 */
+	private function history_log_summary( $entry ) {
+		$head = $entry['head']; $groups = array(); $totals = array();
+		foreach ( array( 'object_type', 'migration_status' ) as $column ) {
+			// Schema v1's VARBINARY projections preserve case and trailing spaces.
+			$sql = 'SELECT `' . $column . '` AS value, COUNT(*) AS count, MIN(item_order) AS first_order FROM `' . $this->table . '`'
+				. ' WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL AND object_type <> %s'
+				. ' GROUP BY `' . $column . '` ORDER BY first_order ASC LIMIT 101';
+			$rows = $this->read( $this->db->prepare( $sql, array( $this->blog, $head['id'], $head['active_generation'], '' ) ) );
+			if ( count( $rows ) > 100 ) { $this->fail( 'Logical log summary exceeds distinct-group budget.' ); }
+			// 80 bytes cover the 32-byte value plus both unsigned count/order fields.
+			$this->consume( count( $rows ), count( $rows ) * 80 ); $counts = array(); $total = 0; $previous = null;
+			foreach ( $rows as $row ) {
+				if ( ! is_string( $row['value'] ) || strlen( $row['value'] ) > 32 || array_key_exists( $row['value'], $counts ) ) { $this->fail( 'Invalid logical summary group.' ); }
+				if ( '' === $row['value'] ) { $this->fail( 'Ambiguous empty status projection is not admitted for logical summaries. No payload scan or option fallback.' ); }
+				$count = $this->number( $row['count'] ); $order = $this->number( $row['first_order'] );
+				if ( $count < 1 || ( null !== $previous && $order <= $previous ) ) { $this->fail( 'Invalid logical summary count/order.' ); }
+				$counts[$row['value']] = $count; $total = $this->add( $total, $count ); $previous = $order;
+			}
+			$groups[$column] = $counts; $totals[$column] = $total;
+		}
+		if ( $totals['object_type'] !== $totals['migration_status'] || $totals['object_type'] > $entry['root']['root_count'] ) { $this->fail( 'Inconsistent logical summary totals.' ); }
+		$types = $groups['object_type']; $statuses = $groups['migration_status']; $total = $totals['object_type'];
+		return array( 'total' => $total, 'count' => $total, 'by_type' => $types, 'types' => $types, 'by_status' => $statuses, 'statuses' => $statuses,
+			'completed' => isset( $statuses['completed'] ) ? $statuses['completed'] : 0, 'error' => isset( $statuses['error'] ) ? $statuses['error'] : 0 );
 	}
 
 	private function filters( $filters ) {

@@ -85,7 +85,7 @@ try {
 	$refuses( function () use ( $backend ) { $backend->metadata_many( array( 'missing' ) ); }, 'missing metadata has no fallback' );
 	$refuses( function () use ( $logical ) { $logical->find_by_source_url( 'image', 'https://example.test/Case.jpg' ); }, 'unindexed source URL refuses rather than history scan' );
 	$refuses( function () use ( $logical ) { $logical->find_by_source_identity( 'image', null, '009' ); }, 'unindexed pluginless source identity explicitly refuses' );
-	$refuses( function () use ( $logical ) { $logical->log_summary(); }, 'physical counts are not exposed as logical log totals' );
+	$refuses( function () use ( $logical ) { $logical->summary(); }, 'per-type summary with ambiguous empty types remains unadmitted' );
 	$refuses( function () use ( $logical ) { $logical->clear(); }, 'unadmitted writes refuse rather than option fallback' );
 	$refuses( function () use ( $logical ) { $logical->read_snapshot(); }, 'no implicit whole-history materialization' );
 	$check( 0 === $writes && serialize( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) ) === serialize( $data ), 'all logical reads/refusals leave options unchanged' );

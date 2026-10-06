@@ -101,7 +101,10 @@ class MigratedHistoryRepository {
 		if ( null !== $this->store ) { return $this->store->revision(); }
 		$read = $this->table_read( 'revision' ); return $read['context'][1]['root']['value'];
 	}
-	public function log_summary() { return $this->option_store()->log_summary(); }
+	public function log_summary() {
+		if ( null !== $this->store ) { return $this->store->log_summary(); }
+		$read = $this->table_read( 'log_summary' ); return $read['result'];
+	}
 	public function log_page( $type = '', $status = '', $offset = 0, $limit = 100 ) { return $this->option_store()->log_page( $type, $status, $offset, $limit ); }
 	public function read_snapshot() { return $this->get_all(); }
 	// Existing engine compatibility names. OptionMigratedStore remains the sole owner.
