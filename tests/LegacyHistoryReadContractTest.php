@@ -86,9 +86,21 @@ class LegacyHistoryReadContractTest extends TestCase {
 			function () use ( $history ) { $history->get_many( array( '9' ) ); }, function () use ( $history ) { $history->has( true ); },
 			function () use ( $history ) { $history->page_log( '', '', 101 ); }, function () use ( $history ) { $history->iterate_page( 1, array() ); },
 			function () use ( $history ) { $history->find_by_source_identity( 'image', null, '009' ); },
-			function () use ( $history ) { $history->find_by_source_identity( 'image', '', '' ); } ) as $call ) {
+			function () use ( $history ) { $history->find_by_source_identity( 'image', true, '' ); } ) as $call ) {
 			try { $call(); $this->fail( 'Expected request refusal.' ); } catch ( \RuntimeException $error ) { $this->assertSame( array(), $table->calls ); }
 		}
+	}
+
+	public function test_empty_scalar_source_ids_are_dispatched_without_normalization(): void {
+		$table = new HistoryReadTableBackend( $this->data() );
+		$history = new MigratedHistoryRepository( $table, new MigratorSettings() );
+		foreach ( array( '', false ) as $id ) {
+			$history->find_by_source_identity( 'image', '', $id );
+			$this->assertSame( array( 'type' => 'image', 'plugin' => '', 'id' => $id ), $table->source_request );
+		}
+		$table->calls = array();
+		$this->assertFalse( $history->find_by_source_identity( 'image', '', null ) );
+		$this->assertSame( array(), $table->calls );
 	}
 }
 
@@ -99,7 +111,7 @@ class HistoryReadTestConnection extends \FooPlugins\FooGalleryMigrate\LegacyTran
 
 /** Translation double only: SQL/budget evidence comes from the guarded WP harness. */
 class HistoryReadTableBackend extends LegacyTableBackend {
-	public $data; public $calls = array(); public $change_during_read = false; private $revision = 1;
+	public $data; public $calls = array(); public $source_request; public $change_during_read = false; private $revision = 1;
 	public function __construct( $data ) { $this->data = $data; }
 	public function history_read( $operation, $request = array() ) {
 		$keys = array( 'migrated', 'migrated-revision' ); $context = $this->metadata_many( $keys );
@@ -109,7 +121,7 @@ class HistoryReadTableBackend extends LegacyTableBackend {
 			case 'presence': $result = $this->identifier_presence( 'migrated', $request ); break;
 			case 'count': $result = $this->count_roots( 'migrated' ); break;
 			case 'page': $result = $this->history_page( 'migrated', $request['limit'], $request['filters'], $request['cursor'] ); break;
-			case 'source': $result = $this->history_source_identity( $request['type'], $request['plugin'], $request['id'] ); break;
+			case 'source': $this->source_request = $request; $result = $this->history_source_identity( $request['type'], $request['plugin'], $request['id'] ); break;
 			default: $result = null;
 		}
 		if ( $this->metadata_many( $keys ) !== $context ) { throw new \RuntimeException( 'History changed during bounded read.' ); }

@@ -17,6 +17,18 @@ use FooPlugins\FooGalleryMigrate\MigratedHistoryRepository;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
 use FooPlugins\FooGalleryMigrate\StorageAuthority;
 
+/** Observe real SQL and inject one concurrent write after candidate selection. */
+class HistoryReadObservedConnection extends LegacyTransactionConnection {
+	public $queries = array(); public $after_candidates;
+	public function get_results( $sql, $format ) {
+		$this->queries[] = $sql; $rows = parent::get_results( $sql, $format );
+		if ( $this->after_candidates && false !== strpos( $sql, 'FORCE INDEX (`source_identity`)' ) && false !== strpos( $sql, 'LIMIT 101' ) ) {
+			$action = $this->after_candidates; $this->after_candidates = null; $action();
+		}
+		return $rows;
+	}
+}
+
 global $wpdb;
 $schema = new LegacyStorageSchema( $wpdb ); $tables = array_keys( $schema->definitions() );
 foreach ( $tables as $table ) {
@@ -101,7 +113,73 @@ try {
 	$check( $reader->head( 'migrated' )['revision'] === 2 && 0 === $writes, 'reads never advance physical/logical revision or option state' );
 	$null_id = $record; $null_id['ID'] = null; $empty_id = $record; $empty_id['ID'] = '';
 	$backend->patch_many( array( array( 'key' => 'migrated', 'expected_revision' => 2, 'patches' => array( array( 'key' => 'null-id', 'value' => $null_id ), array( 'key' => 'empty-id', 'value' => $empty_id ) ) ) ) );
-	$refuses( function () use ( $logical ) { $logical->find_by_source_identity( 'image', '', '' ); }, 'null and empty source ID projection collision explicitly refuses without scanning' );
+	$check( $logical->find_by_source_identity( 'image', '', '' )->ID === '', 'null projection candidate is skipped for exact empty scalar ID' );
+	$check( $logical->find_by_source_identity( 'image', '', false )->ID === '', 'false request preserves option string-cast empty-ID semantics' );
+	$check( false === $logical->find_by_source_identity( 'image', '', null ), 'null request remains a no-read false result' );
+	$seed = function ( $items ) use ( $snapshot, $reader, $observe ) {
+		remove_action( 'updated_option', $observe ); remove_action( 'added_option', $observe );
+		$history = array( MigratorSettings::COMPACT_MARKER => 1, 'type' => 'migratable', 'items' => $items );
+		$snapshot->replace_many( array( array( 'key' => 'migrated', 'order' => 0, 'kind' => 'map', 'value' => $history, 'expected_revision' => $reader->head( 'migrated' )['revision'] ),
+			array( 'key' => 'migrated-revision', 'order' => 1, 'kind' => 'scalar', 'value' => 5, 'expected_revision' => $reader->head( 'migrated-revision' )['revision'] ) ) );
+		( new LegacyOptionBackend() )->replace_all( array( 'migrated' => $history, 'migrated-revision' => 5 ) );
+		add_action( 'updated_option', $observe ); add_action( 'added_option', $observe );
+	};
+	$false_id = $empty_id; $false_id['ID'] = false; $false_id['migrated_id'] = 73;
+	$no_id = $empty_id; unset( $no_id['ID'] );
+	$nested = $record; $nested['children'] = array( 'nested-empty' => $empty_id );
+	$zero = $empty_id; $zero['migrated_id'] = 0;
+	$other_plugin = $empty_id; $other_plugin['plugin_name'] = 'Other';
+	$seed( array( 'missing' => $no_id, 'null' => $null_id, 'zero' => $zero, 'nested' => $nested, 'other' => $other_plugin, 'first' => $false_id, 'later' => $empty_id ) );
+	$check( serialize( $logical->find_by_source_identity( 'image', '', '' ) ) === serialize( $option->find_by_source_identity( 'image', '', '' ) ), 'empty-ID option parity includes false first winner, nested exclusion and positive target eligibility' );
+	$check( false === $logical->find_by_source_identity( 'Image', '', '' ), 'empty-ID type remains case sensitive' );
+	$check( false === $logical->find_by_source_identity( 'image', 'other', '' ), 'empty-ID plugin remains case sensitive' );
+	$check( false === $logical->find_by_source_identity( 'image', ' ', '' ), 'empty-ID significant plugin spaces remain exact' );
+	$refuses( function () use ( $logical ) { $logical->find_by_source_identity( 'image', null, '' ); }, 'empty-ID null plugin remains unadmitted' );
+	$seed( array( 'missing' => $no_id, 'null' => $null_id, 'zero' => $zero, 'nested' => $nested ) );
+	$check( false === $logical->find_by_source_identity( 'image', '', '' ) && false === $option->find_by_source_identity( 'image', '', '' ), 'null-only hash candidates return false without treating missing or child IDs as roots' );
+	$items = array();
+	for ( $i = 0; $i < 99; $i++ ) { $v = $null_id; $v['migrated'] = 0 === $i % 2; $items['null-' . $i] = $v; }
+	$items['winner'] = $false_id;
+	for ( $i = 0; $i < 1200; $i++ ) { $items['unrelated-' . $i] = $record; }
+	$seed( $items );
+	$check( serialize( $logical->find_by_source_identity( 'image', '', '' ) ) === serialize( $option->find_by_source_identity( 'image', '', '' ) ), '100 exact-hash candidates admitted despite 1200 unrelated roots' );
+	$refuses( function () use ( $db, $blog ) { ( new MigratedHistoryRepository( new LegacyTableBackend( $db, $blog, 20 ), new MigratorSettings() ) )->find_by_source_identity( 'image', '', '' ); }, 'empty-ID candidate selection shares logical row budget' );
+	$refuses( function () use ( $db, $blog ) { ( new MigratedHistoryRepository( new LegacyTableBackend( $db, $blog, 10000, 2048 ), new MigratorSettings() ) )->find_by_source_identity( 'image', '', '' ); }, 'empty-ID canonical trees share encoded byte budget' );
+	$items['overflow'] = $null_id; $seed( $items );
+	$refuses( function () use ( $logical ) { $logical->find_by_source_identity( 'image', '', '' ); }, '101 combined flag candidates refuse rather than return partial answer' );
+	$seed( array( 'early-winner' => $empty_id ) + $items );
+	$refuses( function () use ( $logical ) { $logical->find_by_source_identity( 'image', '', '' ); }, 'candidate overflow refuses even with early exact match' );
+	$seed( array() );
+	$check( false === $logical->find_by_source_identity( 'image', '', '' ), 'empty history has no empty-ID match' );
+	$seed( array( 'null' => $null_id, 'winner' => $empty_id ) );
+	$observed = new HistoryReadObservedConnection( $wpdb );
+	$observed_backend = new LegacyTableBackend( $observed, $blog );
+	$observed_logical = new MigratedHistoryRepository( $observed_backend, new MigratorSettings() );
+	$before = $backend->metadata_many( array( 'migrated', 'migrated-revision' ) ); $option_before = serialize( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) );
+	$check( '' === $observed_logical->find_by_source_identity( 'image', '', '' )->ID, 'observed empty-ID canonical match' );
+	$selectors = 0;
+	foreach ( $observed->queries as $sql ) {
+		if ( false === strpos( $sql, 'FORCE INDEX (`source_identity`)' ) ) { continue; }
+		$selectors++;
+		$check( false !== strpos( $sql, 'LIMIT 101' ) && false === strpos( $sql, 'payload' ), 'empty-ID selector is bounded projection-only SQL' );
+		$plan = $db->get_results( 'EXPLAIN ' . $sql, ARRAY_A );
+		$check( count( $plan ) === 1 && $plan[0]['key'] === 'source_identity' && false === stripos( $plan[0]['Extra'], 'filesort' ), 'empty-ID selector uses exact identity ordering index without filesort' );
+	}
+	$check( 2 === $selectors && $before === $backend->metadata_many( array( 'migrated', 'migrated-revision' ) ) && $option_before === serialize( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) ), 'two fixed-flag selectors preserve both heads and exact option bytes' );
+	$peer_wpdb = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST ); $peer_wpdb->base_prefix = $wpdb->base_prefix;
+	$peer = new LegacyTransactionConnection( $peer_wpdb );
+	$check( $db->get_results( 'SELECT CONNECTION_ID() AS id', ARRAY_A )[0]['id'] !== $peer->get_results( 'SELECT CONNECTION_ID() AS id', ARRAY_A )[0]['id'], 'concurrency fixture uses two actual pinned connections' );
+	$observed->after_candidates = function () use ( $peer, $blog, $reader ) {
+		( new LegacyTableBackend( $peer, $blog ) )->patch_many( array( array( 'key' => 'migrated-revision', 'expected_revision' => $reader->head( 'migrated-revision' )['revision'], 'value' => 6 ) ) );
+	};
+	$refuses( function () use ( $observed_logical ) { $observed_logical->find_by_source_identity( 'image', '', '' ); }, 'empty-ID concurrent logical revision change refuses' );
+	$observed->after_candidates = function () use ( $peer, $blog, $reader, $empty_id ) {
+		$v = $empty_id; $v['ID'] = 'changed';
+		( new LegacyTableBackend( $peer, $blog ) )->patch_many( array( array( 'key' => 'migrated', 'expected_revision' => $reader->head( 'migrated' )['revision'], 'patches' => array( array( 'key' => 'winner', 'value' => $v ) ) ) ) );
+	};
+	$refuses( function () use ( $observed_logical ) { $observed_logical->find_by_source_identity( 'image', '', '' ); }, 'empty-ID same-total concurrent identity update refuses' );
+	$check( false === $logical->find_by_source_identity( 'image', '', '' ), 'verified dirty history remains readable without full rehash' );
+	$check( 0 === $writes, 'empty-ID reads perform no observed option writes' );
 } finally {
 	remove_action( 'updated_option', $observe ); remove_action( 'added_option', $observe );
 	if ( array_key_exists( FOOGALLERY_MIGRATE_OPTION_DATA, $options ) ) {

@@ -334,9 +334,49 @@ class LegacyTableRepository {
 	 * the independently stored migrated flag. Preserve physical API defaults.
 	 */
 	public function history_source_identity( $type, $plugin, $id ) {
-		if ( ! is_scalar( $id ) || '' === (string) $id ) { $this->fail( 'Ambiguous empty/null source ID is not admitted.' ); }
+		if ( ! is_scalar( $id ) ) { $this->fail( 'Non-scalar source ID is not admitted.' ); }
+		if ( '' === (string) $id ) { return $this->history_empty_source_identity( $type, $plugin ); }
 		$rows = $this->read_source_identities( 'migrated', array( array( 'type' => $type, 'plugin' => $plugin, 'id' => $id ) ), false, false );
 		return $rows[0];
+	}
+
+	/** Schema v1 hashes null and empty scalar IDs alike. Bound exact-hash
+	 * candidates before fetching trees, then apply the option scalar predicate.
+	 * No change to physical lookup policy or persisted projections is needed.
+	 */
+	private function history_empty_source_identity( $type, $plugin ) {
+		$this->start_budget();
+		if ( ! is_string( $type ) || '' === $type || strlen( $type ) > 32 || ! is_string( $plugin ) ) { $this->fail( 'Invalid empty source identity.' ); }
+		$this->consume( 0, strlen( $this->codec->encode( array( $type, $plugin, '' ) ) ) );
+		$head = $this->head( 'migrated' ); $this->collection( $head );
+		$hash = $this->codec->snapshot_digest( array( 'source-exact-v1', $type, $plugin, '' ) ); $rows = array();
+		foreach ( array( 0, 1 ) as $flag ) {
+			$selected = $this->read( $this->db->prepare( 'SELECT id, item_order, HEX(node_hash) AS node_hash FROM `' . $this->table . '` FORCE INDEX (`source_identity`) '
+				. 'WHERE blog_id = %d AND state_id = %d AND generation = %d AND source_identity_hash = UNHEX(%s) AND is_migrated = %d '
+				. 'AND migrated_id > 0 AND parent_node_hash IS NULL ORDER BY item_order ASC, id ASC LIMIT 101',
+				array( $this->blog, $head['id'], $head['active_generation'], $hash, $flag ) ) );
+			if ( count( $selected ) > 100 - count( $rows ) ) { $this->fail( 'Empty source identity exceeds 100 candidates; no partial answer is admitted.' ); }
+			$this->consume( count( $selected ), strlen( $this->codec->encode( $selected ) ) );
+			foreach ( $selected as $row ) {
+				$row['id'] = $this->number( $row['id'] ); $row['item_order'] = $this->number( $row['item_order'] ); $row['node_hash'] = $this->hex( $row['node_hash'] );
+				$rows[] = $row;
+			}
+		}
+		usort( $rows, function ( $a, $b ) {
+			if ( $a['item_order'] !== $b['item_order'] ) { return $a['item_order'] < $b['item_order'] ? -1 : 1; }
+			return $a['id'] === $b['id'] ? 0 : ( $a['id'] < $b['id'] ? -1 : 1 );
+		} );
+		$result = array( 'found' => false, 'key' => null, 'value' => null );
+		foreach ( $rows as $row ) {
+			$tree = $this->tree_hash( 'migrated', $head, $row['node_hash'] ); $v = false === $tree ? null : $tree['value'];
+			if ( ! is_array( $v ) || ! isset( $v['object_type'], $v['plugin_name'], $v['migrated_id'] ) || ! array_key_exists( 'ID', $v ) ||
+				$v['object_type'] !== $type || $v['plugin_name'] !== $plugin || ( null !== $v['ID'] && ! is_scalar( $v['ID'] ) ) ||
+				(string) $v['ID'] !== '' || (int) $v['migrated_id'] < 1 || $tree['order'] !== $row['item_order'] || $this->number( $tree['rows'][0]['id'] ) !== $row['id'] ) {
+				$this->fail( 'Empty source hash collision or projection mismatch.' );
+			}
+			if ( is_scalar( $v['ID'] ) ) { $result = array( 'found' => true, 'key' => $tree['key'], 'value' => $v ); break; }
+		}
+		$this->unchanged( 'migrated', $head ); return $result;
 	}
 
 	private function read_source_identities( $state_key, $identities, $numeric, $require_migrated ) {

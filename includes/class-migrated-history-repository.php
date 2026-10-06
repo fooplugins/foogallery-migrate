@@ -36,7 +36,7 @@ class MigratedHistoryRepository {
 	public function find_by_source_identity( $type, $plugin_name, $source_id ) {
 		if ( null !== $this->store ) { return $this->store->find_by_source_identity( $type, $plugin_name, $source_id ); }
 		if ( ! is_scalar( $source_id ) ) { return false; }
-		if ( ! is_string( $type ) || '' === $type || strlen( $type ) > 32 || ! is_string( $plugin_name ) || '' === (string) $source_id ) { throw new \RuntimeException( 'Unindexed or ambiguous table source identity is not admitted. No option fallback.' ); }
+		if ( ! is_string( $type ) || '' === $type || strlen( $type ) > 32 || ! is_string( $plugin_name ) ) { throw new \RuntimeException( 'Unindexed or ambiguous table source identity is not admitted. No option fallback.' ); }
 		$read = $this->table_read( 'source', array( 'type' => $type, 'plugin' => $plugin_name, 'id' => $source_id ) );
 		$row = $read['result']; return $row['found'] ? $this->hydrate( $row['value'] ) : false;
 	}
