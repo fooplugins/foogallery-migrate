@@ -116,8 +116,57 @@ try {
 	$refuses( function () use ( $logical ) { $logical->log_summary(); }, 'changed', 'concurrent history head change refuses mixed type/status counts' );
 	$digest_status = $wpdb->get_var( $wpdb->prepare( 'SELECT digest_status FROM `' . $tables[0] . '` WHERE blog_id = %d AND id = %d', array( $blog, $reader->head( 'migrated' )['id'] ) ) );
 	$check( empty( $wpdb->last_error ) && 'dirty' === $digest_status && $logical->log_summary()['total'] === 6 && $logical->log_summary()['completed'] === 2 && 0 === $writes, 'verified dirty-digest projections stay readable without whole-history rehash' );
+	// Per-type summary includes explicit empty types, unlike log_summary. V1
+	// collapses those with absent/null/opaque roots: refuse the whole domain.
+	$typed = array( 'unknown' => $record( 'unknown', 'pending' ), 'image' => $record( 'image', 'error' ),
+		'case' => $record( 'Image', 'Error' ), 'space' => $record( 'image ', 'error ' ),
+		'again' => $record( 'unknown', 'completed' ), 'blank' => $record( ' ', 'error' ),
+		'missing-status' => array( 'object_type' => 'image' ), 'null-status' => $record( 'image', null ),
+		'empty-status' => $record( 'image', '' ), 'numeric' => $record( '9', 'error' ), 'numeric-string' => $record( '09', 'completed' ) );
+	$typed['image']['error'] = false; $typed['again']['error'] = 'not a status error';
+	$typed['unknown']['children'] = array( $record( 'child-only', 'error' ) );
+	$seed( $typed ); $before = $backend->metadata_many( array( 'migrated', 'migrated-revision' ) );
+	$option_before = serialize( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) );
+	$observed->queries = array(); $per_type = $logical->summary(); $type_queries = $observed->queries;
+	$check( serialize( $per_type ) === serialize( $option->summary() ), 'exact per-type count/error/order parity including missing/null/empty statuses and nested exclusion' );
+	$check( array_keys( $per_type ) === array( 'unknown', 'image', 'Image', 'image ', ' ', 9, '09' ) && $per_type['image'] === array( 'count' => 4, 'errors' => 1 ), 'exact binary type groups and PHP numeric keys; errors are exact logical status' );
+	$groups = 0;
+	foreach ( $type_queries as $sql ) {
+		if ( false !== strpos( $sql, $tables[1] ) ) {
+			$check( false === strpos( $sql, 'payload' ) && false !== strpos( $sql, 'GROUP BY' ) && false !== strpos( $sql, 'LIMIT 101' ), 'per-type record query is one bounded projection aggregate' ); $groups++;
+		}
+	}
+	$check( 1 === $groups, 'per-type summary uses one aggregate independent of root count' );
+	$check( $before === $backend->metadata_many( array( 'migrated', 'migrated-revision' ) ) && 0 === $writes && $option_before === serialize( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) ), 'per-type summary never changes heads or options' );
+	foreach ( array( false, null, array(), array( 'object_type' => null ), $record( '', 'error' ) ) as $ambiguous ) {
+		$seed( array( 'valid' => $record( 'image', 'error' ), 'ambiguous' => $ambiguous ) );
+		$refuses( function () use ( $logical ) { $logical->summary(); }, 'Ambiguous empty type', 'per-type missing/null/opaque/explicit-empty type refuses without fallback' );
+		$check( 0 === $writes, 'per-type admission refusal never writes options' );
+	}
+	$seed( array() ); $check( $logical->summary() === array() && $logical->summary() === $option->summary(), 'empty per-type summary parity' );
+	$many = array(); for ( $i = 0; $i < 1200; $i++ ) { $many[$i] = $record( 'image', $i % 2 ? 'error' : 'completed' ); }
+	$seed( $many ); $check( $logical->summary() === $option->summary() && $logical->summary()['image'] === array( 'count' => 1200, 'errors' => 600 ), '1200-root per-type summary parity without payload reads' );
+	$refuses( function () use ( $observed, $blog ) { ( new MigratedHistoryRepository( new LegacyTableBackend( $observed, $blog, 4 ), new MigratorSettings() ) )->summary(); }, 'budget', 'per-type aggregate and metadata share row budget' );
+	$refuses( function () use ( $observed, $blog, $one_context ) { ( new MigratedHistoryRepository( new LegacyTableBackend( $observed, $blog, 10000, $one_context + 100 ), new MigratorSettings() ) )->summary(); }, 'budget', 'per-type aggregate and metadata share byte budget' );
+	$refuses( function () use ( $observed, $blog ) { ( new MigratedHistoryRepository( new LegacyTableBackend( $observed, $blog + 1000 ), new MigratorSettings() ) )->summary(); }, 'Missing', 'per-type wrong-blog refusal' );
+	$refuses( function () use ( $backend ) { $backend->history_read( 'summary', array( 'extra' => true ) ); }, 'Malformed', 'per-type summary admits no filters/callback' );
+	$many = array(); for ( $i = 0; $i < 100; $i++ ) { $many[$i] = $record( 'type-' . $i, 'completed' ); }
+	$seed( $many ); $check( $logical->summary() === $option->summary() && count( $logical->summary() ) === 100, '100 distinct types are admitted' );
+	$many[100] = $record( 'type-100', 'error' ); $seed( $many );
+	$refuses( function () use ( $logical ) { $logical->summary(); }, 'distinct-group', '101 per-type groups refuse' );
+	$seed( $typed );
+	$observed->after_group = function () use ( $db, $blog, $reader ) {
+		( new LegacyTableBackend( $db, $blog ) )->patch_many( array( array( 'key' => 'migrated-revision', 'expected_revision' => $reader->head( 'migrated-revision' )['revision'], 'value' => 7 ) ) );
+	};
+	$refuses( function () use ( $logical ) { $logical->summary(); }, 'changed', 'per-type concurrent logical revision refuses' );
+	$observed->after_group = function () use ( $db, $blog, $reader, $record ) {
+		( new LegacyTableBackend( $db, $blog ) )->patch_many( array( array( 'key' => 'migrated', 'expected_revision' => $reader->head( 'migrated' )['revision'], 'patches' => array( array( 'key' => 'image', 'value' => $record( 'image', 'completed' ) ) ) ) ) );
+	};
+	$refuses( function () use ( $logical ) { $logical->summary(); }, 'changed', 'per-type concurrent same-total status update refuses' );
+	$check( $logical->summary()['image'] === array( 'count' => 4, 'errors' => 0 ) && 0 === $writes, 'per-type verified dirty projections remain readable without whole-history rehash' );
 	$heads = $backend->metadata_many( array( 'migrated', 'migrated-revision' ) );
 	$snapshot->replace_many( array( array( 'key' => 'migrated', 'order' => 0, 'kind' => 'map', 'value' => array( 'header-root' => false ), 'expected_revision' => $heads[0]['head']['revision'] ) ) );
+	$refuses( function () use ( $logical ) { $logical->summary(); }, 'wrapper', 'per-type old header-root refusal' );
 	$refuses( function () use ( $logical ) { $logical->log_summary(); }, 'wrapper', 'old header-root layout is not silently translated' );
 } finally {
 	remove_action( 'updated_option', $observe ); remove_action( 'added_option', $observe );

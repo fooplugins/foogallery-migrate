@@ -76,8 +76,8 @@ class LegacyTableRepository {
 	 * Closed read primitives only: no callback or complete-history facade.
 	 */
 	public function history_read( $operation, $request = array() ) {
-		if ( $this->history_read_active || ! is_array( $request ) || ! in_array( $operation, array( 'identifiers', 'presence', 'source', 'page', 'count', 'revision', 'log_summary' ), true ) ) { $this->fail( 'Unsupported history read.' ); }
-		if ( 'log_summary' === $operation && count( $request ) ) { $this->fail( 'Malformed log summary request.' ); }
+		if ( $this->history_read_active || ! is_array( $request ) || ! in_array( $operation, array( 'identifiers', 'presence', 'source', 'page', 'count', 'revision', 'log_summary', 'summary' ), true ) ) { $this->fail( 'Unsupported history read.' ); }
+		if ( in_array( $operation, array( 'log_summary', 'summary' ), true ) && count( $request ) ) { $this->fail( 'Malformed logical summary request.' ); }
 		$this->start_budget(); $this->history_read_active = true;
 		try {
 			$keys = array( 'migrated', 'migrated-revision' ); $context = $this->metadata_many( $keys );
@@ -93,6 +93,7 @@ class LegacyTableRepository {
 					$result = $this->history_page( 'migrated', $request['limit'], $request['filters'], $request['cursor'] ); break;
 				case 'count': $result = $this->count_roots( 'migrated' ); break;
 				case 'log_summary': $result = $this->history_log_summary( $context[0] ); break;
+				case 'summary': $result = $this->history_type_summary( $context[0] ); break;
 				default: $result = null;
 			}
 			if ( $this->metadata_many( $keys ) !== $context ) { $this->fail( 'History changed during bounded read.' ); }
@@ -444,6 +445,31 @@ class LegacyTableRepository {
 		$types = $groups['object_type']; $statuses = $groups['migration_status']; $total = $totals['object_type'];
 		return array( 'total' => $total, 'count' => $total, 'by_type' => $types, 'types' => $types, 'by_status' => $statuses, 'statuses' => $statuses,
 			'completed' => isset( $statuses['completed'] ) ? $statuses['completed'] : 0, 'error' => isset( $statuses['error'] ) ? $statuses['error'] : 0 );
+	}
+
+	/** Per-type option semantics: only exact status 'error' increments errors.
+	 * Empty types collapse explicit empty strings with missing/null/opaque roots
+	 * in schema v1. Refuse those histories, rather than invent a payload scan.
+	 * Empty statuses are safe here: all contribute zero errors, unlike log_summary.
+	 */
+	private function history_type_summary( $entry ) {
+		$head = $entry['head'];
+		$sql = 'SELECT object_type AS value, COUNT(*) AS count, SUM(migration_status = %s) AS errors, MIN(item_order) AS first_order FROM `' . $this->table . '`'
+			. ' WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL'
+			. ' GROUP BY object_type ORDER BY first_order ASC LIMIT 101';
+		$rows = $this->read( $this->db->prepare( $sql, array( 'error', $this->blog, $head['id'], $head['active_generation'] ) ) );
+		if ( count( $rows ) > 100 ) { $this->fail( 'Logical per-type summary exceeds distinct-group budget.' ); }
+		// 96 bytes cover the 32-byte type plus three unsigned aggregate fields.
+		$this->consume( count( $rows ), count( $rows ) * 96 ); $summary = array(); $total = 0; $previous = null;
+		foreach ( $rows as $row ) {
+			if ( ! is_string( $row['value'] ) || strlen( $row['value'] ) > 32 || array_key_exists( $row['value'], $summary ) ) { $this->fail( 'Invalid logical per-type group.' ); }
+			if ( '' === $row['value'] ) { $this->fail( 'Ambiguous empty type projection is not admitted for per-type summaries. No payload scan or option fallback.' ); }
+			$count = $this->number( $row['count'] ); $errors = $this->number( $row['errors'] ); $order = $this->number( $row['first_order'] );
+			if ( $count < 1 || $errors > $count || ( null !== $previous && $order <= $previous ) ) { $this->fail( 'Invalid logical per-type count/order.' ); }
+			$summary[$row['value']] = array( 'count' => $count, 'errors' => $errors ); $total = $this->add( $total, $count ); $previous = $order;
+		}
+		if ( $total !== $entry['root']['root_count'] ) { $this->fail( 'Inconsistent logical per-type totals.' ); }
+		return $summary;
 	}
 
 	private function filters( $filters ) {

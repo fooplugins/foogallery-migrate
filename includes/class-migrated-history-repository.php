@@ -105,12 +105,15 @@ class MigratedHistoryRepository {
 		if ( null !== $this->store ) { return $this->store->log_summary(); }
 		$read = $this->table_read( 'log_summary' ); return $read['result'];
 	}
+	public function summary() {
+		if ( null !== $this->store ) { return $this->store->summary(); }
+		$read = $this->table_read( 'summary' ); return $read['result'];
+	}
 	public function log_page( $type = '', $status = '', $offset = 0, $limit = 100 ) { return $this->option_store()->log_page( $type, $status, $offset, $limit ); }
 	public function read_snapshot() { return $this->get_all(); }
 	// Existing engine compatibility names. OptionMigratedStore remains the sole owner.
 	public function get_all( $type = '' ) { return $this->option_store()->get_all( $type ); }
 	public function get_by_parent( $identifier ) { return $this->option_store()->get_by_parent( $identifier ); }
-	public function summary() { return $this->option_store()->summary(); }
 	public function manages_revision() { return true; }
 
 	private function option_store() {

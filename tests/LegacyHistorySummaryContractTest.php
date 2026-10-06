@@ -56,9 +56,42 @@ class LegacyHistorySummaryContractTest extends TestCase {
 		$this->assertSame( array(), $GLOBALS['foogallery_migrate_test_option_writes'] );
 	}
 
-	public function test_per_type_summary_remains_unadmitted(): void {
-		$table = new HistorySummaryBackend( array() ); $history = new MigratedHistoryRepository( $table, new MigratorSettings() );
-		$this->expectExceptionMessage( 'not admitted' ); $history->summary();
+	public function test_per_type_summary_dispatch_preserves_option_order_and_exact_errors_without_hydration(): void {
+		$items = array( array( 'object_type' => 'unknown', 'migration_status' => 'pending' ),
+			array( 'object_type' => 'image', 'migration_status' => 'error', 'error' => false ),
+			array( 'object_type' => 'unknown', 'migration_status' => 'completed', 'error' => 'not a status error' ),
+			array( 'object_type' => 'Image', 'migration_status' => 'Error' ),
+			array( 'object_type' => 'image', 'migration_status' => null ),
+			array( 'object_type' => 'image ' ), array( 'object_type' => '09', 'migration_status' => '' ) );
+		$GLOBALS['foogallery_migrate_test_options'][FOOGALLERY_MIGRATE_OPTION_DATA] = array( 'migrated' => array(
+			MigratorSettings::COMPACT_MARKER => 1, 'type' => 'migratable', 'items' => $items ) );
+		$settings = new SummaryNoHydrationSettings(); $option = new MigratedHistoryRepository( new LegacyOptionBackend(), $settings );
+		$expected = array( 'unknown' => array( 'count' => 2, 'errors' => 0 ), 'image' => array( 'count' => 2, 'errors' => 1 ),
+			'Image' => array( 'count' => 1, 'errors' => 0 ), 'image ' => array( 'count' => 1, 'errors' => 0 ), '09' => array( 'count' => 1, 'errors' => 0 ) );
+		$this->assertSame( $expected, $option->summary() );
+		$table = new HistorySummaryBackend( $expected ); $history = new MigratedHistoryRepository( $table, $settings );
+		$this->assertSame( $expected, $history->summary() );
+		$this->assertSame( array( array( 'summary', array() ) ), $table->calls );
+		$this->assertSame( array(), $GLOBALS['foogallery_migrate_test_option_writes'] );
+	}
+
+	public function test_per_type_summary_validates_wrapper_and_revision_without_fallback(): void {
+		foreach ( array( 'wrapper', 'revision' ) as $invalid ) {
+			$table = new HistorySummaryBackend( array() ); $table->invalid = $invalid;
+			$history = new MigratedHistoryRepository( $table, new MigratorSettings() );
+			try { $history->summary(); $this->fail( 'Expected metadata refusal.' ); }
+			catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'wrapper' === $invalid ? 'wrapper' : 'revision', $error->getMessage() ); }
+		}
+		$this->assertSame( array(), $GLOBALS['foogallery_migrate_test_option_writes'] );
+	}
+
+	public function test_option_per_type_summary_keeps_explicit_empty_type_but_skips_missing_null_and_opaque(): void {
+		$GLOBALS['foogallery_migrate_test_options'][FOOGALLERY_MIGRATE_OPTION_DATA] = array( 'migrated' => array(
+			MigratorSettings::COMPACT_MARKER => 1, 'type' => 'migratable', 'items' => array(
+				false, null, array(), array( 'object_type' => null ), array( 'object_type' => '', 'migration_status' => 'error' ) ) ) );
+		$option = new MigratedHistoryRepository( new LegacyOptionBackend(), new MigratorSettings() );
+		$this->assertSame( array( '' => array( 'count' => 1, 'errors' => 1 ) ), $option->summary() );
+		$this->assertSame( array(), $GLOBALS['foogallery_migrate_test_option_writes'] );
 	}
 }
 
