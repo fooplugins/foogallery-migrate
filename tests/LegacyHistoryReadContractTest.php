@@ -85,7 +85,7 @@ class LegacyHistoryReadContractTest extends TestCase {
 		foreach ( array( function () use ( $history ) { $history->get_many( array( '09', '09' ) ); },
 			function () use ( $history ) { $history->get_many( array( '9' ) ); }, function () use ( $history ) { $history->has( true ); },
 			function () use ( $history ) { $history->page_log( '', '', 101 ); }, function () use ( $history ) { $history->iterate_page( 1, array() ); },
-			function () use ( $history ) { $history->find_by_source_identity( 'image', null, '009' ); },
+			function () use ( $history ) { $history->find_by_source_identity( 'image', array(), '009' ); },
 			function () use ( $history ) { $history->find_by_source_identity( 'image', true, '' ); } ) as $call ) {
 			try { $call(); $this->fail( 'Expected request refusal.' ); } catch ( \RuntimeException $error ) { $this->assertSame( array(), $table->calls ); }
 		}
@@ -101,6 +101,19 @@ class LegacyHistoryReadContractTest extends TestCase {
 		$table->calls = array();
 		$this->assertFalse( $history->find_by_source_identity( 'image', '', null ) );
 		$this->assertSame( array(), $table->calls );
+	}
+
+	public function test_null_plugin_requests_preserve_exact_null_and_raw_scalar_ids(): void {
+		$table = new HistoryReadTableBackend( $this->data() );
+		$history = new MigratedHistoryRepository( $table, new MigratorSettings() );
+		foreach ( array( '009', 9, '', false ) as $id ) {
+			$history->find_by_source_identity( 'image', null, $id );
+			$this->assertSame( array( 'type' => 'image', 'plugin' => null, 'id' => $id ), $table->source_request );
+		}
+		$table->calls = array();
+		$this->assertFalse( $history->find_by_source_identity( 'image', null, null ) );
+		$this->assertSame( array(), $table->calls );
+		$this->assertSame( array(), $GLOBALS['foogallery_migrate_test_option_writes'] );
 	}
 }
 

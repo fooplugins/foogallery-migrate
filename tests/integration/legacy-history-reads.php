@@ -96,7 +96,7 @@ try {
 	$refuses( function () use ( $db, $blog, $one_context_bytes ) { ( new MigratedHistoryRepository( new LegacyTableBackend( $db, $blog, 10000, $one_context_bytes + 100 ), new MigratorSettings() ) )->get( 'absent' ); }, 'logical operation shares encoded byte budget across metadata and lookup' );
 	$refuses( function () use ( $backend ) { $backend->metadata_many( array( 'missing' ) ); }, 'missing metadata has no fallback' );
 	$refuses( function () use ( $logical ) { $logical->find_by_source_url( 'image', 'https://example.test/Case.jpg' ); }, 'unindexed source URL refuses rather than history scan' );
-	$refuses( function () use ( $logical ) { $logical->find_by_source_identity( 'image', null, '009' ); }, 'unindexed pluginless source identity explicitly refuses' );
+	$check( false === $logical->find_by_source_identity( 'image', null, '009' ), 'null plugin does not match an empty string plugin' );
 	$refuses( function () use ( $logical ) { $logical->summary(); }, 'per-type summary with ambiguous empty types remains unadmitted' );
 	$refuses( function () use ( $logical ) { $logical->clear(); }, 'unadmitted writes refuse rather than option fallback' );
 	$refuses( function () use ( $logical ) { $logical->read_snapshot(); }, 'no implicit whole-history materialization' );
@@ -134,7 +134,7 @@ try {
 	$check( false === $logical->find_by_source_identity( 'Image', '', '' ), 'empty-ID type remains case sensitive' );
 	$check( false === $logical->find_by_source_identity( 'image', 'other', '' ), 'empty-ID plugin remains case sensitive' );
 	$check( false === $logical->find_by_source_identity( 'image', ' ', '' ), 'empty-ID significant plugin spaces remain exact' );
-	$refuses( function () use ( $logical ) { $logical->find_by_source_identity( 'image', null, '' ); }, 'empty-ID null plugin remains unadmitted' );
+	$check( false === $logical->find_by_source_identity( 'image', null, '' ), 'null plugin remains distinct from empty and named plugins for empty IDs' );
 	$seed( array( 'missing' => $no_id, 'null' => $null_id, 'zero' => $zero, 'nested' => $nested ) );
 	$check( false === $logical->find_by_source_identity( 'image', '', '' ) && false === $option->find_by_source_identity( 'image', '', '' ), 'null-only hash candidates return false without treating missing or child IDs as roots' );
 	$items = array();
@@ -180,6 +180,72 @@ try {
 	$refuses( function () use ( $observed_logical ) { $observed_logical->find_by_source_identity( 'image', '', '' ); }, 'empty-ID same-total concurrent identity update refuses' );
 	$check( false === $logical->find_by_source_identity( 'image', '', '' ), 'verified dirty history remains readable without full rehash' );
 	$check( 0 === $writes, 'empty-ID reads perform no observed option writes' );
+
+	$pluginless = $record; $pluginless['plugin_name'] = null; $pluginless['children'] = array();
+	$absent_plugin = $pluginless; unset( $absent_plugin['plugin_name'] ); $absent_plugin['migrated_id'] = 74;
+	$pluginless_later = $pluginless; $pluginless_later['migrated'] = true; $pluginless_later['migrated_id'] = 75;
+	$pluginless_zero = $pluginless; $pluginless_zero['migrated_id'] = 0;
+	$pluginless_null_id = $pluginless; $pluginless_null_id['ID'] = null;
+	$pluginless_missing_id = $pluginless; unset( $pluginless_missing_id['ID'] );
+	$pluginless_other_type = $pluginless; $pluginless_other_type['object_type'] = 'gallery';
+	$pluginless_nested = $record; $pluginless_nested['children'] = array( 'child' => $pluginless );
+	$seed( array( 'zero' => $pluginless_zero, 'nested' => $pluginless_nested, 'empty-plugin' => $record, 'other-type' => $pluginless_other_type,
+		'null-id' => $pluginless_null_id, 'missing-id' => $pluginless_missing_id, 'first' => $absent_plugin, 'later' => $pluginless_later ) );
+	$check( serialize( $logical->find_by_source_identity( 'image', null, '009' ) ) === serialize( $option->find_by_source_identity( 'image', null, '009' ) ) && $logical->find_by_source_identity( 'image', null, '009' )->migrated_id === 74, 'null-plugin option parity: missing field matches null, first positive root wins across flags' );
+	$check( false === $logical->find_by_source_identity( 'image', null, 9 ) && false === $logical->find_by_source_identity( 'Image', null, '009' ), 'null-plugin type and leading-zero source IDs remain exact' );
+	$check( serialize( $logical->find_by_source_identity( 'gallery', null, '009' ) ) === serialize( $option->find_by_source_identity( 'gallery', null, '009' ) ), 'null-plugin candidates are filtered by canonical type' );
+	$refuses( function () use ( $backend ) { $backend->source_identities( 'migrated', array( array( 'type' => 'image', 'plugin' => null, 'id' => '009' ) ) ); }, 'physical null-plugin lookup admission remains unchanged' );
+	foreach ( array( '', false, 0, true, 1.5 ) as $id ) {
+		$v = $pluginless; $v['ID'] = $id;
+		$seed( array( 'null-id' => $pluginless_null_id, 'missing-id' => $pluginless_missing_id, 'winner' => $v ) );
+		$check( serialize( $logical->find_by_source_identity( 'image', null, $id ) ) === serialize( $option->find_by_source_identity( 'image', null, $id ) ), 'null-plugin raw scalar source parity: ' . gettype( $id ) . ':' . (string) $id );
+	}
+	$seed( array( 'null-id' => $pluginless_null_id, 'missing-id' => $pluginless_missing_id ) );
+	$check( false === $logical->find_by_source_identity( 'image', null, '' ), 'null-plugin null and missing source IDs are not scalar matches' );
+	$items = array();
+	for ( $i = 0; $i < 99; $i++ ) { $v = $pluginless_null_id; $v['migrated'] = 0 === $i % 2; $items['null-plugin-' . $i] = $v; }
+	$items['winner'] = $absent_plugin;
+	for ( $i = 0; $i < 1200; $i++ ) { $items['unrelated-' . $i] = $record; }
+	$seed( $items );
+	$check( serialize( $logical->find_by_source_identity( 'image', null, '009' ) ) === serialize( $option->find_by_source_identity( 'image', null, '009' ) ), '100 null-plugin bucket candidates admitted despite 1200 unrelated roots' );
+	$refuses( function () use ( $db, $blog ) { ( new MigratedHistoryRepository( new LegacyTableBackend( $db, $blog, 20 ), new MigratorSettings() ) )->find_by_source_identity( 'image', null, '009' ); }, 'null-plugin candidates share logical row budget' );
+	$refuses( function () use ( $db, $blog ) { ( new MigratedHistoryRepository( new LegacyTableBackend( $db, $blog, 10000, 2048 ), new MigratorSettings() ) )->find_by_source_identity( 'image', null, '009' ); }, 'null-plugin trees share logical encoded byte budget' );
+	$items['overflow'] = $pluginless_other_type; $seed( $items );
+	$refuses( function () use ( $logical ) { $logical->find_by_source_identity( 'image', null, '009' ); }, '101 null-plugin combined candidates refuse including other types before canonical filtering' );
+	$seed( array( 'early-winner' => $pluginless ) + $items );
+	$observed->queries = array();
+	$refuses( function () use ( $observed_logical ) { $observed_logical->find_by_source_identity( 'image', null, '009' ); }, 'null-plugin overflow refuses even with early exact match' );
+	$check( ! array_filter( $observed->queries, function ( $sql ) { return false !== strpos( $sql, 'SELECT' ) && false !== strpos( $sql, 'mutable_payload' ); } ), 'null-plugin overflow refuses before canonical tree payload retrieval' );
+	$seed( array() );
+	$check( false === $logical->find_by_source_identity( 'image', null, '009' ), 'empty history has no null-plugin match' );
+	$seed( array( 'null-id' => $pluginless_null_id, 'winner' => $absent_plugin, 'later' => $pluginless_later ) );
+	$observed->queries = array();
+	$before = $backend->metadata_many( array( 'migrated', 'migrated-revision' ) ); $option_before = serialize( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) );
+	$check( serialize( $observed_logical->find_by_source_identity( 'image', null, '009' ) ) === serialize( $option->find_by_source_identity( 'image', null, '009' ) ), 'observed null-plugin canonical option match' );
+	$selectors = 0;
+	foreach ( $observed->queries as $sql ) {
+		if ( false === strpos( $sql, 'FORCE INDEX (`source_identity`)' ) ) { continue; }
+		$selectors++;
+		$check( false !== strpos( $sql, 'source_identity_hash IS NULL AND source_plugin_hash IS NULL' ) && false !== strpos( $sql, 'LIMIT 101' ) && false === strpos( $sql, 'payload' ), 'null-plugin selector is bounded projection-only NULL-bucket SQL' );
+		$plan = $db->get_results( 'EXPLAIN ' . $sql, ARRAY_A );
+		$check( count( $plan ) === 1 && $plan[0]['key'] === 'source_identity' && false === stripos( $plan[0]['Extra'], 'filesort' ), 'null-plugin selector uses source identity ordering index without filesort' );
+	}
+	$check( 2 === $selectors && $before === $backend->metadata_many( array( 'migrated', 'migrated-revision' ) ) && $option_before === serialize( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) ), 'null-plugin two fixed-flag selectors preserve both heads and exact option bytes' );
+	$observed->queries = array();
+	$check( false === $observed_logical->find_by_source_identity( 'image', null, null ) && array() === $observed->queries, 'null-plugin null source request returns false without SQL' );
+	$observed->after_candidates = function () use ( $peer, $blog, $reader ) {
+		( new LegacyTableBackend( $peer, $blog ) )->patch_many( array( array( 'key' => 'migrated-revision', 'expected_revision' => $reader->head( 'migrated-revision' )['revision'], 'value' => 6 ) ) );
+	};
+	$refuses( function () use ( $observed_logical ) { $observed_logical->find_by_source_identity( 'image', null, '009' ); }, 'null-plugin concurrent logical revision change refuses on two actual connections' );
+	$observed->after_candidates = function () use ( $peer, $blog, $reader, $absent_plugin ) {
+		$v = $absent_plugin; $v['plugin_name'] = '';
+		( new LegacyTableBackend( $peer, $blog ) )->patch_many( array( array( 'key' => 'migrated', 'expected_revision' => $reader->head( 'migrated' )['revision'], 'patches' => array( array( 'key' => 'winner', 'value' => $v ) ) ) ) );
+	};
+	$refuses( function () use ( $observed_logical ) { $observed_logical->find_by_source_identity( 'image', null, '009' ); }, 'null-plugin same-total concurrent plugin update refuses' );
+	$dirty_head = $reader->head( 'migrated' );
+	$dirty_rows = $db->get_results( $db->prepare( 'SELECT digest_status FROM `' . $tables[0] . '` WHERE blog_id = %d AND id = %d', array( $blog, $dirty_head['id'] ) ), ARRAY_A );
+	$check( $logical->find_by_source_identity( 'image', null, '009' )->migrated_id === 75 && count( $dirty_rows ) === 1 && 'dirty' === $dirty_rows[0]['digest_status'], 'null-plugin verified dirty history reads canonical next winner without rehash' );
+	$check( 0 === $writes, 'null-plugin reads perform no observed option writes' );
 } finally {
 	remove_action( 'updated_option', $observe ); remove_action( 'added_option', $observe );
 	if ( array_key_exists( FOOGALLERY_MIGRATE_OPTION_DATA, $options ) ) {
