@@ -95,7 +95,19 @@ try {
 	$one_context_bytes = $metadata[0]['head']['root_payload_bytes'] + $metadata[1]['head']['root_payload_bytes'] + strlen( $state_codec->key_value( 'migrated' ) ) + strlen( $state_codec->key_value( 'migrated-revision' ) );
 	$refuses( function () use ( $db, $blog, $one_context_bytes ) { ( new MigratedHistoryRepository( new LegacyTableBackend( $db, $blog, 10000, $one_context_bytes + 100 ), new MigratorSettings() ) )->get( 'absent' ); }, 'logical operation shares encoded byte budget across metadata and lookup' );
 	$refuses( function () use ( $backend ) { $backend->metadata_many( array( 'missing' ) ); }, 'missing metadata has no fallback' );
-	$refuses( function () use ( $logical ) { $logical->find_by_source_url( 'image', 'https://example.test/Case.jpg' ); }, 'unindexed source URL refuses rather than history scan' );
+	$url_observed = new HistoryReadObservedConnection( $wpdb );
+	$url_logical = new MigratedHistoryRepository( new LegacyTableBackend( $url_observed, $blog ), $settings );
+	$url_heads = $backend->metadata_many( array( 'migrated', 'migrated-revision' ) );
+	$url_option = serialize( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) );
+	foreach ( array( '', null, false, true, 0, 1.5, array(), new stdClass() ) as $url ) {
+		$check( false === $url_logical->find_by_source_url( 'image', $url ) && false === $option->find_by_source_url( 'image', $url ), 'empty/non-string source URL is a no-read false result: ' . gettype( $url ) );
+	}
+	$check( 71 === $option->find_by_source_url( 'image', 'https://example.test/Case.jpg' )->migrated_id && false === $option->find_by_source_url( 'image', 'https://example.test/case.jpg' ), 'option source URL keeps first-positive exact-case semantics' );
+	foreach ( array( 'https://example.test/Case.jpg', 'https://example.test/case.jpg', ' ', "\xff\x00", str_repeat( 'u', 10000 ) ) as $url ) {
+		try { $url_logical->find_by_source_url( 'image', $url ); $check( false, 'source URL must refuse, not return a negative match' ); }
+		catch ( RuntimeException $error ) { $check( 'Unindexed table source URL lookup is not admitted. No option fallback.' === $error->getMessage(), 'nonempty source URL refuses before SQL without normalization' ); }
+	}
+	$check( array() === $url_observed->queries && $url_heads === $backend->metadata_many( array( 'migrated', 'migrated-revision' ) ) && $url_option === serialize( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) ) && 0 === $writes, 'source URL policy preserves heads/options with zero SQL and no fallback even for existing option match' );
 	$check( false === $logical->find_by_source_identity( 'image', null, '009' ), 'null plugin does not match an empty string plugin' );
 	$refuses( function () use ( $logical ) { $logical->summary(); }, 'per-type summary with ambiguous empty types remains unadmitted' );
 	$refuses( function () use ( $logical ) { $logical->clear(); }, 'unadmitted writes refuse rather than option fallback' );

@@ -40,7 +40,13 @@ class MigratedHistoryRepository {
 		$read = $this->table_read( 'source', array( 'type' => $type, 'plugin' => $plugin_name, 'id' => $source_id ) );
 		$row = $read['result']; return $row['found'] ? $this->hydrate( $row['value'] ) : false;
 	}
-	public function find_by_source_url( $type, $source_url ) { return $this->option_store()->find_by_source_url( $type, $source_url ); }
+	public function find_by_source_url( $type, $source_url ) {
+		if ( null !== $this->store ) { return $this->store->find_by_source_url( $type, $source_url ); }
+		// Option semantics can reject these inputs without consulting history.
+		if ( ! is_string( $source_url ) || '' === $source_url ) { return false; }
+		// Schema v1 has no URL projection/index. Do not scan, normalize or fall back.
+		throw new \RuntimeException( 'Unindexed table source URL lookup is not admitted. No option fallback.' );
+	}
 	public function upsert_batch( $records, $companions = array() ) {
 		if ( null !== $this->store ) { return $this->store->upsert_batch( $records, $companions ); }
 		if ( ! is_array( $records ) || ! is_array( $companions ) || array_intersect( array_keys( $companions ),

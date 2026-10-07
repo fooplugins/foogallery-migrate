@@ -68,6 +68,28 @@ class LegacyHistoryReadContractTest extends TestCase {
 		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'changed', $error->getMessage() ); }
 	}
 
+	public function test_source_url_policy_is_explicit_and_never_reads_the_table_or_options(): void {
+		$data = $this->data();
+		$GLOBALS['foogallery_migrate_test_options'][FOOGALLERY_MIGRATE_OPTION_DATA] = $data;
+		$settings = new MigratorSettings();
+		$option = new MigratedHistoryRepository( new LegacyOptionBackend(), $settings );
+		$db = new HistoryReadTestConnection();
+		$history = new MigratedHistoryRepository( new LegacyTableBackend( $db, 7 ), $settings );
+		foreach ( array( '', null, false, true, 0, 1.5, array(), new \stdClass() ) as $url ) {
+			$this->assertFalse( $option->find_by_source_url( 'image', $url ) );
+			$this->assertFalse( $history->find_by_source_url( 'image', $url ) );
+		}
+		$this->assertSame( 71, $option->find_by_source_url( 'image', 'https://example.test/Case.jpg' )->migrated_id );
+		$this->assertFalse( $option->find_by_source_url( 'image', 'https://example.test/case.jpg' ) );
+		foreach ( array( 'https://example.test/Case.jpg', 'https://example.test/case.jpg', ' ', "\xff\x00", str_repeat( 'u', 10000 ) ) as $url ) {
+			try { $history->find_by_source_url( 'image', $url ); $this->fail( 'Expected source URL policy refusal, not a negative match.' ); }
+			catch ( \RuntimeException $error ) { $this->assertSame( 'Unindexed table source URL lookup is not admitted. No option fallback.', $error->getMessage() ); }
+		}
+		$this->assertSame( array(), $db->queries );
+		$this->assertSame( $data, get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) );
+		$this->assertSame( array(), $GLOBALS['foogallery_migrate_test_option_writes'] );
+	}
+
 	public function test_unimplemented_operations_refuse_without_fallback_or_writes(): void {
 		$table = new HistoryReadTableBackend( $this->data() ); $history = new MigratedHistoryRepository( $table, new MigratorSettings() );
 		foreach ( array( function () use ( $history ) { $history->find_by_source_url( 'image', 'https://example.test/image.jpg' ); },
