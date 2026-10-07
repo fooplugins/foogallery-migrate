@@ -8,8 +8,7 @@ class ScalarStateRepository {
 	protected $settings;
 
 	public function __construct( $backend, $settings ) {
-		// Table dispatch is deliberately reserved for the serial integration lane.
-		if ( ! $backend instanceof LegacyOptionBackend || ! $settings instanceof MigratorSettings ) {
+		if ( ( ! $backend instanceof LegacyOptionBackend && ! $backend instanceof LegacyTableBackend ) || ! $settings instanceof MigratorSettings ) {
 			throw new \RuntimeException( 'Unsupported repository backend. No option fallback is permitted.' );
 		}
 		$this->backend = $backend;
@@ -36,6 +35,11 @@ class ScalarStateRepository {
 	public function read_many( $keys ) {
 		// Reuse exact-key validation without interpreting collection wrappers.
 		$rows = self::exact_keys( $keys );
+		if ( $this->backend instanceof LegacyTableBackend ) {
+			$result = $this->backend->read_scalars( $rows );
+			foreach ( $result as &$row ) { if ( $row['found'] ) { $row['value'] = $this->decode( $row['key'], $row['value'] ); } } unset( $row );
+			return $result;
+		}
 		$data = $this->backend->read_all();
 		foreach ( $rows as $key ) {
 			$found = array_key_exists( $key, $data );
@@ -62,6 +66,10 @@ class ScalarStateRepository {
 		return $this->write_values( $values );
 	}
 	protected function write_values( $values ) {
+		if ( $this->backend instanceof LegacyTableBackend ) {
+			$encoded = array(); foreach ( $values as $key => $value ) { $encoded[$key] = $this->encode( $key, $value ); }
+			return $this->backend->mutate_scalars( $encoded );
+		}
 		return $this->backend->mutate( function ( $data ) use ( $values ) {
 			$previous = serialize( $data );
 			foreach ( $values as $key => $value ) { $data[$key] = $this->encode( $key, $value ); }
@@ -71,6 +79,7 @@ class ScalarStateRepository {
 	public function delete( $key ) {
 		self::exact_keys( array( $key ) );
 		if ( MigratorSettings::KEY_MIGRATED === $key || MigratorSettings::KEY_MIGRATED_REVISION === $key ) { return false; }
+		if ( $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table scalar deletion is not admitted. No option fallback.' ); }
 		return $this->backend->mutate( function ( $data ) use ( $key ) {
 			if ( ! array_key_exists( $key, $data ) ) { return true; }
 			unset( $data[$key] ); return $data;

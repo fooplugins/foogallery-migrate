@@ -37,6 +37,15 @@ class LegacyTableSnapshotTest extends TestCase {
 		}
 	}
 
+	public function test_expired_caller_deadline_refuses_before_preflight_sql(): void {
+		$db = new SnapshotTestWpdb();
+		try { ( new LegacyTableSnapshot( $db, 7, 10000, 16777216, microtime( true ) - 1 ) )->replace_many( array( $this->change() ) ); $this->fail( 'Expected shared deadline refusal.' ); }
+		catch ( \RuntimeException $error ) {
+			$this->assertStringContainsString( 'time budget', $error->getMessage() );
+			$this->assertSame( array(), $db->queries );
+		}
+	}
+
 	/** @dataProvider invalidChanges */
 	public function test_preflight_refuses_before_sql( $changes ): void {
 		$db = new SnapshotTestWpdb();

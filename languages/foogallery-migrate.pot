@@ -144,11 +144,11 @@ msgstr ""
 msgid "One or more images are missing after migration."
 msgstr ""
 
-#: includes/class-migrator-settings.php:780, includes/class-migrator-settings.php:796, includes/objects/class-migratable.php:359
+#: includes/class-migrator-settings.php:792, includes/class-migrator-settings.php:808, includes/objects/class-migratable.php:359
 msgid "Unknown Error"
 msgstr ""
 
-#: includes/class-migrator-settings.php:838
+#: includes/class-migrator-settings.php:850
 msgid "(no title) #%d"
 msgstr ""
 

@@ -52,6 +52,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 */
 		public function get_migrator_setting( $name, $default = false ) {
 			if ( $this->state_backend instanceof LegacyTableBackend ) {
+				if ( in_array( $name, array( self::KEY_GALLERIES, self::KEY_ALBUMS ), true ) ) {
+					return ( new MigratableCollectionRepository( $this->state_backend, $this ) )->read_snapshot( $name );
+				}
 				$setting = $this->state_backend->read( $name );
 				return $setting['found'] ? $this->hydrate_migrator_setting( $name, $setting['value'] ) : $default;
 			}
@@ -85,6 +88,15 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 				return false;
 			}
 			if ( $this->state_backend instanceof LegacyTableBackend ) {
+				$collections = array_intersect( array_keys( $values ), array( self::KEY_GALLERIES, self::KEY_ALBUMS ) );
+				if ( count( $collections ) ) {
+					if ( count( $collections ) !== 1 ) { throw new \RuntimeException( 'Cross-collection replacement is not admitted. No partial write.' ); }
+					$name = reset( $collections ); $companions = $values; unset( $companions[$name] );
+					if ( count( $companions ) && array_keys( $companions ) !== array( $name . '-state' ) ) { throw new \RuntimeException( 'Only the collection checkpoint may accompany a collection replacement.' ); }
+					if ( ! is_array( $values[$name] ) ) { return false; }
+					$repository = new MigratableCollectionRepository( $this->state_backend, $this );
+					return count( $companions ) ? $repository->update_with_state( $name, $values[$name], $companions[$name . '-state'] ) : $repository->replace_snapshot( $name, $values[$name] );
+				}
 				$compact = array(); foreach ( $values as $name => $value ) { $compact[$name] = $this->compact_migrator_setting( $name, $value ); }
 				return $this->state_backend->mutate_scalars( $compact );
 			}

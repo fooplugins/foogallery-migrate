@@ -19,6 +19,10 @@ class MigratableCollectionRepository extends ScalarStateRepository {
 	}
 	public function read_snapshot( $bucket ) {
 		$bucket = $this->bucket( $bucket );
+		if ( $this->backend instanceof LegacyTableBackend ) {
+			$raw = $this->backend->collection_snapshot( $bucket ); $this->validate_collection( $raw );
+			return $this->decode( $bucket, $raw );
+		}
 		$raw = $this->backend->read( $bucket );
 		if ( ! $raw['found'] ) { return array(); }
 		$this->validate_collection( $raw['value'] );
@@ -26,11 +30,18 @@ class MigratableCollectionRepository extends ScalarStateRepository {
 	}
 	public function replace_snapshot( $bucket, $objects ) {
 		if ( ! is_array( $objects ) ) { return false; }
+		if ( $this->backend instanceof LegacyTableBackend ) {
+			$bucket = $this->bucket( $bucket );
+			return $this->backend->replace_collection( $bucket, $this->encode( $bucket, $objects ) );
+		}
 		return $this->write_values( array( $this->bucket( $bucket ) => $objects ) );
 	}
 	public function update_with_state( $bucket, $objects, $state ) {
 		if ( ! is_array( $objects ) ) { return false; }
 		$bucket = $this->bucket( $bucket );
+		if ( $this->backend instanceof LegacyTableBackend ) {
+			return $this->backend->replace_collection( $bucket, $this->encode( $bucket, $objects ), array( $bucket . '-state' => $this->encode( $bucket . '-state', $state ) ) );
+		}
 		return $this->write_values( array( $bucket => $objects, $bucket . '-state' => $state ) );
 	}
 	/** Locator: exact root PHP key and exact child keys along children[]. */
@@ -39,6 +50,10 @@ class MigratableCollectionRepository extends ScalarStateRepository {
 		if ( ! is_array( $locator ) || ! array_key_exists( 'root', $locator ) || ! isset( $locator['path'] ) || ! is_array( $locator['path'] ) ) { return false; }
 		self::exact_keys( array( $locator['root'] ) );
 		foreach ( $locator['path'] as $key ) { self::exact_keys( array( $key ) ); }
+		if ( $this->backend instanceof LegacyTableBackend ) {
+			$encoded = $this->encode( $bucket, array( $object ) );
+			return $this->backend->update_collection_record( $bucket, $locator, $encoded['items'][0] );
+		}
 		return $this->backend->mutate( function ( $data ) use ( $bucket, $locator, $object ) {
 			if ( ! isset( $data[$bucket] ) || ! is_array( $data[$bucket] ) ) { return false; }
 			$this->validate_collection( $data[$bucket] );

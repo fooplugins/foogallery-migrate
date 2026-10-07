@@ -23,6 +23,10 @@ class LegacyTableBackend {
 	public function history_read( $operation, $request = array() ) { return $this->repository->history_read( $operation, $request ); }
 	public function history_mutate( $operation, $request, $companions = array() ) { return $this->repository->history_mutate( $operation, $request, $companions ); }
 	public function mutate_scalars( $values ) { return $this->repository->mutate_scalars( $values ); }
+	public function read_scalars( $keys ) { return $this->repository->read_scalars( $keys ); }
+	public function collection_snapshot( $key ) { return $this->repository->collection_snapshot( $key ); }
+	public function replace_collection( $key, $value, $companions = array() ) { return $this->repository->replace_collection( $key, $value, $companions ); }
+	public function update_collection_record( $key, $locator, $value ) { return $this->repository->update_collection_record( $key, $locator, $value ); }
 	public function history_page( $key, $limit, $filters, $cursor = null ) { return $this->repository->history_page( $key, $limit, $filters, $cursor ); }
 	public function history_source_identity( $type, $plugin, $id ) { return $this->repository->history_source_identity( $type, $plugin, $id ); }
 	public function roots( $key, $keys ) { return $this->repository->roots( $key, $keys ); }

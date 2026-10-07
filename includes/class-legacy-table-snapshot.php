@@ -22,11 +22,12 @@ class LegacyTableSnapshot {
 	private $record_table;
 	private $max_rows;
 	private $max_bytes;
+	private $deadline;
 	private $busy = false;
 	private $tainted = false;
 
 	/** Bounds apply to the entire affected replacement, including companion keys. */
-	public function __construct( $wpdb, $blog_id, $max_rows = 10000, $max_bytes = 16777216 ) {
+	public function __construct( $wpdb, $blog_id, $max_rows = 10000, $max_bytes = 16777216, $deadline = null ) {
 		if ( ! ( $wpdb instanceof LegacyTransactionConnection ) ) { $this->fail( 'A pinned, non-replaying transaction connection is required.' ); }
 		foreach ( array( $blog_id, $max_rows, $max_bytes ) as $number ) {
 			if ( ! is_int( $number ) || $number < 1 ) { $this->fail( 'Invalid site or snapshot budget.' ); }
@@ -35,6 +36,8 @@ class LegacyTableSnapshot {
 		$this->blog_id = $blog_id;
 		$this->max_rows = $max_rows;
 		$this->max_bytes = $max_bytes;
+		if ( null !== $deadline && ( ! is_float( $deadline ) || ! is_finite( $deadline ) ) ) { $this->fail( 'Invalid shared deadline.' ); }
+		$this->deadline = $deadline;
 		$this->codec = new LegacyStateCodec();
 		$this->records = new LegacyRecordCodec( $this->codec, $max_rows, $max_bytes );
 		$this->definitions = ( new LegacyStorageSchema( $wpdb ) )->definitions();
@@ -74,6 +77,7 @@ class LegacyTableSnapshot {
 		}
 		try {
 			// Hash order is stable across callers to reduce multi-key deadlocks.
+			$this->tick();
 			ksort( $prepared, SORT_STRING );
 			$staged = array();
 			foreach ( $prepared as $hash => $change ) {
@@ -98,11 +102,16 @@ class LegacyTableSnapshot {
 				if ( 1 !== $this->write( $this->wpdb->prepare( $sql, $args ) ) ) { $this->fail( 'State-head compare-and-swap failed.' ); }
 				$result[] = array( 'key' => $change['key'], 'id' => $stage['id'], 'generation' => $stage['generation'], 'revision' => $stage['revision'] + 1 );
 			}
+			// A detected timeout still belongs to the rollback-safe transaction.
+			$this->tick();
 		} catch ( \Exception $error ) {
 			$this->rollback( $error );
 		}
 		try {
-			$this->write( 'COMMIT' );
+			// Check immediately before issuing COMMIT, while rollback is still safe.
+			// Do not turn a successful in-flight COMMIT into a rollback claim.
+			$result_commit = $this->wpdb->query( 'COMMIT' );
+			if ( false === $result_commit || ! empty( $this->wpdb->last_error ) ) { $this->fail( 'Database commit failed.' ); }
 		} catch ( \Exception $error ) {
 			// The server may have committed but its reply may have been lost.
 			// Never report a safe retry or silently replay the logical operation.
@@ -235,6 +244,7 @@ class LegacyTableSnapshot {
 				if ( count( $value ) > $this->max_rows - $total_rows ) { $this->fail( 'Snapshot exceeds the record budget.' ); }
 				$order = 0;
 				foreach ( $value as $key => $record ) {
+				$this->tick();
 					$tree = $this->records->flatten_tree( $change['key'], $key, $record, $order++, function () {} );
 					if ( 'migrated' === $change['key'] ) { $tree['encoded_bytes'] += strlen( $this->codec->key_value( $key ) ); }
 					foreach ( $stats as $field => $amount ) { $stats[ $field ] += $tree[ $field ]; }
@@ -252,7 +262,7 @@ class LegacyTableSnapshot {
 			$prepared[ $hash ] = $change;
 		}
 		// Complete digests only after every affected bucket passes preflight.
-		foreach ( $prepared as &$change ) { $change['digest'] = $this->codec->snapshot_digest( $change['value'] ); }
+		foreach ( $prepared as &$change ) { $this->tick(); $change['digest'] = $this->codec->snapshot_digest( $change['value'] ); $this->tick(); }
 		unset( $change );
 		return $prepared;
 	}
@@ -414,6 +424,7 @@ class LegacyTableSnapshot {
 
 	private function admit() {
 		if ( $this->busy || $this->tainted ) { $this->fail( 'Busy or uncertain connection; use a fresh reconciled repository.' ); }
+		$this->tick();
 	}
 
 	private function rollback( $error ) {
@@ -424,15 +435,23 @@ class LegacyTableSnapshot {
 	}
 
 	private function write( $sql ) {
+		$this->tick();
 		$result = $this->wpdb->query( $sql );
 		if ( false === $result || ! empty( $this->wpdb->last_error ) ) { $this->fail( 'Database write failed.' ); }
+		if ( 'START TRANSACTION' !== $sql ) { $this->tick(); }
 		return $result;
 	}
 
 	private function read( $sql ) {
+		$this->tick();
 		$rows = $this->wpdb->get_results( $sql, ARRAY_A );
+		$this->tick();
 		if ( ! is_array( $rows ) || ! empty( $this->wpdb->last_error ) ) { $this->fail( 'Database read failed.' ); }
 		return $rows;
+	}
+
+	private function tick() {
+		if ( null !== $this->deadline && microtime( true ) > $this->deadline ) { $this->fail( 'Shared operation time budget exceeded.' ); }
 	}
 
 	private function typed_key( $key ) {

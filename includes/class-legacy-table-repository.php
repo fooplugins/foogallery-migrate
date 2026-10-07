@@ -165,7 +165,7 @@ class LegacyTableRepository {
 				}
 				if ( $this->max_rows <= $this->used_rows || $this->byte_limit <= $this->used_bytes ) { $this->fail( 'Clear publication budget exhausted.' ); }
 				$this->tick();
-				( new LegacyTableSnapshot( $this->db, $this->blog, $this->max_rows - $this->used_rows, $this->byte_limit - $this->used_bytes ) )->replace_many( $changes );
+				( new LegacyTableSnapshot( $this->db, $this->blog, $this->max_rows - $this->used_rows, $this->byte_limit - $this->used_bytes, $this->deadline ) )->replace_many( $changes );
 				return true;
 			}
 			// Retry uses the exact parent key plus the indexed ERROR domain only.
@@ -251,6 +251,115 @@ class LegacyTableRepository {
 			if ( count( $changes ) ) { $this->patch( $changes, false, $context ); }
 			return true;
 		} finally { $this->history_read_active = false; }
+	}
+
+	/** Physical missing versus null/false, with one aggregate read budget. */
+	public function read_scalars( $keys ) {
+		if ( $this->history_read_active || ! is_array( $keys ) || count( $keys ) > 100 ) { $this->fail( 'Invalid scalar read keys.' ); }
+		$this->start_budget(); $this->history_read_active = true;
+		try {
+			$seen = array(); $result = array(); $heads = array();
+			foreach ( $keys as $key ) {
+				$this->typed_key( $key ); $hash = $this->codec->key_hash( $key );
+				if ( isset( $seen[$hash] ) ) { $this->fail( 'Duplicate scalar read key.' ); } $seen[$hash] = true;
+				$this->consume( 1, strlen( $this->codec->key_value( $key ) ) );
+				$heads[] = $this->reader->head( $key ); $this->tick();
+				$row = $this->read_scalar( $key ); $row['key'] = $key;
+				$result[] = array( 'found' => $row['found'], 'key' => $key, 'value' => $row['value'] );
+			}
+			foreach ( $keys as $index => $key ) { if ( $this->reader->head( $key ) !== $heads[$index] ) { $this->fail( 'Scalar read changed.' ); } $this->tick(); }
+			return $result;
+		} finally { $this->history_read_active = false; }
+	}
+
+	/** Existing gallery/album collections only; never a whole-history facade. */
+	private function collection_key( $key ) {
+		if ( ! in_array( $key, array( 'galleries', 'albums' ), true ) ) { $this->fail( 'Gallery/album collection required.' ); }
+	}
+
+	/** One cumulative budget spans every page and coherent metadata read. */
+	public function collection_snapshot( $key ) {
+		$this->collection_key( $key );
+		if ( $this->history_read_active ) { $this->fail( 'Reentrant collection read.' ); }
+		$this->start_budget(); $this->history_read_active = true;
+		try {
+			$entry = $this->metadata_many( array( $key ) )[0];
+			return $this->collection_value( $key, $entry );
+		} finally { $this->history_read_active = false; }
+	}
+
+	private function collection_value( $key, $entry ) {
+		if ( ! in_array( $entry['head']['state_kind'], array( 'map', 'list' ), true ) || ! isset( $entry['root']['wrapper'] ) ) { $this->fail( 'Indexed collection envelope required.' ); }
+		$items = array(); $cursor = null; $rows = 0; $payload = $entry['head']['root_payload_bytes'];
+		do {
+			$page = $this->export_page( $key, 100, $cursor );
+			if ( $page['revision'] !== $entry['head']['revision'] ) { $this->fail( 'Collection changed during snapshot.' ); }
+			foreach ( $page['rows'] as $row ) {
+				if ( array_key_exists( $row['key'], $items ) || ( 'list' === $entry['head']['state_kind'] && $row['key'] !== count( $items ) ) ) { $this->fail( 'Invalid collection ordering.' ); }
+				$items[$row['key']] = $row['value'];
+			}
+			$rows += $page['record_count']; $payload += $page['payload_bytes']; $cursor = $page['cursor'];
+		} while ( count( $page['rows'] ) );
+		if ( count( $items ) !== $entry['root']['root_count'] || $rows !== $entry['head']['record_count'] || $payload !== $entry['head']['payload_bytes'] ) { $this->fail( 'Collection snapshot statistics mismatch.' ); }
+		$this->unchanged( $key, $entry['head'] );
+		return ( new LegacyCollectionEnvelope() )->rebuild( $entry['root'], $items );
+	}
+
+	/** Order-preserving updates/appends and map removals with atomic checkpoint.
+	 * Explicit list removal/reordering and envelope changes refuse before writes.
+	 */
+	public function replace_collection( $key, $value, $companions = array() ) {
+		$this->collection_key( $key );
+		if ( $this->history_read_active || ! is_array( $companions ) || count( $companions ) > 1 || ( count( $companions ) && array_keys( $companions ) !== array( $key . '-state' ) ) ) { $this->fail( 'Invalid collection checkpoint.' ); }
+		$this->start_budget(); $this->history_read_active = true;
+		try {
+			$context = $this->metadata_many( array_merge( array( $key ), array_keys( $companions ) ) ); $entry = $context[0];
+			$old_value = $this->collection_value( $key, $entry ); $envelope = new LegacyCollectionEnvelope();
+			$old = $envelope->split( $key, $entry['head']['state_kind'], $old_value );
+			$new = $envelope->split( $key, $entry['head']['state_kind'], $value );
+			$before = $old['root']; $after = $new['root']; unset( $before['root_count'], $after['root_count'] );
+			if ( serialize( $before ) !== serialize( $after ) ) { $this->fail( 'Collection envelope replacement requires explicit staging.' ); }
+			$expected_keys = array();
+			foreach ( $old['items'] as $item_key => $item ) { if ( array_key_exists( $item_key, $new['items'] ) ) { $expected_keys[] = $item_key; } }
+			foreach ( $new['items'] as $item_key => $item ) { if ( ! array_key_exists( $item_key, $old['items'] ) ) { $expected_keys[] = $item_key; } }
+			if ( $expected_keys !== array_keys( $new['items'] ) || ( 'list' === $entry['head']['state_kind'] && count( $new['items'] ) < count( $old['items'] ) ) ) { $this->fail( 'Collection reordering/list removal requires explicit staging.' ); }
+			$patches = array();
+			foreach ( $old['items'] as $item_key => $item ) { if ( ! array_key_exists( $item_key, $new['items'] ) ) { $patches[] = array( 'key' => $item_key, 'delete' => true ); } }
+			foreach ( $new['items'] as $item_key => $item ) { if ( ! array_key_exists( $item_key, $old['items'] ) || serialize( $item ) !== serialize( $old['items'][$item_key] ) ) { $patches[] = array( 'key' => $item_key, 'value' => $item ); } }
+			$changes = count( $patches ) ? array( array( 'key' => $key, 'expected_revision' => $entry['head']['revision'], 'patches' => $patches ) ) : array();
+			foreach ( array_slice( $context, 1 ) as $companion ) {
+				if ( 'scalar' !== $companion['head']['state_kind'] ) { $this->fail( 'Scalar collection checkpoint required.' ); }
+				if ( serialize( $companion['root']['value'] ) !== serialize( $companions[$companion['key']] ) ) { $changes[] = array( 'key' => $companion['key'], 'expected_revision' => $companion['head']['revision'], 'value' => $companions[$companion['key']] ); }
+			}
+			if ( $this->metadata_many( array_merge( array( $key ), array_keys( $companions ) ) ) !== $context ) { $this->fail( 'Collection dependency changed.' ); }
+			if ( count( $changes ) ) { $this->patch( $changes, 'list' === $entry['head']['state_kind'], $context ); }
+			return true;
+		} finally { $this->history_read_active = false; }
+	}
+
+	/** Exact containing-root update; unrelated roots are neither fetched nor written. */
+	public function update_collection_record( $key, $locator, $value ) {
+		$this->collection_key( $key );
+		if ( $this->history_read_active || ! is_array( $locator ) || array_keys( $locator ) !== array( 'root', 'path' ) || ! is_array( $locator['path'] ) ) { $this->fail( 'Invalid nested collection locator.' ); }
+		$this->typed_key( $locator['root'] ); foreach ( $locator['path'] as $child ) { $this->typed_key( $child ); }
+		$this->start_budget(); $this->history_read_active = true;
+		try {
+			$context = $this->metadata_many( array( $key ) ); $entry = $context[0];
+			if ( ! isset( $entry['root']['wrapper'] ) ) { $this->fail( 'Indexed collection envelope required.' ); }
+			$row = $this->roots( $key, array( $locator['root'] ) )[0]; if ( ! $row['found'] ) { return false; }
+			$ok = true; $replacement = $this->replace_collection_child( $row['value'], $locator['path'], $value, $ok );
+			if ( ! $ok ) { return false; }
+			if ( $this->metadata_many( array( $key ) ) !== $context ) { $this->fail( 'Collection root changed.' ); }
+			if ( $this->codec->encode( $replacement ) !== $this->codec->encode( $row['value'] ) ) { $this->patch( array( array( 'key' => $key, 'expected_revision' => $entry['head']['revision'], 'patches' => array( array( 'key' => $locator['root'], 'value' => $replacement ) ) ) ), 'list' === $entry['head']['state_kind'], $context ); }
+			return true;
+		} finally { $this->history_read_active = false; }
+	}
+
+	private function replace_collection_child( $node, $path, $value, &$ok ) {
+		$this->tick(); if ( ! count( $path ) ) { return $value; }
+		$key = array_shift( $path );
+		if ( ! is_array( $node ) || ! isset( $node['children'] ) || ! is_array( $node['children'] ) || ! array_key_exists( $key, $node['children'] ) ) { $ok = false; return $node; }
+		$node['children'][$key] = $this->replace_collection_child( $node['children'][$key], $path, $value, $ok ); return $node;
 	}
 
 	/** Missing is distinct from a stored false/null. No full collection read. */
