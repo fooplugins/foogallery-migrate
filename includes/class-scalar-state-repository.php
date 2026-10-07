@@ -79,7 +79,7 @@ class ScalarStateRepository {
 	public function delete( $key ) {
 		self::exact_keys( array( $key ) );
 		if ( MigratorSettings::KEY_MIGRATED === $key || MigratorSettings::KEY_MIGRATED_REVISION === $key ) { return false; }
-		if ( $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table scalar deletion is not admitted. No option fallback.' ); }
+		if ( $this->backend instanceof LegacyTableBackend ) { return $this->backend->delete_scalar( $key ); }
 		return $this->backend->mutate( function ( $data ) use ( $key ) {
 			if ( ! array_key_exists( $key, $data ) ) { return true; }
 			unset( $data[$key] ); return $data;

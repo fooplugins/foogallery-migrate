@@ -241,16 +241,74 @@ class LegacyTableRepository {
 				if ( strlen( $encoded ) > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Scalar row byte budget exceeded.' ); }
 				$this->consume( 0, strlen( $encoded ) );
 			}
-			$context = $this->metadata_many( array_keys( $values ) ); $changes = array();
+			$context = array(); $missing = false; $changes = array(); $guards = array();
+			foreach ( $values as $key => $value ) {
+				$head = $this->reader->head( $key ); $this->tick();
+				$guards[] = array( 'key' => $key, 'head' => $head );
+				if ( false === $head ) { $missing = true; $context[] = array( 'key' => $key, 'head' => false ); }
+				else { $context[] = $this->metadata_many( array( $key ) )[0]; }
+			}
+			$order = $missing ? $this->next_state_order() : 0; $replacements = array();
 			foreach ( $context as $entry ) {
+				if ( false === $entry['head'] ) {
+					$replacements[] = array( 'key' => $entry['key'], 'kind' => 'scalar', 'order' => $order++, 'value' => $values[$entry['key']], 'expected_revision' => null ); continue;
+				}
 				if ( 'scalar' !== $entry['head']['state_kind'] ) { $this->fail( 'Existing scalar heads required; no collection fallback.' ); }
 				$value = $values[$entry['key']];
-				if ( serialize( $value ) !== serialize( $entry['root']['value'] ) ) { $changes[] = array( 'key' => $entry['key'], 'expected_revision' => $entry['head']['revision'], 'value' => $value ); }
+				if ( serialize( $value ) !== serialize( $entry['root']['value'] ) ) {
+					$changes[] = array( 'key' => $entry['key'], 'expected_revision' => $entry['head']['revision'], 'value' => $value );
+					$replacements[] = array( 'key' => $entry['key'], 'kind' => 'scalar', 'order' => $entry['head']['state_order'], 'value' => $value, 'expected_revision' => $entry['head']['revision'] );
+				}
 			}
-			if ( $this->metadata_many( array_keys( $values ) ) !== $context ) { $this->fail( 'Scalar read dependency changed.' ); }
-			if ( count( $changes ) ) { $this->patch( $changes, false, $context ); }
+			foreach ( $guards as $guard ) { if ( $this->reader->head( $guard['key'] ) !== $guard['head'] ) { $this->fail( 'Scalar read dependency changed.' ); } $this->tick(); }
+			if ( $missing ) { $this->replace_bounded( $replacements, $guards ); }
+			else if ( count( $changes ) ) { $this->patch( $changes, false, $context ); }
 			return true;
 		} finally { $this->history_read_active = false; }
+	}
+
+	private function next_state_order() {
+		$rows = $this->read( $this->db->prepare( 'SELECT MAX(state_order) AS last_order FROM `' . $this->state . '` WHERE blog_id = %d', array( $this->blog ) ) );
+		if ( count( $rows ) !== 1 ) { $this->fail( 'Cannot read state order.' ); }
+		$order = null === $rows[0]['last_order'] ? 0 : $this->number( $rows[0]['last_order'] ) + 1;
+		if ( ! is_int( $order ) || $order >= PHP_INT_MAX ) { $this->fail( 'State order exhausted.' ); } return $order;
+	}
+
+	private function replace_bounded( $changes, $guards ) {
+		$this->tick();
+		if ( $this->max_rows <= $this->used_rows || $this->byte_limit <= $this->used_bytes ) { $this->fail( 'Replacement publication budget exhausted.' ); }
+		( new LegacyTableSnapshot( $this->db, $this->blog, $this->max_rows - $this->used_rows, $this->byte_limit - $this->used_bytes, $this->deadline ) )->replace_many( $changes, $guards );
+	}
+
+	/** Delete only a verified scalar; all retained generations must be empty. */
+	public function delete_scalar( $key ) {
+		$this->typed_key( $key );
+		if ( in_array( $key, array( 'migrated', 'migrated-revision', 'plugins', 'galleries', 'albums' ), true ) ) { $this->fail( 'Cannot delete reserved collection/history through scalar facade.' ); }
+		if ( $this->history_read_active ) { $this->fail( 'Reentrant scalar deletion.' ); }
+		$this->start_budget();
+		$row = $this->read_scalar( $key ); if ( ! $row['found'] ) { return true; }
+		$head = $this->head( $key );
+		( new LegacyStorageSchema( $this->db ) )->verify();
+		$mode = $this->read( 'SELECT @@SESSION.autocommit AS autocommit' );
+		if ( count( $mode ) !== 1 || $this->number( $mode[0]['autocommit'] ) !== 1 ) { $this->fail( 'Idle autocommit connection required.' ); }
+		$this->write( 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ' ); $this->busy = true;
+		try { $this->write( 'START TRANSACTION' ); }
+		catch ( \Exception $error ) { $this->busy = false; $this->tainted = true; $this->fail( 'Transaction start uncertain.' ); }
+		try {
+			$this->lock_identity( $key );
+			if ( $this->head( $key ) !== $head ) { $this->fail( 'Scalar deletion dependency changed.' ); }
+			$root = $this->root_metadata( $head ); $this->verify_scalar( $head, $root['value'] );
+			$rows = $this->read( $this->db->prepare( 'SELECT id FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d LIMIT 1', array( $this->blog, $head['id'] ) ) );
+			if ( count( $rows ) ) { $this->fail( 'Scalar has retained collection records; explicit recovery required.' ); }
+			if ( 1 !== $this->write( $this->db->prepare( 'DELETE FROM `' . $this->state . '` WHERE blog_id = %d AND id = %d AND revision = %d AND active_generation = %d', array( $this->blog, $head['id'], $head['revision'], $head['active_generation'] ) ) ) ) { $this->fail( 'Scalar delete CAS failed.' ); }
+			if ( false !== $this->reader->head( $key ) ) { $this->fail( 'Scalar deletion readback failed.' ); } $this->tick();
+		} catch ( \Exception $error ) {
+			$ok = $this->db->query( 'ROLLBACK' ); $this->busy = false;
+			if ( false === $ok || ! empty( $this->db->last_error ) ) { $this->tainted = true; $this->fail( 'Rollback uncertain.' ); } throw $error;
+		}
+		try { $this->write( 'COMMIT' ); }
+		catch ( \Exception $error ) { $this->busy = false; $this->tainted = true; $this->db->query( 'ROLLBACK' ); $this->fail( 'Commit outcome uncertain; reconcile, never replay.' ); }
+		$this->busy = false; return true;
 	}
 
 	/** Physical missing versus null/false, with one aggregate read budget. */

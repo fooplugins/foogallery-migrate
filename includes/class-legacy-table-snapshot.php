@@ -58,9 +58,17 @@ class LegacyTableSnapshot {
 	 * caller-owned work implicitly. No reentrant use is supported.
 	 * No public production caller is admitted until that manager contract exists.
 	 */
-	public function replace_many( $changes ) {
+	public function replace_many( $changes, $guards = array() ) {
 		$this->admit();
 		$prepared = $this->preflight( $changes );
+		if ( ! is_array( $guards ) || count( $guards ) > 100 ) { $this->fail( 'Invalid snapshot read dependencies.' ); }
+		$dependencies = array();
+		foreach ( $guards as $entry ) {
+			if ( ! is_array( $entry ) || array_keys( $entry ) !== array( 'key', 'head' ) ) { $this->fail( 'Invalid snapshot read dependency.' ); }
+			$this->typed_key( $entry['key'] ); $hash = $this->codec->key_hash( $entry['key'] );
+			if ( isset( $dependencies[$hash] ) ) { $this->fail( 'Duplicate snapshot read dependency.' ); }
+			$dependencies[$hash] = $entry;
+		}
 		( new LegacyStorageSchema( $this->wpdb ) )->verify();
 		$mode = $this->read( 'SELECT @@SESSION.autocommit AS autocommit' );
 		if ( count( $mode ) !== 1 || $this->number( $mode[0]['autocommit'] ) !== 1 ) { $this->fail( 'Disabled autocommit; caller must supply an idle connection.' ); }
@@ -79,6 +87,14 @@ class LegacyTableSnapshot {
 			// Hash order is stable across callers to reduce multi-key deadlocks.
 			$this->tick();
 			ksort( $prepared, SORT_STRING );
+			$locks = $dependencies;
+			foreach ( $prepared as $hash => $change ) { if ( ! isset( $locks[$hash] ) ) { $locks[$hash] = array( 'key' => $change['key'] ); } }
+			ksort( $locks, SORT_STRING );
+			foreach ( $locks as $entry ) {
+				$this->read( $this->wpdb->prepare( 'SELECT id FROM `' . $this->state_table . '` WHERE blog_id = %d AND state_key_hash = UNHEX(%s) LIMIT 2 FOR UPDATE', array( $this->blog_id, $this->codec->key_hash( $entry['key'] ) ) ) );
+			}
+			$reader = new LegacyTableReader( $this->wpdb, $this->blog_id );
+			foreach ( $dependencies as $entry ) { if ( $reader->head( $entry['key'] ) !== $entry['head'] ) { $this->fail( 'Snapshot read dependency changed.' ); } $this->tick(); }
 			$staged = array();
 			foreach ( $prepared as $hash => $change ) {
 				$staged[ $hash ] = $this->stage( $change );
