@@ -79,7 +79,11 @@ try {
 	$table_settings = new MigratorSettings( $backend );
 	$check( $engine->set_migrator_setting( 'queue', array( '09' => 'pending' ) ) && $table_settings->has_migrator_setting_items( 'queue' ), 'table scalar-array presence matches option semantics' );
 	$before = $heads();
-	$refuses( function () use ( $table_settings ) { $table_settings->set_migrator_settings( array( 'queue' => 'must-not-commit', 'absent-checkpoint' => 1 ) ); }, 'absent scalar head rejects complete engine batch' );
+	$check( $table_settings->set_migrator_settings( array( 'queue' => 'atomic-checkpoint', 'absent-checkpoint' => 1 ) ), 'existing engine batch creates missing scalar companion atomically' );
+	$after = $heads(); $check( $before[0] === $after[0] && $before[1] === $after[1] && 'atomic-checkpoint' === $backend->read( 'queue' )['value'] && 1 === $backend->read( 'absent-checkpoint' )['value'] && $option_before === get_option( FOOGALLERY_MIGRATE_OPTION_DATA ), 'new scalar batch preserves history heads and stale options while publishing both scalars' );
+	$check( $backend->delete_scalar( 'absent-checkpoint' ) && $engine->set_migrator_setting( 'queue', array( '09' => 'pending' ) ), 'restore isolated scalar batch fixture' );
+	$before = $heads();
+	$refuses( function () use ( $table_settings ) { $table_settings->set_migrator_settings( array( 'queue' => 'must-not-commit', 'absent-checkpoint' => new stdClass() ) ); }, 'invalid scalar rejects complete engine batch before any creation' );
 	$check( $before === $heads() && $option_before === get_option( FOOGALLERY_MIGRATE_OPTION_DATA ), 'failed scalar batch preserves every head and stale options' );
 	$refuses( function () use ( $engine ) { $engine->set_migrator_setting( 'migrated', array() ); }, 'scalar engine setter cannot replace history' );
 	$check( $engine->set_migrator_setting( 'queue', $data['queue'] ), 'restore table scalar queue after presence regression' );
