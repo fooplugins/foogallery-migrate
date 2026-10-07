@@ -58,7 +58,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\WordPressCore' ) ) {
          */
         function detect() {
             foreach ( $this->get_eligible_posts() as $post ) {
-                if ( ! empty( $this->find_content_occurrences( $post ) ) ) {
+                $occurrences = $this->find_content_occurrences( $post );
+                if ( ! empty( $occurrences ) ) {
                     return true;
                 }
             }

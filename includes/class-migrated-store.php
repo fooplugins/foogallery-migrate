@@ -146,8 +146,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratedStore' ) ) {
 			$required_columns = array( 'object_key', 'parent_key', 'object_type', 'plugin_name', 'status', 'payload', 'created_at', 'updated_at' );
 			$required_indexes = array( 'PRIMARY', 'parent_key', 'object_type', 'plugin_name', 'status' );
 
-			return empty( array_diff( $required_columns, array_unique( $column_names ) ) ) &&
-				empty( array_diff( $required_indexes, array_unique( $index_names ) ) );
+			$missing_columns = array_diff( $required_columns, array_unique( $column_names ) );
+			$missing_indexes = array_diff( $required_indexes, array_unique( $index_names ) );
+			return empty( $missing_columns ) && empty( $missing_indexes );
 		}
 
 		/** @return bool */

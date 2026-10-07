@@ -228,7 +228,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
                             $has_error = true;
                         }
                         if ( ! $has_error && $this->has_children() ) {
-                            $has_error = ! empty( $this->get_children_errors() );
+                            $children_errors = $this->get_children_errors();
+                            $has_error = ! empty( $children_errors );
                         }
 
                         $this->migrated = true;

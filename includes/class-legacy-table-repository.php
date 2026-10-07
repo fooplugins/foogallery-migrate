@@ -31,6 +31,11 @@ class LegacyTableRepository {
 	private $tainted = false;
 	private $history_read_active = false;
 
+	/** Evaluate the result while still guarded, then release on every return. */
+	private function finish_history_read( $result ) {
+		$this->history_read_active = false; return $result;
+	}
+
 	/** Budgets span the complete call, including old AND new affected trees. */
 	public function __construct( $db, $blog, $max_rows = 10000, $max_bytes = 16777216, $max_seconds = 10 ) {
 		if ( ! $db instanceof LegacyTransactionConnection ) { $this->fail( 'A pinned non-replaying connection is required.' ); }
@@ -109,8 +114,9 @@ class LegacyTableRepository {
 				default: $result = null;
 			}
 			if ( $this->metadata_many( $keys ) !== $context ) { $this->fail( 'History changed during bounded read.' ); }
-			return array( 'context' => $context, 'result' => $result );
-		} finally { $this->history_read_active = false; }
+			return $this->finish_history_read( array( 'context' => $context, 'result' => $result ) );
+		} catch ( \Exception $error ) { $this->history_read_active = false; throw $error; }
+		catch ( \Throwable $error ) { $this->history_read_active = false; throw $error; }
 	}
 
 	/** Closed logical mutations over an admitted indexed history wrapper.
@@ -139,7 +145,7 @@ class LegacyTableRepository {
 					$this->typed_key( $record['key'] ); $identifiers[$this->codec->key_hash( $record['key'] )] = $record['key'];
 					$this->consume( 0, strlen( $this->codec->encode( $record ) ) );
 				}
-				if ( ! count( $request ) && ! count( $companions ) ) { return 0; }
+				if ( ! count( $request ) && ! count( $companions ) ) { return $this->finish_history_read( 0 ); }
 			} elseif ( 'clear' === $operation ) {
 				if ( count( $request ) ) { $this->fail( 'Malformed history clear.' ); }
 			} else {
@@ -156,7 +162,7 @@ class LegacyTableRepository {
 			// neither decode nor delete an arbitrarily large previous generation.
 			if ( 'clear' === $operation ) {
 				if ( $this->metadata_many( $keys ) !== $context ) { $this->fail( 'History changed before clear.' ); }
-				if ( 0 === $history['root']['root_count'] ) { return true; }
+				if ( 0 === $history['root']['root_count'] ) { return $this->finish_history_read( true ); }
 				if ( $revision['root']['value'] >= PHP_INT_MAX ) { $this->fail( 'Logical history revision exhausted.' ); }
 				$changes = array(); $empty_root = $history['root']; $empty_root['root_count'] = 0;
 				foreach ( $context as $entry ) {
@@ -166,7 +172,7 @@ class LegacyTableRepository {
 				if ( $this->max_rows <= $this->used_rows || $this->byte_limit <= $this->used_bytes ) { $this->fail( 'Clear publication budget exhausted.' ); }
 				$this->tick();
 				( new LegacyTableSnapshot( $this->db, $this->blog, $this->max_rows - $this->used_rows, $this->byte_limit - $this->used_bytes, $this->deadline ) )->replace_many( $changes );
-				return true;
+				return $this->finish_history_read( true );
 			}
 			// Retry uses the exact parent key plus the indexed ERROR domain only.
 			// Parent association has no v1 index; all error candidates share ONE
@@ -224,8 +230,9 @@ class LegacyTableRepository {
 			}
 			if ( $this->metadata_many( $keys ) !== $context ) { $this->fail( 'History changed during bounded mutation.' ); }
 			if ( count( $changes ) ) { $this->patch( $changes, false, $context ); }
-			return $result;
-		} finally { $this->history_read_active = false; }
+			return $this->finish_history_read( $result );
+		} catch ( \Exception $error ) { $this->history_read_active = false; throw $error; }
+		catch ( \Throwable $error ) { $this->history_read_active = false; throw $error; }
 	}
 
 	/** Existing scalar/checkpoint heads, one aggregate budget and atomic CAS. */
@@ -263,8 +270,9 @@ class LegacyTableRepository {
 			foreach ( $guards as $guard ) { if ( $this->reader->head( $guard['key'] ) !== $guard['head'] ) { $this->fail( 'Scalar read dependency changed.' ); } $this->tick(); }
 			if ( $missing ) { $this->replace_bounded( $replacements, $guards ); }
 			else if ( count( $changes ) ) { $this->patch( $changes, false, $context ); }
-			return true;
-		} finally { $this->history_read_active = false; }
+			return $this->finish_history_read( true );
+		} catch ( \Exception $error ) { $this->history_read_active = false; throw $error; }
+		catch ( \Throwable $error ) { $this->history_read_active = false; throw $error; }
 	}
 
 	private function next_state_order() {
@@ -319,8 +327,9 @@ class LegacyTableRepository {
 		$this->start_budget(); $this->history_read_active = true;
 		try {
 			$context = $this->partial_state_context( ContentScanRepository::STATE_KEY, true );
-			$this->verify_partial_dependencies( $context['guards'] ); return $context['value'];
-		} finally { $this->history_read_active = false; }
+			$this->verify_partial_dependencies( $context['guards'] ); return $this->finish_history_read( $context['value'] );
+		} catch ( \Exception $error ) { $this->history_read_active = false; throw $error; }
+		catch ( \Throwable $error ) { $this->history_read_active = false; throw $error; }
 	}
 	public function change_content_scan( $change ) { return $this->change_partial_state( ContentScanRepository::STATE_KEY, $change, true ); }
 	public function change_image_tag_queue( $change ) { return $this->change_partial_state( ImageTagQueueRepository::STATE_KEY, $change, false ); }
@@ -351,19 +360,20 @@ class LegacyTableRepository {
 		$this->start_budget(); $this->history_read_active = true;
 		try {
 			$context = $this->partial_state_context( $key, $content );
-			if ( ! is_array( $context['value'] ) ) { return false; }
+			if ( ! is_array( $context['value'] ) ) { return $this->finish_history_read( false ); }
 			$value = call_user_func( $change, $context['value'] ); $this->tick();
-			if ( false === $value ) { return false; }
+			if ( false === $value ) { return $this->finish_history_read( false ); }
 			if ( ! is_array( $value ) ) { $this->fail( 'Invalid partial state result.' ); }
 			$this->verify_partial_dependencies( $context['guards'] );
-			if ( false !== $context['head'] && serialize( $value ) === serialize( $context['value'] ) ) { return true; }
+			if ( false !== $context['head'] && serialize( $value ) === serialize( $context['value'] ) ) { return $this->finish_history_read( true ); }
 			if ( false === $context['head'] ) {
 				$this->replace_bounded( array( array( 'key' => $key, 'kind' => 'scalar', 'order' => $this->next_state_order(), 'value' => $value, 'expected_revision' => null ) ), $context['guards'] );
 			} else {
 				$this->patch( array( array( 'key' => $key, 'value' => $value, 'expected_revision' => $context['head']['revision'] ) ), false, $context['guards'] );
 			}
-			return true;
-		} finally { $this->history_read_active = false; }
+			return $this->finish_history_read( true );
+		} catch ( \Exception $error ) { $this->history_read_active = false; throw $error; }
+		catch ( \Throwable $error ) { $this->history_read_active = false; throw $error; }
 	}
 
 	/** Physical missing versus null/false, with one aggregate read budget. */
@@ -381,8 +391,9 @@ class LegacyTableRepository {
 				$result[] = array( 'found' => $row['found'], 'key' => $key, 'value' => $row['value'] );
 			}
 			foreach ( $keys as $index => $key ) { if ( $this->reader->head( $key ) !== $heads[$index] ) { $this->fail( 'Scalar read changed.' ); } $this->tick(); }
-			return $result;
-		} finally { $this->history_read_active = false; }
+			return $this->finish_history_read( $result );
+		} catch ( \Exception $error ) { $this->history_read_active = false; throw $error; }
+		catch ( \Throwable $error ) { $this->history_read_active = false; throw $error; }
 	}
 
 	/** Existing gallery/album collections only; never a whole-history facade. */
@@ -404,11 +415,12 @@ class LegacyTableRepository {
 			if ( false === $this->reader->head( $key ) ) {
 				$rows = $this->read( $this->db->prepare( 'SELECT id FROM `' . $this->state . '` WHERE blog_id = %d LIMIT 1', array( $this->blog ) ) );
 				if ( ! count( $rows ) ) { $this->fail( 'Missing site state scope; no option fallback.' ); }
-				if ( false !== $this->reader->head( $key ) ) { $this->fail( 'Missing collection changed.' ); } return array( 'found' => false, 'value' => null );
+				if ( false !== $this->reader->head( $key ) ) { $this->fail( 'Missing collection changed.' ); } return $this->finish_history_read( array( 'found' => false, 'value' => null ) );
 			}
 			$entry = $this->metadata_many( array( $key ) )[0];
-			return array( 'found' => true, 'value' => $this->collection_value( $key, $entry ) );
-		} finally { $this->history_read_active = false; }
+			return $this->finish_history_read( array( 'found' => true, 'value' => $this->collection_value( $key, $entry ) ) );
+		} catch ( \Exception $error ) { $this->history_read_active = false; throw $error; }
+		catch ( \Throwable $error ) { $this->history_read_active = false; throw $error; }
 	}
 
 	private function collection_value( $key, $entry ) {
@@ -470,8 +482,9 @@ class LegacyTableRepository {
 			$this->verify_partial_dependencies( $guards );
 			if ( $stage && count( $replacements ) ) { $this->replace_bounded( $replacements, $guards ); }
 			else if ( count( $changes ) ) { $this->patch( $changes, 'list' === $kind, $context ); }
-			return true;
-		} finally { $this->history_read_active = false; }
+			return $this->finish_history_read( true );
+		} catch ( \Exception $error ) { $this->history_read_active = false; throw $error; }
+		catch ( \Throwable $error ) { $this->history_read_active = false; throw $error; }
 	}
 
 	/** Exact containing-root update; unrelated roots are neither fetched nor written. */
@@ -481,16 +494,17 @@ class LegacyTableRepository {
 		$this->typed_key( $locator['root'] ); foreach ( $locator['path'] as $child ) { $this->typed_key( $child ); }
 		$this->start_budget(); $this->history_read_active = true;
 		try {
-			if ( false === $this->reader->head( $key ) ) { return false; }
+			if ( false === $this->reader->head( $key ) ) { return $this->finish_history_read( false ); }
 			$context = $this->metadata_many( array( $key ) ); $entry = $context[0];
 			if ( ! isset( $entry['root']['wrapper'] ) ) { $this->fail( 'Indexed collection envelope required.' ); }
-			$row = $this->roots( $key, array( $locator['root'] ) )[0]; if ( ! $row['found'] ) { return false; }
+			$row = $this->roots( $key, array( $locator['root'] ) )[0]; if ( ! $row['found'] ) { return $this->finish_history_read( false ); }
 			$ok = true; $replacement = $this->replace_collection_child( $row['value'], $locator['path'], $value, $ok );
-			if ( ! $ok ) { return false; }
+			if ( ! $ok ) { return $this->finish_history_read( false ); }
 			if ( $this->metadata_many( array( $key ) ) !== $context ) { $this->fail( 'Collection root changed.' ); }
 			if ( $this->codec->encode( $replacement ) !== $this->codec->encode( $row['value'] ) ) { $this->patch( array( array( 'key' => $key, 'expected_revision' => $entry['head']['revision'], 'patches' => array( array( 'key' => $locator['root'], 'value' => $replacement ) ) ) ), 'list' === $entry['head']['state_kind'], $context ); }
-			return true;
-		} finally { $this->history_read_active = false; }
+			return $this->finish_history_read( true );
+		} catch ( \Exception $error ) { $this->history_read_active = false; throw $error; }
+		catch ( \Throwable $error ) { $this->history_read_active = false; throw $error; }
 	}
 
 	private function replace_collection_child( $node, $path, $value, &$ok ) {
