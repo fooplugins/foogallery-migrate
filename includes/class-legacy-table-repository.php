@@ -76,7 +76,7 @@ class LegacyTableRepository {
 	 * Closed read primitives only: no callback or complete-history facade.
 	 */
 	public function history_read( $operation, $request = array() ) {
-		if ( $this->history_read_active || ! is_array( $request ) || ! in_array( $operation, array( 'identifiers', 'presence', 'source', 'page', 'count', 'revision', 'log_summary', 'summary' ), true ) ) { $this->fail( 'Unsupported history read.' ); }
+		if ( $this->history_read_active || ! is_array( $request ) || ! in_array( $operation, array( 'identifiers', 'presence', 'children', 'source', 'page', 'export', 'count', 'revision', 'log_summary', 'summary' ), true ) ) { $this->fail( 'Unsupported history read.' ); }
 		if ( in_array( $operation, array( 'log_summary', 'summary' ), true ) && count( $request ) ) { $this->fail( 'Malformed logical summary request.' ); }
 		$this->start_budget(); $this->history_read_active = true;
 		try {
@@ -88,9 +88,21 @@ class LegacyTableRepository {
 				case 'source':
 					if ( array_keys( $request ) !== array( 'type', 'plugin', 'id' ) ) { $this->fail( 'Malformed source request.' ); }
 					$result = $this->history_source_identity( $request['type'], $request['plugin'], $request['id'] ); break;
+				case 'children':
+					if ( array_keys( $request ) !== array( 'parent', 'keys' ) || ! is_array( $request['keys'] ) || count( $request['keys'] ) > $this->max_rows ) { $this->fail( 'Malformed child request.' ); }
+					$this->typed_key( $request['parent'] ); $this->consume( 0, strlen( $this->codec->key_value( $request['parent'] ) ) ); $result = array();
+					foreach ( array_chunk( $request['keys'], 100 ) as $batch_keys ) {
+						foreach ( $this->identifiers( 'migrated', $batch_keys ) as $row ) {
+							if ( $row['found'] && is_array( $row['value'] ) && isset( $row['value']['migration_parent_key'] ) && $request['parent'] === $row['value']['migration_parent_key'] ) { $result[] = $row; }
+						}
+					}
+					break;
 				case 'page':
+				case 'export':
 					if ( array_keys( $request ) !== array( 'limit', 'filters', 'cursor' ) ) { $this->fail( 'Malformed page request.' ); }
-					$result = $this->history_page( 'migrated', $request['limit'], $request['filters'], $request['cursor'] ); break;
+					if ( 'export' === $operation && count( $request['filters'] ) ) { $this->fail( 'Raw exports do not filter records.' ); }
+					$result = 'export' === $operation ? $this->read_page( 'migrated', $request['limit'], $request['cursor'], array(), false, true, true )
+						: $this->history_page( 'migrated', $request['limit'], $request['filters'], $request['cursor'] ); break;
 				case 'count': $result = $this->count_roots( 'migrated' ); break;
 				case 'log_summary': $result = $this->history_log_summary( $context[0] ); break;
 				case 'summary': $result = $this->history_type_summary( $context[0] ); break;
@@ -106,7 +118,7 @@ class LegacyTableRepository {
 	 * All read dependencies are locked/CAS-checked, even unchanged companions.
 	 */
 	public function history_mutate( $operation, $request, $companions = array() ) {
-		if ( $this->history_read_active || ! in_array( $operation, array( 'upsert', 'status', 'delete' ), true ) || ! is_array( $request ) ||
+		if ( $this->history_read_active || ! in_array( $operation, array( 'upsert', 'status', 'delete', 'retry', 'clear' ), true ) || ! is_array( $request ) ||
 			! is_array( $companions ) || count( $companions ) > 98 || ( 'upsert' !== $operation && count( $companions ) ) ) { $this->fail( 'Unsupported history mutation.' ); }
 		$this->start_budget(); $this->history_read_active = true;
 		try {
@@ -128,6 +140,8 @@ class LegacyTableRepository {
 					$this->consume( 0, strlen( $this->codec->encode( $record ) ) );
 				}
 				if ( ! count( $request ) && ! count( $companions ) ) { return 0; }
+			} elseif ( 'clear' === $operation ) {
+				if ( count( $request ) ) { $this->fail( 'Malformed history clear.' ); }
 			} else {
 				if ( array_keys( $request ) !== ( 'status' === $operation ? array( 'key', 'status' ) : array( 'key' ) ) ) { $this->fail( 'Malformed history mutation key.' ); }
 				$this->typed_key( $request['key'] ); $identifiers[] = $request['key'];
@@ -137,7 +151,43 @@ class LegacyTableRepository {
 			if ( 'map' !== $history['head']['state_kind'] || ! isset( $history['root']['wrapper'] ) ) { $this->fail( 'Indexed history wrapper required.' ); }
 			if ( 'scalar' !== $revision['head']['state_kind'] || ! is_int( $revision['root']['value'] ) || $revision['root']['value'] < 0 ) { $this->fail( 'Invalid logical history revision.' ); }
 			foreach ( array_slice( $context, 2 ) as $entry ) { if ( 'scalar' !== $entry['head']['state_kind'] ) { $this->fail( 'Existing scalar companion heads required.' ); } }
-			$old = $this->identifiers( 'migrated', array_values( $identifiers ) ); $working = array();
+			// Explicit clear is an atomic empty-generation publication. Old rows
+			// remain byte-identical for the separate guarded maintenance owner;
+			// neither decode nor delete an arbitrarily large previous generation.
+			if ( 'clear' === $operation ) {
+				if ( $this->metadata_many( $keys ) !== $context ) { $this->fail( 'History changed before clear.' ); }
+				if ( 0 === $history['root']['root_count'] ) { return true; }
+				if ( $revision['root']['value'] >= PHP_INT_MAX ) { $this->fail( 'Logical history revision exhausted.' ); }
+				$changes = array(); $empty_root = $history['root']; $empty_root['root_count'] = 0;
+				foreach ( $context as $entry ) {
+					$value = 'migrated' === $entry['key'] ? ( new LegacyCollectionEnvelope() )->rebuild( $empty_root, array() ) : $revision['root']['value'] + 1;
+					$changes[] = array( 'key' => $entry['key'], 'order' => $entry['head']['state_order'], 'kind' => $entry['head']['state_kind'], 'value' => $value, 'expected_revision' => $entry['head']['revision'] );
+				}
+				if ( $this->max_rows <= $this->used_rows || $this->byte_limit <= $this->used_bytes ) { $this->fail( 'Clear publication budget exhausted.' ); }
+				$this->tick();
+				( new LegacyTableSnapshot( $this->db, $this->blog, $this->max_rows - $this->used_rows, $this->byte_limit - $this->used_bytes ) )->replace_many( $changes );
+				return true;
+			}
+			// Retry uses the exact parent key plus the indexed ERROR domain only.
+			// Parent association has no v1 index; all error candidates share ONE
+			// cumulative row/byte/time budget. Refuse overflow, never partial retry.
+			if ( 'retry' === $operation ) {
+				$parent = $this->identifiers( 'migrated', array( $request['key'] ) )[0];
+				$selected = array( $parent['key'] => $parent ); $cursor = null;
+				do {
+					$page = $this->history_page( 'migrated', 100, array( 'migration_status' => 'error' ), $cursor );
+					foreach ( $page['rows'] as $row ) {
+						$value = $row['value'];
+						if ( $row['key'] === $request['key'] || ( is_array( $value ) && isset( $value['migration_parent_key'], $value['migration_status'] ) &&
+							$request['key'] === $value['migration_parent_key'] && 'error' === $value['migration_status'] ) ) {
+							$selected[$row['key']] = array( 'found' => true, 'key' => $row['key'], 'value' => $value );
+						}
+					}
+					$cursor = $page['cursor'];
+				} while ( null !== $cursor );
+				$old = array_values( $selected );
+			} else { $old = $this->identifiers( 'migrated', array_values( $identifiers ) ); }
+			$working = array();
 			foreach ( $old as $row ) { $working[$row['key']] = $row; }
 			$result = 'upsert' === $operation ? count( $request ) : true;
 			if ( 'upsert' === $operation ) {
@@ -148,6 +198,8 @@ class LegacyTableRepository {
 					if ( null !== $parent ) { $payload['migration_parent_key'] = $parent; }
 					$working[$record['key']] = array( 'found' => true, 'key' => $record['key'], 'value' => $payload );
 				}
+			} elseif ( in_array( $operation, array( 'retry', 'clear' ), true ) ) {
+				foreach ( $old as $row ) { $working[$row['key']]['found'] = false; }
 			} else {
 				$row = $old[0];
 				if ( ! $row['found'] || ( 'status' === $operation && ! is_array( $row['value'] ) ) ) { $result = false; }
@@ -173,6 +225,31 @@ class LegacyTableRepository {
 			if ( $this->metadata_many( $keys ) !== $context ) { $this->fail( 'History changed during bounded mutation.' ); }
 			if ( count( $changes ) ) { $this->patch( $changes, false, $context ); }
 			return $result;
+		} finally { $this->history_read_active = false; }
+	}
+
+	/** Existing scalar/checkpoint heads, one aggregate budget and atomic CAS. */
+	public function mutate_scalars( $values ) {
+		if ( $this->history_read_active || ! is_array( $values ) || count( $values ) > 100 ) { $this->fail( 'Invalid bounded scalar changes.' ); }
+		if ( ! count( $values ) ) { return true; }
+		$this->start_budget(); $this->history_read_active = true;
+		try {
+			foreach ( $values as $key => $value ) {
+				$this->typed_key( $key );
+				if ( in_array( $key, array( 'migrated', 'migrated-revision', 'plugins', 'galleries', 'albums' ), true ) ) { $this->fail( 'Scalar facade cannot replace reserved collections or history revision.' ); }
+				$encoded = $this->codec->encode( array( 'version' => 1, 'kind' => 'scalar', 'value' => $value ) );
+				if ( strlen( $encoded ) > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Scalar row byte budget exceeded.' ); }
+				$this->consume( 0, strlen( $encoded ) );
+			}
+			$context = $this->metadata_many( array_keys( $values ) ); $changes = array();
+			foreach ( $context as $entry ) {
+				if ( 'scalar' !== $entry['head']['state_kind'] ) { $this->fail( 'Existing scalar heads required; no collection fallback.' ); }
+				$value = $values[$entry['key']];
+				if ( serialize( $value ) !== serialize( $entry['root']['value'] ) ) { $changes[] = array( 'key' => $entry['key'], 'expected_revision' => $entry['head']['revision'], 'value' => $value ); }
+			}
+			if ( $this->metadata_many( array_keys( $values ) ) !== $context ) { $this->fail( 'Scalar read dependency changed.' ); }
+			if ( count( $changes ) ) { $this->patch( $changes, false, $context ); }
+			return true;
 		} finally { $this->history_read_active = false; }
 	}
 

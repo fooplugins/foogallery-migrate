@@ -54,6 +54,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         public function __construct( $migrated_store = null ) {
             if ( $migrated_store instanceof MigratedStore || $migrated_store instanceof MigratedHistoryRepository ) {
                 $this->migrated_store = $migrated_store;
+                if ( $migrated_store instanceof MigratedHistoryRepository ) { $this->settings = new MigratorSettings( $migrated_store->state_backend() ); }
                 return;
             }
             $error = StorageAuthority::option_mode_error();
@@ -210,6 +211,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return void
          */
         public function clear_migrator_setting() {
+			if ( ! $this->settings()->can_clear_migrator_state() ) { throw new \RuntimeException( 'Whole table-state reset is not admitted. No partial history clear or option fallback.' ); }
 			if ( ! $this->migrated_store()->clear() ) {
 				return false;
 			}
@@ -1053,7 +1055,11 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return bool
          */
         public function has_migrated_objects() {
-            return $this->migrated_store()->count() > 0 || $this->settings()->has_migrator_setting_items( self::KEY_MIGRATED );
+            $store = $this->migrated_store();
+            // The explicitly injected common repository owns presence, including
+            // empty table history. Never reinterpret it using stale options.
+            return $store instanceof MigratedHistoryRepository ? $store->count() > 0
+                : $store->count() > 0 || $this->settings()->has_migrator_setting_items( self::KEY_MIGRATED );
         }
 
         /**
@@ -1078,13 +1084,21 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
 
             $parent_key = (string) $parent->unique_identifier();
             $stored = array();
-            foreach ( $this->migrated_store()->get_by_parent( $parent_key ) as $object ) {
+            $children = $parent->get_children();
+            $store = $this->migrated_store();
+            if ( $store instanceof MigratedHistoryRepository ) {
+                $keys = array();
+                foreach ( $children as $child ) {
+                    if ( is_object( $child ) && method_exists( $child, 'unique_identifier' ) ) { $key = $child->unique_identifier(); $keys[serialize( $key )] = $key; }
+                }
+                $migrated_children = $store->get_children_for_parent( $parent_key, array_values( $keys ) );
+            } else { $migrated_children = $store->get_by_parent( $parent_key ); }
+            foreach ( $migrated_children as $object ) {
                 if ( is_object( $object ) && method_exists( $object, 'unique_identifier' ) ) {
                     $stored[ (string) $object->unique_identifier() ] = $object;
                 }
             }
 
-            $children = $parent->get_children();
             foreach ( $children as $index => $child ) {
                 if ( ! is_object( $child ) || ! method_exists( $child, 'unique_identifier' ) ) {
                     continue;

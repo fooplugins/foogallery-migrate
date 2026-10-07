@@ -192,13 +192,21 @@ class OptionMigratedStore extends MigratedStore {
 	}
 	/** Common page envelope. Option cursor binds logical bytes, not fictional table IDs. */
 	public function page_log( $type = '', $status = '', $limit = 100, $cursor = null ) {
+		return $this->history_page( $type, $status, $limit, $cursor, false );
+	}
+	public function export_page( $limit = 100, $cursor = null ) {
+		return $this->history_page( '', '', $limit, $cursor, true );
+	}
+	private function history_page( $type, $status, $limit, $cursor, $raw ) {
 		if ( ! is_string( $type ) || ! is_string( $status ) || ! is_int( $limit ) || $limit < 1 || $limit > 100 ) { throw new \RuntimeException( 'Invalid bounded history page.' ); }
 		$data = $this->option_backend->read_all();
 		$records = $this->records_from( $data );
+		$wrapper = array_key_exists( MigratorSettings::KEY_MIGRATED, $data ) ? $data[MigratorSettings::KEY_MIGRATED] : array();
 		$revision = array_key_exists( MigratorSettings::KEY_MIGRATED_REVISION, $data ) && false !== $data[MigratorSettings::KEY_MIGRATED_REVISION]
 			? absint( $data[MigratorSettings::KEY_MIGRATED_REVISION] ) : ( count( $records ) ? 1 : 0 );
 		$binding = array( 'blog' => $this->current_blog_id(), 'state' => MigratorSettings::KEY_MIGRATED, 'revision' => $revision,
 			'digest' => hash( 'sha256', serialize( $records ) ), 'type' => $type, 'status' => $status );
+		if ( $raw ) { $binding['export'] = true; $binding['wrapper_digest'] = hash( 'sha256', serialize( $wrapper ) ); }
 		$offset = 0;
 		if ( null !== $cursor ) {
 			if ( ! is_array( $cursor ) || array_keys( $cursor ) !== array_merge( array_keys( $binding ), array( 'offset' ) ) ||
@@ -211,14 +219,17 @@ class OptionMigratedStore extends MigratedStore {
 			if ( ( '' !== $type && $type !== $this->field( $record, 'object_type' ) ) || ( '' !== $status && $status !== $this->field( $record, 'migration_status' ) ) ) { continue; }
 			if ( $matched++ < $offset ) { continue; }
 			if ( count( $rows ) === $limit ) { $more = true; break; }
-			$rows[] = array( 'key' => $key, 'value' => $this->hydrate( $record ) );
+			$rows[] = array( 'key' => $key, 'value' => $raw ? $record : $this->hydrate( $record ) );
 		}
 		// Do not return mixed pages if a non-cooperating option writer changed history.
 		$after = $this->option_backend->read_all();
 		if ( serialize( $this->records_from( $after ) ) !== serialize( $records ) ||
 			( isset( $after[MigratorSettings::KEY_MIGRATED_REVISION] ) ? $after[MigratorSettings::KEY_MIGRATED_REVISION] : null ) !==
 			( isset( $data[MigratorSettings::KEY_MIGRATED_REVISION] ) ? $data[MigratorSettings::KEY_MIGRATED_REVISION] : null ) ) { throw new \RuntimeException( 'History changed during page read.' ); }
-		return array( 'rows' => $rows, 'cursor' => $more ? $binding + array( 'offset' => $offset + count( $rows ) ) : null, 'revision' => $revision );
+		if ( $raw && serialize( array_key_exists( MigratorSettings::KEY_MIGRATED, $after ) ? $after[MigratorSettings::KEY_MIGRATED] : array() ) !== serialize( $wrapper ) ) { throw new \RuntimeException( 'History wrapper changed during export.' ); }
+		$page = array( 'rows' => $rows, 'cursor' => $more ? $binding + array( 'offset' => $offset + count( $rows ) ) : null, 'revision' => $revision );
+		if ( $raw ) { $page = array( 'root' => ( new LegacyCollectionEnvelope() )->split( MigratorSettings::KEY_MIGRATED, 'map', $wrapper )['root'] ) + $page; }
+		return $page;
 	}
 	public function iterate_page( $limit = 100, $cursor = null ) { return $this->page_log( '', '', $limit, $cursor ); }
 	protected function current_blog_id() { return get_current_blog_id(); }

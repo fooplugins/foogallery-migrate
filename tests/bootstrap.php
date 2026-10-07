@@ -194,12 +194,19 @@ function get_sites( $args = array() ) {
 }
 
 function switch_to_blog( $site_id ) {
+	$GLOBALS['foogallery_migrate_test_blog_id_stack'][] = get_current_blog_id();
+	$GLOBALS['foogallery_migrate_test_blog_id'] = (int) $site_id;
 	$GLOBALS['foogallery_migrate_test_blog_prefix_stack'][] = $GLOBALS['wpdb']->prefix;
 	$GLOBALS['wpdb']->prefix = 'wp_' . (int) $site_id . '_';
 }
 
 function restore_current_blog() {
+	$GLOBALS['foogallery_migrate_test_blog_id'] = array_pop( $GLOBALS['foogallery_migrate_test_blog_id_stack'] );
 	$GLOBALS['wpdb']->prefix = array_pop( $GLOBALS['foogallery_migrate_test_blog_prefix_stack'] );
+}
+
+function get_current_blog_id() {
+	return isset( $GLOBALS['foogallery_migrate_test_blog_id'] ) ? $GLOBALS['foogallery_migrate_test_blog_id'] : 1;
 }
 
 function absint( $maybeint ) {

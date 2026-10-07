@@ -3,13 +3,15 @@ namespace FooPlugins\FooGalleryMigrate;
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 /** Shared history shape. Table operations are explicitly injected, not authority selection.
- * OptionMigratedStore remains the sole option-history owner. Bulk deletion,
- * complete exports and public engine adoption are not yet admitted.
+ * OptionMigratedStore remains the sole option-history owner. Explicit bounded
+ * maintenance/export is admitted; unbounded hydration and public selection are not.
  */
 class MigratedHistoryRepository {
 	private $store;
 	private $backend;
 	private $settings;
+	/** Explicit dependency injection only; never selects persistent authority. */
+	public function state_backend() { return $this->backend; }
 	public function __construct( $backend, $settings ) {
 		if ( ( ! $backend instanceof LegacyOptionBackend && ! $backend instanceof LegacyTableBackend ) || ! $settings instanceof MigratorSettings ) {
 			throw new \RuntimeException( 'Unsupported history backend. No option fallback.' );
@@ -101,8 +103,26 @@ class MigratedHistoryRepository {
 		$this->identifier_keys( array( $identifier ) );
 		return $this->backend->history_mutate( 'delete', array( 'key' => $identifier ) );
 	}
-	public function delete_for_retry( $identifier ) { return $this->option_store()->delete_for_retry( $identifier ); }
-	public function clear() { return $this->option_store()->clear(); }
+	public function delete_for_retry( $identifier ) {
+		if ( null !== $this->store ) { return $this->store->delete_for_retry( $identifier ); }
+		$this->identifier_keys( array( $identifier ) );
+		return $this->backend->history_mutate( 'retry', array( 'key' => $identifier ) );
+	}
+	public function clear() {
+		return null !== $this->store ? $this->store->clear() : $this->backend->history_mutate( 'clear', array() );
+	}
+	/** Explicit lossless export, distinct from hydrated runtime log pages. */
+	public function export_page( $limit = 100, $cursor = null ) {
+		if ( null !== $this->store ) { return $this->store->export_page( $limit, $cursor ); }
+		if ( ! is_int( $limit ) || $limit < 1 || $limit > 100 ) { throw new \RuntimeException( 'Invalid bounded history export.' ); }
+		if ( null !== $cursor && ( ! is_array( $cursor ) || array_keys( $cursor ) !== array( 'physical', 'revision_head' ) || ! is_array( $cursor['physical'] ) || ! is_array( $cursor['revision_head'] ) ) ) { throw new \RuntimeException( 'Malformed logical history export cursor.' ); }
+		$read = $this->table_read( 'export', array( 'limit' => $limit, 'filters' => array(), 'cursor' => null === $cursor ? null : $cursor['physical'] ) );
+		$context = $read['context']; $page = $read['result']; $head = $context[1]['head'];
+		$identity = array( 'id' => $head['id'], 'generation' => $head['active_generation'], 'revision' => $head['revision'] );
+		if ( null !== $cursor && $cursor['revision_head'] !== $identity ) { throw new \RuntimeException( 'Stale logical history export cursor.' ); }
+		if ( $page['revision'] !== $context[0]['head']['revision'] ) { throw new \RuntimeException( 'History changed during export.' ); }
+		return array( 'root' => $context[0]['root'], 'rows' => $page['rows'], 'cursor' => null === $page['cursor'] ? null : array( 'physical' => $page['cursor'], 'revision_head' => $identity ), 'revision' => $context[1]['root']['value'] );
+	}
 	public function revision() {
 		if ( null !== $this->store ) { return $this->store->revision(); }
 		$read = $this->table_read( 'revision' ); return $read['context'][1]['root']['value'];
@@ -120,6 +140,19 @@ class MigratedHistoryRepository {
 	// Existing engine compatibility names. OptionMigratedStore remains the sole owner.
 	public function get_all( $type = '' ) { return $this->option_store()->get_all( $type ); }
 	public function get_by_parent( $identifier ) { return $this->option_store()->get_by_parent( $identifier ); }
+	/** Loaded-parent seam: no unindexed whole-history scan on tables. */
+	public function get_children_for_parent( $identifier, $keys ) {
+		if ( null !== $this->store ) { return $this->store->get_by_parent( $identifier ); }
+		$this->identifier_keys( array( $identifier ) );
+		if ( ! is_array( $keys ) || count( $keys ) > 10000 ) { throw new \RuntimeException( 'Loaded child lookup exceeds its bounded envelope.' ); }
+		foreach ( array_chunk( $keys, 100 ) as $batch ) { $this->identifier_keys( $batch ); }
+		$seen = array();
+		foreach ( $keys as $key ) { $typed = serialize( $key ); if ( isset( $seen[$typed] ) ) { throw new \RuntimeException( 'Duplicate loaded child identity.' ); } $seen[$typed] = true; }
+		$children = array();
+		$read = $this->table_read( 'children', array( 'parent' => $identifier, 'keys' => $keys ) );
+		foreach ( $read['result'] as $row ) { $object = $this->hydrate( $row['value'] ); if ( is_object( $object ) ) { $children[] = $object; } }
+		return $children;
+	}
 	public function manages_revision() { return true; }
 
 	private function option_store() {

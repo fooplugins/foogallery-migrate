@@ -110,7 +110,7 @@ try {
 	$check( array() === $url_observed->queries && $url_heads === $backend->metadata_many( array( 'migrated', 'migrated-revision' ) ) && $url_option === serialize( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) ) && 0 === $writes, 'source URL policy preserves heads/options with zero SQL and no fallback even for existing option match' );
 	$check( false === $logical->find_by_source_identity( 'image', null, '009' ), 'null plugin does not match an empty string plugin' );
 	$refuses( function () use ( $logical ) { $logical->summary(); }, 'per-type summary with ambiguous empty types remains unadmitted' );
-	$refuses( function () use ( $logical ) { $logical->clear(); }, 'unadmitted writes refuse rather than option fallback' );
+	$refuses( function () use ( $logical ) { $logical->get_by_parent( 'gallery' ); }, 'unbounded parent scan refuses rather than option fallback' );
 	$refuses( function () use ( $logical ) { $logical->read_snapshot(); }, 'no implicit whole-history materialization' );
 	$check( 0 === $writes && serialize( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) ) === serialize( $data ), 'all logical reads/refusals leave options unchanged' );
 	$backend->patch_many( array( array( 'key' => 'migrated-revision', 'expected_revision' => 1, 'value' => 6 ) ) );

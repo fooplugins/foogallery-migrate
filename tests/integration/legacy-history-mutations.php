@@ -11,6 +11,7 @@ use FooPlugins\FooGalleryMigrate\LegacyOptionBackend;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
 use FooPlugins\FooGalleryMigrate\LegacyTableReader;
+use FooPlugins\FooGalleryMigrate\LegacyTableRepository;
 use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\MigratedHistoryRepository;
@@ -66,6 +67,22 @@ try {
 	$snapshot->replace_many( $initial ); $check( ( new LegacyOptionBackend() )->replace_all( $data ), 'seed real option fixture succeeds' );
 	$settings = new MigratorSettings(); $option = new MigratedHistoryRepository( new LegacyOptionBackend(), $settings ); $logical = new MigratedHistoryRepository( $backend, $settings );
 	$heads = function () use ( $backend ) { return $backend->metadata_many( array( 'migrated', 'migrated-revision', 'queue' ) ); };
+	$engine = new \FooPlugins\FooGalleryMigrate\MigratorEngine( $logical );
+	$option_before = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+	$check( $engine->set_migrator_setting( 'queue', 'table-engine' ), 'injected engine scalar state writes table backend' );
+	$check( $option_before === get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) && 'table-engine' === $backend->read( 'queue' )['value'], 'engine scalar writes never modify options' );
+	$check( 'table-engine' === $engine->get_migrator_setting( 'queue' ), 'injected engine reads its table queue, not stale option queue' );
+	$before = $heads(); $check( $engine->set_migrator_setting( 'queue', 'table-engine' ) && $heads() === $before, 'engine scalar no-op preserves every head' );
+	$refuses( function () use ( $engine ) { $engine->clear_migrator_setting(); }, 'whole-state engine reset refuses before partial table-history clearing' );
+	$check( $before === $heads() && $option_before === get_option( FOOGALLERY_MIGRATE_OPTION_DATA ), 'unsupported whole-state reset preserves table and option authority' );
+	$check( $engine->set_migrator_setting( 'queue', $data['queue'] ), 'restore table queue after isolated engine seam checks' );
+	$table_settings = new MigratorSettings( $backend );
+	$check( $engine->set_migrator_setting( 'queue', array( '09' => 'pending' ) ) && $table_settings->has_migrator_setting_items( 'queue' ), 'table scalar-array presence matches option semantics' );
+	$before = $heads();
+	$refuses( function () use ( $table_settings ) { $table_settings->set_migrator_settings( array( 'queue' => 'must-not-commit', 'absent-checkpoint' => 1 ) ); }, 'absent scalar head rejects complete engine batch' );
+	$check( $before === $heads() && $option_before === get_option( FOOGALLERY_MIGRATE_OPTION_DATA ), 'failed scalar batch preserves every head and stale options' );
+	$refuses( function () use ( $engine ) { $engine->set_migrator_setting( 'migrated', array() ); }, 'scalar engine setter cannot replace history' );
+	$check( $engine->set_migrator_setting( 'queue', $data['queue'] ), 'restore table scalar queue after presence regression' );
 	$verify = function ( $label ) use ( $backend, $snapshot, $reader, $check ) {
 		$snapshot->verify_digest( 'migrated', $reader->head( 'migrated' )['revision'] );
 		$check( serialize( $snapshot->read_bounded( 'migrated' ) ) === serialize( get_option( FOOGALLERY_MIGRATE_OPTION_DATA )['migrated'] ), $label . ': exact raw wrapper/items/order parity' );
@@ -79,6 +96,11 @@ try {
 	$image = new Image(); $image->source_url = 'https://example.test/New.jpg'; $image->migrated_id = 91;
 	$records = array( array( 'object' => $image, 'parent_key' => 'Parent' ), $image );
 	$check( 2 === $option->upsert_batch( $records, array( 'queue' => false ) ) && 2 === $logical->upsert_batch( $records, array( 'queue' => false ) ), 'duplicate sequential upserts counted and coalesced atomically' ); $verify( 'upsert' );
+	$children = $logical->get_children_for_parent( 'Parent', array( $image->unique_identifier(), 'missing' ) );
+	$check( 1 === count( $children ) && $children[0]->migration_parent_key === 'Parent', 'loaded parent uses exact indexed keys and exact parent association' );
+	$before = $heads();
+	$refuses( function () use ( $db, $blog ) { ( new LegacyTableRepository( $db, $blog, 1 ) )->history_mutate( 'clear', array() ); }, 'clear refuses cumulative row budget before any write' );
+	$check( $heads() === $before, 'maintenance budget refusal retains all heads' );
 	$before = $heads(); $check( 1 === $logical->upsert( $image ), 'upsert exact no-op returns requested count' ); $check( $heads() === $before, 'upsert no-op preserves physical/logical revisions' );
 	$check( 1 === $option->upsert( $image, array( 'queue' => 'changed' ) ) && 1 === $logical->upsert( $image, array( 'queue' => 'changed' ) ), 'no-op history plus changed companion succeeds' );
 	$after = $heads(); $check( $after[0] === $before[0] && $after[1] === $before[1] && $after[2]['head']['revision'] === $before[2]['head']['revision'] + 1, 'companion-only write leaves both history heads unchanged' ); $verify( 'companion-only' );
@@ -119,7 +141,26 @@ try {
 	$check( $logical->set_status( '09', 'error' ), 'explicit table status mutation without options' );
 	$check( 0 === $writes && $option_before === get_option( FOOGALLERY_MIGRATE_OPTION_DATA ), 'table operations never read/write fallback options' );
 	$refuses( function () use ( $db, $blog ) { ( new MigratedHistoryRepository( new LegacyTableBackend( $db, $blog + 1000 ), new MigratorSettings() ) )->delete( '09' ); }, 'wrong-blog mutation refuses' );
-	$refuses( function () use ( $logical ) { $logical->clear(); }, 'whole-history clear not silently scanned' );
+	// Explicit raw export is cursor-bound and does not hydrate or narrow opaque records.
+	$page = $logical->export_page( 2 ); $exported = array(); $export_root = $page['root'];
+	do {
+		foreach ( $page['rows'] as $row ) { $exported[$row['key']] = $row['value']; }
+		$cursor = $page['cursor']; if ( null !== $cursor ) { $page = $logical->export_page( 2, $cursor ); }
+	} while ( null !== $cursor );
+	$snapshot->verify_digest( 'migrated', $reader->head( 'migrated' )['revision'] );
+	$check( serialize( ( new \FooPlugins\FooGalleryMigrate\LegacyCollectionEnvelope() )->rebuild( $export_root, $exported ) ) === serialize( $snapshot->read_bounded( 'migrated' ) ), 'raw export retains exact wrapper, opaque fields and typed order' );
+	// Restore option parity after the deliberately interleaved physical writes above.
+	$expected = get_option( FOOGALLERY_MIGRATE_OPTION_DATA ); $expected['migrated'] = $snapshot->read_bounded( 'migrated' ); $expected['migrated-revision'] = $logical->revision(); $expected['queue'] = $backend->read( 'queue' )['value'];
+	$check( ( new LegacyOptionBackend() )->replace_all( $expected ), 'restore option parity for explicit maintenance' );
+	$check( $option->delete_for_retry( 'Parent' ) === $logical->delete_for_retry( 'Parent' ), 'retry deletes only exact parent and its error children' ); $verify( 'retry' );
+	$before = $heads(); $check( $logical->delete_for_retry( 'Parent' ) && $heads() === $before, 'missing retry is a revision-preserving success' );
+	$unrelated = array();
+	for ( $i = 0; $i < 10; $i++ ) { $child = new Image(); $child->source_url = 'https://example.test/Unrelated-' . $i . '.jpg'; $child->migration_status = 'completed'; $unrelated[] = $child; }
+	$check( 10 === $option->upsert_batch( $unrelated ) && 10 === $logical->upsert_batch( $unrelated ), 'unrelated completed history seeded for bounded maintenance' );
+	$bounded = new MigratedHistoryRepository( new LegacyTableBackend( $db, $blog, 8 ), $settings );
+	$before = $heads(); $check( $bounded->delete_for_retry( 'absent-parent' ) && $heads() === $before, 'missing retry does not scan unrelated completed/opaque roots' );
+	$check( $option->clear() === $bounded->clear(), 'explicit clear publishes an empty generation without decoding unrelated roots' ); $verify( 'clear preserves wrapper headers' );
+	$before = $heads(); $check( $logical->clear() && $heads() === $before, 'empty clear preserves every head' );
 	$check( $logical->manages_revision(), 'shared repository owns logical revision' );
 } finally {
 	remove_action( 'updated_option', $observe ); remove_action( 'added_option', $observe );

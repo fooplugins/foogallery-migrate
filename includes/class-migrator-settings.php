@@ -38,13 +38,24 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		const SETTING_IMAGES_PER_TURN = 'images_per_turn';
 		const SETTING_DEBUG_ENABLED = 'debug_enabled';
 
+		private $state_backend;
+		public function __construct( $backend = null ) {
+			if ( null !== $backend && ! $backend instanceof LegacyOptionBackend && ! $backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Unsupported injected settings backend.' ); }
+			$this->state_backend = null === $backend ? new LegacyOptionBackend() : $backend;
+		}
+		public function can_clear_migrator_state() { return $this->state_backend instanceof LegacyOptionBackend; }
+
 		/**
 		 * Returns a setting for the migrator.
 		 *
 		 * @return mixed
 		 */
 		public function get_migrator_setting( $name, $default = false ) {
-			try { $setting = ( new LegacyOptionBackend() )->read( $name ); }
+			if ( $this->state_backend instanceof LegacyTableBackend ) {
+				$setting = $this->state_backend->read( $name );
+				return $setting['found'] ? $this->hydrate_migrator_setting( $name, $setting['value'] ) : $default;
+			}
+			try { $setting = $this->state_backend->read( $name ); }
 			catch ( \RuntimeException $error ) { return $default; }
 			return $setting['found'] ? $this->hydrate_migrator_setting( $name, $setting['value'] ) : $default;
 		}
@@ -73,7 +84,11 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 				array_key_exists( self::KEY_MIGRATED_REVISION, $values ) ) ) {
 				return false;
 			}
-			return ( new LegacyOptionBackend() )->mutate( function ( $settings ) use ( $values ) {
+			if ( $this->state_backend instanceof LegacyTableBackend ) {
+				$compact = array(); foreach ( $values as $name => $value ) { $compact[$name] = $this->compact_migrator_setting( $name, $value ); }
+				return $this->state_backend->mutate_scalars( $compact );
+			}
+			return $this->state_backend->mutate( function ( $settings ) use ( $values ) {
 				$previous_value = array_key_exists( self::KEY_MIGRATED, $settings ) ? $settings[ self::KEY_MIGRATED ] : null;
 				foreach ( $values as $name => $value ) {
 					$settings[ $name ] = $this->compact_migrator_setting( $name, $value );
@@ -94,7 +109,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @return bool Whether the settings were cleared.
 		 */
 		public function clear_migrator_setting() {
-			return ( new LegacyOptionBackend() )->replace_all( array() );
+			if ( ! $this->can_clear_migrator_state() ) { throw new \RuntimeException( 'Whole table-state reset requires the approved maintenance owner. No partial clear or option fallback.' ); }
+			return $this->state_backend->replace_all( array() );
 		}
 
 		/**
@@ -103,7 +119,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @return bool
 		 */
 		public function has_migrator_settings() {
-			return ( new LegacyOptionBackend() )->exists();
+			if ( $this->state_backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Whole table-state presence is not admitted; use scoped collection/history counts.' ); }
+			return $this->state_backend->exists();
 		}
 
 		/**
@@ -116,7 +133,11 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @return bool
 		 */
 		public function has_migrator_setting_items( $name ) {
-			try { $setting = ( new LegacyOptionBackend() )->read( $name ); }
+			if ( $this->state_backend instanceof LegacyTableBackend ) {
+				$entry = $this->state_backend->metadata_many( array( $name ) )[0];
+				return 'scalar' === $entry['head']['state_kind'] ? $this->raw_setting_has_items( $entry['root']['value'] ) : $entry['root']['root_count'] > 0;
+			}
+			try { $setting = $this->state_backend->read( $name ); }
 			catch ( \RuntimeException $error ) { return false; }
 			return $setting['found'] && $this->raw_setting_has_items( $setting['value'] );
 		}
