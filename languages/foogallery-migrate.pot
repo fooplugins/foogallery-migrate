@@ -96,59 +96,59 @@ msgstr ""
 msgid "Invalid object."
 msgstr ""
 
-#: includes/class-migrator-engine.php:373, includes/class-migrator-engine.php:391
+#: includes/class-migrator-engine.php:375, includes/class-migrator-engine.php:393
 msgid "FooGallery media tags are not available."
 msgstr ""
 
-#: includes/class-migrator-engine.php:399
+#: includes/class-migrator-engine.php:401
 msgid "No image tag sync is queued."
 msgstr ""
 
-#: includes/class-migrator-engine.php:983, includes/class-migrator-engine.php:1017
+#: includes/class-migrator-engine.php:985, includes/class-migrator-engine.php:1019
 msgid "Migrated object not found."
 msgstr ""
 
-#: includes/class-migrator-engine.php:987
+#: includes/class-migrator-engine.php:989
 msgid "Invalid migrated object."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1003
+#: includes/class-migrator-engine.php:1005
 msgid "Migrated object could not be updated."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1128, includes/class-migrator-engine.php:1233
+#: includes/class-migrator-engine.php:1142, includes/class-migrator-engine.php:1247
 msgid "Gallery not found."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1172
+#: includes/class-migrator-engine.php:1186
 msgid "Migrated gallery state could not be reset."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1177, includes/class-migrator-engine.php:1190, includes/class-migrator-engine.php:1193, includes/class-migrator-engine.php:1237, includes/class-migrator-engine.php:1240
+#: includes/class-migrator-engine.php:1191, includes/class-migrator-engine.php:1204, includes/class-migrator-engine.php:1207, includes/class-migrator-engine.php:1251, includes/class-migrator-engine.php:1254
 msgid "Migrated gallery state could not be saved."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1284, includes/objects/class-image.php:256
+#: includes/class-migrator-engine.php:1298, includes/objects/class-image.php:256
 msgid "Attachment file is missing after migration."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1297
+#: includes/class-migrator-engine.php:1311
 msgid "Attachment file size could not be determined after migration."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1320
+#: includes/class-migrator-engine.php:1334
 msgid "Attachment file could not be loaded after migration."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1340
+#: includes/class-migrator-engine.php:1354
 msgid "One or more images are missing after migration."
 msgstr ""
 
-#: includes/class-migrator-settings.php:759, includes/class-migrator-settings.php:775, includes/objects/class-migratable.php:359
+#: includes/class-migrator-settings.php:780, includes/class-migrator-settings.php:796, includes/objects/class-migratable.php:359
 msgid "Unknown Error"
 msgstr ""
 
-#: includes/class-migrator-settings.php:817
+#: includes/class-migrator-settings.php:838
 msgid "(no title) #%d"
 msgstr ""
 
