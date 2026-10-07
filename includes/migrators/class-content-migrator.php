@@ -390,6 +390,11 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * @return array
 		 */
 		private function build_migrated_object_lookup() {
+			// Table callers resolve only occurrences in the current bounded action.
+			// Keep the option path's request-local index and behavior unchanged.
+			if ( method_exists( $this->migrator_engine, 'uses_scoped_history' ) && $this->migrator_engine->uses_scoped_history() ) {
+				return array( 'targeted' => true, 'objects' => array(), 'images' => array() );
+			}
 			$lookup = array(
 				'objects' => array(),
 				'images' => array(),
@@ -464,6 +469,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				}
 
 				$identifier = $plugins[ $plugin_name ]->get_content_image_identifier( $source_id );
+				if ( ! empty( $lookup['targeted'] ) ) {
+					return is_string( $identifier ) && '' !== $identifier ? $this->targeted_migrated_id( $identifier, 'image' ) : false;
+				}
 				return is_string( $identifier ) && isset( $lookup['images'][ $identifier ] )
 					? $lookup['images'][ $identifier ]
 					: false;
@@ -472,9 +480,18 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			if ( ! in_array( $object_type, array( 'album', 'gallery' ), true ) ) {
 				return null;
 			}
+			if ( ! empty( $lookup['targeted'] ) ) {
+				return $this->targeted_migrated_id( $object_type . '_' . $plugin_name . '_' . (string) $source_id, $object_type );
+			}
 
 			$key = $this->migrated_lookup_key( $object_type, $plugin_name, $source_id );
 			return isset( $lookup['objects'][ $key ] ) ? $lookup['objects'][ $key ] : false;
+		}
+
+		private function targeted_migrated_id( $identifier, $type ) {
+			$object = $this->migrator_engine->get_migrated_object( $identifier );
+			if ( ! is_object( $object ) || ! method_exists( $object, 'type' ) || $type !== $object->type() || empty( $object->migrated ) || empty( $object->migrated_id ) ) { return false; }
+			return absint( $object->migrated_id );
 		}
 
 		/**

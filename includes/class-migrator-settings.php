@@ -52,8 +52,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 */
 		public function get_migrator_setting( $name, $default = false ) {
 			if ( $this->state_backend instanceof LegacyTableBackend ) {
-				if ( in_array( $name, array( self::KEY_GALLERIES, self::KEY_ALBUMS ), true ) ) {
-					return ( new MigratableCollectionRepository( $this->state_backend, $this ) )->read_snapshot( $name );
+				if ( in_array( $name, array( self::KEY_PLUGINS, self::KEY_GALLERIES, self::KEY_ALBUMS ), true ) ) {
+					$setting = $this->state_backend->read_collection( $name );
+					return $setting['found'] ? $this->hydrate_migrator_setting( $name, $setting['value'] ) : $default;
 				}
 				$setting = $this->state_backend->read( $name );
 				return $setting['found'] ? $this->hydrate_migrator_setting( $name, $setting['value'] ) : $default;
@@ -88,10 +89,15 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 				return false;
 			}
 			if ( $this->state_backend instanceof LegacyTableBackend ) {
-				$collections = array_intersect( array_keys( $values ), array( self::KEY_GALLERIES, self::KEY_ALBUMS ) );
+				$collections = array_intersect( array_keys( $values ), array( self::KEY_PLUGINS, self::KEY_GALLERIES, self::KEY_ALBUMS ) );
 				if ( count( $collections ) ) {
 					if ( count( $collections ) !== 1 ) { throw new \RuntimeException( 'Cross-collection replacement is not admitted. No partial write.' ); }
 					$name = reset( $collections ); $companions = $values; unset( $companions[$name] );
+					if ( self::KEY_PLUGINS === $name ) {
+						if ( count( $companions ) ) { throw new \RuntimeException( 'Plugin detection replacement cannot accompany other settings.' ); }
+						if ( ! is_array( $values[$name] ) ) { return false; }
+						return $this->state_backend->replace_collection( $name, $this->compact_migrator_setting( $name, $values[$name] ) );
+					}
 					if ( count( $companions ) && array_keys( $companions ) !== array( $name . '-state' ) ) { throw new \RuntimeException( 'Only the collection checkpoint may accompany a collection replacement.' ); }
 					if ( ! is_array( $values[$name] ) ) { return false; }
 					$repository = new MigratableCollectionRepository( $this->state_backend, $this );

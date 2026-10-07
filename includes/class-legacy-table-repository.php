@@ -387,11 +387,16 @@ class LegacyTableRepository {
 
 	/** Existing gallery/album collections only; never a whole-history facade. */
 	private function collection_key( $key ) {
-		if ( ! in_array( $key, array( 'galleries', 'albums' ), true ) ) { $this->fail( 'Gallery/album collection required.' ); }
+		if ( ! in_array( $key, array( 'plugins', 'galleries', 'albums' ), true ) ) { $this->fail( 'Unsupported collection dispatch.' ); }
 	}
 
-	/** One cumulative budget spans every page and coherent metadata read. */
+	/** Complete bounded collection compatibility; no whole-state/history hydration. */
 	public function collection_snapshot( $key ) {
+		$row = $this->read_collection( $key ); return $row['found'] ? $row['value'] : array();
+	}
+
+	/** Preserve absence for existing settings callers' lazy discovery defaults. */
+	public function read_collection( $key ) {
 		$this->collection_key( $key );
 		if ( $this->history_read_active ) { $this->fail( 'Reentrant collection read.' ); }
 		$this->start_budget(); $this->history_read_active = true;
@@ -399,10 +404,10 @@ class LegacyTableRepository {
 			if ( false === $this->reader->head( $key ) ) {
 				$rows = $this->read( $this->db->prepare( 'SELECT id FROM `' . $this->state . '` WHERE blog_id = %d LIMIT 1', array( $this->blog ) ) );
 				if ( ! count( $rows ) ) { $this->fail( 'Missing site state scope; no option fallback.' ); }
-				if ( false !== $this->reader->head( $key ) ) { $this->fail( 'Missing collection changed.' ); } return array();
+				if ( false !== $this->reader->head( $key ) ) { $this->fail( 'Missing collection changed.' ); } return array( 'found' => false, 'value' => null );
 			}
 			$entry = $this->metadata_many( array( $key ) )[0];
-			return $this->collection_value( $key, $entry );
+			return array( 'found' => true, 'value' => $this->collection_value( $key, $entry ) );
 		} finally { $this->history_read_active = false; }
 	}
 
@@ -429,6 +434,7 @@ class LegacyTableRepository {
 	public function replace_collection( $key, $value, $companions = array() ) {
 		$this->collection_key( $key );
 		if ( $this->history_read_active || ! is_array( $companions ) || count( $companions ) > 1 || ( count( $companions ) && array_keys( $companions ) !== array( $key . '-state' ) ) ) { $this->fail( 'Invalid collection checkpoint.' ); }
+		if ( 'plugins' === $key && count( $companions ) ) { $this->fail( 'Plugin detection has no collection checkpoint.' ); }
 		$this->start_budget(); $this->history_read_active = true;
 		try {
 			$context = array(); $guards = array(); $stage = false;

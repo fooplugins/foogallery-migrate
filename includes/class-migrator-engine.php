@@ -952,6 +952,12 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
             return $objects;
         }
 
+        /** Inform existing content callers about explicit injection, never select authority. */
+        public function uses_scoped_history() {
+            return $this->migrated_store instanceof MigratedHistoryRepository
+                && $this->migrated_store->state_backend() instanceof LegacyTableBackend;
+        }
+
         /**
          * Return the revision of the migrated-object map.
          *

@@ -55,6 +55,7 @@ class CollectionDispatchBackend extends LegacyTableBackend {
 	public $value; public $companions; public $locator; public $record;
 	public function __construct() {}
 	public function collection_snapshot( $key ) { return $this->value; }
+	public function read_collection( $key ) { return array( 'found' => null !== $this->value, 'value' => $this->value ); }
 	public function replace_collection( $key, $value, $companions = array() ) { $this->value = $value; $this->companions = $companions; return true; }
 	public function update_collection_record( $key, $locator, $value ) { $this->locator = $locator; $this->record = $value; return true; }
 }
