@@ -57,7 +57,7 @@ class StorageAuthority {
 				return self::recovery_error();
 			}
 			if ( null !== $found ) {
-				$rows = $wpdb->get_var( $wpdb->prepare( 'SELECT 1 FROM `' . $table . '` WHERE blog_id = %d LIMIT 1', $blog_id ) );
+				$rows = $wpdb->get_var( $wpdb->prepare( 'SELECT 1 AS present FROM `' . $table . '` WHERE blog_id = %d LIMIT 1', $blog_id ) );
 				if ( ! empty( $wpdb->last_error ) || null !== $rows ) {
 					return self::recovery_error();
 				}

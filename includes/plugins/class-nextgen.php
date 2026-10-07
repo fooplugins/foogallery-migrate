@@ -60,7 +60,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
                    return false;
                 }
 
-                return (bool) $wpdb->get_var( "SELECT 1 FROM {$gallery_table} LIMIT 1" );
+                return (bool) $wpdb->get_var( "SELECT 1 AS present FROM {$gallery_table} LIMIT 1" );
             }
         }
 
@@ -269,7 +269,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Nextgen' ) ) {
             return (bool) $wpdb->get_var(
                 $wpdb->prepare(
                     "
-                    SELECT 1
+                    SELECT 1 AS present
                     FROM {$picture_table} p
                     INNER JOIN {$wpdb->term_relationships} tr ON tr.object_id = p.pid
                     INNER JOIN {$wpdb->term_taxonomy} tt ON tt.term_taxonomy_id = tr.term_taxonomy_id

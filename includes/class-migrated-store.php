@@ -378,7 +378,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratedStore' ) ) {
 			}
 
 			$sql = $this->wpdb->prepare(
-				'SELECT 1 FROM ' . $this->table_name() . ' WHERE object_key = %s LIMIT 1',
+				'SELECT 1 AS present FROM ' . $this->table_name() . ' WHERE object_key = %s LIMIT 1',
 				$storage_key
 			);
 

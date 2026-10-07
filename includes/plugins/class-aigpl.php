@@ -81,7 +81,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Aigpl' ) ) {
 
             return (bool) $wpdb->get_var(
                 $wpdb->prepare(
-                    "SELECT 1
+                    "SELECT 1 AS present
                     FROM {$wpdb->posts} p
                     INNER JOIN {$wpdb->postmeta} pm ON p.ID = pm.post_id
                     WHERE p.post_type = %s

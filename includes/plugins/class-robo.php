@@ -48,7 +48,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
 
                 return (bool) $wpdb->get_var(
                     $wpdb->prepare(
-                        "SELECT 1 FROM {$wpdb->posts} WHERE post_type = %s LIMIT 1",
+                        "SELECT 1 AS present FROM {$wpdb->posts} WHERE post_type = %s LIMIT 1",
                         'robo_gallery_table'
                     )
                 );

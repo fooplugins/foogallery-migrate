@@ -88,6 +88,7 @@ class StorageAuthorityTest extends TestCase {
 	public function test_shared_tables_without_this_sites_rows_do_not_adopt_table_authority(): void {
 		$GLOBALS['wpdb']->existing = 'wp_foogallery_migrate_legacy_state';
 		$this->assertFalse( StorageAuthority::option_mode_error() );
+		$this->assertStringContainsString( 'SELECT 1 AS present FROM', $GLOBALS['wpdb']->reads[3] );
 		$this->assertStringContainsString( 'WHERE blog_id = 1 LIMIT 1', $GLOBALS['wpdb']->reads[3] );
 		$this->assertSame( array(), $GLOBALS['foogallery_migrate_test_options'] );
 	}
@@ -123,7 +124,8 @@ class AuthorityTestWpdb {
 		$this->reads[] = $query;
 		$this->last_error = $this->fail_probe ? 'probe failed' : '';
 		if ( 0 === strpos( $query, 'SELECT 1' ) ) {
-			return $this->site_rows ? '1' : null;
+			// PHP 5.4 mysqlnd object results lose an unaliased numeric column.
+			return $this->site_rows && 0 === strpos( $query, 'SELECT 1 AS present FROM' ) ? '1' : null;
 		}
 		return false !== strpos( stripslashes( $query ), $this->existing ) && '' !== $this->existing ? $this->existing : null;
 	}
