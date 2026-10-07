@@ -18,13 +18,13 @@ class ContentScanRepository extends ScalarStateRepository {
 		return array( 'items' => $items, 'progress' => $progress );
 	}
 	private function option_state() {
-		if ( $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table content-scan dispatch is not admitted. No option fallback.' ); }
+		if ( $this->backend instanceof LegacyTableBackend ) { return $this->backend->content_scan_state(); }
 		return $this->state( $this->backend->read_all() );
 	}
 	public function metadata() { return $this->option_state()['progress']; }
 	public function read_snapshot() { return $this->option_state()['items']; }
 	private function change( $change ) {
-		if ( $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table content-scan mutation is not admitted. No option fallback.' ); }
+		if ( $this->backend instanceof LegacyTableBackend ) { return $this->backend->change_content_scan( $change ); }
 		return $this->backend->mutate( function ( $data ) use ( $change ) {
 			$state = call_user_func( $change, $this->state( $data ) );
 			if ( false === $state ) { return false; }

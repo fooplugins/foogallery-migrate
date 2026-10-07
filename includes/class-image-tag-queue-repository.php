@@ -10,7 +10,7 @@ class ImageTagQueueRepository extends ScalarStateRepository {
 		return $this->write_values( array( self::STATE_KEY => $state ) );
 	}
 	private function change( $change ) {
-		if ( $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table image-tag partial mutation is not admitted. No option fallback.' ); }
+		if ( $this->backend instanceof LegacyTableBackend ) { return $this->backend->change_image_tag_queue( $change ); }
 		return $this->backend->mutate( function ( $data ) use ( $change ) {
 			$state = array_key_exists( self::STATE_KEY, $data ) ? $data[self::STATE_KEY] : array();
 			if ( ! is_array( $state ) ) { return false; }

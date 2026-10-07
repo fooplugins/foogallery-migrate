@@ -24,6 +24,9 @@ class LegacyTableBackend {
 	public function history_mutate( $operation, $request, $companions = array() ) { return $this->repository->history_mutate( $operation, $request, $companions ); }
 	public function mutate_scalars( $values ) { return $this->repository->mutate_scalars( $values ); }
 	public function delete_scalar( $key ) { return $this->repository->delete_scalar( $key ); }
+	public function content_scan_state() { return $this->repository->content_scan_state(); }
+	public function change_content_scan( $change ) { return $this->repository->change_content_scan( $change ); }
+	public function change_image_tag_queue( $change ) { return $this->repository->change_image_tag_queue( $change ); }
 	public function read_scalars( $keys ) { return $this->repository->read_scalars( $keys ); }
 	public function collection_snapshot( $key ) { return $this->repository->collection_snapshot( $key ); }
 	public function replace_collection( $key, $value, $companions = array() ) { return $this->repository->replace_collection( $key, $value, $companions ); }

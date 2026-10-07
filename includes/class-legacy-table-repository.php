@@ -311,6 +311,61 @@ class LegacyTableRepository {
 		$this->busy = false; return true;
 	}
 
+	/** Minimal existing content/image-tag compatibility, not a large queue API.
+	 * These established states remain scalars; only this bounded bucket is read.
+	 */
+	public function content_scan_state() {
+		if ( $this->history_read_active ) { $this->fail( 'Reentrant content scan read.' ); }
+		$this->start_budget(); $this->history_read_active = true;
+		try {
+			$context = $this->partial_state_context( ContentScanRepository::STATE_KEY, true );
+			$this->verify_partial_dependencies( $context['guards'] ); return $context['value'];
+		} finally { $this->history_read_active = false; }
+	}
+	public function change_content_scan( $change ) { return $this->change_partial_state( ContentScanRepository::STATE_KEY, $change, true ); }
+	public function change_image_tag_queue( $change ) { return $this->change_partial_state( ImageTagQueueRepository::STATE_KEY, $change, false ); }
+
+	private function partial_state_context( $key, $content ) {
+		$guards = array(); $head = $this->reader->head( $key ); $this->tick();
+		$guards[] = array( 'key' => $key, 'head' => $head );
+		$row = $this->read_scalar( $key );
+		$value = $row['found'] ? $row['value'] : array();
+		if ( $content && ! $row['found'] ) {
+			$legacy = array();
+			foreach ( array( 'block-shortcode', 'block-shortcode_scan_progress' ) as $legacy_key ) {
+				$guards[] = array( 'key' => $legacy_key, 'head' => $this->reader->head( $legacy_key ) );
+				$legacy[$legacy_key] = $this->read_scalar( $legacy_key );
+			}
+			$value = array( 'items' => is_array( $legacy['block-shortcode']['value'] ) ? $legacy['block-shortcode']['value'] : array(), 'progress' => is_array( $legacy['block-shortcode_scan_progress']['value'] ) ? $legacy['block-shortcode_scan_progress']['value'] : array() );
+		}
+		if ( $content && ( ! is_array( $value ) || ! isset( $value['items'], $value['progress'] ) || ! is_array( $value['items'] ) || ! is_array( $value['progress'] ) ) ) { $this->fail( 'Invalid content scan state. No legacy fallback.' ); }
+		return array( 'head' => $head, 'value' => $value, 'guards' => $guards );
+	}
+
+	private function verify_partial_dependencies( $guards ) {
+		foreach ( $guards as $guard ) { if ( $this->reader->head( $guard['key'] ) !== $guard['head'] ) { $this->fail( 'Partial state dependency changed.' ); } $this->tick(); }
+	}
+
+	private function change_partial_state( $key, $change, $content ) {
+		if ( $this->history_read_active || ! is_callable( $change ) ) { $this->fail( 'Invalid partial state mutation.' ); }
+		$this->start_budget(); $this->history_read_active = true;
+		try {
+			$context = $this->partial_state_context( $key, $content );
+			if ( ! is_array( $context['value'] ) ) { return false; }
+			$value = call_user_func( $change, $context['value'] ); $this->tick();
+			if ( false === $value ) { return false; }
+			if ( ! is_array( $value ) ) { $this->fail( 'Invalid partial state result.' ); }
+			$this->verify_partial_dependencies( $context['guards'] );
+			if ( false !== $context['head'] && serialize( $value ) === serialize( $context['value'] ) ) { return true; }
+			if ( false === $context['head'] ) {
+				$this->replace_bounded( array( array( 'key' => $key, 'kind' => 'scalar', 'order' => $this->next_state_order(), 'value' => $value, 'expected_revision' => null ) ), $context['guards'] );
+			} else {
+				$this->patch( array( array( 'key' => $key, 'value' => $value, 'expected_revision' => $context['head']['revision'] ) ), false, $context['guards'] );
+			}
+			return true;
+		} finally { $this->history_read_active = false; }
+	}
+
 	/** Physical missing versus null/false, with one aggregate read budget. */
 	public function read_scalars( $keys ) {
 		if ( $this->history_read_active || ! is_array( $keys ) || count( $keys ) > 100 ) { $this->fail( 'Invalid scalar read keys.' ); }
