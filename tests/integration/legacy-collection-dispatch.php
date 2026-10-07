@@ -81,7 +81,8 @@ try {
 	$refuses( function () use ( $db, $blog ) { ( new MigratableCollectionRepository( new LegacyTableBackend( $db, $blog, 2 ), new MigratorSettings() ) )->read_snapshot( 'galleries' ); }, 'snapshot aggregate row bound refuses' );
 	$check( $before === $physical(), 'snapshot budget refusal leaves physical bytes unchanged' );
 	$reordered = array( 9 => $objects[9], '09' => $objects['09'] );
-	$refuses( function () use ( $table, $reordered ) { $table->replace_snapshot( 'galleries', $reordered ); }, 'unadmitted reorder fails closed before writes' ); $check( $before === $physical(), 'reorder refusal preserves every physical byte' );
+	$check( $table->replace_snapshot( 'galleries', $reordered ), 'bounded reorder succeeds through staged replacement' );
+	$check( array( 9, '09' ) === array_keys( $table->read_snapshot( 'galleries' ) ), 'staged reorder readback preserves typed identity and exact order' );
 	$scalars = new ScalarStateRepository( $backend, $settings );
 	$check( $scalars->read_many( array( 'queue', 'galleries-state', 'missing' ) ) === array( array( 'found' => true, 'key' => 'queue', 'value' => false ), array( 'found' => true, 'key' => 'galleries-state', 'value' => array( 'cursor' => 9 ) ), array( 'found' => false, 'key' => 'missing', 'value' => null ) ), 'bounded scalar read distinguishes stored false and missing' );
 	$option_before = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );

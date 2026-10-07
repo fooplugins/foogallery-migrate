@@ -396,6 +396,11 @@ class LegacyTableRepository {
 		if ( $this->history_read_active ) { $this->fail( 'Reentrant collection read.' ); }
 		$this->start_budget(); $this->history_read_active = true;
 		try {
+			if ( false === $this->reader->head( $key ) ) {
+				$rows = $this->read( $this->db->prepare( 'SELECT id FROM `' . $this->state . '` WHERE blog_id = %d LIMIT 1', array( $this->blog ) ) );
+				if ( ! count( $rows ) ) { $this->fail( 'Missing site state scope; no option fallback.' ); }
+				if ( false !== $this->reader->head( $key ) ) { $this->fail( 'Missing collection changed.' ); } return array();
+			}
 			$entry = $this->metadata_many( array( $key ) )[0];
 			return $this->collection_value( $key, $entry );
 		} finally { $this->history_read_active = false; }
@@ -418,34 +423,47 @@ class LegacyTableRepository {
 		return ( new LegacyCollectionEnvelope() )->rebuild( $entry['root'], $items );
 	}
 
-	/** Order-preserving updates/appends and map removals with atomic checkpoint.
-	 * Explicit list removal/reordering and envelope changes refuse before writes.
+	/** Existing caller replacement: affected-root patches when order is stable,
+	 * otherwise bounded staged replacement with the same atomic checkpoint.
 	 */
 	public function replace_collection( $key, $value, $companions = array() ) {
 		$this->collection_key( $key );
 		if ( $this->history_read_active || ! is_array( $companions ) || count( $companions ) > 1 || ( count( $companions ) && array_keys( $companions ) !== array( $key . '-state' ) ) ) { $this->fail( 'Invalid collection checkpoint.' ); }
 		$this->start_budget(); $this->history_read_active = true;
 		try {
-			$context = $this->metadata_many( array_merge( array( $key ), array_keys( $companions ) ) ); $entry = $context[0];
-			$old_value = $this->collection_value( $key, $entry ); $envelope = new LegacyCollectionEnvelope();
-			$old = $envelope->split( $key, $entry['head']['state_kind'], $old_value );
-			$new = $envelope->split( $key, $entry['head']['state_kind'], $value );
+			$context = array(); $guards = array(); $stage = false;
+			foreach ( array_merge( array( $key ), array_keys( $companions ) ) as $state_key ) {
+				$head = $this->reader->head( $state_key ); $this->tick(); $guards[] = array( 'key' => $state_key, 'head' => $head );
+				if ( false === $head ) { $stage = true; $context[] = array( 'key' => $state_key, 'head' => false ); }
+				else { $context[] = $this->metadata_many( array( $state_key ) )[0]; }
+			}
+			$entry = $context[0]; $kind = false === $entry['head'] ? 'map' : $entry['head']['state_kind'];
+			$envelope = new LegacyCollectionEnvelope(); $new = $envelope->split( $key, $kind, $value );
+			$old_value = false === $entry['head'] ? null : $this->collection_value( $key, $entry );
+			$old = false === $entry['head'] ? array( 'root' => $new['root'], 'items' => array() ) : $envelope->split( $key, $kind, $old_value );
 			$before = $old['root']; $after = $new['root']; unset( $before['root_count'], $after['root_count'] );
-			if ( serialize( $before ) !== serialize( $after ) ) { $this->fail( 'Collection envelope replacement requires explicit staging.' ); }
+			if ( serialize( $before ) !== serialize( $after ) ) { $stage = true; }
 			$expected_keys = array();
 			foreach ( $old['items'] as $item_key => $item ) { if ( array_key_exists( $item_key, $new['items'] ) ) { $expected_keys[] = $item_key; } }
 			foreach ( $new['items'] as $item_key => $item ) { if ( ! array_key_exists( $item_key, $old['items'] ) ) { $expected_keys[] = $item_key; } }
-			if ( $expected_keys !== array_keys( $new['items'] ) || ( 'list' === $entry['head']['state_kind'] && count( $new['items'] ) < count( $old['items'] ) ) ) { $this->fail( 'Collection reordering/list removal requires explicit staging.' ); }
+			if ( $expected_keys !== array_keys( $new['items'] ) || ( 'list' === $kind && count( $new['items'] ) < count( $old['items'] ) ) ) { $stage = true; }
 			$patches = array();
 			foreach ( $old['items'] as $item_key => $item ) { if ( ! array_key_exists( $item_key, $new['items'] ) ) { $patches[] = array( 'key' => $item_key, 'delete' => true ); } }
 			foreach ( $new['items'] as $item_key => $item ) { if ( ! array_key_exists( $item_key, $old['items'] ) || serialize( $item ) !== serialize( $old['items'][$item_key] ) ) { $patches[] = array( 'key' => $item_key, 'value' => $item ); } }
-			$changes = count( $patches ) ? array( array( 'key' => $key, 'expected_revision' => $entry['head']['revision'], 'patches' => $patches ) ) : array();
+			$collection_changed = false === $entry['head'] || serialize( $old_value ) !== serialize( $value );
+			$changes = ! $stage && count( $patches ) ? array( array( 'key' => $key, 'expected_revision' => $entry['head']['revision'], 'patches' => $patches ) ) : array();
+			$order = $stage ? $this->next_state_order() : 0; $replacements = array();
+			if ( $collection_changed ) { $replacements[] = array( 'key' => $key, 'kind' => $kind, 'order' => false === $entry['head'] ? $order++ : $entry['head']['state_order'], 'value' => $value, 'expected_revision' => false === $entry['head'] ? null : $entry['head']['revision'] ); }
 			foreach ( array_slice( $context, 1 ) as $companion ) {
-				if ( 'scalar' !== $companion['head']['state_kind'] ) { $this->fail( 'Scalar collection checkpoint required.' ); }
-				if ( serialize( $companion['root']['value'] ) !== serialize( $companions[$companion['key']] ) ) { $changes[] = array( 'key' => $companion['key'], 'expected_revision' => $companion['head']['revision'], 'value' => $companions[$companion['key']] ); }
+				if ( false !== $companion['head'] && 'scalar' !== $companion['head']['state_kind'] ) { $this->fail( 'Scalar collection checkpoint required.' ); }
+				if ( false === $companion['head'] || serialize( $companion['root']['value'] ) !== serialize( $companions[$companion['key']] ) ) {
+					if ( ! $stage ) { $changes[] = array( 'key' => $companion['key'], 'expected_revision' => $companion['head']['revision'], 'value' => $companions[$companion['key']] ); }
+					$replacements[] = array( 'key' => $companion['key'], 'kind' => 'scalar', 'order' => false === $companion['head'] ? $order++ : $companion['head']['state_order'], 'value' => $companions[$companion['key']], 'expected_revision' => false === $companion['head'] ? null : $companion['head']['revision'] );
+				}
 			}
-			if ( $this->metadata_many( array_merge( array( $key ), array_keys( $companions ) ) ) !== $context ) { $this->fail( 'Collection dependency changed.' ); }
-			if ( count( $changes ) ) { $this->patch( $changes, 'list' === $entry['head']['state_kind'], $context ); }
+			$this->verify_partial_dependencies( $guards );
+			if ( $stage && count( $replacements ) ) { $this->replace_bounded( $replacements, $guards ); }
+			else if ( count( $changes ) ) { $this->patch( $changes, 'list' === $kind, $context ); }
 			return true;
 		} finally { $this->history_read_active = false; }
 	}
@@ -457,6 +475,7 @@ class LegacyTableRepository {
 		$this->typed_key( $locator['root'] ); foreach ( $locator['path'] as $child ) { $this->typed_key( $child ); }
 		$this->start_budget(); $this->history_read_active = true;
 		try {
+			if ( false === $this->reader->head( $key ) ) { return false; }
 			$context = $this->metadata_many( array( $key ) ); $entry = $context[0];
 			if ( ! isset( $entry['root']['wrapper'] ) ) { $this->fail( 'Indexed collection envelope required.' ); }
 			$row = $this->roots( $key, array( $locator['root'] ) )[0]; if ( ! $row['found'] ) { return false; }
