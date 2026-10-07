@@ -99,6 +99,7 @@ const zip = require( 'gulp-zip' ),
 		'**/*',
 		'!package*.json',
 		'!./{node_modules,node_modules/**/*}',
+		'!./{vendor,vendor/**/*}', // Composer dependencies are development-only.
 		'!./{bin,bin/**/*}',
 		'!./{dist,dist/**/*}',
 		'!./{scripts,scripts/**/*}',

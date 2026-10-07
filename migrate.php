@@ -36,9 +36,7 @@ require_once FOOGM_PATH . 'includes/functions.php';
 // Check minimum requirements before loading the plugin.
 if ( require_once FOOGM_PATH . 'includes/startup-checks.php' ) {
 
-    // Start autoloader.
-    require_once FOOGM_PATH . 'vendor/autoload.php';
-
+    // Production uses the native loader; Composer is for development tools only.
     spl_autoload_register( 'foogallery_migrate_autoloader' );
 
     register_activation_hook( FOOGM_FILE, 'foogallery_migrate_activate' );
