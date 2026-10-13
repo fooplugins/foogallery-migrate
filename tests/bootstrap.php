@@ -152,6 +152,9 @@ class FooGalleryMigrateTestJsonResponse extends RuntimeException {
 }
 
 function get_option( $name, $default = false ) {
+	if ( isset( $GLOBALS['foogallery_migrate_test_option_reads'] ) ) {
+		$GLOBALS['foogallery_migrate_test_option_reads'][] = $name;
+	}
 	if ( ! empty( $GLOBALS['foogallery_migrate_test_serialized_reads'][$name] ) && array_key_exists( $name, $GLOBALS['foogallery_migrate_test_options'] ) ) {
 		return unserialize( serialize( $GLOBALS['foogallery_migrate_test_options'][$name] ) );
 	}
@@ -247,7 +250,16 @@ function check_admin_referer( $action = -1, $query_arg = '_wpnonce' ) {
 }
 
 function current_user_can( $capability, ...$args ) {
+	if ( isset( $GLOBALS['foogallery_migrate_test_capabilities'] ) ) {
+		return ! empty( $GLOBALS['foogallery_migrate_test_capabilities'][$capability] );
+	}
 	return true;
+}
+
+function wp_verify_nonce( $nonce, $action = -1 ) {
+	$expected = isset( $GLOBALS['foogallery_migrate_test_nonce'] ) ? $GLOBALS['foogallery_migrate_test_nonce'] : array();
+	return isset( $expected['action'], $expected['value'], $expected['result'] ) &&
+		$action === $expected['action'] && $nonce === $expected['value'] ? $expected['result'] : false;
 }
 
 function wp_unslash( $value ) {
