@@ -18,7 +18,7 @@ class LegacySharedIntegrationTest extends TestCase {
 		$GLOBALS['wpdb'] = new class {
 			public $prefix = 'wp_';
 			public $last_error = '';
-			public function prepare( $sql, $value ) { return sprintf( $sql, $value ); }
+			public function prepare( $sql, ...$values ) { return vsprintf( $sql, $values ); }
 			public function esc_like( $value ) { return addcslashes( $value, '_%' ); }
 			public function get_var( $sql ) { return null; }
 		};

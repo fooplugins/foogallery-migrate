@@ -16,6 +16,7 @@ class StorageAuthority {
 	const CONTROL_OPTION = 'foogallery_migrate_storage_control';
 	const AUTHORITY_OPTION = 'foogallery_migrate_storage_authority';
 	const MAINTENANCE_OPTION = 'foogallery_migrate_storage_maintenance';
+	const STORAGE_BACKUP_OPTION = 'foogallery-migrate-data-storage-backup';
 	const STATE_TABLE_SUFFIX = 'foogallery_migrate_state';
 	const SHARED_STATE_TABLE_SUFFIX = 'foogallery_migrate_legacy_state';
 	const SHARED_RECORDS_TABLE_SUFFIX = 'foogallery_migrate_legacy_records';
@@ -62,6 +63,15 @@ class StorageAuthority {
 					return self::recovery_error();
 				}
 			}
+		}
+		// Backups are evidence of a prior/pending conversion, not active authority.
+		// Probe row existence only: a backup can be huge or contain legacy objects.
+		$backup = $wpdb->get_var( $wpdb->prepare(
+			'SELECT 1 AS present FROM `' . $wpdb->prefix . 'options` WHERE option_name IN (%s, %s) LIMIT 1',
+			MigratedStore::LEGACY_BACKUP_OPTION, self::STORAGE_BACKUP_OPTION
+		) );
+		if ( ! empty( $wpdb->last_error ) || null !== $backup ) {
+			return self::recovery_error();
 		}
 		return false;
 	}
