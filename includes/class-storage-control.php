@@ -106,7 +106,7 @@ class StorageControl {
 		if ( JSON_ERROR_NONE !== json_last_error() || ! is_array( $r ) ||
 			array_keys( $r ) !== array( 'version', 'blog_id', 'token', 'expires' ) || json_encode( $r ) !== $raw ||
 			1 !== $r['version'] || $this->blog !== $r['blog_id'] || ! is_string( $r['token'] ) ||
-			! preg_match( '/^[a-f0-9]{32}$/D', $r['token'] ) || ! is_int( $r['expires'] ) || $r['expires'] <= time() ) { self::fail(); }
+			! preg_match( '/^[A-Za-z0-9]{32}$/D', $r['token'] ) || ! is_int( $r['expires'] ) || $r['expires'] <= time() ) { self::fail(); }
 		$table = '`' . $this->prefix . 'options`';
 		return $this->db->prepare( ' AND EXISTS (SELECT 1 FROM (SELECT option_value AS maintenance_value FROM ' . $table .
 			' WHERE option_name = %s LIMIT 1) AS maintenance_owner WHERE BINARY maintenance_value = BINARY %s)' .

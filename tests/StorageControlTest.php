@@ -87,7 +87,7 @@ class StorageControlTest extends TestCase {
 
 	public function test_conversion_maintenance_guard_binds_exact_owner_expiry_and_writer_absence(): void {
 		$db = new ControlTestWpdb(); $store = new StorageControl( $db, 1 );
-		$owner = json_encode( array( 'version' => 1, 'blog_id' => 1, 'token' => str_repeat( 'a', 32 ), 'expires' => time() + 300 ) );
+		$owner = json_encode( array( 'version' => 1, 'blog_id' => 1, 'token' => str_repeat( 'Az09', 8 ), 'expires' => time() + 300 ) );
 		$sql = $store->maintenance_guard( $owner );
 		$this->assertStringContainsString( 'BINARY maintenance_value = BINARY', $sql );
 		$this->assertStringContainsString( $owner, stripslashes( $sql ) );
