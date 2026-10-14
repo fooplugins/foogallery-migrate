@@ -435,6 +435,9 @@ function foogallery_migrate_migrator_instance() {
 }
 
 function foogallery_default_gallery_template() {
+	if ( isset( $GLOBALS['foogallery_migrate_test_default_template_callback'] ) ) {
+		call_user_func( $GLOBALS['foogallery_migrate_test_default_template_callback'] );
+	}
 	return 'default';
 }
 
@@ -443,6 +446,9 @@ function foogallery_gallery_templates() {
 }
 
 function foogallery_get_setting( $key ) {
+	if ( isset( $GLOBALS['foogallery_migrate_test_gallery_setting_callback'] ) ) {
+		call_user_func( $GLOBALS['foogallery_migrate_test_gallery_setting_callback'], $key );
+	}
 	return '';
 }
 
@@ -538,6 +544,9 @@ function update_post_meta( $post_id, $meta_key, $meta_value ) {
 
 function get_post_meta( $post_id, $meta_key = '', $single = false ) {
 	$post_id = absint( $post_id );
+	if ( isset( $GLOBALS['foogallery_migrate_test_meta_read_callback'] ) ) {
+		call_user_func( $GLOBALS['foogallery_migrate_test_meta_read_callback'], $post_id, $meta_key );
+	}
 
 	if ( ! isset( $GLOBALS['foogallery_migrate_test_post_meta'][ $post_id ] ) ) {
 		return $single ? '' : array();
