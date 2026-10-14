@@ -42,10 +42,10 @@ if ('native-preflight' === $mode) {
     foreach ($actions as $hook => $callback) {
         // Record legacy callback defects without expanding a classloader fix into
         // hook remediation. Callback execution belongs to real WP acceptance.
-        $callback_readback[$hook] = array('callback' => is_array($callback) ? get_class($callback[0]) . '::' . $callback[1] : $callback, 'callable' => is_callable($callback));
+        $callback_readback[$hook] = array('callback' => is_array($callback) ? (is_object($callback[0]) ? get_class($callback[0]) : $callback[0]) . '::' . $callback[1] : $callback, 'callable' => is_callable($callback));
     }
     if ('admin' === $mode) {
-        foreach (array('foogallery_admin_menu_after', 'wp_ajax_foogallery_migrate', 'wp_ajax_foogallery_content_replace') as $hook) {
+        foreach (array('foogallery_admin_menu_after', 'wp_ajax_foogallery_migrate', 'wp_ajax_foogallery_content_replace', 'admin_post_foogallery_migrate_storage') as $hook) {
             loader_check(isset($actions[$hook]) && is_callable($actions[$hook]), 'Required admin init hook missing: ' . $hook);
         }
     }

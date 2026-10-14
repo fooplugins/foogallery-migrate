@@ -32,8 +32,10 @@ class StorageConversion {
 
 	/** Switch only from a validated stable backend; no source/destination merge. */
 	public function switch_backend( $request ) {
-		$authorized = $this->authorize( $request, false );
+		$authorized = self::authorize_request( $request, false, $this->blog );
 		if ( is_wp_error( $authorized ) ) { return $authorized; }
+		$budget = StoragePreflight::decode_budget( 0, ini_get( 'memory_limit' ), memory_get_usage( true ), $this->policy );
+		if ( is_wp_error( $budget ) ) { return $budget; }
 		try {
 			$this->begin();
 			$raw = $this->controls->read( StorageAuthority::CONTROL_OPTION );
@@ -72,8 +74,10 @@ class StorageConversion {
 	 * live foreign/expired marker is retained and requires separate safe proof.
 	 */
 	public function recover( $request ) {
-		$authorized = $this->authorize( $request, true );
+		$authorized = self::authorize_request( $request, true, $this->blog );
 		if ( is_wp_error( $authorized ) ) { return $authorized; }
+		$budget = StoragePreflight::decode_budget( 0, ini_get( 'memory_limit' ), memory_get_usage( true ), $this->policy );
+		if ( is_wp_error( $budget ) ) { return $budget; }
 		try {
 			$this->begin(); $this->storage();
 			$r = StorageControl::decode( $this->controls->read( StorageAuthority::CONTROL_OPTION ), $this->blog );
@@ -88,14 +92,17 @@ class StorageConversion {
 		catch ( \Throwable $error ) { return $this->failed( $error ); }
 	}
 
-	private function authorize( $r, $recovery ) {
+	/** Shared receiver authorization; never reads or writes storage. */
+	public static function authorize_request( $r, $recovery = false, $blog = null ) {
 		if ( ! current_user_can( 'manage_options' ) ) { return self::error( 'forbidden' ); }
+		$blog = null === $blog ? get_current_blog_id() : $blog;
 		if ( ! is_array( $r ) || count( $r ) !== 5 || ! isset( $r['blog_id'], $r['scope'], $r['target'], $r['confirmation'], $r['nonce'] ) ||
-			( $r['blog_id'] !== $this->blog && $r['blog_id'] !== (string) $this->blog ) || 'site' !== $r['scope'] ||
+			! is_int( $blog ) || $blog < 1 || $blog !== get_current_blog_id() ||
+			( $r['blog_id'] !== $blog && $r['blog_id'] !== (string) $blog ) || 'site' !== $r['scope'] ||
 			! in_array( $r['target'], array( 'table', 'option' ), true ) || ! is_string( $r['nonce'] ) ||
 			$r['confirmation'] !== ( $recovery ? 'recover-storage' : 'switch-to-' . $r['target'] ) ) { return self::error( 'invalid_request' ); }
 		$purpose = $recovery ? 'recover' : ( 'table' === $r['target'] ? 'option_import' : 'table_export' );
-		$nonce = wp_verify_nonce( $r['nonce'], 'foogallery_migrate_storage_' . $purpose . '_' . $this->blog );
+		$nonce = wp_verify_nonce( $r['nonce'], 'foogallery_migrate_storage_' . $purpose . '_' . $blog );
 		if ( 1 !== $nonce && 2 !== $nonce ) { return self::error( 'invalid_nonce' ); }
 		return true;
 	}

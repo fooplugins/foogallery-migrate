@@ -22,7 +22,7 @@ The native matrix includes production factory read/write and post-reverse cached
 
 ## Finite remaining map for the SAME task
 
-1. Implement and measure a trusted runtime-specific calibration/operating envelope and connect the already approved explicit administrator preflight/selection operation to this coordinator. No request-supplied or invented default policy; no public UI acceptance is claimed here.
+1. The follow-on `storage-operations-checkpoint.md` connects the explicit administrator receiver and runtime/implementation calibration identity, with finite native measurements and no shipped approval/default policy. Independently justify the worst-case runtime/SAPI-specific operating envelope (or retain evidence-backed refusal); the approved preflight/selection UI is still OPEN. No request-supplied policy or public UI acceptance.
 2. Define and prove the explicit inactive-generation/backup replacement protocol for repeat option-to-table selection after reverse. Current behavior truthfully refuses rather than erasing evidence. Safely handle or explicitly classify previously proposed PR table state.
 3. Deliver authoritative stale-owner recovery only with the committed safe ownership/drain proof; no expiry-only takeover. Hard request/process death, failed readback, lost ownership and separate-process writer/DDL races still need the complete native matrix and delayed cleanup proof.
 4. Provide safe supported-runtime legacy decoding and exact-candidate literal PHP5.4.0/WP5.0 and PHP5.6.20/WP6.0 receipts. Object-disabled modern decoding does not satisfy those floors. The existing final floor gate remains held.

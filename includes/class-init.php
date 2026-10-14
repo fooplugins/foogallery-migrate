@@ -58,6 +58,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             add_action( 'wp_ajax_foogallery_migrate_delete_object', array( $this, 'ajax_delete_migrated_object' ) );
 
             add_action( 'admin_post_foogallery_migrate_save_settings', array( $this, 'save_settings' ) );
+            add_action( 'admin_post_foogallery_migrate_storage', array( 'FooPlugins\\FooGalleryMigrate\\StorageOperations', 'handle' ) );
             add_action( 'admin_post_foogallery_migrate_detect_wordpress_core', array( $this, 'detect_wordpress_core_galleries' ) );
             add_action( 'admin_post_foogallery_migrate_content', array( $this, 'migrate_content_no_js' ) );
             add_action( 'admin_post_foogallery_migrate_refresh_content', array( $this, 'refresh_content_no_js' ) );

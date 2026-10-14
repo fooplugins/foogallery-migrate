@@ -8,7 +8,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Language-Team: FooPlugins <info@fooplugins.com>\n"
 "Last-Translator: Brad Vincent <brad@fooplugins.com>\n"
-"POT-Creation-Date: 2026-10-14 08:50+0000\n"
+"POT-Creation-Date: 2026-10-14 09:26+0000\n"
 "Report-Msgid-Bugs-To: https://fooplugins.com\n"
 "X-Poedit-Basepath: ..\n"
 "X-Poedit-KeywordsList: __;_e;_ex:1,2c;_n:1,2;_n_noop:1,2;_nx:1,2,4c;_nx_noop:1,2,3c;_x:1,2c;esc_attr__;esc_attr_e;esc_attr_x:1,2c;esc_html__;esc_html_e;esc_html_x:1,2c\n"
@@ -17,82 +17,82 @@ msgstr ""
 "X-Poedit-SourceCharset: UTF-8\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
-#: includes/class-init.php:78
+#: includes/class-init.php:79
 msgid "install FooGallery!"
 msgstr ""
 
-#: includes/class-init.php:80
+#: includes/class-init.php:81
 msgid "The FooGallery plugin is required for the FooGallery Migrate plugin to work. Activate it now if you have it installed, or "
 msgstr ""
 
-#: includes/class-init.php:140, includes/class-init.php:187, includes/class-init.php:218, includes/class-init.php:239, includes/class-init.php:268, includes/class-init.php:386, includes/class-init.php:425, includes/class-init.php:448, includes/class-init.php:469, includes/class-init.php:499, includes/class-init.php:520, includes/class-init.php:540, includes/class-init.php:565, includes/class-init.php:604, includes/class-init.php:627, includes/class-init.php:647, includes/class-init.php:672, includes/class-init.php:723, includes/class-init.php:774, includes/class-init.php:819, includes/class-init.php:877, includes/views/view-migrate-tab-sources.php:7, includes/views/view-migrate-tab-sources.php:32
+#: includes/class-init.php:141, includes/class-init.php:188, includes/class-init.php:219, includes/class-init.php:240, includes/class-init.php:269, includes/class-init.php:387, includes/class-init.php:426, includes/class-init.php:449, includes/class-init.php:470, includes/class-init.php:500, includes/class-init.php:521, includes/class-init.php:541, includes/class-init.php:566, includes/class-init.php:605, includes/class-init.php:628, includes/class-init.php:648, includes/class-init.php:673, includes/class-init.php:724, includes/class-init.php:775, includes/class-init.php:820, includes/class-init.php:878, includes/views/view-migrate-tab-sources.php:7, includes/views/view-migrate-tab-sources.php:32
 msgid "Unauthorized."
 msgstr ""
 
-#: includes/class-init.php:149
+#: includes/class-init.php:150
 msgid "Choose a valid WordPress gallery migration mode."
 msgstr ""
 
-#: includes/class-init.php:152
+#: includes/class-init.php:153
 msgid "The WordPress gallery migration mode could not be saved."
 msgstr ""
 
-#: includes/class-init.php:412, includes/class-init.php:435, includes/class-init.php:591, includes/class-init.php:614
+#: includes/class-init.php:413, includes/class-init.php:436, includes/class-init.php:592, includes/class-init.php:615
 msgid "Migration state could not be saved. Please retry."
 msgstr ""
 
-#: includes/class-init.php:495, includes/class-init.php:718, includes/class-init.php:769, includes/class-init.php:816, includes/class-init.php:874
+#: includes/class-init.php:496, includes/class-init.php:719, includes/class-init.php:770, includes/class-init.php:817, includes/class-init.php:875
 msgid "Invalid request."
 msgstr ""
 
 #. translators: %d: migrated occurrence count.
-#: includes/class-init.php:691, includes/views/view-migrate-tab-content.php:12
+#: includes/class-init.php:692, includes/views/view-migrate-tab-content.php:12
 msgid "Successfully migrated and replaced %d gallery occurrence."
 msgid_plural "Successfully migrated and replaced %d gallery occurrences."
 msgstr[0] ""
 msgstr[1] ""
 
-#: includes/class-init.php:698
+#: includes/class-init.php:699
 msgid "Errors:"
 msgstr ""
 
-#: includes/class-init.php:756, includes/views/view-migrate-tab-content.php:24
+#: includes/class-init.php:757, includes/views/view-migrate-tab-content.php:24
 msgid "The content scan stopped before completion. Previously saved results are safe; use the scan button to retry."
 msgstr ""
 
-#: includes/class-init.php:803, includes/views/view-migrate-tab-content.php:31
+#: includes/class-init.php:804, includes/views/view-migrate-tab-content.php:31
 msgid "The status refresh stopped before completion. Previously saved results are safe; use Refresh Status to retry."
 msgstr ""
 
-#: includes/class-init.php:843
+#: includes/class-init.php:844
 msgid "Invalid status update."
 msgstr ""
 
-#: includes/class-init.php:854, includes/objects/class-migratable.php:275, includes/views/view-migrate-tab-log.php:10
+#: includes/class-init.php:855, includes/objects/class-migratable.php:275, includes/views/view-migrate-tab-log.php:10
 msgid "Not migrated"
 msgstr ""
 
-#: includes/class-init.php:855
+#: includes/class-init.php:856
 msgid "Queued"
 msgstr ""
 
-#: includes/class-init.php:856
+#: includes/class-init.php:857
 msgid "Started"
 msgstr ""
 
-#: includes/class-init.php:857, includes/views/view-migrate-tab-log.php:13
+#: includes/class-init.php:858, includes/views/view-migrate-tab-log.php:13
 msgid "Completed"
 msgstr ""
 
-#: includes/class-init.php:858, includes/views/view-migrate-tab-log.php:14
+#: includes/class-init.php:859, includes/views/view-migrate-tab-log.php:14
 msgid "Nothing to migrate"
 msgstr ""
 
-#: includes/class-init.php:859, includes/migrators/class-gallery-migrator.php:236, includes/views/view-migrate-tab-log.php:15, includes/views/view-migrate-tab-log.php:148, includes/views/view-migrate.php:110
+#: includes/class-init.php:860, includes/migrators/class-gallery-migrator.php:236, includes/views/view-migrate-tab-log.php:15, includes/views/view-migrate-tab-log.php:148, includes/views/view-migrate.php:110
 msgid "Error"
 msgstr ""
 
-#: includes/class-init.php:887
+#: includes/class-init.php:888
 msgid "Invalid object."
 msgstr ""
 
@@ -156,7 +156,11 @@ msgstr ""
 msgid "Migration storage requires recovery before continuing. No migration state was changed. Retain the database and contact your site administrator; do not delete storage markers, restore the legacy history snapshot over current state, or restart migrations from stale options."
 msgstr ""
 
-#: includes/class-storage-conversion.php:331
+#: includes/class-storage-calibration.php:57
+msgid "No approved migration storage calibration matches this runtime and implementation. No conversion was started. Retain all storage; administrator-assisted calibration is required."
+msgstr ""
+
+#: includes/class-storage-conversion.php:338
 msgid "Migration storage conversion was refused. Retain the recorded authority and all storage evidence; no fallback or expired-owner takeover was attempted."
 msgstr ""
 
@@ -166,6 +170,14 @@ msgstr ""
 
 #: includes/class-storage-maintenance-gate.php:292
 msgid "Migration storage ownership could not be verified. Retain storage markers and retry or request recovery."
+msgstr ""
+
+#: includes/class-storage-operations.php:39
+msgid "You are not authorized to manage migration storage."
+msgstr ""
+
+#: includes/class-storage-operations.php:60
+msgid "Invalid migration storage request."
 msgstr ""
 
 #: includes/functions.php:82
