@@ -214,6 +214,15 @@ try {
 				if ( ! $loss && 'gallery-error' !== $scenario && 'media-error' !== $scenario ) { $record = isset( $items[$object->unique_identifier()] ) ? $items[$object->unique_identifier()] : array(); $assert( count( $items ) === 1 && ! empty( $record['migrated'] ) && (int) $record['migrated_id'] === (int) $object->migrated_id, 'independent persisted completion ' . $scenario ); }
 				else { $assert( array() === $items, 'independent no history advancement ' . $scenario ); }
 			}
+			if ( 'base-healthy' === $scenario ) {
+				$checkpoint_values = array(
+					'albums-state' => $engine->get_album_migrator()->get_state(),
+					\FooPlugins\FooGalleryMigrate\ContentScanRepository::STATE_KEY => array( 'items' => array(), 'progress' => array( 'status' => 'complete' ) ),
+					\FooPlugins\FooGalleryMigrate\ImageTagQueueRepository::STATE_KEY => array( 'items' => array(), 'errors' => array() ),
+				);
+				foreach ( $checkpoint_values as $key => $value ) { $assert( $engine->set_migrator_setting( $key, $value ), 'seed real scalar-array checkpoint ' . $key ); }
+				$assert( $engine->storage_is_quiescent(), 'checkpoint seed drained before selection' );
+			}
 			$before = $writers(); $assert( 1 === count( $before ), 'one owned writer before shutdown ' . $scenario );
 			$gate->shutdown_writer();
 			if ( ! $pin->is_current() ) { $assert( $before === $writers(), 'uncertain marker retained ' . $scenario ); }
@@ -231,6 +240,13 @@ try {
 				$fresh = foogallery_migrate_migrator_instance(); $saved = $fresh->get_migrated_object( $object->unique_identifier() );
 				$assert( is_object( $saved ) && $saved->migrated && $saved->migrated_id === $object->migrated_id, 'fresh engine reads authoritative completed history ' . $mode );
 				$assert( 100 === (int) $fresh->get_gallery_migrator()->get_state()['progress'], 'selected backend retains base checkpoint ' . $mode );
+				foreach ( $checkpoint_values as $key => $value ) {
+					$assert( $value === $fresh->get_migrator_setting( $key ), 'selected backend retains scalar-array checkpoint ' . $key );
+					$value['fixture_roundtrip'] = true;
+					$assert( $fresh->set_migrator_setting( $key, $value ), 'selected backend updates scalar-array checkpoint ' . $key );
+					$assert( $value === $fresh->get_migrator_setting( $key ), 'updated scalar-array checkpoint readback ' . $key );
+				}
+				StorageMaintenanceGate::current()->shutdown_writer();
 				$assert( $source_content === get_post( $source_post )->post_content, 'selection never rewrites source content ' . $mode );
 			}
 			$owned_markers = $writers();

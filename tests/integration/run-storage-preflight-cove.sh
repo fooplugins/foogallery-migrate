@@ -117,6 +117,7 @@ for topology in single multi; do
       dump --skip-comments --skip-dump-date --skip-extended-insert --no-create-info --compact "$database" > "$after"
       equal=false
       cmp -s "$before" "$after" && equal=true
+      if [[ "$equal" != true ]]; then diff -u "$before" "$after" > "$OUT/raw/$id.db-diff.txt" || [[ "$?" == 1 ]]; fi
       result=FAIL
       [[ "$rc" != 0 || "$equal" != true ]] || result=PASS
       printf '%s\t%s\t%s\t%s\n' "$id" "$result" "$rc" "$equal" >> "$OUT/ledger.tsv"
