@@ -30,12 +30,14 @@ $raw = function () use ( $db, $tables, $options ) {
 	foreach ( $tables as $table ) { $result[$table] = $db->get_results( 'SELECT * FROM `' . $table . '` ORDER BY id', ARRAY_A ); if ( ! is_array( $result[$table] ) || ! empty( $db->last_error ) ) { throw new RuntimeException( 'Independent table observer failed.' ); } }
 	return $result;
 };
-$reset = function () use ( $db, $wpdb, $blog, $tables, $options, $check ) {
+$reset = function () use ( $db, $wpdb, $blog, $tables, $options, $check, $names ) {
 	// Fixture teardown only: exact rows captured by this invocation, never product recovery.
 	foreach ( $options() as $row ) {
 		$check( 1 === $db->query( $db->prepare( 'DELETE FROM `' . $wpdb->options . '` WHERE option_name = %s AND BINARY option_value = BINARY %s', array( $row['option_name'], $row['option_value'] ) ) ), 'fixture-owned exact option teardown ' . $row['option_name'] );
 		wp_cache_delete( $row['option_name'], 'options' );
 	}
+	// The child can delete a row while the observer still caches its old value.
+	foreach ( $names as $name ) { wp_cache_delete( $name, 'options' ); }
 	wp_cache_delete( 'alloptions', 'options' ); wp_cache_delete( 'notoptions', 'options' );
 	foreach ( array_reverse( $tables ) as $table ) { $check( false !== $db->query( $db->prepare( 'DELETE FROM `' . $table . '` WHERE blog_id = %d', array( $blog ) ) ), 'fixture-owned blog row teardown ' . $table ); }
 };
