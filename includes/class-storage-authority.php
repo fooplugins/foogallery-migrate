@@ -27,7 +27,9 @@ class StorageAuthority {
 	public static function option_mode_error( $writer = null, $maintenance = false ) {
 		global $wpdb;
 		try {
-			$db = true === $maintenance && $writer instanceof StorageMaintenanceGate ? $writer->connection() : $wpdb;
+			// Writer/runtime authority and marker ownership share one failure latch.
+			// A healthy/reconnected wpdb cannot rescue an unusable writer pin.
+			$db = $writer instanceof StorageMaintenanceGate ? $writer->connection() : $wpdb;
 			return self::option_mode_error_on( $db, $writer, $maintenance );
 		} catch ( \Exception $error ) { return self::recovery_error(); }
 		catch ( \Throwable $error ) { return self::recovery_error(); }
@@ -95,7 +97,8 @@ class StorageAuthority {
 	public static function runtime_record( $writer = null ) {
 		global $wpdb;
 		try {
-			$blog = get_current_blog_id(); $control = new StorageControl( $wpdb, $blog );
+			$db = $writer instanceof StorageMaintenanceGate ? $writer->connection() : $wpdb;
+			$blog = get_current_blog_id(); $control = new StorageControl( $db, $blog );
 			$raw = $control->read( self::CONTROL_OPTION );
 			if ( null === $raw ) {
 				$error = self::option_mode_error( $writer );
@@ -105,14 +108,14 @@ class StorageAuthority {
 			if ( ! StorageControl::runtime_ready( $r, $control->read( self::AUTHORITY_OPTION ) ) ) { return self::recovery_error(); }
 			$markers = array( 'foogallery_migrate_storage', MigratedStore::SCHEMA_OPTION, MigratedStore::MIGRATION_OPTION );
 			if ( ! $writer instanceof StorageMaintenanceGate || true !== $writer->assert_writer() ) { $markers[] = self::MAINTENANCE_OPTION; }
-			$found = $wpdb->get_var( $wpdb->prepare( 'SELECT 1 AS present FROM `' . $wpdb->prefix . 'options` WHERE option_name IN (' . implode( ', ', array_fill( 0, count( $markers ), '%s' ) ) . ') LIMIT 1', $markers ) );
-			if ( ! empty( $wpdb->last_error ) || null !== $found ) { return self::recovery_error(); }
+			$found = $db->get_var( $db->prepare( 'SELECT 1 AS present FROM `' . $db->prefix . 'options` WHERE option_name IN (' . implode( ', ', array_fill( 0, count( $markers ), '%s' ) ) . ') LIMIT 1', $markers ) );
+			if ( ! empty( $db->last_error ) || null !== $found ) { return self::recovery_error(); }
 			foreach ( array( MigratedStore::TABLE_SUFFIX, self::STATE_TABLE_SUFFIX ) as $suffix ) {
-				$found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $wpdb->prefix . $suffix ) ) );
-				if ( ! empty( $wpdb->last_error ) || null !== $found ) { return self::recovery_error(); }
+				$found = $db->get_var( $db->prepare( 'SHOW TABLES LIKE %s', $db->esc_like( $db->prefix . $suffix ) ) );
+				if ( ! empty( $db->last_error ) || null !== $found ) { return self::recovery_error(); }
 			}
-			$live = $wpdb->get_var( $wpdb->prepare( 'SELECT 1 AS present FROM `' . $wpdb->prefix . 'options` WHERE option_name = %s LIMIT 1', FOOGALLERY_MIGRATE_OPTION_DATA ) );
-			if ( ! empty( $wpdb->last_error ) || ( 'table' === $r['backend'] ? null !== $live : null === $live ) ) { return self::recovery_error(); }
+			$live = $db->get_var( $db->prepare( 'SELECT 1 AS present FROM `' . $db->prefix . 'options` WHERE option_name = %s LIMIT 1', FOOGALLERY_MIGRATE_OPTION_DATA ) );
+			if ( ! empty( $db->last_error ) || ( 'table' === $r['backend'] ? null !== $live : null === $live ) ) { return self::recovery_error(); }
 			return $r;
 		} catch ( \Exception $error ) { return self::recovery_error(); }
 		catch ( \Throwable $error ) { return self::recovery_error(); }

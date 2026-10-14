@@ -95,8 +95,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
             if ( ! isset( $this->production_backend ) ) {
                 $admission = $this->storage_guarded ? array( $this, 'assert_storage_writer' ) : null;
                 if ( is_array( $this->storage_control ) && 'table' === $this->storage_control['backend'] ) {
-                    global $wpdb;
-                    $connection = new LegacyTransactionConnection( $wpdb );
+                    // Share the marker's failure latch as well as its mysqli
+                    // handle. Uncertain repository COMMIT/readback must not
+                    // leave a separately healthy gate able to release a writer.
+                    $connection = $this->storage_gate->connection();
                     ( new LegacyStorageSchema( $connection ) )->verify();
                     $this->production_backend = new LegacyTableBackend( $connection, get_current_blog_id(), 10000, 16777216, 10, $admission, array( $this, 'assert_storage_context' ) );
                 } else { $this->production_backend = new LegacyOptionBackend( $admission ); }
@@ -106,8 +108,12 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
 
         /** The current engine is synchronous; pending request-local work is not drained. */
         public function storage_is_quiescent() {
-            return $this->storage_guarded && $this->storage_gate === StorageMaintenanceGate::current() &&
-                ! $this->migrated_batch_active && empty( $this->pending_migrated_objects );
+            try {
+                return $this->storage_guarded && $this->storage_gate === StorageMaintenanceGate::current() &&
+                    $this->storage_gate->connection()->is_current() &&
+                    ! $this->migrated_batch_active && empty( $this->pending_migrated_objects );
+            } catch ( \Exception $error ) { return false; }
+            catch ( \Throwable $error ) { return false; }
         }
 
         /** Trusted synchronous-engine verdict for authenticated maintenance.

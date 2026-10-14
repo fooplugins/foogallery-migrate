@@ -92,10 +92,10 @@ try {
 		$check( ! is_wp_error( $converted ), $fault . ': actual coordinator converts verified source' );
 		$engine = foogallery_migrate_migrator_instance();
 		$check( true === $engine->set_migrator_setting( 'checkpoint', 'admitted' ), $fault . ': actual table writer admitted' );
+		$writers = $observer->get_results( $observer->prepare( 'SELECT option_name, option_value, autoload FROM `' . $original->options . '` WHERE option_name LIKE %s ORDER BY option_name', array( $writer_pattern ) ), ARRAY_A );
 		$repository = fgm_runtime_property( fgm_runtime_property( $engine, 'production_backend' ), 'repository' );
 		$check( $pin === fgm_runtime_property( $repository, 'db' ), $fault . ': production backend and marker share identical adapter, not just mysqli handle' );
 		$options = $raw_options();
-		$writers = $observer->get_results( $observer->prepare( 'SELECT option_name, option_value, autoload FROM `' . $original->options . '` WHERE option_name LIKE %s ORDER BY option_name', array( $writer_pattern ) ), ARRAY_A );
 		$check( 1 === count( $writers ), $fault . ': one persisted owned writer' );
 		$queries = array(); $capture = function ( $sql ) use ( &$queries ) { $queries[] = $sql; return $sql; }; add_filter( 'query', $capture );
 		$pin->fault = $fault;

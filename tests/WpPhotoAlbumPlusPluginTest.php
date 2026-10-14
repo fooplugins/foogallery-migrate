@@ -342,7 +342,8 @@ class WpPhotoAlbumPlusPluginTest extends TestCase {
 			)
 		);
 
-		$migrator = new ContentMigrator( new MigratorEngine(), 'content' );
+		// This parser-only fixture has no native WordPress mysqli transport.
+		$migrator = new ContentMigrator( $GLOBALS['foogallery_migrate_engine_instance'], 'content' );
 		$extract = new \ReflectionMethod( ContentMigrator::class, 'extract_gallery_id_from_block' );
 		$this->assertSame(
 			42,
