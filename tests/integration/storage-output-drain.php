@@ -65,6 +65,7 @@ $clean = function () use ( $observer, &$created, &$owned_markers, $names, $blog,
 $post_hook = $meta_hook = $option_hook = $generation_hook = $term_hook = $attachment_hook = $discovery_hook = null; $source_id = 991;
 $old_post = $_POST; $old_method = isset( $_SERVER['REQUEST_METHOD'] ) ? $_SERVER['REQUEST_METHOD'] : null;
 $old_fresh_site = get_option( 'fresh_site', false );
+$old_blog_updated = is_multisite() ? $observer->get_var( $observer->prepare( "SELECT last_updated FROM `{$observer->blogs}` WHERE blog_id=%d", $blog ) ) : null;
 $synthetic = function () { return array( 'version' => 1, 'status' => 'approved', 'fingerprint' => StorageCalibration::fingerprint(), 'evidence_sha256' => str_repeat( 'a', 64 ), 'policy' => array( 'max_raw_bytes' => 1048576, 'amplification' => 64, 'reserve_bytes' => 33554432 ) ); };
 $response = function ( $target, $blog ) {
 	$die = function () { return function () { throw new RuntimeException( 'owned-json-response' ); }; };
@@ -272,6 +273,11 @@ try {
 	// Native publication of our source page changes this preexisting option.
 	// Restore only that demonstrated owned-fixture side effect, not DB drift.
 	if ( false === $old_fresh_site ) { delete_option( 'fresh_site' ); } else { update_option( 'fresh_site', $old_fresh_site ); }
+	// Core multisite publish/delete hooks update only this site's timestamp.
+	if ( null !== $old_blog_updated ) {
+		$assert( false !== $observer->query( $observer->prepare( "UPDATE `{$observer->blogs}` SET last_updated=%s WHERE blog_id=%d", $old_blog_updated, $blog ) ), 'restore owned source publish/delete site timestamp' );
+		$assert( $old_blog_updated === $observer->get_var( $observer->prepare( "SELECT last_updated FROM `{$observer->blogs}` WHERE blog_id=%d", $blog ) ), 'native site timestamp restoration readback' );
+	}
 	$term = get_term_by( 'slug', 'native-output-fixture-tag', FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ); if ( $term ) { wp_delete_term( $term->term_id, FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ); }
 	foreach ( array_reverse( $created ) as $table ) { $observer->query( "DROP TABLE `$table`" ); }
 	wp_cache_flush(); unset( $GLOBALS['foogallery_migrate_engine_instance'] );
