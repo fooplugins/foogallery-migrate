@@ -7,6 +7,7 @@ if ( ! defined( 'FOOGM_STORAGE_TEST_DISPOSABLE' ) || true !== FOOGM_STORAGE_TEST
 $root = realpath( FOOGM_STORAGE_TEST_ROOT );
 if ( ! $root || ! is_file( $root . '/migrate.php' ) ) { throw new RuntimeException( 'Invalid fixture root.' ); }
 require $root . '/migrate.php';
+require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
 use FooPlugins\FooGalleryMigrate\StorageMaintenanceGate;
 use FooPlugins\FooGalleryMigrate\StorageConversion;
