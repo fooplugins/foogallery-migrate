@@ -25,7 +25,7 @@ $observer_wpdb = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
 $observer_wpdb->prefix = $wpdb->prefix; $observer_wpdb->base_prefix = $wpdb->base_prefix;
 $observer = new FgmKilledTransport( $observer_wpdb ); $observer->options = $wpdb->options;
 $schema = new LegacyStorageSchema( $observer_wpdb ); $tables = array_keys( $schema->definitions() );
-$names = array( FOOGALLERY_MIGRATE_OPTION_DATA, StorageAuthority::CONTROL_OPTION, StorageAuthority::AUTHORITY_OPTION, StorageAuthority::MAINTENANCE_OPTION, StorageAuthority::STORAGE_BACKUP_OPTION );
+$names = array( FOOGALLERY_MIGRATE_OPTION_DATA, StorageAuthority::CONTROL_OPTION, StorageAuthority::AUTHORITY_OPTION, StorageAuthority::MAINTENANCE_OPTION, StorageAuthority::STORAGE_BACKUP_OPTION, StorageMaintenanceGate::WRITER_PREFIX . 'fixture_direct' );
 foreach ( $tables as $table ) {
 	if ( null !== $observer->get_var( $observer->prepare( 'SHOW TABLES LIKE %s', $observer->esc_like( $table ) ) ) ) { throw new RuntimeException( 'Refusing existing tables.' ); }
 }
@@ -53,6 +53,17 @@ $created = array(); $capture = null;
 try {
 	foreach ( $schema->statements() as $index => $ddl ) { $created[] = $tables[$index]; dbDelta( $ddl ); }
 	$check( $schema->verify(), 'fixture schema verified' );
+	// Uninstrumented production adapter: query filters must not repair its SQL.
+	$direct = new LegacyTransactionConnection( $original );
+	foreach ( array( '', '0', '100% literal %s %d _ https://example.test/image%20one' ) as $literal ) {
+		$check( $literal === $direct->get_var( $direct->prepare( 'SELECT %s AS value', array( $literal ) ) ), 'direct adapter preserves literal: ' . json_encode( $literal ) );
+	}
+	$direct_gate = StorageMaintenanceGate::current();
+	$check( true === $direct_gate->acquire_maintenance(), 'direct gate claims maintenance' );
+	$observer->query( $observer->prepare( 'INSERT INTO `' . $observer->options . "` (option_name, option_value, autoload) VALUES (%s, %s, 'no')", end( $names ), 'malformed-undrained-writer' ) );
+	$check( is_wp_error( $direct_gate->maintenance_ready( function () { return true; } ) ), 'uninstrumented production writer wildcard sees malformed foreign marker' );
+	$check( true === $direct_gate->release_maintenance(), 'direct gate releases only own maintenance marker' );
+	$check( 'malformed-undrained-writer' === $observer->get_var( $observer->prepare( 'SELECT option_value FROM `' . $observer->options . '` WHERE option_name = %s', end( $names ) ) ), 'direct gate retains foreign writer evidence' );
 	foreach ( array( 'owner-readback', 'copying-before-write', 'control-readback', 'delete-source', 'stable-before-write' ) as $point ) {
 		$reset();
 		// Fresh fixture request/connection; product code never replaces a lost pin.
