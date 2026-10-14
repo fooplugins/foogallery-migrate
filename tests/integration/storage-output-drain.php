@@ -23,11 +23,14 @@ use FooPlugins\FooGalleryMigrate\Objects\Plugin;
 
 foreach ( array( 'FOOGALLERY_CPT_GALLERY' => 'foogallery', 'FOOGALLERY_CPT_ALBUM' => 'fooalbum', 'FOOGALLERY_META_TEMPLATE' => '_foogallery_template', 'FOOGALLERY_META_SETTINGS' => '_foogallery_settings', 'FOOGALLERY_META_ATTACHMENTS' => '_foogallery_attachments', 'FOOGALLERY_ALBUM_META_TEMPLATE' => '_fooalbum_template', 'FOOGALLERY_ALBUM_META_GALLERIES' => '_fooalbum_galleries' ) as $name => $value ) { if ( ! defined( $name ) ) { define( $name, $value ); } }
 if ( ! function_exists( 'foogallery_get_setting' ) ) { function foogallery_get_setting( $key ) { return ''; } }
+if ( ! defined( 'FOOGALLERY_ATTACHMENT_TAXONOMY_TAG' ) ) { define( 'FOOGALLERY_ATTACHMENT_TAXONOMY_TAG', 'native_fixture_tag' ); }
+register_taxonomy( FOOGALLERY_ATTACHMENT_TAXONOMY_TAG, 'attachment' );
 class NativeOutputSource extends Plugin {
 	public function name() { return 'NativeOutputFixture'; }
 	public function detect() { return true; }
 	public function find_galleries() { return array(); }
 	public function find_albums() { return array(); }
+	public function get_image_tags( $image ) { return array( 'native-output-fixture-tag' ); }
 	public function get_gallery_template( $gallery ) { return 'default'; }
 	public function get_gallery_settings( $gallery, $settings ) { return $settings; }
 }
@@ -56,11 +59,11 @@ $clean = function () use ( $observer, &$created, &$owned_markers, $names, $blog,
 	foreach ( $names as $name ) { $observer->query( $observer->prepare( "DELETE FROM `{$observer->options}` WHERE option_name=%s", $name ) ); }
 	wp_cache_flush(); unset( $GLOBALS['foogallery_migrate_engine_instance'] );
 };
-$post_hook = $meta_hook = $option_hook = null; $source_id = 991;
+$post_hook = $meta_hook = $option_hook = $generation_hook = $term_hook = null; $source_id = 991;
 try {
 	$assert( current_user_can( 'manage_options' ), 'administrator fixture' );
 	foreach ( array( 'option', 'table' ) as $mode ) {
-		foreach ( array( 'gallery-healthy', 'album-healthy', 'gallery-post-loss', 'album-post-loss', 'gallery-meta-loss', 'gallery-error', 'album-blog-loss', 'option-loss' ) as $scenario ) {
+		foreach ( array( 'gallery-healthy', 'album-healthy', 'gallery-post-loss', 'album-post-loss', 'gallery-meta-loss', 'gallery-error', 'album-blog-loss', 'option-loss', 'media-healthy', 'media-post-loss', 'media-generation-loss', 'media-alt-loss', 'media-term-loss', 'media-error', 'media-reuse-healthy' ) as $scenario ) {
 			if ( ( 'table' === $mode && 'option-loss' === $scenario ) || ( ! is_multisite() && 'album-blog-loss' === $scenario ) ) { continue; }
 			$clean();
 			// A latched failed transport is NOT reset by restoring its handle. Each
@@ -82,26 +85,48 @@ try {
 			$engine = foogallery_migrate_migrator_instance(); $engine->assert_storage_writer();
 			$pin = $gate->connection(); $replacement = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
 			$lose = function () use ( $replacement ) { global $wpdb; $wpdb->dbh = $replacement->dbh; };
-			$metadata_calls = 0; $post_calls = 0; $caught = null;
+			$metadata_calls = 0; $post_calls = 0; $term_calls = 0; $generation_calls = 0; $caught = null;
 			$post_hook = function ( $id, $post, $update ) use ( $engine, $assert, $lose, $scenario, &$posts, &$post_calls, $blog ) {
-				if ( $update || ! in_array( $post->post_type, array( FOOGALLERY_CPT_GALLERY, FOOGALLERY_CPT_ALBUM ), true ) ) { return; }
+				if ( $update || ! in_array( $post->post_type, array( FOOGALLERY_CPT_GALLERY, FOOGALLERY_CPT_ALBUM, 'attachment' ), true ) ) { return; }
 				$posts[] = $id; $post_calls++;
 				$engine->begin_migrated_object_batch(); $assert( $engine->flush_migrated_object_batch(), 'nested flush ' . $scenario );
 				$assert( ! $engine->storage_is_quiescent(), 'post hook still active ' . $scenario );
 				if ( false !== strpos( $scenario, 'post-loss' ) ) { $lose(); }
 				if ( 'gallery-error' === $scenario ) { throw new Error( 'native output error' ); }
+				if ( 'media-error' === $scenario ) { throw new Error( 'native media error' ); }
 				if ( 'album-blog-loss' === $scenario ) { switch_to_blog( 1 === $blog ? 2 : 1 ); }
 			};
 			$meta_hook = function ( $meta_id, $id, $key ) use ( $assert, $engine, $lose, $scenario, &$posts, &$metadata_calls ) {
 				if ( ! in_array( $id, $posts, true ) ) { return; }
 				$metadata_calls++; $assert( ! $engine->storage_is_quiescent(), 'metadata hook active ' . $scenario );
 				if ( 'gallery-meta-loss' === $scenario ) { $lose(); }
+				if ( 'media-alt-loss' === $scenario && '_wp_attachment_image_alt' === $key ) { $lose(); }
+			};
+			$generation_hook = function ( $data ) use ( $engine, $assert, $lose, $scenario, &$generation_calls ) {
+				$generation_calls++; $engine->begin_migrated_object_batch(); $assert( $engine->flush_migrated_object_batch(), 'nested metadata flush ' . $scenario );
+				$assert( ! $engine->storage_is_quiescent(), 'media metadata callback active ' . $scenario );
+				if ( 'media-generation-loss' === $scenario ) { $lose(); } return $data;
+			};
+			$term_hook = function ( $id, $terms, $tt_ids, $taxonomy ) use ( $engine, $assert, $lose, $scenario, &$term_calls ) {
+				if ( FOOGALLERY_ATTACHMENT_TAXONOMY_TAG !== $taxonomy ) { return; }
+				$term_calls++; $engine->begin_migrated_object_batch(); $assert( $engine->flush_migrated_object_batch(), 'nested terms flush ' . $scenario );
+				$assert( ! $engine->storage_is_quiescent(), 'media term callback active ' . $scenario ); if ( 'media-term-loss' === $scenario ) { $lose(); }
 			};
 			$option_hook = function ( $name ) use ( $engine, $assert, $lose ) { if ( FOOGALLERY_MIGRATE_OPTION_DATA === $name ) { $assert( ! $engine->storage_is_quiescent(), 'option hook active' ); $lose(); } };
 			add_action( 'wp_insert_post', $post_hook, 10, 3 ); add_action( 'added_post_meta', $meta_hook, 10, 3 ); add_action( 'updated_post_meta', $meta_hook, 10, 3 );
+			add_filter( 'wp_generate_attachment_metadata', $generation_hook ); add_action( 'set_object_terms', $term_hook, 10, 4 );
 			$object = false;
 			try {
 				if ( 'option-loss' === $scenario ) { add_action( 'added_option', $option_hook, 10, 1 ); add_action( 'updated_option', $option_hook, 10, 1 ); $engine->set_migrator_setting( 'fixture', $scenario ); }
+				elseif ( 0 === strpos( $scenario, 'media-' ) ) {
+					$object = new Image( new NativeOutputSource() ); $object->ID = $source_id++; $object->title = 'Native attachment fixture'; $object->alt = 'Native alt text';
+					$object->local_file = ABSPATH . 'wp-includes/images/blank.gif'; $object->source_url = 'https://example.invalid/fixture-' . $source_id . '.gif';
+					$object->create_new_migrated_object();
+					if ( 'media-reuse-healthy' === $scenario ) {
+						$reused = new Image( $object->plugin ); $reused->ID = $object->ID; $reused->source_url = $object->source_url; $reused->create_new_migrated_object();
+						$assert( $reused->migrated && $reused->migrated_id === $object->migrated_id && 1 === $post_calls, 'source metadata reuses actual attachment without duplicate post' );
+					}
+				}
 				else {
 					$class = 0 === strpos( $scenario, 'album' ) ? Album::class : Gallery::class;
 					$object = new $class( new NativeOutputSource() ); $object->ID = $source_id++; $object->title = 'Native output fixture';
@@ -110,17 +135,27 @@ try {
 				}
 			} catch ( Throwable $error ) { $caught = $error; }
 			remove_action( 'wp_insert_post', $post_hook, 10 ); remove_action( 'added_post_meta', $meta_hook, 10 ); remove_action( 'updated_post_meta', $meta_hook, 10 ); remove_action( 'added_option', $option_hook, 10 ); remove_action( 'updated_option', $option_hook, 10 );
-			$post_hook = $meta_hook = $option_hook = null;
+			remove_filter( 'wp_generate_attachment_metadata', $generation_hook ); remove_action( 'set_object_terms', $term_hook, 10 );
+			$post_hook = $meta_hook = $option_hook = $generation_hook = $term_hook = null;
 			$loss = false !== strpos( $scenario, 'loss' );
-			if ( ! $loss && 'gallery-error' !== $scenario && null !== $caught ) { throw $caught; }
+			if ( ! $loss && 'gallery-error' !== $scenario && 'media-error' !== $scenario && null !== $caught ) { throw $caught; }
 			if ( $loss ) {
 				$assert( $caught instanceof RuntimeException, 'lost authority refused ' . $scenario );
 				$assert( ! $engine->storage_is_quiescent(), 'lost authority not drained ' . $scenario );
-				if ( $object ) { $assert( ! $object->migrated, 'no object completion ' . $scenario ); $assert( ( 'gallery-meta-loss' === $scenario ? 1 : 0 ) === $metadata_calls, 'no subsequent metadata ' . $scenario ); }
+				if ( $object ) {
+					$assert( ! $object->migrated, 'no object completion ' . $scenario );
+					if ( 0 !== strpos( $scenario, 'media-' ) ) { $assert( ( 'gallery-meta-loss' === $scenario ? 1 : 0 ) === $metadata_calls, 'no subsequent metadata ' . $scenario ); }
+					else {
+						$assert( ( 'media-term-loss' === $scenario ? 1 : 0 ) === $term_calls, 'no subsequent terms ' . $scenario );
+						$assert( ( 'media-post-loss' === $scenario ? 0 : 1 ) === $generation_calls, 'no subsequent generation ' . $scenario );
+						$assert( 'media-term-loss' === $scenario || null === $observer->get_var( $observer->prepare( "SELECT meta_value FROM `{$observer->postmeta}` WHERE post_id=%d AND meta_key=%s", $object->migrated_id, Image::META_SOURCE_KEY ) ), 'no following source metadata ' . $scenario );
+					}
+				}
 			} elseif ( 'gallery-error' === $scenario ) { $assert( $caught instanceof Error && 'native output error' === $caught->getMessage(), 'output Error propagated' ); $assert( $engine->storage_is_quiescent(), 'Error unwound depth' ); }
+			elseif ( 'media-error' === $scenario ) { $assert( $caught instanceof Error && 'native media error' === $caught->getMessage(), 'media Error propagated' ); $assert( $engine->storage_is_quiescent(), 'media Error unwound depth' ); }
 			else { $assert( null === $caught, 'healthy output returned ' . $scenario ); $assert( $engine->storage_is_quiescent(), 'healthy output drained ' . $scenario ); $assert( $object->migrated && $post_calls === 1 && $metadata_calls > 0, 'native output and completion ' . $scenario ); }
 			if ( 'album-blog-loss' === $scenario ) { restore_current_blog(); }
-			if ( $object ) {
+			if ( $object && 0 !== strpos( $scenario, 'media-' ) ) {
 				// Independent real transport observes persisted completion, not just
 				// the request object; losses/errors must not append history.
 				if ( 'table' === $mode ) {
@@ -143,10 +178,12 @@ try {
 	}
 } finally {
 	if ( null !== $post_hook ) { remove_action( 'wp_insert_post', $post_hook, 10 ); remove_action( 'added_post_meta', $meta_hook, 10 ); remove_action( 'updated_post_meta', $meta_hook, 10 ); remove_action( 'added_option', $option_hook, 10 ); remove_action( 'updated_option', $option_hook, 10 ); }
+	if ( null !== $generation_hook ) { remove_filter( 'wp_generate_attachment_metadata', $generation_hook ); remove_action( 'set_object_terms', $term_hook, 10 ); }
 	while ( get_current_blog_id() !== $blog && ms_is_switched() ) { restore_current_blog(); }
 	if ( null !== $gate ) { $gate->shutdown_writer(); }
 	$clean(); $wpdb = $original;
-	foreach ( $posts as $id ) { wp_delete_post( $id, true ); }
+	foreach ( $posts as $id ) { if ( 'attachment' === get_post_type( $id ) ) { wp_delete_attachment( $id, true ); } else { wp_delete_post( $id, true ); } }
+	$term = get_term_by( 'slug', 'native-output-fixture-tag', FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ); if ( $term ) { wp_delete_term( $term->term_id, FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ); }
 	foreach ( array_reverse( $created ) as $table ) { $observer->query( "DROP TABLE `$table`" ); }
 	wp_cache_flush(); unset( $GLOBALS['foogallery_migrate_engine_instance'] );
 }

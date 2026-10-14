@@ -115,6 +115,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                     $this->storage_gate->connection()->is_current() &&
                     0 === $this->storage_operation_depth &&
                     Objects\Migratable::storage_is_quiescent() &&
+                    Migrators\MigratorBase::storage_is_quiescent() &&
                     ! $this->migrated_batch_active && empty( $this->pending_migrated_objects );
             } catch ( \Exception $error ) { return false; }
             catch ( \Throwable $error ) { return false; }

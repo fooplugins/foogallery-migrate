@@ -25,6 +25,31 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
      */
     abstract class MigratorBase {
 
+        // Request-global across cached migrators: an inner flush cannot drain
+        // a still-running discovery, queue or migration turn. Not death proof.
+        private static $storage_operation_depth = 0;
+
+        public static function storage_is_quiescent() {
+            return 0 === self::$storage_operation_depth;
+        }
+
+        private function storage_operation( $method, $arguments = array() ) {
+            $this->migrator_engine->assert_storage_writer();
+            self::$storage_operation_depth++;
+            try {
+                $result = call_user_func_array( array( $this, $method ), $arguments );
+                $this->migrator_engine->assert_storage_writer();
+            } catch ( \Exception $error ) {
+                self::$storage_operation_depth--;
+                throw $error;
+            } catch ( \Throwable $error ) {
+                self::$storage_operation_depth--;
+                throw $error;
+            }
+            self::$storage_operation_depth--;
+            return $result;
+        }
+
         /**
          * @var string
          */
@@ -72,6 +97,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
          * @return array<Migratable>
          */
         public function get_objects_to_migrate( $force = false ) {
+            return $this->storage_operation( 'get_objects_to_migrate_admitted', array( $force ) );
+        }
+
+        private function get_objects_to_migrate_admitted( $force ) {
             $objects = $this->get_setting( $this->type );
 
             if ( $objects === false || $force ) {
@@ -79,7 +108,9 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
                 $objects = array();
                 foreach ( $this->migrator_engine->get_plugins() as $plugin ) {
                     if ( $plugin->is_detected ) {
+                        $this->migrator_engine->assert_storage_writer();
                         $plugin_objects = $plugin->find_objects( $this->type );
+                        $this->migrator_engine->assert_storage_writer();
 
                         if ( is_array( $plugin_objects ) ) {
                             $objects = array_merge( $objects, $plugin_objects );
@@ -99,6 +130,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
          * @return bool Whether the queue and its summary state were persisted.
          */
         function queue_objects_for_migration( $id_array ) {
+            return $this->storage_operation( 'queue_objects_for_migration_admitted', array( $id_array ) );
+        }
+
+        private function queue_objects_for_migration_admitted( $id_array ) {
             $this->migrator_engine->assert_storage_writer();
 
             $objects = $this->get_objects_to_migrate();
@@ -221,6 +256,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
          * @return bool Whether the migrated batch and option state were persisted.
          */
         function migrate() {
+            return $this->storage_operation( 'migrate_admitted' );
+        }
+
+        private function migrate_admitted() {
             $this->migrator_engine->assert_storage_writer();
             $objects = $this->get_objects_to_migrate();
 

@@ -84,6 +84,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
         }
 
         function create_new_migrated_object() {
+            return $this->storage_output_operation( 'create_new_migrated_object_admitted' );
+        }
+
+        protected function create_new_migrated_object_admitted() {
             foogallery_migrate_migrator_instance()->assert_storage_writer();
             // Check if we can get out early!
             if ( $this->migrated && $this->migrated_id > 0 ) {
@@ -92,6 +96,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
 
             // Check if the file has already been uploaded to the media library.
             $existing_attachment_id = $this->check_image_already_uploaded();
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
             if ( $existing_attachment_id !== 0 ) {
                 $this->migrated_id = $existing_attachment_id;
                 if ( ! $this->apply_image_tags_to_attachment() ) {
@@ -109,6 +114,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
 
 			@set_time_limit(0);
 			wp_raise_memory_limit( 'image' );
+			foogallery_migrate_migrator_instance()->assert_storage_writer();
 
             // Use local file paths where possible to avoid HTTP and memory spikes.
             $file = '';
@@ -163,12 +169,14 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
                 $this->include_file_helpers();
 
                 $validated_url = wp_http_validate_url( $this->source_url );
+                foogallery_migrate_migrator_instance()->assert_storage_writer();
                 if ( ! $validated_url ) {
                     $this->mark_error( new \WP_Error( 'foogallery_migrate_invalid_source_url', __( 'Invalid source URL for migration.', 'foogallery-migrate' ) ) );
                     return;
                 }
 
                 $tmp = download_url( $validated_url, 60 );
+                foogallery_migrate_migrator_instance()->assert_storage_writer();
                 if ( is_wp_error( $tmp ) ) {
                     $this->mark_error( $tmp );
                     return;
@@ -181,6 +189,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
 
                 foogallery_migrate_migrator_instance()->assert_storage_writer();
                 $sideload = wp_handle_sideload( $file_array, array( 'test_form' => false ) );
+                foogallery_migrate_migrator_instance()->assert_storage_writer();
                 if ( ! empty( $sideload['error'] ) ) {
                     @unlink( $tmp );
                     $this->mark_error( new \WP_Error( 'foogallery_migrate_sideload_failed', $sideload['error'] ) );
@@ -196,6 +205,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
                     $this->include_file_helpers();
 
                     $tmp = wp_tempnam( $file );
+                    foogallery_migrate_migrator_instance()->assert_storage_writer();
                     if ( ! $tmp || ! @copy( $file, $tmp ) ) {
                         if ( $tmp ) {
                             @unlink( $tmp );
@@ -211,6 +221,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
 
                     foogallery_migrate_migrator_instance()->assert_storage_writer();
                     $sideload = wp_handle_sideload( $file_array, array( 'test_form' => false ) );
+                    foogallery_migrate_migrator_instance()->assert_storage_writer();
                     if ( ! empty( $sideload['error'] ) ) {
                         @unlink( $tmp );
                         $this->mark_error( new \WP_Error( 'foogallery_migrate_sideload_failed', $sideload['error'] ) );
@@ -223,6 +234,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
             }
 
             $file_type = wp_check_filetype( basename( $file ), null );
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
 
             // Create attachment
             $attachment = array(
@@ -243,6 +255,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
             // Insert the attachment
             foogallery_migrate_migrator_instance()->assert_storage_writer();
             $this->migrated_id = wp_insert_attachment( $attachment, $file, 0 );
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
             if ( is_wp_error( $this->migrated_id ) ) {
                 $error = $this->migrated_id;
                 $this->migrated_id = 0;
@@ -250,18 +263,21 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
                 return;
             }
             $attachment_data = wp_generate_attachment_metadata( $this->migrated_id, $file );
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
             wp_update_attachment_metadata( $this->migrated_id, $attachment_data );
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
 
             // Save alt text in the post meta
-            update_post_meta( $this->migrated_id, '_wp_attachment_image_alt', $this->alt );
+            $this->update_migrated_meta( '_wp_attachment_image_alt', $this->alt );
 
             $attachment_path = get_attached_file( $this->migrated_id );
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
             if ( empty( $attachment_path ) || ! file_exists( $attachment_path ) ) {
                 $this->mark_error( new \WP_Error( 'foogallery_migrate_missing_file', __( 'Attachment file is missing after migration.', 'foogallery-migrate' ) ) );
                 return;
             }
 
-			update_post_meta( $this->migrated_id, self::META_SOURCE_KEY, $this->unique_identifier() );
+            $this->update_migrated_meta( self::META_SOURCE_KEY, $this->unique_identifier() );
             $this->apply_image_tags_to_attachment();
         }
 
@@ -290,6 +306,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
                     'tags'        => $image_tags,
                 )
             );
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
 
             if ( is_wp_error( $attachment_id ) ) {
                 $this->mark_error( $attachment_id );
@@ -303,7 +320,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
             }
 
             $this->migrated_id = $attachment_id;
-			update_post_meta( $this->migrated_id, self::META_SOURCE_KEY, $this->unique_identifier() );
+            $this->update_migrated_meta( self::META_SOURCE_KEY, $this->unique_identifier() );
             if ( ! empty( $this->date ) ) {
                 wp_update_post(
                     array(
@@ -311,6 +328,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
                         'post_date' => $this->date,
                     )
                 );
+                foogallery_migrate_migrator_instance()->assert_storage_writer();
             }
 
             if ( ! $this->apply_image_tags_to_attachment() ) {
@@ -333,6 +351,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
             }
 
             $result = wp_set_object_terms( $this->migrated_id, $image_tags, FOOGALLERY_ATTACHMENT_TAXONOMY_TAG, false );
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
             if ( is_wp_error( $result ) ) {
                 $this->mark_error( $result );
                 return false;
@@ -358,11 +377,13 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
          * @return array Tag names.
          */
         private function get_image_tags() {
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
             if ( ! isset( $this->plugin ) || ! is_object( $this->plugin ) || ! method_exists( $this->plugin, 'get_image_tags' ) ) {
                 return array();
             }
 
             $tags = $this->plugin->get_image_tags( $this );
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
             if ( ! is_array( $tags ) ) {
                 return array();
             }
