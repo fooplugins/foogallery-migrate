@@ -67,10 +67,10 @@ $old_post = $_POST; $old_method = isset( $_SERVER['REQUEST_METHOD'] ) ? $_SERVER
 $old_fresh_site = get_option( 'fresh_site', false );
 $old_blog_updated = is_multisite() ? $observer->get_var( $observer->prepare( "SELECT last_updated FROM `{$observer->blogs}` WHERE blog_id=%d", $blog ) ) : null;
 $synthetic = function () { return array( 'version' => 1, 'status' => 'approved', 'fingerprint' => StorageCalibration::fingerprint(), 'evidence_sha256' => str_repeat( 'a', 64 ), 'policy' => array( 'max_raw_bytes' => 1048576, 'amplification' => 64, 'reserve_bytes' => 33554432 ) ); };
-$response = function ( $target, $blog ) {
+$response = function ( $target, $blog, $operation = 'switch', $purpose = null, $request_blog = null ) {
 	$die = function () { return function () { throw new RuntimeException( 'owned-json-response' ); }; };
-	$purpose = 'table' === $target ? 'option_import' : 'table_export';
-	$_POST = array( 'action' => 'foogallery_migrate_storage', 'operation' => 'switch', 'blog_id' => (string) $blog, 'scope' => 'site', 'target' => $target, 'confirmation' => 'switch-to-' . $target, 'nonce' => wp_create_nonce( 'foogallery_migrate_storage_' . $purpose . '_' . $blog ) );
+	$purpose = null === $purpose ? ( 'recover' === $operation ? 'recover' : ( 'table' === $target ? 'option_import' : 'table_export' ) ) : $purpose;
+	$_POST = array( 'action' => 'foogallery_migrate_storage', 'operation' => $operation, 'blog_id' => (string) ( null === $request_blog ? $blog : $request_blog ), 'scope' => 'site', 'target' => $target, 'confirmation' => 'recover' === $operation ? 'recover-storage' : 'switch-to-' . $target, 'nonce' => wp_create_nonce( 'foogallery_migrate_storage_' . $purpose . '_' . $blog ) );
 	$_SERVER['REQUEST_METHOD'] = 'POST'; add_filter( 'wp_die_ajax_handler', $die ); ob_start();
 	try { do_action( 'admin_post_foogallery_migrate_storage' ); throw new RuntimeException( 'Receiver returned without JSON.' ); }
 	catch ( RuntimeException $error ) { if ( 'owned-json-response' !== $error->getMessage() ) { throw $error; } }
@@ -84,7 +84,7 @@ try {
 	$source_post = wp_insert_post( array( 'post_title' => 'Owned base fixture source', 'post_type' => 'page', 'post_status' => 'publish', 'post_content' => $source_content ) ); $posts[] = $source_post;
 	$assert( 0 === (int) get_option( 'fresh_site' ), 'native source publish changes fresh_site before any engine writer' );
 	foreach ( array( 'option', 'table' ) as $mode ) {
-		foreach ( array( 'gallery-healthy', 'album-healthy', 'gallery-post-loss', 'album-post-loss', 'gallery-meta-loss', 'gallery-error', 'album-blog-loss', 'option-loss', 'media-healthy', 'media-post-loss', 'media-generation-loss', 'media-alt-loss', 'media-term-loss', 'media-error', 'media-reuse-healthy', 'base-healthy', 'base-discovery-loss', 'base-discovery-error', 'base-post-loss' ) as $scenario ) {
+		foreach ( array( 'gallery-healthy', 'album-healthy', 'gallery-post-loss', 'album-post-loss', 'gallery-meta-loss', 'gallery-error', 'album-blog-loss', 'option-loss', 'media-healthy', 'media-post-loss', 'media-generation-loss', 'media-alt-loss', 'media-term-loss', 'media-error', 'media-reuse-healthy', 'base-healthy', 'base-discovery-loss', 'base-discovery-error', 'base-post-loss', 'base-recovery-copying', 'base-recovery-verified', 'base-recovery-flipped' ) as $scenario ) {
 			if ( ( 'table' === $mode && 'option-loss' === $scenario ) || ( ! is_multisite() && 'album-blog-loss' === $scenario ) ) { continue; }
 			$clean();
 			// A latched failed transport is NOT reset by restoring its handle. Each
@@ -217,7 +217,7 @@ try {
 				if ( ! $loss && 'gallery-error' !== $scenario && 'media-error' !== $scenario ) { $record = isset( $items[$object->unique_identifier()] ) ? $items[$object->unique_identifier()] : array(); $assert( count( $items ) === 1 && ! empty( $record['migrated'] ) && (int) $record['migrated_id'] === (int) $object->migrated_id, 'independent persisted completion ' . $scenario ); }
 				else { $assert( array() === $items, 'independent no history advancement ' . $scenario ); }
 			}
-			if ( 'base-healthy' === $scenario ) {
+			if ( 'base-healthy' === $scenario || 0 === strpos( $scenario, 'base-recovery-' ) ) {
 				$assert( $engine->get_album_migrator()->calculate_migration_state( array() ), 'persist actual empty album summary' );
 				$checkpoint_values = array(
 					'albums-state' => $engine->get_album_migrator()->get_state(),
@@ -230,13 +230,15 @@ try {
 			$before = $writers(); $assert( 1 === count( $before ), 'one owned writer before shutdown ' . $scenario );
 			$gate->shutdown_writer();
 			if ( ! $pin->is_current() ) { $assert( $before === $writers(), 'uncertain marker retained ' . $scenario ); }
-			if ( 'base-healthy' === $scenario ) {
+			if ( 'base-healthy' === $scenario || 0 === strpos( $scenario, 'base-recovery-' ) ) {
 				$assert( array() === $writers(), 'base completion releases owned marker before selection' );
 				// Explicit owned-fixture schema provisioning, never implicit DDL.
 				if ( ! $created ) { foreach ( $schema->statements() as $i => $ddl ) { $created[] = $tables[$i]; dbDelta( $ddl ); } }
 				$assert( $schema->verify(), 'explicit fixture schema before public selection' );
 				unset( $GLOBALS['foogallery_migrate_engine_instance'] ); add_filter( 'foogallery_migrate_storage_calibration', $synthetic );
-				$target = 'option' === $mode ? 'table' : 'option'; $result = $response( $target, $blog );
+				$target = 'option' === $mode ? 'table' : 'option';
+				if ( 0 === strpos( $scenario, 'base-recovery-' ) ) { require __DIR__ . '/storage-native-recovery.php'; }
+				else { $result = $response( $target, $blog ); }
 				$assert( true === $result['success'] && $target === $result['data']['backend'] && 'stable' === $result['data']['phase'], 'public receiver selects authoritative backend after real base output ' . $mode );
 				remove_filter( 'foogallery_migrate_storage_calibration', $synthetic );
 				$stale = null; try { $engine->get_gallery_migrator()->get_objects_to_migrate(); } catch ( RuntimeException $error ) { $stale = $error; }
@@ -256,7 +258,7 @@ try {
 			$owned_markers = $writers();
 			$clean();
 			// Keep the next base-post-loss case on a genuine insertion path.
-			if ( 'base-healthy' === $scenario ) { wp_delete_post( $object->migrated_id, true ); }
+			if ( 'base-healthy' === $scenario || 0 === strpos( $scenario, 'base-recovery-' ) ) { wp_delete_post( $object->migrated_id, true ); }
 		}
 	}
 } finally {
