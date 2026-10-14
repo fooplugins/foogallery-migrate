@@ -14,6 +14,8 @@ use FooPlugins\FooGalleryMigrate\StorageMaintenanceGate;
 use FooPlugins\FooGalleryMigrate\StorageConversion;
 use FooPlugins\FooGalleryMigrate\StorageAuthority;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
+use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
+use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\Objects\Gallery;
 use FooPlugins\FooGalleryMigrate\Objects\Album;
 use FooPlugins\FooGalleryMigrate\Objects\Image;
@@ -118,6 +120,15 @@ try {
 			} elseif ( 'gallery-error' === $scenario ) { $assert( $caught instanceof Error && 'native output error' === $caught->getMessage(), 'output Error propagated' ); $assert( $engine->storage_is_quiescent(), 'Error unwound depth' ); }
 			else { $assert( null === $caught, 'healthy output returned ' . $scenario ); $assert( $engine->storage_is_quiescent(), 'healthy output drained ' . $scenario ); $assert( $object->migrated && $post_calls === 1 && $metadata_calls > 0, 'native output and completion ' . $scenario ); }
 			if ( 'album-blog-loss' === $scenario ) { restore_current_blog(); }
+			if ( $object ) {
+				// Independent real transport observes persisted completion, not just
+				// the request object; losses/errors must not append history.
+				if ( 'table' === $mode ) { $history = ( new LegacyTableBackend( new LegacyTransactionConnection( $observer ), $blog ) )->read( MigratorSettings::KEY_MIGRATED ); $history = $history['value']; }
+				else { $raw = $observer->get_var( $observer->prepare( "SELECT option_value FROM `{$observer->options}` WHERE option_name=%s", FOOGALLERY_MIGRATE_OPTION_DATA ) ); $state = null === $raw ? array() : unserialize( $raw, array( 'allowed_classes' => false ) ); $history = isset( $state[MigratorSettings::KEY_MIGRATED] ) ? $state[MigratorSettings::KEY_MIGRATED] : array(); }
+				$items = isset( $history['items'] ) ? $history['items'] : array();
+				if ( ! $loss && 'gallery-error' !== $scenario ) { $record = isset( $items[$object->unique_identifier()] ) ? $items[$object->unique_identifier()] : array(); $assert( count( $items ) === 1 && ! empty( $record['migrated'] ) && (int) $record['migrated_id'] === (int) $object->migrated_id, 'independent persisted completion ' . $scenario ); }
+				else { $assert( array() === $items, 'independent no history advancement ' . $scenario ); }
+			}
 			$before = $writers(); $assert( 1 === count( $before ), 'one owned writer before shutdown ' . $scenario );
 			$gate->shutdown_writer();
 			if ( ! $pin->is_current() ) { $assert( $before === $writers(), 'uncertain marker retained ' . $scenario ); }
