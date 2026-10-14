@@ -52,7 +52,7 @@ $clean = function () use ( $observer, &$created, &$owned_markers, $names, $blog,
 	foreach ( $names as $name ) { $observer->query( $observer->prepare( "DELETE FROM `{$observer->options}` WHERE option_name=%s", $name ) ); }
 	wp_cache_flush(); unset( $GLOBALS['foogallery_migrate_engine_instance'] );
 };
-$post_hook = $meta_hook = $option_hook = null;
+$post_hook = $meta_hook = $option_hook = null; $source_id = 991;
 try {
 	$assert( current_user_can( 'manage_options' ), 'administrator fixture' );
 	foreach ( array( 'option', 'table' ) as $mode ) {
@@ -98,7 +98,7 @@ try {
 				if ( 'option-loss' === $scenario ) { add_action( 'added_option', $option_hook, 10, 1 ); add_action( 'updated_option', $option_hook, 10, 1 ); $engine->set_migrator_setting( 'fixture', $scenario ); }
 				else {
 					$class = 0 === strpos( $scenario, 'album' ) ? Album::class : Gallery::class;
-					$object = new $class( new NativeOutputSource() ); $object->ID = 991; $object->title = 'Native output fixture';
+					$object = new $class( new NativeOutputSource() ); $object->ID = $source_id++; $object->title = 'Native output fixture';
 					$child = new Image( $object->plugin ); $child->ID = 992; $child->migrated = true; $child->migrated_id = 993; $object->children = array( $child );
 					$object->migrate();
 				}
