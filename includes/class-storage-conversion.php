@@ -131,6 +131,8 @@ class StorageConversion {
 	private function begin() {
 		$this->deadline = microtime( true ) + 10;
 		$this->gate = StorageMaintenanceGate::current();
+		$this->connection = $this->gate->connection();
+		$this->controls = new StorageControl( $this->connection, $this->blog );
 		$this->require_true( $this->gate->acquire_maintenance() ); $this->owns_gate = true; $this->ready();
 	}
 
@@ -147,7 +149,6 @@ class StorageConversion {
 	}
 
 	private function storage() {
-		$this->connection = new LegacyTransactionConnection( $this->db );
 		$this->require_true( ( new LegacyStorageSchema( $this->connection ) )->verify() );
 		$this->snapshot = new LegacyTableSnapshot( $this->connection, $this->blog, 10000, 16777216, $this->deadline );
 	}
@@ -204,7 +205,7 @@ class StorageConversion {
 				if ( $this->option_present( FOOGALLERY_MIGRATE_OPTION_DATA ) ) {
 					$this->require_true( $this->raw_option_digest( FOOGALLERY_MIGRATE_OPTION_DATA ) === $r['source_digest'] );
 					$raw = $this->option_raw();
-					$this->write( $this->db->prepare( 'DELETE FROM `' . $this->prefix . 'options` WHERE option_name = %s AND BINARY option_value = BINARY %s', array( FOOGALLERY_MIGRATE_OPTION_DATA, $raw ) ) . $this->maintenance_guard() );
+					$this->write( $this->connection->prepare( 'DELETE FROM `' . $this->prefix . 'options` WHERE option_name = %s AND BINARY option_value = BINARY %s', array( FOOGALLERY_MIGRATE_OPTION_DATA, $raw ) ) . $this->maintenance_guard() );
 					$this->invalidate( FOOGALLERY_MIGRATE_OPTION_DATA );
 					$this->require_true( ! $this->option_present( FOOGALLERY_MIGRATE_OPTION_DATA ) );
 				}
@@ -279,13 +280,13 @@ class StorageConversion {
 	}
 
 	private function option_raw() {
-		$bytes = $this->db->get_var( $this->db->prepare( 'SELECT LENGTH(option_value) FROM `' . $this->prefix . 'options` WHERE option_name = %s LIMIT 1', array( FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
-		$this->require_true( empty( $this->db->last_error ) );
+		$bytes = $this->connection->get_var( $this->connection->prepare( 'SELECT LENGTH(option_value) FROM `' . $this->prefix . 'options` WHERE option_name = %s LIMIT 1', array( FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
+		$this->require_true( empty( $this->connection->last_error ) );
 		if ( null === $bytes ) { $this->budget( 0 ); return null; }
 		$this->require_true( is_numeric( $bytes ) && (string) (int) $bytes === (string) $bytes && (int) $bytes >= 0 );
 		$bytes = (int) $bytes; $this->budget( $bytes );
-		$raw = $this->db->get_var( $this->db->prepare( "SELECT CONCAT('v:', option_value) FROM `" . $this->prefix . 'options` WHERE option_name = %s AND LENGTH(option_value) = %d LIMIT 1', array( FOOGALLERY_MIGRATE_OPTION_DATA, $bytes ) ) );
-		$this->require_true( empty( $this->db->last_error ) && is_string( $raw ) && 0 === strpos( $raw, 'v:' ) && strlen( $raw ) === $bytes + 2 );
+		$raw = $this->connection->get_var( $this->connection->prepare( "SELECT CONCAT('v:', option_value) FROM `" . $this->prefix . 'options` WHERE option_name = %s AND LENGTH(option_value) = %d LIMIT 1', array( FOOGALLERY_MIGRATE_OPTION_DATA, $bytes ) ) );
+		$this->require_true( empty( $this->connection->last_error ) && is_string( $raw ) && 0 === strpos( $raw, 'v:' ) && strlen( $raw ) === $bytes + 2 );
 		return substr( $raw, 2 );
 	}
 
@@ -334,25 +335,25 @@ class StorageConversion {
 	}
 
 	private function raw_option_digest( $name ) {
-		$digest = $this->db->get_var( $this->db->prepare( 'SELECT SHA2(option_value, 256) FROM `' . $this->prefix . 'options` WHERE option_name = %s LIMIT 1', array( $name ) ) );
-		$this->require_true( empty( $this->db->last_error ) && ( null === $digest || ( is_string( $digest ) && preg_match( '/^[a-f0-9]{64}$/D', $digest ) ) ) );
+		$digest = $this->connection->get_var( $this->connection->prepare( 'SELECT SHA2(option_value, 256) FROM `' . $this->prefix . 'options` WHERE option_name = %s LIMIT 1', array( $name ) ) );
+		$this->require_true( empty( $this->connection->last_error ) && ( null === $digest || ( is_string( $digest ) && preg_match( '/^[a-f0-9]{64}$/D', $digest ) ) ) );
 		return hash( 'sha256', null === $digest ? 'absent' : 'present:' . $digest );
 	}
 
 	private function option_present( $name ) {
-		$found = $this->db->get_var( $this->db->prepare( 'SELECT 1 AS present FROM `' . $this->prefix . 'options` WHERE option_name = %s LIMIT 1', array( $name ) ) );
-		$this->require_true( empty( $this->db->last_error ) ); return null !== $found;
+		$found = $this->connection->get_var( $this->connection->prepare( 'SELECT 1 AS present FROM `' . $this->prefix . 'options` WHERE option_name = %s LIMIT 1', array( $name ) ) );
+		$this->require_true( empty( $this->connection->last_error ) ); return null !== $found;
 	}
 
 	private function insert_option( $name, $raw ) {
 		$this->ready();
-		$this->write( $this->db->prepare( 'INSERT INTO `' . $this->prefix . "options` ( option_name, option_value, autoload ) SELECT %s, %s, 'no' WHERE 1 = 1", array( $name, $raw ) ) . $this->maintenance_guard() );
+		$this->write( $this->connection->prepare( 'INSERT INTO `' . $this->prefix . "options` ( option_name, option_value, autoload ) SELECT %s, %s, 'no' WHERE 1 = 1", array( $name, $raw ) ) . $this->maintenance_guard() );
 		$this->invalidate( $name );
 		$this->require_true( $this->raw_option_digest( $name ) === hash( 'sha256', 'present:' . hash( 'sha256', $raw ) ) );
 	}
 
 	private function maintenance_guard() { return $this->controls->maintenance_guard( $this->gate->maintenance_identity() ); }
-	private function write( $sql ) { $this->require_true( 1 === $this->db->query( $sql ) && empty( $this->db->last_error ) ); }
+	private function write( $sql ) { $this->require_true( 1 === $this->connection->query( $sql ) && empty( $this->connection->last_error ) ); }
 	private function invalidate( $name ) { wp_cache_delete( $name, 'options' ); wp_cache_delete( 'alloptions', 'options' ); wp_cache_delete( 'notoptions', 'options' ); }
 	private function require_true( $value ) { if ( true !== $value ) { throw new \RuntimeException( 'Retain recorded authority and all conversion evidence; storage recovery is required.' ); } }
 	private function end() { $this->require_true( $this->gate->release_maintenance() ); $this->owns_gate = false; $this->gate = null; }

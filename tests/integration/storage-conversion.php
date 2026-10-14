@@ -4,6 +4,7 @@ if ( ! defined( 'ABSPATH' ) || ! defined( 'FOOGM_STORAGE_TEST_DISPOSABLE' ) || t
 $root = defined( 'FOOGM_STORAGE_TEST_ROOT' ) ? FOOGM_STORAGE_TEST_ROOT : dirname( dirname( __DIR__ ) );
 require_once $root . '/migrate.php';
 require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+require_once __DIR__ . '/storage-pinned-fixture.php';
 
 use FooPlugins\FooGalleryMigrate\StorageAuthority;
 use FooPlugins\FooGalleryMigrate\StorageControl;

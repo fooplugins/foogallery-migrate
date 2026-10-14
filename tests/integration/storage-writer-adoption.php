@@ -3,6 +3,7 @@
 if ( ! defined( 'ABSPATH' ) || ! defined( 'FOOGM_STORAGE_TEST_DISPOSABLE' ) || true !== FOOGM_STORAGE_TEST_DISPOSABLE ||
 	! defined( 'FOOGM_STORAGE_TEST_ROOT' ) ) { throw new RuntimeException( 'Explicitly disposable fixture required.' ); }
 require_once FOOGM_STORAGE_TEST_ROOT . '/migrate.php';
+require_once __DIR__ . '/storage-pinned-fixture.php';
 // wp_send_json() otherwise uses an uncatchable die outside real AJAX requests.
 if ( ! defined( 'DOING_AJAX' ) ) { define( 'DOING_AJAX', true ); }
 

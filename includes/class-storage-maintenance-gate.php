@@ -16,6 +16,7 @@ class StorageMaintenanceGate {
 	const TTL = 300;
 	private static $instances = array();
 	private $db;
+	private $connection;
 	private $blog_id;
 	private $prefix;
 	private $table;
@@ -203,6 +204,17 @@ class StorageMaintenanceGate {
 		if ( $wpdb !== $this->db || get_current_blog_id() !== $this->blog_id || $wpdb->prefix !== $this->prefix ) {
 			throw new \RuntimeException( 'Storage barrier context changed.' );
 		}
+		if ( null !== $this->connection && ! $this->connection->is_current() ) { throw new \RuntimeException( 'Storage barrier connection changed; retain ownership evidence.' ); }
+	}
+
+	/** Capture once, before the first marker statement. Never reconnect/reacquire. */
+	public function connection() {
+		$this->context();
+		if ( null === $this->connection ) {
+			$this->connection = $this->db instanceof LegacyTransactionConnection ? $this->db : new LegacyTransactionConnection( $this->db );
+		}
+		if ( ! $this->connection->is_current() ) { throw new \RuntimeException( 'Storage barrier connection unavailable.' ); }
+		return $this->connection;
 	}
 
 	private function record() {
@@ -215,33 +227,36 @@ class StorageMaintenanceGate {
 
 	/** Fresh bounded SQL reads bypass persistent-cache negative/stale entries. */
 	private function read( $name ) {
-		$value = $this->db->get_var( $this->db->prepare(
-			"SELECT CONCAT('v:', IF(LENGTH(option_value) <= 512, option_value, '')) AS marker FROM `" . $this->table . '` WHERE option_name = %s LIMIT 1', $name
+		$db = $this->connection();
+		$value = $db->get_var( $db->prepare(
+			"SELECT CONCAT('v:', IF(LENGTH(option_value) <= 512, option_value, '')) AS marker FROM `" . $this->table . '` WHERE option_name = %s LIMIT 1', array( $name )
 		) );
-		if ( ! empty( $this->db->last_error ) ) { throw new \RuntimeException( 'Storage marker read failed.' ); }
+		if ( ! empty( $db->last_error ) ) { throw new \RuntimeException( 'Storage marker read failed.' ); }
 		// wpdb::get_var maps an empty string to null. A nonempty envelope makes
 		// empty/corrupt/oversized existing rows distinguishable from absence.
 		return null === $value ? null : substr( $value, 2 );
 	}
 
 	private function insert( $name, $raw ) {
+		$db = $this->connection();
 		// WP add_option uses ON DUPLICATE KEY UPDATE, which is not a lock claim.
 		// IGNORE refuses a competing row without overwriting its owner. Inputs
 		// are fixed bounded ASCII names/JSON; exact raw readback verifies the claim.
-		$result = $this->db->query( $this->db->prepare(
-			'INSERT IGNORE INTO `' . $this->table . '` (option_name, option_value, autoload) VALUES ( %s, %s, \'no\' )', $name, $raw
+		$result = $db->query( $db->prepare(
+			'INSERT IGNORE INTO `' . $this->table . '` (option_name, option_value, autoload) VALUES ( %s, %s, \'no\' )', array( $name, $raw )
 		) );
 		$this->invalidate( $name );
-		if ( ! empty( $this->db->last_error ) ) { throw new \RuntimeException( 'Storage marker insertion failed.' ); }
+		if ( ! empty( $db->last_error ) ) { throw new \RuntimeException( 'Storage marker insertion failed.' ); }
 		return 1 === $result;
 	}
 
 	private function writers_present() {
-		$found = $this->db->get_var( $this->db->prepare(
+		$db = $this->connection();
+		$found = $db->get_var( $db->prepare(
 			'SELECT 1 AS present FROM `' . $this->table . '` WHERE option_name LIKE %s LIMIT 1',
-			$this->db->esc_like( self::WRITER_PREFIX ) . '%'
+			array( $db->esc_like( self::WRITER_PREFIX ) . '%' )
 		) );
-		if ( ! empty( $this->db->last_error ) ) { throw new \RuntimeException( 'Storage writer probe failed.' ); }
+		if ( ! empty( $db->last_error ) ) { throw new \RuntimeException( 'Storage writer probe failed.' ); }
 		// Even malformed/expired markers block. Recovery must prove safe removal.
 		return null !== $found;
 	}
@@ -255,17 +270,18 @@ class StorageMaintenanceGate {
 	}
 
 	private function renew( $name, &$raw ) {
+		$db = $this->connection();
 		$this->owned_live( $name, $raw );
 		$record = json_decode( $raw, true );
 		$record['expires'] = time() + self::TTL;
 		$next = wp_json_encode( $record );
 		if ( ! is_string( $next ) ) { throw new \RuntimeException( 'Storage marker encoding failed.' ); }
-		$result = $this->db->query( $this->db->prepare(
+		$result = $db->query( $db->prepare(
 			'UPDATE `' . $this->table . '` SET option_value = %s WHERE option_name = %s AND BINARY option_value = BINARY %s',
-			$next, $name, $raw
+			array( $next, $name, $raw )
 		) );
 		$this->invalidate( $name );
-		if ( false === $result || ! empty( $this->db->last_error ) || ( 0 === $result && $next !== $raw ) ) {
+		if ( false === $result || ! empty( $db->last_error ) || ( 0 === $result && $next !== $raw ) ) {
 			throw new \RuntimeException( 'Storage marker renewal failed.' );
 		}
 		// Save a successful write's raw owner BEFORE readback: if readback fails,
@@ -275,12 +291,13 @@ class StorageMaintenanceGate {
 	}
 
 	private function remove_owned( $name, $raw ) {
+		$db = $this->connection();
 		if ( ! is_string( $raw ) ) { throw new \RuntimeException( 'No storage ownership.' ); }
-		$result = $this->db->query( $this->db->prepare(
-			'DELETE FROM `' . $this->table . '` WHERE option_name = %s AND BINARY option_value = BINARY %s', $name, $raw
+		$result = $db->query( $db->prepare(
+			'DELETE FROM `' . $this->table . '` WHERE option_name = %s AND BINARY option_value = BINARY %s', array( $name, $raw )
 		) );
 		$this->invalidate( $name );
-		if ( 1 !== $result || ! empty( $this->db->last_error ) || null !== $this->read( $name ) ) {
+		if ( 1 !== $result || ! empty( $db->last_error ) || null !== $this->read( $name ) ) {
 			throw new \RuntimeException( 'Storage marker release failed.' );
 		}
 	}

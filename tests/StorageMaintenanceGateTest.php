@@ -239,7 +239,10 @@ class StorageMaintenanceGateTest extends TestCase {
 	}
 }
 
-class MaintenanceTestWpdb {
+class MaintenanceTestWpdb extends \FooPlugins\FooGalleryMigrate\LegacyTransactionConnection {
+	public $current = true;
+	public function __construct() {}
+	public function is_current() { return $this->current; }
 	public $prefix = 'wp_';
 	public $last_error = '';
 	public $fail_read = false;

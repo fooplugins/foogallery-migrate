@@ -26,6 +26,14 @@ class StorageAuthority {
 	 */
 	public static function option_mode_error( $writer = null, $maintenance = false ) {
 		global $wpdb;
+		try {
+			$db = true === $maintenance && $writer instanceof StorageMaintenanceGate ? $writer->connection() : $wpdb;
+			return self::option_mode_error_on( $db, $writer, $maintenance );
+		} catch ( \Exception $error ) { return self::recovery_error(); }
+		catch ( \Throwable $error ) { return self::recovery_error(); }
+	}
+
+	private static function option_mode_error_on( $wpdb, $writer, $maintenance ) {
 		if ( ! is_object( $wpdb ) || ! is_callable( array( $wpdb, 'get_var' ) ) ||
 			! is_callable( array( $wpdb, 'prepare' ) ) || ! is_callable( array( $wpdb, 'esc_like' ) ) ||
 			! isset( $wpdb->prefix ) || ! preg_match( '/^[A-Za-z0-9_]+$/', $wpdb->prefix ) ) {
