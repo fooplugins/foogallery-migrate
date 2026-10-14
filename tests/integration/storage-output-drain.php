@@ -51,7 +51,7 @@ $writers = function () use ( $observer, $pattern ) { return $observer->get_resul
 foreach ( $tables as $table ) { if ( null !== $observer->get_var( $observer->prepare( 'SHOW TABLES LIKE %s', $observer->esc_like( $table ) ) ) ) { throw new RuntimeException( 'Refusing preexisting tables.' ); } }
 foreach ( $names as $name ) { if ( null !== $observer->get_var( $observer->prepare( "SELECT 1 FROM `{$observer->options}` WHERE option_name=%s", $name ) ) ) { throw new RuntimeException( 'Refusing preexisting state.' ); } }
 if ( array() !== $writers() ) { throw new RuntimeException( 'Refusing preexisting writers.' ); }
-$checks = array(); $posts = array(); $owned_markers = array(); $created = array(); $gate = null;
+$checks = array(); $native_recoveries = array(); $posts = array(); $owned_markers = array(); $created = array(); $gate = null;
 $assert = function ( $condition, $label ) use ( &$checks ) { if ( ! $condition ) { throw new RuntimeException( $label ); } $checks[] = $label; };
 $clean = function () use ( $observer, &$created, &$owned_markers, $names, $blog, $assert ) {
 	foreach ( $owned_markers as $row ) {
@@ -285,4 +285,4 @@ try {
 	wp_cache_flush(); unset( $GLOBALS['foogallery_migrate_engine_instance'] );
 }
 $assert( array() === $writers() && false === StorageAuthority::option_mode_error(), 'virgin option authority and no writer remnants' );
-echo wp_json_encode( array( 'status' => 'pass', 'scope' => 'real base/core-adapter discovery, queue, output, checkpoint and public backend selection; direct gallery/album/media hooks; synthetic FooGallery settings/calibration; handle replacement, not network/PHP death/full recovery', 'checks' => $checks, 'check_count' => count( $checks ), 'blog_id' => $blog, 'wordpress' => get_bloginfo( 'version' ), 'php' => PHP_VERSION, 'database' => $observer->get_var( 'SELECT VERSION()' ) ) ) . PHP_EOL;
+echo wp_json_encode( array( 'status' => 'pass', 'scope' => 'real base/core discovery/output, public selection and fresh-process phase recovery after handled SQL interruption; direct gallery/album/media hooks; synthetic FooGallery settings/calibration; NOT stale-owner takeover, network/PHP death recovery or full output audit', 'native_recoveries' => $native_recoveries, 'checks' => $checks, 'check_count' => count( $checks ), 'blog_id' => $blog, 'wordpress' => get_bloginfo( 'version' ), 'php' => PHP_VERSION, 'database' => $observer->get_var( 'SELECT VERSION()' ) ) ) . PHP_EOL;

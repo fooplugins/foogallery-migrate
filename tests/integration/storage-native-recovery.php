@@ -80,4 +80,5 @@ if ( 'flipped' === $phase ) {
 	if ( 'table' === $mode ) { foreach ( $tables as $table ) { $assert( $inactive[$table] === $after_recovery[$table], 'post-flip public recovery neither trusts nor rewrites inactive table ' . $label ); } }
 	else { $name = \FooPlugins\FooGalleryMigrate\StorageAuthority::STORAGE_BACKUP_OPTION; $assert( $inactive[$name] === $after_recovery[$name], 'post-flip public recovery neither trusts nor rewrites inactive backup ' . $label ); }
 }
+$native_recoveries[] = array( 'from' => $mode, 'to' => $target, 'phase' => $phase, 'blog_id' => $blog, 'worker_pid' => $worker['pid'], 'parent_pid' => getmypid(), 'exit' => $rc, 'stderr_bytes' => strlen( $err ), 'response' => $result, 'history_retained' => $worker['history_retained'], 'progress' => $worker['progress'], 'inactive_changed' => 'flipped' === $phase );
 wp_cache_flush(); unset( $GLOBALS['foogallery_migrate_engine_instance'] );
