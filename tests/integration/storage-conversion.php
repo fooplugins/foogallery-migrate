@@ -155,6 +155,19 @@ try {
 	$check( $fired && is_wp_error( $failed ) && 'verified' === $pending['phase'] && 'option' === $pending['backend'], 'destination parity failure retains source authority after staging' );
 	$check( is_wp_error( ( new StorageConversion( $policy ) )->recover( $request( 'table', true ) ) ) && $codec->snapshot_digest( $initial ) === $codec->snapshot_digest( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) ), 'mismatched destination recovery refuses rather than merging or rewriting source' );
 
+	// Publication itself must depend on the last verified destination snapshot.
+	$reset(); update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $initial, false ); $fired = false;
+	$hook = function ( $sql ) use ( &$fired, $db, $blog ) {
+		$set = stripslashes( substr( $sql, 0, (int) strpos( $sql, ' WHERE ' ) ) );
+		if ( ! $fired && 0 === strpos( $sql, 'UPDATE' ) && false !== strpos( $sql, 'storage_control' ) && false !== strpos( $set, '"phase":"stable"' ) ) {
+			$fired = true; ( new LegacyTableBackend( $db, $blog ) )->mutate_scalars( array( 9 => true ) );
+		}
+		return $sql;
+	};
+	add_filter( 'query', $hook ); $failed = ( new StorageConversion( $policy ) )->switch_backend( $request( 'table' ) ); remove_filter( 'query', $hook ); $hook = null;
+	$pending = StorageControl::decode( $control->read( StorageAuthority::CONTROL_OPTION ), $blog );
+	$check( $fired && is_wp_error( $failed ) && 'flipped' === $pending['phase'] && ! StorageControl::runtime_ready( $pending, $control->read( StorageAuthority::AUTHORITY_OPTION ) ), 'stable-publication CAS refuses destination changed after final parity check' );
+
 	// Atomic source dependency in final authority CAS, not only a prior SELECT.
 	$reset(); update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $initial, false ); $fired = false;
 	$hook = function ( $sql ) use ( &$fired, $initial ) {
