@@ -56,7 +56,7 @@ try { do_action( 'admin_post_foogallery_migrate_storage' ); throw new RuntimeExc
 catch ( RuntimeException $error ) { if ( 'owned-json-response' !== $error->getMessage() ) { throw $error; } }
 finally { $raw = ob_get_clean(); remove_filter( 'wp_die_ajax_handler', $die ); remove_filter( 'foogallery_migrate_storage_calibration', $profile ); }
 $response = json_decode( $raw, true );
-if ( ! $recover || ! is_array( $response ) || false !== $response['success'] || 'foogallery_migrate_storage_busy' !== $response['data']['code'] ) { exit( 7 ); }
+if ( ! $recover || ! is_array( $response ) || false !== $response['success'] || 'foogallery_migrate_storage_recovery_required' !== $response['data']['code'] ) { fwrite( STDERR, 'Unexpected public response: ' . $raw . "\n" ); exit( 7 ); }
 $blocked = false;
 try { new \FooPlugins\FooGalleryMigrate\MigratorEngine(); }
 catch ( RuntimeException $error ) { $blocked = true; }

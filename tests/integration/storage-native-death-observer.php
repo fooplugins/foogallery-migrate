@@ -19,7 +19,11 @@ $start = function ( $operation ) use ( &$process, &$pipes, $blog, $root, $target
 	if ( ! is_resource( $process ) ) { throw new RuntimeException( 'Could not start owned receiver.' ); }
 	fwrite( $pipes[0], json_encode( array( 'blog_id' => $blog, 'plugin' => $root, 'target' => $target, 'phase' => $phase, 'mode' => $operation, 'migrated_id' => (int) $object->migrated_id ) ) . "\n" ); fflush( $pipes[0] );
 	stream_set_timeout( $pipes[1], 30 ); $line = fgets( $pipes[1], 4096 );
-	if ( ! is_string( $line ) ) { throw new RuntimeException( 'Missing bounded receiver handshake.' ); }
+	if ( ! is_string( $line ) ) {
+		$status = proc_get_status( $process );
+		$detail = $status['running'] ? 'receiver still running' : 'exit=' . $status['exitcode'] . ' stderr=' . stream_get_contents( $pipes[2], 4096 );
+		throw new RuntimeException( 'Missing bounded receiver handshake: ' . $detail );
+	}
 	return json_decode( $line, true );
 };
 $finish = function () use ( &$process, &$pipes ) {
@@ -59,7 +63,7 @@ try {
 		$frozen = $capture(); $probe = $start( 'probe' ); $fresh_status = proc_get_status( $process );
 		fclose( $pipes[0] ); $out = stream_get_contents( $pipes[1] ); $err = stream_get_contents( $pipes[2] ); fclose( $pipes[1] ); fclose( $pipes[2] ); $pipes = array(); $rc = proc_close( $process ); $process = null;
 		$assert( 0 === $rc && '' === $out && '' === $err && is_array( $probe ) && $probe['pid'] === $fresh_status['pid'] && $probe['pid'] !== getmypid() && $probe['pid'] !== $hello['pid'], 'separately bootstrapped purpose-authorized public recovery ' . $label . '/' . $age );
-		$assert( false === $probe['response']['success'] && 'foogallery_migrate_storage_busy' === $probe['response']['data']['code'] && true === $probe['runtime_blocked'] && true === $probe['output_retained'], 'dead or aged owner blocks even completed output and stable destination ' . $label . '/' . $age );
+		$assert( false === $probe['response']['success'] && 'foogallery_migrate_storage_recovery_required' === $probe['response']['data']['code'] && true === $probe['runtime_blocked'] && true === $probe['output_retained'], 'dead or aged owner blocks even completed output and stable destination ' . $label . '/' . $age );
 		$assert( $frozen === $capture(), 'fresh refused recovery neither clears owner nor rewrites any backend/output ' . $label . '/' . $age );
 		$probes[] = array( 'age' => $age, 'exit' => $rc, 'stderr_bytes' => strlen( $err ), 'state_sha256' => hash( 'sha256', json_encode( $frozen ) ), 'receipt' => $probe );
 	}
