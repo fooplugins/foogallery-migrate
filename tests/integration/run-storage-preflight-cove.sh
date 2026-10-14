@@ -1,11 +1,13 @@
 #!/bin/bash
-# Focused exact-head read-only admission checkpoint, NOT a release gate.
+# Focused exact-head storage primitive checkpoint, NOT a release gate.
 set -euo pipefail
 umask 077
 SOURCE=${1:?absolute clean source repository}
 ZIP=${2:?absolute candidate ZIP}
 OUT=${3:?absolute new evidence directory}
 EXPECTED=${4:?exact candidate commit}
+CASE=${5:-storage-preflight}
+[[ "$CASE" == storage-preflight || "$CASE" == storage-writer-gate ]] || exit 1
 COVE=/opt/homebrew/bin/cove
 [[ "$SOURCE" == /* && "$ZIP" == /* && "$OUT" == /* ]] || exit 1
 [[ "$SOURCE$ZIP$OUT" != *"'"* ]] || exit 1
@@ -102,10 +104,10 @@ for topology in single multi; do
     for scope in "${scopes[@]}"; do
       url="https://$site.localhost/"
       [[ "$scope" != multi-2 ]] || url="https://$site.localhost/second/"
-      id="$kind-$scope-storage-preflight"
+      id="$kind-$scope-$CASE"
       "$COVE" wp "$site" --url="$url" --skip-plugins --skip-themes --user=1 eval 'get_option("siteurl"); current_user_can("manage_options");' > /dev/null 2>&1
       dump --skip-comments --skip-dump-date --skip-extended-insert --no-create-info --compact "$database" > "$before"
-      harness="$OUT/source/tests/integration/storage-preflight.php"
+      harness="$OUT/source/tests/integration/$CASE.php"
       code="define('FOOGM_STORAGE_TEST_DISPOSABLE', true); define('FOOGM_STORAGE_TEST_ROOT', '$plugin'); require '$harness'; echo 'PREFLIGHT_CASE_COMPLETE:$id' . PHP_EOL;"
       rc=0
       "$COVE" wp "$site" --url="$url" --skip-plugins --skip-themes --user=1 eval "$code" > "$OUT/raw/$id.stdout" 2> "$OUT/raw/$id.stderr" || rc=$?
