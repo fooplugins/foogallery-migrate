@@ -17,6 +17,7 @@ class FgmRuntimeReceiptLoss extends LegacyTransactionConnection {
 	public $fault;
 	public $fired = false;
 	public $after_commit = false;
+	public $mutated = false;
 	public $sql = array();
 	private function lose() {
 		// Test-only loss of a response after a REAL native commit/read. This does
@@ -27,7 +28,8 @@ class FgmRuntimeReceiptLoss extends LegacyTransactionConnection {
 	}
 	public function query( $sql ) {
 		$this->sql[] = $sql; $result = parent::query( $sql );
-		if ( null !== $this->fault && 'COMMIT' === $sql && false !== $result ) {
+		if ( null !== $this->fault && 1 === $result && false !== strpos( $sql, ' SET root_payload = ' ) ) { $this->mutated = true; }
+		if ( null !== $this->fault && $this->mutated && 'COMMIT' === $sql && false !== $result ) {
 			$this->after_commit = true;
 			if ( 'commit-ack' === $this->fault ) { $this->lose(); return false; }
 		}
@@ -99,7 +101,14 @@ try {
 		$check( 1 === count( $writers ), $fault . ': one persisted owned writer' );
 		$queries = array(); $capture = function ( $sql ) use ( &$queries ) { $queries[] = $sql; return $sql; }; add_filter( 'query', $capture );
 		$pin->fault = $fault;
-		try { $engine->set_migrator_setting( 'checkpoint', 'committed-without-receipt' ); throw new LogicException( 'Uncertain writer reported success.' ); }
+		try {
+			$result = $engine->set_migrator_setting( 'checkpoint', 'committed-without-receipt' );
+			if ( 'post-commit-read' === $fault ) {
+				$check( true === $result && $pin->after_commit, $fault . ': confirmed native mutation precedes lost next authority read' );
+				$engine->get_migrator_setting( 'checkpoint' );
+			}
+			throw new LogicException( 'Uncertain writer/read reported success.' );
+		}
 		catch ( RuntimeException $error ) { $check( $pin->fired && ! $pin->is_current(), $fault . ': lost receipt refuses actual writer and latches shared pin' ); }
 		$check( array() === $queries, $fault . ': writer and authority SQL never use wpdb replay/query-filter path' );
 		remove_filter( 'query', $capture ); $capture = null;
