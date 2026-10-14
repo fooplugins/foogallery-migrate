@@ -72,7 +72,7 @@ Native same-request triggers are not separate-process races or hard-death proof.
 The executed results and fixture teardown verification are in the adjacent handoff.
 
 Keep `t_396d60fe` OPEN with `task_scope_completed=false`; retain the existing
-compatibility `t_7dc60149` and independent review `t_8552160b` dependency holds.
+downstream validation/implementation `t_7dc60149` and `t_8552160b` dependency holds.
 Remaining same-card work includes independently approved runtime/SAPI worst-case
 calibration (or evidence-backed refusal), approved selection/preflight UI, safe
 stale-owner/drain proof, hard-process-death and uncertain ownership/readback/commit
