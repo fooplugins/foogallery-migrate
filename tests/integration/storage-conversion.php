@@ -76,7 +76,8 @@ try {
 
 	// Direct admitted-backend primitive fixture mutation, not public UI acceptance.
 	$backend = new LegacyTableBackend( $db, $blog );
-	$backend->mutate_scalars( array( 9 => true, 'migrated-revision' => 8 ) );
+	$backend->mutate_scalars( array( 9 => true ) );
+	$reader->replace_many( array( array( 'key' => 'migrated-revision', 'order' => 1, 'kind' => 'scalar', 'value' => 8, 'expected_revision' => 1 ) ) );
 	$expected = $initial; $expected[9] = true; $expected['migrated-revision'] = 8;
 	$result = ( new StorageConversion( $policy ) )->switch_backend( $request( 'option' ) );
 	$check( ! is_wp_error( $result ), 'authorized reverse switch succeeds from current authoritative table state' );
