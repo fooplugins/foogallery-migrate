@@ -250,6 +250,7 @@ class MaintenanceTestWpdb {
 
 	public function esc_like( $value ) { return addcslashes( $value, '_%\\' ); }
 	public function prepare( $query, ...$values ) {
+		if ( 1 === count( $values ) && is_array( $values[0] ) ) { $values = $values[0]; }
 		foreach ( $values as $value ) {
 			$query = preg_replace_callback( '/%[sd]/', function ( $match ) use ( $value ) {
 				return '%d' === $match[0] ? (string) (int) $value : "'" . str_replace( "'", "''", $value ) . "'";
@@ -261,6 +262,13 @@ class MaintenanceTestWpdb {
 		$this->queries[] = $query;
 		$this->last_error = $this->fail_read ? 'private read error' : '';
 		$value = null;
+		if ( false !== strpos( $query, 'option_name IN' ) ) {
+			preg_match_all( "/'([^']+)'/", $query, $names );
+			foreach ( $names[1] as $name ) {
+				if ( array_key_exists( $name, $GLOBALS['foogallery_migrate_test_options'] ) ) { return '1'; }
+			}
+			return null;
+		}
 		if ( preg_match( "/option_name = '([^']+)'/", $query, $match ) ) {
 			if ( array_key_exists( $match[1], $GLOBALS['foogallery_migrate_test_options'] ) ) {
 				$value = $GLOBALS['foogallery_migrate_test_options'][$match[1]];

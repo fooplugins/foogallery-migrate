@@ -11,22 +11,19 @@ use FooPlugins\FooGalleryMigrate\Objects\Image;
 use FooPlugins\FooGalleryMigrate\ScalarStateRepository;
 use PHPUnit\Framework\TestCase;
 
+require_once __DIR__ . '/StorageMaintenanceGateTest.php';
+
 class LegacySharedIntegrationTest extends TestCase {
 	private $previous_db;
 	protected function setUp(): void {
 		$this->previous_db = isset( $GLOBALS['wpdb'] ) ? $GLOBALS['wpdb'] : null;
-		$GLOBALS['wpdb'] = new class {
-			public $prefix = 'wp_';
-			public $last_error = '';
-			public function prepare( $sql, ...$values ) { return vsprintf( $sql, $values ); }
-			public function esc_like( $value ) { return addcslashes( $value, '_%' ); }
-			public function get_var( $sql ) { return null; }
-		};
+		$GLOBALS['wpdb'] = new MaintenanceTestWpdb();
 		$GLOBALS['foogallery_migrate_test_options'] = array();
 		$GLOBALS['foogallery_migrate_test_failed_options'] = array();
 		$GLOBALS['foogallery_migrate_test_option_writes'] = array();
 	}
 	protected function tearDown(): void {
+		\FooPlugins\FooGalleryMigrate\StorageMaintenanceGate::current()->shutdown_writer();
 		$GLOBALS['wpdb'] = $this->previous_db;
 		$GLOBALS['foogallery_migrate_test_failed_options'] = array();
 		unset( $GLOBALS['foogallery_migrate_test_option_writes'] );

@@ -84,6 +84,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
         }
 
         function create_new_migrated_object() {
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
             // Check if we can get out early!
             if ( $this->migrated && $this->migrated_id > 0 ) {
                 return;
@@ -178,6 +179,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
                     'tmp_name' => $tmp,
                 );
 
+                foogallery_migrate_migrator_instance()->assert_storage_writer();
                 $sideload = wp_handle_sideload( $file_array, array( 'test_form' => false ) );
                 if ( ! empty( $sideload['error'] ) ) {
                     @unlink( $tmp );
@@ -207,6 +209,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
                         'tmp_name' => $tmp,
                     );
 
+                    foogallery_migrate_migrator_instance()->assert_storage_writer();
                     $sideload = wp_handle_sideload( $file_array, array( 'test_form' => false ) );
                     if ( ! empty( $sideload['error'] ) ) {
                         @unlink( $tmp );
@@ -238,6 +241,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
             }
 
             // Insert the attachment
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
             $this->migrated_id = wp_insert_attachment( $attachment, $file, 0 );
             if ( is_wp_error( $this->migrated_id ) ) {
                 $error = $this->migrated_id;
@@ -270,6 +274,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
          * @return bool|null True/error handled when used, null when skipped.
          */
         private function import_tagged_image_with_foogallery() {
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
             $image_tags = $this->get_image_tags();
             if ( empty( $image_tags ) || ! function_exists( 'foogallery_import_attachment' ) || ! $this->can_assign_foogallery_image_tags() ) {
                 return null;
@@ -321,6 +326,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
          * @return bool True when term migration completed or was skipped.
          */
         private function apply_image_tags_to_attachment() {
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
             $image_tags = $this->get_image_tags();
             if ( $this->migrated_id < 1 || empty( $image_tags ) || ! $this->can_assign_foogallery_image_tags() ) {
                 return true;

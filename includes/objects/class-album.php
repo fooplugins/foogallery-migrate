@@ -58,6 +58,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Album' ) ) {
         }
 
         function create_new_migrated_object() {
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
             // Create an album
             
             if ( $this->migrated_id === 0 ) {
@@ -100,6 +101,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Album' ) ) {
          * @return void
          */
         function inherit_album_settings_from( $source_album_id ) {
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
             if ( defined( 'FOOGALLERY_META_SETTINGS_OLD' ) ) {
                 $settings = get_post_meta( $source_album_id, FOOGALLERY_META_SETTINGS_OLD, true );
                 if ( ! empty( $settings ) ) {
@@ -128,6 +130,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Album' ) ) {
          * @return void
          */
         function migrate_next_child() {
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
             parent::migrate_next_child();        
             $galleries = $this->build_child_migrated_id_array();
             update_post_meta( $this->migrated_id, FOOGALLERY_ALBUM_META_GALLERIES, $galleries );

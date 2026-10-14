@@ -139,6 +139,7 @@ class FakePlugin {
 }
 
 class FakeEngine {
+	public function assert_storage_writer() {}
 	public $settings = array();
 	public $fail_next_write = false;
 	public $migration_revision = 0;

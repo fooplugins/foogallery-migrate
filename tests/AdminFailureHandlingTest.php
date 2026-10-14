@@ -5,9 +5,18 @@ namespace FooPlugins\FooGalleryMigrate\Tests;
 use FooPlugins\FooGalleryMigrate\Init;
 use PHPUnit\Framework\TestCase;
 
+require_once __DIR__ . '/StorageMaintenanceGateTest.php';
+
 class AdminFailureHandlingTest extends TestCase {
+	protected function setUp(): void {
+		$GLOBALS['wpdb'] = new MaintenanceTestWpdb();
+		$GLOBALS['foogallery_migrate_test_blog_id'] = 1;
+		$GLOBALS['foogallery_migrate_test_options'] = array();
+	}
 
 	protected function tearDown(): void {
+		\FooPlugins\FooGalleryMigrate\StorageMaintenanceGate::current()->shutdown_writer();
+		unset( $GLOBALS['wpdb'] );
 		$_POST = array();
 		unset( $GLOBALS['foogallery_migrate_engine_instance'] );
 		parent::tearDown();

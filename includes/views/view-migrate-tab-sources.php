@@ -24,21 +24,20 @@ if ( ! defined( 'ABSPATH' ) ) {
         if ( ! current_user_can( 'manage_options' ) ) {
             wp_die( esc_html__( 'Unauthorized.', 'foogallery-migrate' ) );
         }
-        if ( isset( $_POST['clear_migration_history'] ) ) {
-            if ( check_admin_referer( 'foogallery_migrate_detect', 'foogallery_migrate_detect' ) ) {
+        if ( check_admin_referer( 'foogallery_migrate_detect', 'foogallery_migrate_detect' ) ) {
+            $storage_error = \FooPlugins\FooGalleryMigrate\StorageAuthority::admit_option_writer();
+            if ( is_wp_error( $storage_error ) ) {
+                echo '<div class="notice notice-error inline"><p>' . esc_html( $storage_error->get_error_message() ) . '</p></div>';
+            } else if ( isset( $_POST['clear_migration_history'] ) ) {
                 $migrator->clear_migrator_setting();
-            }
-        } else if ( isset( $_POST['check_migration_errors'] ) ) {
-            if ( check_admin_referer( 'foogallery_migrate_detect', 'foogallery_migrate_detect' ) ) {
+            } else if ( isset( $_POST['check_migration_errors'] ) ) {
                 $migration_error_check_result = $migrator->check_for_migration_errors();
                 if ( is_wp_error( $migration_error_check_result ) ) {
                     echo '<div class="notice notice-error inline"><p>' . esc_html( $migration_error_check_result->get_error_message() ) . '</p></div>';
                 } else {
 					$migrator->get_gallery_migrator()->get_objects_to_migrate(true);
                 }
-            }
-        } else {
-            if ( check_admin_referer( 'foogallery_migrate_detect', 'foogallery_migrate_detect' ) ) {
+            } else {
                 $migrator->run_detection();
             }
         }

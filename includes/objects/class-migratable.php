@@ -185,6 +185,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
          * @return void
          */
         function migrate() {
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
             $migrated_object = false;
             if ( empty( $this->migration_store_checked ) ) {
                 $migrated_object = foogallery_migrate_migrator_instance()->get_migrated_object( $this->unique_identifier() );

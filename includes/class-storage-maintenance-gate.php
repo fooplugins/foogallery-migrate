@@ -3,7 +3,7 @@
  * Request-scoped storage barrier, NOT an engine worker lease or backend selector.
  * Callers must use current(), enter before any output/state mutation, and leave
  * on normal returns. PHP exit/wp_die paths have an owner-checked shutdown fallback.
- * This primitive is not yet wired into production mutation endpoints.
+ * Production option-mode mutations retain one admission until request shutdown.
  *
  * @package FooPlugins\FooGalleryMigrate
  */
@@ -49,6 +49,11 @@ class StorageMaintenanceGate {
 	}
 
 	/** Check -> atomic marker insertion -> check closes check-then-start races. */
+	public function admit_request_writer() {
+		// Never turn a failed/expired previous admission into a new owner.
+		return null !== $this->writer_raw ? $this->renew_writer() : $this->begin_writer();
+	}
+
 	public function begin_writer() {
 		try {
 			$this->context();

@@ -75,6 +75,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
             $objects = $this->get_setting( $this->type );
 
             if ( $objects === false || $force ) {
+                $this->migrator_engine->assert_storage_writer();
                 $objects = array();
                 foreach ( $this->migrator_engine->get_plugins() as $plugin ) {
                     if ( $plugin->is_detected ) {
@@ -98,6 +99,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
          * @return bool Whether the queue and its summary state were persisted.
          */
         function queue_objects_for_migration( $id_array ) {
+            $this->migrator_engine->assert_storage_writer();
 
             $objects = $this->get_objects_to_migrate();
             $queued_object_count = 0;
@@ -173,6 +175,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
          * @return void
          */
         function cancel_migration() {
+            $this->migrator_engine->assert_storage_writer();
             $this->queue_objects_for_migration( array() );
         }
 
@@ -218,6 +221,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
          * @return bool Whether the migrated batch and option state were persisted.
          */
         function migrate() {
+            $this->migrator_engine->assert_storage_writer();
             $objects = $this->get_objects_to_migrate();
 
             $this->migrator_engine->begin_migrated_object_batch();

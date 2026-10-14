@@ -10,6 +10,16 @@ namespace FooPlugins\FooGalleryMigrate;
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 class LegacyOptionBackend {
+	private $writer_admission;
+
+	/** The production engine binds admission; injected repository seams stay inert. */
+	public function __construct( $writer_admission = null ) {
+		if ( null !== $writer_admission && ! is_callable( $writer_admission ) ) { throw new \RuntimeException( 'Invalid storage writer admission.' ); }
+		$this->writer_admission = $writer_admission;
+	}
+	private function assert_writer() {
+		if ( null !== $this->writer_admission && true !== call_user_func( $this->writer_admission ) ) { throw new \RuntimeException( 'Storage writer was not admitted.' ); }
+	}
 	/** Raw logical state; historical objects and unknown fields are untouched. */
 	public function read_all() {
 		$missing = new \stdClass();
@@ -66,6 +76,7 @@ class LegacyOptionBackend {
 	 */
 	public function mutate( $change ) {
 		if ( ! is_callable( $change ) ) { return false; }
+		$this->assert_writer();
 		try { $data = $this->read_all(); }
 		catch ( \RuntimeException $error ) { return false; }
 		$changed = call_user_func( $change, $data );
@@ -75,6 +86,7 @@ class LegacyOptionBackend {
 	/** Explicit full replacement (including clear), never a table hot-path API. */
 	public function replace_all( $data ) {
 		if ( ! is_array( $data ) ) { return false; }
+		$this->assert_writer();
 		update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $data, false );
 		$saved = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
 		// WP caches serialized bytes; reads can create new object identities.

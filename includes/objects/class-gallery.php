@@ -42,6 +42,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Gallery' ) ) {
         }
 
         function create_new_migrated_object() {
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
             $existing = get_posts(
                 array(
                     'post_type'      => FOOGALLERY_CPT_GALLERY,
@@ -142,6 +143,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Gallery' ) ) {
          * @return void
          */
         function migrate_next_child() {
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
             parent::migrate_next_child();
 
             $attachments = $this->build_child_migrated_id_array();

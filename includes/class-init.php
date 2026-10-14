@@ -141,6 +141,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             }
 
             check_admin_referer( 'foogallery_migrate_detect_wordpress_core' );
+			$this->admit_storage_writer();
 
             $migrator = foogallery_migrate_migrator_instance();
             $mode = isset( $_POST['wordpress_gallery_mode'] ) ? sanitize_key( wp_unslash( $_POST['wordpress_gallery_mode'] ) ) : '';
@@ -188,6 +189,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
 
             check_admin_referer( 'foogallery_content_migrate', 'foogallery_content_migrate' );
 
+			$this->admit_storage_writer();
             $selected_items = array();
             if ( isset( $_POST['content-item'] ) ) {
                 $selected_items = map_deep( wp_unslash( $_POST['content-item'] ), 'absint' );
@@ -217,6 +219,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             }
 
             check_admin_referer( 'foogallery_content_migrate', 'foogallery_content_migrate' );
+			$this->admit_storage_writer();
             $migrator = foogallery_migrate_migrator_instance();
             $migrator->get_gallery_migrator()->get_objects_to_migrate( true );
             $content_migrator = $migrator->get_content_migrator();
@@ -237,6 +240,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             }
 
             check_admin_referer( 'foogallery_content_migrate', 'foogallery_content_migrate' );
+			$this->admit_storage_writer();
             $content_migrator = foogallery_migrate_migrator_instance()->get_content_migrator();
             $progress = $content_migrator->get_status_refresh_progress();
             $reset = empty( $progress['started'] ) || ! empty( $progress['complete'] );
@@ -265,6 +269,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             }
 
             check_admin_referer( 'foogallery_migrate_settings', 'foogallery_migrate_settings' );
+			$this->admit_storage_writer();
 
             $settings = array(
                 'override_gallery_layout' => '',
@@ -337,6 +342,15 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             wp_send_json_error( array( 'message' => $message ), $status_code );
         }
 
+        /** Admission is after authentication, before engine creation or callbacks. */
+        private function admit_storage_writer( $ajax = false ) {
+            $error = StorageAuthority::admit_option_writer();
+            if ( is_wp_error( $error ) ) {
+                if ( $ajax ) { $this->send_json_error( $error->get_error_message(), 503 ); }
+                else { wp_die( esc_html( $error->get_error_message() ) ); }
+            }
+        }
+
         /**
          * Read a submitted migration title, including PHP-normalized field names.
          *
@@ -371,6 +385,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
                     $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
+				$this->admit_storage_writer( true );
 
                 $migrator = foogallery_migrate_migrator_instance();
 
@@ -409,6 +424,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
                     $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
+				$this->admit_storage_writer( true );
 
                 if ( array_key_exists( 'action', $_REQUEST ) ) {
                     $action = sanitize_text_field( wp_unslash( $_REQUEST['action'] ) );
@@ -431,6 +447,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
                     $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
+				$this->admit_storage_writer( true );
                 $migrator = foogallery_migrate_migrator_instance();
 
                 if ( array_key_exists( 'foogallery_migrate_retry_gallery_id', $_POST ) ) {
@@ -451,6 +468,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
                     $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
+				$this->admit_storage_writer( true );
 
                 $migrator = foogallery_migrate_migrator_instance();
                 if ( array_key_exists( 'foogallery_migrate_check_gallery_id', $_POST ) ) {
@@ -480,6 +498,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             if ( ! current_user_can( 'manage_options' ) ) {
                 $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
             }
+			$this->admit_storage_writer( true );
 
             $reset = false;
             if ( array_key_exists( 'reset', $_POST ) ) {
@@ -500,6 +519,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
                     $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
+				$this->admit_storage_writer( true );
 
                 if ( array_key_exists( 'action', $_REQUEST ) ) {
                     $action = sanitize_text_field(wp_unslash($_REQUEST['action']));
@@ -519,6 +539,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
                     $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
+				$this->admit_storage_writer( true );
 
                 if ( array_key_exists( 'action', $_REQUEST ) ) {
                     $action = sanitize_text_field(wp_unslash($_REQUEST['action']));
@@ -543,6 +564,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
                     $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
+				$this->admit_storage_writer( true );
 
                 $migrator = foogallery_migrate_migrator_instance();
 
@@ -581,6 +603,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
                     $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
+				$this->admit_storage_writer( true );
 
                 if ( array_key_exists( 'action', $_REQUEST ) ) {
                     $action = sanitize_text_field( wp_unslash( $_REQUEST['action'] ) );
@@ -603,6 +626,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
                     $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
+				$this->admit_storage_writer( true );
 
                 if ( array_key_exists( 'action', $_REQUEST ) ) {
                     $action = sanitize_text_field(wp_unslash($_REQUEST['action']));
@@ -622,6 +646,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
                     $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
+				$this->admit_storage_writer( true );
 
                 if ( array_key_exists( 'action', $_REQUEST ) ) {
                     $action = sanitize_text_field(wp_unslash($_REQUEST['action']));
@@ -646,6 +671,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 if ( ! current_user_can( 'manage_options' ) ) {
                     $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
                 }
+				$this->admit_storage_writer( true );
 
                 $migrator = foogallery_migrate_migrator_instance();
                 $content_migrator = $migrator->get_content_migrator();
@@ -703,6 +729,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 $reset = '1' === sanitize_text_field( wp_unslash( $_POST['reset'] ) );
             }
 
+            $this->admit_storage_writer( true );
             try {
                 $migrator = foogallery_migrate_migrator_instance();
                 $content_migrator = $migrator->get_content_migrator();
@@ -753,6 +780,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 $reset = '1' === sanitize_text_field( wp_unslash( $_POST['reset'] ) );
             }
 
+            $this->admit_storage_writer( true );
             try {
                 $content_migrator = foogallery_migrate_migrator_instance()->get_content_migrator();
                 $progress = $content_migrator->refresh_migration_status_batch( $reset );
@@ -790,6 +818,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             if ( ! current_user_can( 'manage_options' ) ) {
                 $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
             }
+			$this->admit_storage_writer( true );
 
             $object_id = '';
             if ( array_key_exists( 'object_id', $_POST ) ) {
@@ -847,6 +876,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             if ( ! current_user_can( 'manage_options' ) ) {
                 $this->send_json_error( __( 'Unauthorized.', 'foogallery-migrate' ), 403 );
             }
+			$this->admit_storage_writer( true );
 
             $object_id = '';
             if ( array_key_exists( 'object_id', $_POST ) ) {

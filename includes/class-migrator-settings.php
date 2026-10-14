@@ -39,8 +39,11 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		const SETTING_DEBUG_ENABLED = 'debug_enabled';
 
 		private $state_backend;
-		public function __construct( $backend = null ) {
+		private $writer_admission;
+		public function __construct( $backend = null, $writer_admission = null ) {
 			if ( null !== $backend && ! $backend instanceof LegacyOptionBackend && ! $backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Unsupported injected settings backend.' ); }
+			if ( null !== $writer_admission && ! is_callable( $writer_admission ) ) { throw new \RuntimeException( 'Invalid storage writer admission.' ); }
+			$this->writer_admission = $writer_admission;
 			$this->state_backend = null === $backend ? new LegacyOptionBackend() : $backend;
 		}
 		public function can_clear_migrator_state() { return $this->state_backend instanceof LegacyOptionBackend; }
@@ -213,6 +216,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @return void
 		 */
 		public function save_settings( $settings ) {
+			if ( null !== $this->writer_admission && true !== call_user_func( $this->writer_admission ) ) { throw new \RuntimeException( 'Storage writer was not admitted.' ); }
 			$current_settings = $this->get_settings();
 
 			if ( ! is_array( $settings ) ) {

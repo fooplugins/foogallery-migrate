@@ -48,6 +48,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         /** @var array Request-local compact records keyed by migrated object identifier. */
         protected $migrated_object_records = array();
 
+        /** True only for the production options factory, not inert injected seams. */
+        private $storage_guarded = false;
+        private $storage_gate;
+
         /**
          * @param MigratedStore|MigratedHistoryRepository|null $migrated_store Optional injected store.
          */
@@ -57,10 +61,26 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 if ( $migrated_store instanceof MigratedHistoryRepository ) { $this->settings = new MigratorSettings( $migrated_store->state_backend() ); }
                 return;
             }
-            $error = StorageAuthority::option_mode_error();
+            $this->storage_gate = StorageMaintenanceGate::current();
+            $error = StorageAuthority::option_mode_error( $this->storage_gate );
             if ( is_wp_error( $error ) ) {
                 throw new \RuntimeException( $error->get_error_message() );
             }
+            $this->storage_guarded = true;
+        }
+
+        /** Defensive admission before state, source callbacks or output changes. */
+        public function assert_storage_writer() {
+            if ( ! $this->storage_guarded ) { return true; }
+            $error = StorageAuthority::admit_option_writer( $this->storage_gate );
+            if ( is_wp_error( $error ) ) { throw new \RuntimeException( $error->get_error_message() ); }
+            return true;
+        }
+
+        /** The current engine is synchronous; pending request-local work is not drained. */
+        public function storage_is_quiescent() {
+            return $this->storage_guarded && $this->storage_gate === StorageMaintenanceGate::current() &&
+                ! $this->migrated_batch_active && empty( $this->pending_migrated_objects );
         }
 
         /**
@@ -70,7 +90,8 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          */
         protected function settings() {
             if ( ! isset( $this->settings ) ) {
-                $this->settings = new MigratorSettings();
+                $admission = $this->storage_guarded ? array( $this, 'assert_storage_writer' ) : null;
+                $this->settings = new MigratorSettings( new LegacyOptionBackend( $admission ), $admission );
             }
 
             return $this->settings;
@@ -79,7 +100,8 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         /** @return MigratedStore|MigratedHistoryRepository */
         protected function migrated_store() {
             if ( ! isset( $this->migrated_store ) ) {
-                $this->migrated_store = new MigratedHistoryRepository( new LegacyOptionBackend(), $this->settings() );
+                $admission = $this->storage_guarded ? array( $this, 'assert_storage_writer' ) : null;
+                $this->migrated_store = new MigratedHistoryRepository( new LegacyOptionBackend( $admission ), $this->settings() );
             }
 
             return $this->migrated_store;
@@ -211,6 +233,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return void
          */
         public function clear_migrator_setting() {
+            $this->assert_storage_writer();
 			if ( ! $this->settings()->can_clear_migrator_state() ) { throw new \RuntimeException( 'Whole table-state reset is not admitted. No partial history clear or option fallback.' ); }
 			if ( ! $this->migrated_store()->clear() ) {
 				return false;
@@ -234,6 +257,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array<Plugin>
          */
         public function run_detection() {
+            $this->assert_storage_writer();
             $plugins = foogallery_migrate_get_available_plugins();
 
             foreach ( $plugins as $plugin ) {
@@ -369,6 +393,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array|\WP_Error
          */
         public function start_image_tag_sync() {
+            $this->assert_storage_writer();
             if ( ! $this->can_assign_image_tag_terms() ) {
                 return new \WP_Error(
                     'foogallery_migrate_image_tags_unavailable',
@@ -387,6 +412,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array|\WP_Error
          */
         public function continue_image_tag_sync() {
+            $this->assert_storage_writer();
             if ( ! $this->can_assign_image_tag_terms() ) {
                 return new \WP_Error(
                     'foogallery_migrate_image_tags_unavailable',
@@ -860,6 +886,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return void
          */
         public function add_migrated_object( $object ) {
+            $this->assert_storage_writer();
             if ( ! is_object( $object ) || ! method_exists( $object, 'unique_identifier' ) ) {
                 return false;
             }
@@ -890,12 +917,14 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
 
         /** @return void */
         public function begin_migrated_object_batch() {
+            $this->assert_storage_writer();
             $this->pending_migrated_objects = array();
             $this->migrated_batch_active = true;
         }
 
         /** @return bool */
         public function flush_migrated_object_batch() {
+            $this->assert_storage_writer();
             $records = array_values( $this->pending_migrated_objects );
 			$changed = false;
 			foreach ( $records as $record ) {
@@ -986,6 +1015,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return Migratable|\WP_Error
          */
         public function update_migrated_object_status( $unique_identifier, $status ) {
+            $this->assert_storage_writer();
             $object = $this->get_migrated_object( $unique_identifier );
             if ( false === $object ) {
                 return new \WP_Error( 'foogallery_migrate_missing_object', __( 'Migrated object not found.', 'foogallery-migrate' ) );
@@ -1021,6 +1051,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return bool|\WP_Error
          */
         public function delete_migrated_object( $unique_identifier ) {
+            $this->assert_storage_writer();
             if ( ! $this->has_object_been_migrated( $unique_identifier ) ) {
                 return new \WP_Error( 'foogallery_migrate_missing_object', __( 'Migrated object not found.', 'foogallery-migrate' ) );
             }
@@ -1127,6 +1158,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return bool|\WP_Error
          */
         public function retry_gallery_migration( $unique_identifier ) {
+            $this->assert_storage_writer();
             $gallery_migrator = $this->get_gallery_migrator();
             $galleries = $gallery_migrator->get_objects_to_migrate();
             $gallery_index = null;
@@ -1223,6 +1255,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array|\WP_Error
          */
         public function check_for_migration_errors( $unique_identifier = '' ) {
+            $this->assert_storage_writer();
             $gallery_migrator = $this->get_gallery_migrator();
             $galleries = $gallery_migrator->get_objects_to_migrate();
             $checked = 0;
@@ -1378,6 +1411,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array|\WP_Error
          */
         public function check_gallery_migration_errors( $unique_identifier ) {
+            $this->assert_storage_writer();
             return $this->check_for_migration_errors( $unique_identifier );
         }
 	}

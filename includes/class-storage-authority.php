@@ -24,21 +24,24 @@ class StorageAuthority {
 	/**
 	 * @return false|\WP_Error False only for unambiguous legacy option authority.
 	 */
-	public static function option_mode_error() {
+	public static function option_mode_error( $writer = null ) {
 		global $wpdb;
-		$missing = new \stdClass();
-		// Even false/empty/corrupt persisted controls are evidence, not defaults.
-		foreach ( array( self::CONTROL_OPTION, self::AUTHORITY_OPTION, self::MAINTENANCE_OPTION,
-			'foogallery_migrate_storage', MigratedStore::SCHEMA_OPTION, MigratedStore::MIGRATION_OPTION ) as $option ) {
-			if ( $missing !== get_option( $option, $missing ) ) {
-				return self::recovery_error();
-			}
-		}
 		if ( ! is_object( $wpdb ) || ! is_callable( array( $wpdb, 'get_var' ) ) ||
 			! is_callable( array( $wpdb, 'prepare' ) ) || ! is_callable( array( $wpdb, 'esc_like' ) ) ||
 			! isset( $wpdb->prefix ) || ! preg_match( '/^[A-Za-z0-9_]+$/', $wpdb->prefix ) ) {
 			return self::recovery_error();
 		}
+		// Existence only: do not hydrate arbitrary controls or trust option caches.
+		$markers = array( self::CONTROL_OPTION, self::AUTHORITY_OPTION,
+			'foogallery_migrate_storage', MigratedStore::SCHEMA_OPTION, MigratedStore::MIGRATION_OPTION );
+		// An already-admitted request may finish behind a newly acquired gate.
+		if ( ! $writer instanceof StorageMaintenanceGate || true !== $writer->assert_writer() ) {
+			$markers[] = self::MAINTENANCE_OPTION;
+		}
+		$found = $wpdb->get_var( $wpdb->prepare(
+			'SELECT 1 AS present FROM `' . $wpdb->prefix . 'options` WHERE option_name IN (' . implode( ', ', array_fill( 0, count( $markers ), '%s' ) ) . ') LIMIT 1', $markers
+		) );
+		if ( ! empty( $wpdb->last_error ) || null !== $found ) { return self::recovery_error(); }
 		foreach ( array( MigratedStore::TABLE_SUFFIX, self::STATE_TABLE_SUFFIX ) as $suffix ) {
 			$table = $wpdb->prefix . $suffix;
 			$found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
@@ -74,6 +77,19 @@ class StorageAuthority {
 			return self::recovery_error();
 		}
 		return false;
+	}
+
+	/** Production option writer admission; no public table selection or fallback. */
+	public static function admit_option_writer( $gate = null ) {
+		try {
+			if ( null === $gate ) { $gate = StorageMaintenanceGate::current(); }
+			if ( ! $gate instanceof StorageMaintenanceGate ) { return self::recovery_error(); }
+			$result = $gate->admit_request_writer();
+			if ( is_wp_error( $result ) ) { return $result; }
+			$error = self::option_mode_error( $gate );
+			if ( is_wp_error( $error ) ) { return $error; }
+			return $gate->assert_writer();
+		} catch ( \RuntimeException $error ) { return self::recovery_error(); }
 	}
 
 	private static function recovery_error() {

@@ -91,6 +91,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * @throws \RuntimeException When the batch state cannot be persisted.
 		 */
 		function scan_content_batch( $reset = false ) {
+			$this->migrator_engine->assert_storage_writer();
 			if ( $reset ) {
 				$progress = $this->default_scan_progress();
 				$progress['migrated_revision'] = $this->get_migrated_revision();
@@ -229,6 +230,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * @throws \RuntimeException When the updated state cannot be persisted.
 		 */
 		function refresh_migration_status_batch( $reset = false ) {
+			$this->migrator_engine->assert_storage_writer();
 			$state = $this->get_scan_state();
 			$content_items = $state['items'];
 			$progress = $state['progress'];
@@ -1507,6 +1509,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * @return array Results with success count and errors
 		 */
 		function replace_content( $selected_items, $expected_post_contents = array() ) {
+			$this->migrator_engine->assert_storage_writer();
 			$content_items = $this->get_content_items();
 			$replaced_count = 0;
 			$errors = array();

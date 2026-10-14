@@ -258,6 +258,10 @@ function check_admin_referer( $action = -1, $query_arg = '_wpnonce' ) {
 	return true;
 }
 
+function check_ajax_referer( $action = -1, $query_arg = false, $die = true ) { return true; }
+class FooGalleryMigrateTestDie extends RuntimeException {}
+function wp_die( $message ) { throw new FooGalleryMigrateTestDie( $message ); }
+
 function current_user_can( $capability, ...$args ) {
 	if ( isset( $GLOBALS['foogallery_migrate_test_capabilities'] ) ) {
 		return ! empty( $GLOBALS['foogallery_migrate_test_capabilities'][$capability] );
