@@ -59,6 +59,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Gallery' ) ) {
                 )
             );
 
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
+
             if ( is_array( $existing ) && ! empty( $existing ) ) {
                 $this->migrated_id = absint( reset( $existing ) );
             } else {
@@ -80,18 +82,22 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Gallery' ) ) {
 
                 // Determine the best possible gallery template.
                 $gallery_template = $this->plugin->get_migration_gallery_template( $this );
+                foogallery_migrate_migrator_instance()->assert_storage_writer();
 
                 if ( empty( $gallery_template ) ) {
                     $gallery_template = foogallery_default_gallery_template();
+                    foogallery_migrate_migrator_instance()->assert_storage_writer();
                 }
 
                 // Set the gallery template.
                 $this->update_migrated_meta( FOOGALLERY_META_TEMPLATE, $gallery_template );
 
                 $gallery_settings = $this->get_initial_gallery_settings();
+                foogallery_migrate_migrator_instance()->assert_storage_writer();
 
                 // Determine the best possible settings for the gallery.
                 $gallery_settings = $this->plugin->get_gallery_settings( $this, $gallery_settings );
+                foogallery_migrate_migrator_instance()->assert_storage_writer();
 
                 // Set the gallery settings.
                 $this->update_migrated_meta( FOOGALLERY_META_SETTINGS, $gallery_settings );

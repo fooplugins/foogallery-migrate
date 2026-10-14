@@ -87,6 +87,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Album' ) ) {
                     $album_template = 'default';
                     if ( $override_album_settings_id > 0 ) {
                         $source_album_template = get_post_meta( $override_album_settings_id, FOOGALLERY_ALBUM_META_TEMPLATE, true );
+                        foogallery_migrate_migrator_instance()->assert_storage_writer();
                         if ( is_scalar( $source_album_template ) && '' !== trim( (string) $source_album_template ) ) {
                             $album_template = $source_album_template;
                         }
@@ -115,6 +116,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Album' ) ) {
             foogallery_migrate_migrator_instance()->assert_storage_writer();
             if ( defined( 'FOOGALLERY_META_SETTINGS_OLD' ) ) {
                 $settings = get_post_meta( $source_album_id, FOOGALLERY_META_SETTINGS_OLD, true );
+                foogallery_migrate_migrator_instance()->assert_storage_writer();
                 if ( ! empty( $settings ) ) {
                     $this->update_migrated_meta( FOOGALLERY_META_SETTINGS_OLD, $settings );
                 }
@@ -122,6 +124,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Album' ) ) {
 
             if ( defined( 'FOOGALLERY_ALBUM_META_SORT' ) ) {
                 $sort = get_post_meta( $source_album_id, FOOGALLERY_ALBUM_META_SORT, true );
+                foogallery_migrate_migrator_instance()->assert_storage_writer();
                 if ( is_scalar( $sort ) && '' !== trim( (string) $sort ) ) {
                     $this->update_migrated_meta( FOOGALLERY_ALBUM_META_SORT, $sort );
                 }
@@ -129,6 +132,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Album' ) ) {
 
             if ( defined( 'FOOGALLERY_META_CUSTOM_CSS' ) ) {
                 $custom_css = get_post_meta( $source_album_id, FOOGALLERY_META_CUSTOM_CSS, true );
+                foogallery_migrate_migrator_instance()->assert_storage_writer();
                 if ( is_scalar( $custom_css ) && '' !== trim( (string) $custom_css ) ) {
                     $this->update_migrated_meta( FOOGALLERY_META_CUSTOM_CSS, $custom_css );
                 }
