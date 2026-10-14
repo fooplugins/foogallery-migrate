@@ -38,6 +38,24 @@ class StorageOperationsTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_nonce']['action'] = 'foogallery_migrate_storage_recover_1';
 		$this->error( 'calibration_required', $receiver->dispatch( 'recover', $r ) );
 	}
+	public function test_encoding_failure_never_matches_the_old_empty_identity_hash_before_sql(): void {
+		$profile = $this->profile();
+		$profile['fingerprint'] = hash( 'sha256', '' );
+		$previous = getenv( 'ZEND_MM_SEG_SIZE' );
+		try {
+			foreach ( array( "262144\xff", "524288\xff" ) as $raw ) {
+				putenv( 'ZEND_MM_SEG_SIZE=' . $raw );
+				$this->error( 'calibration_required', ( new StorageOperations( $profile ) )->dispatch( 'preflight', $this->request() ) );
+				$this->error( 'calibration_required', ( new StorageOperations( $profile ) )->dispatch( 'switch', $this->request() ) );
+				$r = $this->request(); $r['confirmation'] = 'recover-storage';
+				$GLOBALS['foogallery_migrate_test_nonce']['action'] = 'foogallery_migrate_storage_recover_1';
+				$this->error( 'calibration_required', ( new StorageOperations( $profile ) )->dispatch( 'recover', $r ) );
+				$GLOBALS['foogallery_migrate_test_nonce']['action'] = 'foogallery_migrate_storage_option_import_1';
+			}
+		} finally {
+			putenv( false === $previous ? 'ZEND_MM_SEG_SIZE' : 'ZEND_MM_SEG_SIZE=' . $previous );
+		}
+	}
 	public function test_authentication_and_exact_request_precede_calibration_or_sql(): void {
 		$receiver = new StorageOperations( $this->profile() );
 		$GLOBALS['foogallery_migrate_test_capabilities']['manage_options'] = false;

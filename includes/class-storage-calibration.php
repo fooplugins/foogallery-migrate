@@ -13,7 +13,11 @@ class StorageCalibration {
 	/** Exact PHP/WordPress/allocator/codec implementation identity, not a SAPI waiver. */
 	public static function fingerprint() {
 		$runtime = self::identity();
-		return null === $runtime ? null : hash( 'sha256', json_encode( $runtime ) );
+		if ( null === $runtime ) { return null; }
+		$encoded = json_encode( $runtime );
+		// Raw identity bytes are authoritative. Never repair them or hash false
+		// as an empty string: distinct malformed environments would then collide.
+		return is_string( $encoded ) ? hash( 'sha256', $encoded ) : null;
 	}
 
 	/** Read-only evidence identity; current environment is NOT allocator startup attestation. */
