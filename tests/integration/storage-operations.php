@@ -5,6 +5,9 @@ if ( ! defined( 'ABSPATH' ) || ! defined( 'FOOGM_STORAGE_TEST_DISPOSABLE' ) || t
 if ( ! defined( 'DOING_AJAX' ) ) { define( 'DOING_AJAX', true ); }
 $root = defined( 'FOOGM_STORAGE_TEST_ROOT' ) ? FOOGM_STORAGE_TEST_ROOT : dirname( dirname( __DIR__ ) );
 require_once $root . '/migrate.php';
+// WP-CLI has already defined WP_ADMIN=false; execute the production admin
+// initializer explicitly, as other native admin harnesses do. No HTTP claim.
+if ( ! is_admin() ) { new \FooPlugins\FooGalleryMigrate\Init(); }
 require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
 use FooPlugins\FooGalleryMigrate\StorageAuthority;
