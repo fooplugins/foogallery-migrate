@@ -217,7 +217,7 @@ try {
 				else { $assert( array() === $items, 'independent no history advancement ' . $scenario ); }
 			}
 			if ( 'base-healthy' === $scenario ) {
-				$engine->get_album_migrator()->get_objects_to_migrate( true );
+				$assert( $engine->get_album_migrator()->calculate_migration_state( array() ), 'persist actual empty album summary' );
 				$checkpoint_values = array(
 					'albums-state' => $engine->get_album_migrator()->get_state(),
 					\FooPlugins\FooGalleryMigrate\ContentScanRepository::STATE_KEY => array( 'items' => array(), 'progress' => array( 'status' => 'complete' ) ),
