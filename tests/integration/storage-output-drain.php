@@ -8,6 +8,8 @@ $root = realpath( FOOGM_STORAGE_TEST_ROOT );
 if ( ! $root || ! is_file( $root . '/migrate.php' ) ) { throw new RuntimeException( 'Invalid fixture root.' ); }
 require $root . '/migrate.php';
 require_once ABSPATH . 'wp-admin/includes/upgrade.php';
+if ( ! defined( 'DOING_AJAX' ) ) { define( 'DOING_AJAX', true ); }
+if ( ! is_admin() ) { new \FooPlugins\FooGalleryMigrate\Init(); }
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
 use FooPlugins\FooGalleryMigrate\StorageMaintenanceGate;
@@ -16,6 +18,7 @@ use FooPlugins\FooGalleryMigrate\StorageAuthority;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
+use FooPlugins\FooGalleryMigrate\StorageCalibration;
 use FooPlugins\FooGalleryMigrate\Objects\Gallery;
 use FooPlugins\FooGalleryMigrate\Objects\Album;
 use FooPlugins\FooGalleryMigrate\Objects\Image;
@@ -59,11 +62,26 @@ $clean = function () use ( $observer, &$created, &$owned_markers, $names, $blog,
 	foreach ( $names as $name ) { $observer->query( $observer->prepare( "DELETE FROM `{$observer->options}` WHERE option_name=%s", $name ) ); }
 	wp_cache_flush(); unset( $GLOBALS['foogallery_migrate_engine_instance'] );
 };
-$post_hook = $meta_hook = $option_hook = $generation_hook = $term_hook = $attachment_hook = null; $source_id = 991;
+$post_hook = $meta_hook = $option_hook = $generation_hook = $term_hook = $attachment_hook = $discovery_hook = null; $source_id = 991;
+$old_post = $_POST; $old_method = isset( $_SERVER['REQUEST_METHOD'] ) ? $_SERVER['REQUEST_METHOD'] : null;
+$synthetic = function () { return array( 'version' => 1, 'status' => 'approved', 'fingerprint' => StorageCalibration::fingerprint(), 'evidence_sha256' => str_repeat( 'a', 64 ), 'policy' => array( 'max_raw_bytes' => 1048576, 'amplification' => 64, 'reserve_bytes' => 33554432 ) ); };
+$response = function ( $target, $blog ) {
+	$die = function () { return function () { throw new RuntimeException( 'owned-json-response' ); }; };
+	$purpose = 'table' === $target ? 'option_import' : 'table_export';
+	$_POST = array( 'action' => 'foogallery_migrate_storage', 'operation' => 'switch', 'blog_id' => (string) $blog, 'scope' => 'site', 'target' => $target, 'confirmation' => 'switch-to-' . $target, 'nonce' => wp_create_nonce( 'foogallery_migrate_storage_' . $purpose . '_' . $blog ) );
+	$_SERVER['REQUEST_METHOD'] = 'POST'; add_filter( 'wp_die_ajax_handler', $die ); ob_start();
+	try { do_action( 'admin_post_foogallery_migrate_storage' ); throw new RuntimeException( 'Receiver returned without JSON.' ); }
+	catch ( RuntimeException $error ) { if ( 'owned-json-response' !== $error->getMessage() ) { throw $error; } }
+	finally { $raw = ob_get_clean(); remove_filter( 'wp_die_ajax_handler', $die ); }
+	$value = json_decode( $raw, true ); if ( ! is_array( $value ) || ! isset( $value['success'], $value['data'] ) ) { throw new RuntimeException( 'Invalid receiver response.' ); } return $value;
+};
 try {
 	$assert( current_user_can( 'manage_options' ), 'administrator fixture' );
+	$source_attachment = wp_insert_attachment( array( 'post_title' => 'Owned base fixture image', 'post_mime_type' => 'image/gif', 'post_status' => 'inherit', 'guid' => home_url( '/wp-includes/images/blank.gif' ) ) ); $posts[] = $source_attachment;
+	$source_content = '[gallery ids="' . $source_attachment . '" link="none"]';
+	$source_post = wp_insert_post( array( 'post_title' => 'Owned base fixture source', 'post_type' => 'post', 'post_status' => 'publish', 'post_content' => $source_content ) ); $posts[] = $source_post;
 	foreach ( array( 'option', 'table' ) as $mode ) {
-		foreach ( array( 'gallery-healthy', 'album-healthy', 'gallery-post-loss', 'album-post-loss', 'gallery-meta-loss', 'gallery-error', 'album-blog-loss', 'option-loss', 'media-healthy', 'media-post-loss', 'media-generation-loss', 'media-alt-loss', 'media-term-loss', 'media-error', 'media-reuse-healthy' ) as $scenario ) {
+		foreach ( array( 'gallery-healthy', 'album-healthy', 'gallery-post-loss', 'album-post-loss', 'gallery-meta-loss', 'gallery-error', 'album-blog-loss', 'option-loss', 'media-healthy', 'media-post-loss', 'media-generation-loss', 'media-alt-loss', 'media-term-loss', 'media-error', 'media-reuse-healthy', 'base-healthy', 'base-discovery-loss', 'base-discovery-error', 'base-post-loss' ) as $scenario ) {
 			if ( ( 'table' === $mode && 'option-loss' === $scenario ) || ( ! is_multisite() && 'album-blog-loss' === $scenario ) ) { continue; }
 			$clean();
 			// A latched failed transport is NOT reset by restoring its handle. Each
@@ -85,7 +103,7 @@ try {
 			$engine = foogallery_migrate_migrator_instance(); $engine->assert_storage_writer();
 			$pin = $gate->connection(); $replacement = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
 			$lose = function () use ( $replacement ) { global $wpdb; $wpdb->dbh = $replacement->dbh; };
-			$metadata_calls = 0; $post_calls = 0; $term_calls = 0; $generation_calls = 0; $caught = null;
+			$metadata_calls = 0; $post_calls = 0; $term_calls = 0; $generation_calls = 0; $discovery_calls = 0; $caught = null;
 			$post_hook = function ( $id, $post, $update ) use ( $engine, $assert, $lose, $scenario, &$posts, &$post_calls, $blog ) {
 				if ( $update || ! in_array( $post->post_type, array( FOOGALLERY_CPT_GALLERY, FOOGALLERY_CPT_ALBUM, 'attachment' ), true ) ) { return; }
 				$posts[] = $id; $post_calls++;
@@ -121,6 +139,26 @@ try {
 			$object = false;
 			try {
 				if ( 'option-loss' === $scenario ) { add_action( 'added_option', $option_hook, 10, 1 ); add_action( 'updated_option', $option_hook, 10, 1 ); $engine->set_migrator_setting( 'fixture', $scenario ); }
+				elseif ( 0 === strpos( $scenario, 'base-' ) ) {
+					$source = new \FooPlugins\FooGalleryMigrate\Plugins\WordPressCore(); $source->is_detected = true;
+					$assert( $engine->set_migrator_setting( MigratorEngine::KEY_PLUGINS, array( $source ) ), 'persist real core adapter ' . $scenario );
+					$discovery_hook = function ( $sql ) use ( $engine, $assert, $lose, $scenario, &$discovery_calls ) {
+						if ( false === strpos( $sql, "post_content LIKE '%[gallery%'" ) ) { return $sql; }
+						$discovery_calls++; $engine->begin_migrated_object_batch(); $assert( $engine->flush_migrated_object_batch(), 'discovery nested flush ' . $scenario );
+						$assert( ! $engine->storage_is_quiescent(), 'real base discovery remains active ' . $scenario );
+						if ( 'base-discovery-loss' === $scenario ) { $lose(); }
+						if ( 'base-discovery-error' === $scenario ) { throw new Error( 'native discovery error' ); } return $sql;
+					};
+					add_filter( 'query', $discovery_hook ); $migrator = $engine->get_gallery_migrator();
+					$objects = $migrator->get_objects_to_migrate( true ); remove_filter( 'query', $discovery_hook ); $discovery_hook = null;
+					$assert( 1 === count( $objects ) && 1 === $discovery_calls, 'actual shortcode discovery ' . $scenario ); $object = $objects[0];
+					$assert( $engine->storage_is_quiescent(), 'discovery normal return drained ' . $scenario );
+					$migrator->queue_objects_for_migration( array( $object->unique_identifier() ) );
+					$assert( 1 === $migrator->get_state()['queued'], 'real base queue persisted ' . $scenario );
+					$migrator->migrate(); $object = $migrator->get_objects_to_migrate()[0];
+					$assert( 100 === $migrator->get_state()['progress'], 'real base turn persisted completion ' . $scenario );
+					$assert( array( $source_attachment ) === get_post_meta( $object->migrated_id, FOOGALLERY_META_ATTACHMENTS, true ), 'real attachment reused by base turn ' . $scenario );
+				}
 				elseif ( 0 === strpos( $scenario, 'media-' ) ) {
 					$object = new Image( new NativeOutputSource() ); $object->ID = $source_id++; $object->title = 'Native attachment fixture'; $object->alt = 'Native alt text';
 					$object->source_url = home_url( '/wp-includes/images/blank.gif' ) . '?fixture=' . $object->ID;
@@ -141,9 +179,10 @@ try {
 			remove_action( 'wp_insert_post', $post_hook, 10 ); remove_action( 'added_post_meta', $meta_hook, 10 ); remove_action( 'updated_post_meta', $meta_hook, 10 ); remove_action( 'added_option', $option_hook, 10 ); remove_action( 'updated_option', $option_hook, 10 );
 			remove_filter( 'wp_generate_attachment_metadata', $generation_hook ); remove_action( 'set_object_terms', $term_hook, 10 );
 			remove_action( 'add_attachment', $attachment_hook );
+			if ( null !== $discovery_hook ) { remove_filter( 'query', $discovery_hook ); $discovery_hook = null; }
 			$post_hook = $meta_hook = $option_hook = $generation_hook = $term_hook = $attachment_hook = null;
 			$loss = false !== strpos( $scenario, 'loss' );
-			if ( ! $loss && 'gallery-error' !== $scenario && 'media-error' !== $scenario && null !== $caught ) { throw $caught; }
+			if ( ! $loss && false === strpos( $scenario, '-error' ) && null !== $caught ) { throw $caught; }
 			if ( $loss ) {
 				$assert( $caught instanceof RuntimeException, 'lost authority refused ' . $scenario );
 				$assert( ! $engine->storage_is_quiescent(), 'lost authority not drained ' . $scenario );
@@ -158,6 +197,7 @@ try {
 				}
 			} elseif ( 'gallery-error' === $scenario ) { $assert( $caught instanceof Error && 'native output error' === $caught->getMessage(), 'output Error propagated' ); $assert( $engine->storage_is_quiescent(), 'Error unwound depth' ); }
 			elseif ( 'media-error' === $scenario ) { $assert( $caught instanceof Error && 'native media error' === $caught->getMessage(), 'media Error propagated' ); $assert( $engine->storage_is_quiescent(), 'media Error unwound depth' ); }
+			elseif ( 'base-discovery-error' === $scenario ) { $assert( $caught instanceof Error && 'native discovery error' === $caught->getMessage(), 'discovery Error propagated' ); $assert( $engine->storage_is_quiescent(), 'base discovery Error unwound depth' ); }
 			else { $assert( null === $caught, 'healthy output returned ' . $scenario ); $assert( $engine->storage_is_quiescent(), 'healthy output drained ' . $scenario ); $assert( $object->migrated && $post_calls === 1 && $metadata_calls > 0, 'native output and completion ' . $scenario ); }
 			if ( 'album-blog-loss' === $scenario ) { restore_current_blog(); }
 			if ( $object ) {
@@ -177,11 +217,30 @@ try {
 			$before = $writers(); $assert( 1 === count( $before ), 'one owned writer before shutdown ' . $scenario );
 			$gate->shutdown_writer();
 			if ( ! $pin->is_current() ) { $assert( $before === $writers(), 'uncertain marker retained ' . $scenario ); }
+			if ( 'base-healthy' === $scenario ) {
+				$assert( array() === $writers(), 'base completion releases owned marker before selection' );
+				// Explicit owned-fixture schema provisioning, never implicit DDL.
+				if ( ! $created ) { foreach ( $schema->statements() as $i => $ddl ) { $created[] = $tables[$i]; dbDelta( $ddl ); } }
+				$assert( $schema->verify(), 'explicit fixture schema before public selection' );
+				unset( $GLOBALS['foogallery_migrate_engine_instance'] ); add_filter( 'foogallery_migrate_storage_calibration', $synthetic );
+				$target = 'option' === $mode ? 'table' : 'option'; $result = $response( $target, $blog );
+				$assert( true === $result['success'] && $target === $result['data']['backend'] && 'stable' === $result['data']['phase'], 'public receiver selects authoritative backend after real base output ' . $mode );
+				remove_filter( 'foogallery_migrate_storage_calibration', $synthetic );
+				$stale = null; try { $engine->get_gallery_migrator()->get_objects_to_migrate(); } catch ( RuntimeException $error ) { $stale = $error; }
+				$assert( $stale instanceof RuntimeException, 'cached base engine refuses switched authority ' . $mode );
+				$fresh = foogallery_migrate_migrator_instance(); $saved = $fresh->get_migrated_object( $object->unique_identifier() );
+				$assert( is_object( $saved ) && $saved->migrated && $saved->migrated_id === $object->migrated_id, 'fresh engine reads authoritative completed history ' . $mode );
+				$assert( 100 === $fresh->get_gallery_migrator()->get_state()['progress'], 'selected backend retains base checkpoint ' . $mode );
+				$assert( $source_content === get_post( $source_post )->post_content, 'selection never rewrites source content ' . $mode );
+			}
 			$owned_markers = $writers();
 			$clean();
 		}
 	}
 } finally {
+	if ( null !== $discovery_hook ) { remove_filter( 'query', $discovery_hook ); }
+	remove_filter( 'foogallery_migrate_storage_calibration', $synthetic ); $_POST = $old_post;
+	if ( null === $old_method ) { unset( $_SERVER['REQUEST_METHOD'] ); } else { $_SERVER['REQUEST_METHOD'] = $old_method; }
 	if ( null !== $post_hook ) { remove_action( 'wp_insert_post', $post_hook, 10 ); remove_action( 'added_post_meta', $meta_hook, 10 ); remove_action( 'updated_post_meta', $meta_hook, 10 ); remove_action( 'added_option', $option_hook, 10 ); remove_action( 'updated_option', $option_hook, 10 ); }
 	if ( null !== $generation_hook ) { remove_filter( 'wp_generate_attachment_metadata', $generation_hook ); remove_action( 'set_object_terms', $term_hook, 10 ); }
 	if ( null !== $attachment_hook ) { remove_action( 'add_attachment', $attachment_hook ); }
@@ -194,4 +253,4 @@ try {
 	wp_cache_flush(); unset( $GLOBALS['foogallery_migrate_engine_instance'] );
 }
 $assert( array() === $writers() && false === StorageAuthority::option_mode_error(), 'virgin option authority and no writer remnants' );
-echo wp_json_encode( array( 'status' => 'pass', 'scope' => 'bounded real gallery/album/option output hooks; synthetic source/settings/policy; deliberate handle replacement, not network/PHP death or full drain', 'checks' => $checks, 'check_count' => count( $checks ), 'blog_id' => $blog, 'wordpress' => get_bloginfo( 'version' ), 'php' => PHP_VERSION, 'database' => $observer->get_var( 'SELECT VERSION()' ) ) ) . PHP_EOL;
+echo wp_json_encode( array( 'status' => 'pass', 'scope' => 'real base/core-adapter discovery, queue, output, checkpoint and public backend selection; direct gallery/album/media hooks; synthetic FooGallery settings/calibration; handle replacement, not network/PHP death/full recovery', 'checks' => $checks, 'check_count' => count( $checks ), 'blog_id' => $blog, 'wordpress' => get_bloginfo( 'version' ), 'php' => PHP_VERSION, 'database' => $observer->get_var( 'SELECT VERSION()' ) ) ) . PHP_EOL;
