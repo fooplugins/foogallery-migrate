@@ -123,7 +123,7 @@ try {
 				if ( 'option-loss' === $scenario ) { add_action( 'added_option', $option_hook, 10, 1 ); add_action( 'updated_option', $option_hook, 10, 1 ); $engine->set_migrator_setting( 'fixture', $scenario ); }
 				elseif ( 0 === strpos( $scenario, 'media-' ) ) {
 					$object = new Image( new NativeOutputSource() ); $object->ID = $source_id++; $object->title = 'Native attachment fixture'; $object->alt = 'Native alt text';
-					$object->source_url = home_url( '/wp-includes/images/blank.gif' );
+					$object->source_url = home_url( '/wp-includes/images/blank.gif' ) . '?fixture=' . $object->ID;
 					$object->create_new_migrated_object();
 					$object->migrate(); // Record completion after the direct creation boundary.
 					if ( 'media-reuse-healthy' === $scenario ) {
