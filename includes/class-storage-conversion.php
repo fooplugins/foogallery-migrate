@@ -159,7 +159,7 @@ class StorageConversion {
 				$this->require_true( $this->controls->read( StorageAuthority::AUTHORITY_OPTION ) === json_encode( StorageControl::sentinel( $r ) ) );
 			}
 			// Last source proof and engine/drain verdict immediately before CAS.
-			$this->unchanged_source( $r ); $this->ready(); $r = $this->phase( $r, 'flipped' );
+			$this->unchanged_source( $r ); $this->ready(); $r = $this->phase( $r, 'flipped', $target );
 		}
 		if ( 'flipped' === $r['phase'] ) {
 			$this->ready();
@@ -183,32 +183,43 @@ class StorageConversion {
 					$this->controls->cas( StorageAuthority::AUTHORITY_OPTION, $sentinel, null );
 				}
 			}
-			$this->ready(); $r = $this->phase( $r, 'stable' );
+			$this->ready(); $r = $this->phase( $r, 'stable', $active );
 		}
 		$this->require_true( StorageControl::runtime_ready( $r, $this->controls->read( StorageAuthority::AUTHORITY_OPTION ) ) );
 		return $r;
 	}
 
-	private function phase( $r, $phase ) {
+	private function phase( $r, $phase, $destination = null ) {
 		$old = json_encode( $r );
+		$source_sentinel = 'table' === $r['from'] ? json_encode( StorageControl::sentinel( $r ) ) : null;
 		$r['phase'] = $phase; $r['updated'] = max( $r['updated'], time() );
 		if ( 'flipped' === $phase ) { $this->require_true( $r['epoch'] < PHP_INT_MAX ); ++$r['epoch']; $r['backend'] = $r['to']; }
 		$new = json_encode( $r ); StorageControl::decode( $new, $this->blog );
 		$guard = null;
 		if ( 'flipped' === $phase ) {
-			if ( 'option' === $r['from'] ) {
-				$raw = $this->option_raw();
-				$hash = null === $raw ? null : hash( 'sha256', $raw );
-				$this->require_true( hash( 'sha256', null === $hash ? 'absent' : 'present:' . $hash ) === $r['source_digest'] );
-				$guard = array( 'kind' => 'option', 'value' => $hash );
-			} else {
-				$heads = $this->heads(); $this->require_true( hash( 'sha256', json_encode( $heads ) ) === $r['source_digest'] );
-				$dependencies = array();
-				foreach ( $heads as $head ) { $dependencies[] = array( 'id' => (int) $head['id'], 'revision' => (int) $head['revision'], 'generation' => (int) $head['active_generation'] ); }
-				$guard = array( 'kind' => 'table', 'value' => $dependencies );
-			}
+			$guard = $this->snapshot_guard( $r['from'], $r['source_digest'] );
+		}
+		if ( 'flipped' === $phase || 'stable' === $phase ) {
+			$this->require_true( is_array( $destination ) && isset( $destination['physical'] ) );
+			$dependencies = array( $this->snapshot_guard( $r['to'], $destination['physical'] ) );
+			if ( null !== $guard ) { $dependencies[] = $guard; }
+			$sentinel = 'table' === $r['to'] ? json_encode( StorageControl::sentinel( $r ) ) : ( 'flipped' === $phase ? $source_sentinel : null );
+			$dependencies[] = array( 'kind' => 'sentinel', 'value' => $sentinel );
+			$guard = array( 'kind' => 'all', 'value' => $dependencies );
 		}
 		$this->controls->cas( StorageAuthority::CONTROL_OPTION, $old, $new, $guard ); return $r;
+	}
+
+	private function snapshot_guard( $backend, $physical ) {
+		if ( 'option' === $backend ) {
+			$raw = $this->option_raw(); $hash = null === $raw ? null : hash( 'sha256', $raw );
+			$this->require_true( hash( 'sha256', null === $hash ? 'absent' : 'present:' . $hash ) === $physical );
+			return array( 'kind' => 'option', 'value' => $hash );
+		}
+		$heads = $this->heads(); $this->require_true( hash( 'sha256', json_encode( $heads ) ) === $physical );
+		$dependencies = array();
+		foreach ( $heads as $head ) { $dependencies[] = array( 'id' => (int) $head['id'], 'revision' => (int) $head['revision'], 'generation' => (int) $head['active_generation'] ); }
+		return array( 'kind' => 'table', 'value' => $dependencies );
 	}
 
 	private function unchanged_source( $r ) {

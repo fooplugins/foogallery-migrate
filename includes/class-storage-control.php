@@ -90,8 +90,18 @@ class StorageControl {
 	}
 
 	/** Atomic flip dependency, closed shapes and fixed source names only. */
-	private function source_guard( $guard ) {
+	private function source_guard( $guard, $nested = false ) {
 		if ( ! is_array( $guard ) || array_keys( $guard ) !== array( 'kind', 'value' ) ) { self::fail(); }
+		if ( 'all' === $guard['kind'] ) {
+			if ( $nested || ! is_array( $guard['value'] ) || count( $guard['value'] ) < 2 || count( $guard['value'] ) > 3 || array_keys( $guard['value'] ) !== range( 0, count( $guard['value'] ) - 1 ) ) { self::fail(); }
+			$sql = ''; foreach ( $guard['value'] as $dependency ) { $sql .= $this->source_guard( $dependency, true ); } return $sql;
+		}
+		if ( 'sentinel' === $guard['kind'] ) {
+			$raw = $guard['value'];
+			if ( null !== $raw && ( ! is_string( $raw ) || strlen( $raw ) > self::MAX_BYTES ) ) { self::fail(); }
+			$select = '(SELECT sentinel_value FROM (SELECT option_value AS sentinel_value FROM `' . $this->prefix . 'options` WHERE option_name = %s) AS target_sentinel)';
+			return $this->db->prepare( ' AND ' . $select . ( null === $raw ? ' IS NULL' : ' = BINARY %s' ), null === $raw ? array( StorageAuthority::AUTHORITY_OPTION ) : array( StorageAuthority::AUTHORITY_OPTION, $raw ) );
+		}
 		if ( 'option' === $guard['kind'] ) {
 			$hash = $guard['value'];
 			if ( null !== $hash && ( ! is_string( $hash ) || ! preg_match( '/^[a-f0-9]{64}$/D', $hash ) ) ) { self::fail(); }
