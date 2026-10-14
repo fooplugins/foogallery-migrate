@@ -8,7 +8,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Language-Team: FooPlugins <info@fooplugins.com>\n"
 "Last-Translator: Brad Vincent <brad@fooplugins.com>\n"
-"POT-Creation-Date: 2026-10-02 19:03+0000\n"
+"POT-Creation-Date: 2026-10-14 02:27+0000\n"
 "Report-Msgid-Bugs-To: https://fooplugins.com\n"
 "X-Poedit-Basepath: ..\n"
 "X-Poedit-KeywordsList: __;_e;_ex:1,2c;_n:1,2;_n_noop:1,2;_nx:1,2,4c;_nx_noop:1,2,3c;_x:1,2c;esc_attr__;esc_attr_e;esc_attr_x:1,2c;esc_html__;esc_html_e;esc_html_x:1,2c\n"
@@ -68,7 +68,7 @@ msgstr ""
 msgid "Invalid status update."
 msgstr ""
 
-#: includes/class-init.php:825, includes/objects/class-migratable.php:273, includes/views/view-migrate-tab-log.php:10
+#: includes/class-init.php:825, includes/objects/class-migratable.php:274, includes/views/view-migrate-tab-log.php:10
 msgid "Not migrated"
 msgstr ""
 
@@ -144,7 +144,7 @@ msgstr ""
 msgid "One or more images are missing after migration."
 msgstr ""
 
-#: includes/class-migrator-settings.php:798, includes/class-migrator-settings.php:814, includes/objects/class-migratable.php:359
+#: includes/class-migrator-settings.php:798, includes/class-migrator-settings.php:814, includes/objects/class-migratable.php:360
 msgid "Unknown Error"
 msgstr ""
 
@@ -152,8 +152,16 @@ msgstr ""
 msgid "(no title) #%d"
 msgstr ""
 
-#: includes/class-storage-authority.php:72
+#: includes/class-storage-authority.php:82
 msgid "Migration storage requires recovery before continuing. No migration state was changed. Retain the database and contact your site administrator; do not delete storage markers, restore the legacy history snapshot over current state, or restart migrations from stale options."
+msgstr ""
+
+#: includes/class-storage-maintenance-gate.php:283
+msgid "Migration storage is busy or requires recovery. No new storage operation was admitted."
+msgstr ""
+
+#: includes/class-storage-maintenance-gate.php:287
+msgid "Migration storage ownership could not be verified. Retain storage markers and retry or request recovery."
 msgstr ""
 
 #: includes/functions.php:82
@@ -510,57 +518,57 @@ msgstr ""
 msgid "Image import failed."
 msgstr ""
 
-#: includes/objects/class-migratable.php:275, includes/views/view-migrate-tab-log.php:11
+#: includes/objects/class-migratable.php:276, includes/views/view-migrate-tab-log.php:11
 msgid "Queued for migration"
 msgstr ""
 
-#: includes/objects/class-migratable.php:281, includes/views/view-migrate-tab-log.php:12
+#: includes/objects/class-migratable.php:282, includes/views/view-migrate-tab-log.php:12
 msgid "Migrating..."
 msgstr ""
 
-#: includes/objects/class-migratable.php:278
+#: includes/objects/class-migratable.php:279
 msgid "Migrated %d of %d %s"
 msgstr ""
 
-#: includes/objects/class-migratable.php:287
+#: includes/objects/class-migratable.php:288
 msgid "Done!"
 msgstr ""
 
-#: includes/objects/class-migratable.php:285
+#: includes/objects/class-migratable.php:286
 msgid "Done! %d %s migrated"
 msgstr ""
 
-#: includes/objects/class-migratable.php:293
+#: includes/objects/class-migratable.php:294
 msgid "Nothing to migrate!"
 msgstr ""
 
-#: includes/objects/class-migratable.php:291
+#: includes/objects/class-migratable.php:292
 msgid "No %s to migrate!"
 msgstr ""
 
-#: includes/objects/class-migratable.php:296
+#: includes/objects/class-migratable.php:297
 msgid "Error while migrating!"
 msgstr ""
 
-#: includes/objects/class-migratable.php:299
+#: includes/objects/class-migratable.php:300
 msgid "Unknown status!"
 msgstr ""
 
-#: includes/plugins/class-word-press-core.php:234
+#: includes/plugins/class-word-press-core.php:235
 msgid "Gallery block"
 msgstr ""
 
-#: includes/plugins/class-word-press-core.php:234
+#: includes/plugins/class-word-press-core.php:235
 msgid "Gallery shortcode"
 msgstr ""
 
 #. translators: 1: post title, 2: gallery occurrence number.
-#: includes/plugins/class-word-press-core.php:239
+#: includes/plugins/class-word-press-core.php:240
 msgid "%1$s - core gallery %2$d"
 msgstr ""
 
 #. translators: 1: source type, 2: occurrence number, 3: attachment count.
-#: includes/plugins/class-word-press-core.php:245
+#: includes/plugins/class-word-press-core.php:246
 msgid "%1$s #%2$d (%3$d image)"
 msgid_plural "%1$s #%2$d (%3$d images)"
 msgstr[0] ""
