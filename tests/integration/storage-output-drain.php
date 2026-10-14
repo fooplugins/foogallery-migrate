@@ -120,8 +120,9 @@ try {
 				if ( 'option-loss' === $scenario ) { add_action( 'added_option', $option_hook, 10, 1 ); add_action( 'updated_option', $option_hook, 10, 1 ); $engine->set_migrator_setting( 'fixture', $scenario ); }
 				elseif ( 0 === strpos( $scenario, 'media-' ) ) {
 					$object = new Image( new NativeOutputSource() ); $object->ID = $source_id++; $object->title = 'Native attachment fixture'; $object->alt = 'Native alt text';
-					$object->local_file = ABSPATH . 'wp-includes/images/blank.gif'; $object->source_url = 'https://example.invalid/fixture-' . $source_id . '.gif';
+					$object->source_url = home_url( '/wp-includes/images/blank.gif' );
 					$object->create_new_migrated_object();
+					$object->migrate(); // Record completion after the direct creation boundary.
 					if ( 'media-reuse-healthy' === $scenario ) {
 						$reused = new Image( $object->plugin ); $reused->ID = $object->ID; $reused->source_url = $object->source_url; $reused->create_new_migrated_object();
 						$assert( $reused->migrated && $reused->migrated_id === $object->migrated_id && 1 === $post_calls, 'source metadata reuses actual attachment without duplicate post' );
@@ -155,7 +156,7 @@ try {
 			elseif ( 'media-error' === $scenario ) { $assert( $caught instanceof Error && 'native media error' === $caught->getMessage(), 'media Error propagated' ); $assert( $engine->storage_is_quiescent(), 'media Error unwound depth' ); }
 			else { $assert( null === $caught, 'healthy output returned ' . $scenario ); $assert( $engine->storage_is_quiescent(), 'healthy output drained ' . $scenario ); $assert( $object->migrated && $post_calls === 1 && $metadata_calls > 0, 'native output and completion ' . $scenario ); }
 			if ( 'album-blog-loss' === $scenario ) { restore_current_blog(); }
-			if ( $object && 0 !== strpos( $scenario, 'media-' ) ) {
+			if ( $object ) {
 				// Independent real transport observes persisted completion, not just
 				// the request object; losses/errors must not append history.
 				if ( 'table' === $mode ) {
@@ -166,7 +167,7 @@ try {
 				}
 				else { $raw = $observer->get_var( $observer->prepare( "SELECT option_value FROM `{$observer->options}` WHERE option_name=%s", FOOGALLERY_MIGRATE_OPTION_DATA ) ); $state = null === $raw ? array() : unserialize( $raw, array( 'allowed_classes' => false ) ); $history = isset( $state[MigratorSettings::KEY_MIGRATED] ) ? $state[MigratorSettings::KEY_MIGRATED] : array(); }
 				$items = isset( $history['items'] ) ? $history['items'] : array();
-				if ( ! $loss && 'gallery-error' !== $scenario ) { $record = isset( $items[$object->unique_identifier()] ) ? $items[$object->unique_identifier()] : array(); $assert( count( $items ) === 1 && ! empty( $record['migrated'] ) && (int) $record['migrated_id'] === (int) $object->migrated_id, 'independent persisted completion ' . $scenario ); }
+				if ( ! $loss && 'gallery-error' !== $scenario && 'media-error' !== $scenario ) { $record = isset( $items[$object->unique_identifier()] ) ? $items[$object->unique_identifier()] : array(); $assert( count( $items ) === 1 && ! empty( $record['migrated'] ) && (int) $record['migrated_id'] === (int) $object->migrated_id, 'independent persisted completion ' . $scenario ); }
 				else { $assert( array() === $items, 'independent no history advancement ' . $scenario ); }
 			}
 			$before = $writers(); $assert( 1 === count( $before ), 'one owned writer before shutdown ' . $scenario );
