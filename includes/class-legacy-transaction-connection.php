@@ -41,7 +41,9 @@ class LegacyTransactionConnection {
 			if ( ! $this->is_current() ) { throw new \RuntimeException( 'Storage connection changed.' ); }
 			$result = $this->wpdb->prepare( $sql, $args );
 			if ( ! $this->is_current() || ! is_string( $result ) || '' === $result ) { throw new \RuntimeException( 'Invalid prepared query.' ); }
-			return $result;
+			// wpdb normally removes its percent tokens in a query filter. This
+			// transport deliberately skips query(), so normalize explicitly.
+			return $this->wpdb->remove_placeholder_escape( $result );
 		} catch ( \Exception $error ) {
 			$this->tainted = true;
 			throw new \RuntimeException( 'Legacy transaction connection: query preparation failed.' );

@@ -19,6 +19,10 @@ client transport errors and failed COMMIT unusable. It does not reconnect, ping,
 open a connection, switch authority or clear ownership. Known server SQL rejection
 still permits same-handle rollback; a lost session cannot authorize rollback or
 release on its replacement. Scalar reads preserve empty/zero versus absence.
+Prepared SQL explicitly removes WordPress percent-placeholder tokens without
+running its query filters. A native, uninstrumented regression first failed on
+literal percent/encoded-URL data; that check and a direct foreign-writer wildcard
+probe prevent the race fixture's query filter from silently masking this class.
 
 Existing native race fixtures intercept a test-only adapter subclass at the SQL
 boundary; production has no query hook/injection API. The native session-loss
