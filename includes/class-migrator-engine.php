@@ -83,6 +83,16 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 ! $this->migrated_batch_active && empty( $this->pending_migrated_objects );
         }
 
+        /** Trusted synchronous-engine verdict for authenticated maintenance.
+         * Across requests the writer markers, not cached engine state, prove
+         * drain. Opaque/injected engines cannot supply an affirmative verdict.
+         */
+        public static function storage_maintenance_is_quiescent() {
+            global $foogallery_migrate_engine_instance;
+            return ! isset( $foogallery_migrate_engine_instance ) ||
+                ( $foogallery_migrate_engine_instance instanceof self && $foogallery_migrate_engine_instance->storage_is_quiescent() );
+        }
+
         /**
          * Returns the migrator settings handler.
          *

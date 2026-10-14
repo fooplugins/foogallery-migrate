@@ -24,7 +24,7 @@ class StorageAuthority {
 	/**
 	 * @return false|\WP_Error False only for unambiguous legacy option authority.
 	 */
-	public static function option_mode_error( $writer = null ) {
+	public static function option_mode_error( $writer = null, $maintenance = false ) {
 		global $wpdb;
 		if ( ! is_object( $wpdb ) || ! is_callable( array( $wpdb, 'get_var' ) ) ||
 			! is_callable( array( $wpdb, 'prepare' ) ) || ! is_callable( array( $wpdb, 'esc_like' ) ) ||
@@ -35,7 +35,9 @@ class StorageAuthority {
 		$markers = array( self::CONTROL_OPTION, self::AUTHORITY_OPTION,
 			'foogallery_migrate_storage', MigratedStore::SCHEMA_OPTION, MigratedStore::MIGRATION_OPTION );
 		// An already-admitted request may finish behind a newly acquired gate.
-		if ( ! $writer instanceof StorageMaintenanceGate || true !== $writer->assert_writer() ) {
+		$owned_maintenance = true === $maintenance && $writer instanceof StorageMaintenanceGate &&
+			true === $writer->maintenance_ready( array( 'FooPlugins\\FooGalleryMigrate\\MigratorEngine', 'storage_maintenance_is_quiescent' ) );
+		if ( ! $owned_maintenance && ( ! $writer instanceof StorageMaintenanceGate || true !== $writer->assert_writer() ) ) {
 			$markers[] = self::MAINTENANCE_OPTION;
 		}
 		$found = $wpdb->get_var( $wpdb->prepare(
