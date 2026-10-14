@@ -333,6 +333,13 @@ try {
 				$check( 'fixture-undrained-writer' === $wpdb->get_var( 'SELECT option_value FROM `' . $wpdb->options . "` WHERE option_name = 'foogallery_migrate_storage_writer_fixture_race'" ), 'raced writer marker retained for drain proof: ' . $point );
 				delete_option( 'foogallery_migrate_storage_writer_fixture_race' );
 			}
+			if ( 'copying' === $point ) {
+				$check( null === $control->read( StorageAuthority::CONTROL_OPTION ), 'denied initial intent leaves options authority without invented recovery state: ' . $race );
+				$recovered = ( new StorageConversion( $policy ) )->switch_backend( $request( 'table' ) );
+			} else { $recovered = ( new StorageConversion( $policy ) )->recover( $request( $reverse ? 'option' : 'table', true ) ); }
+			$check( ! is_wp_error( $recovered ) && StorageControl::runtime_ready( $recovered, $control->read( StorageAuthority::AUTHORITY_OPTION ) ) &&
+				$recovered['backend'] === ( $reverse ? 'option' : 'table' ), 'explicit post-race recovery reaches only recorded destination authority: ' . $point . '/' . $race );
+			$check( $codec->snapshot_digest( $initial ) === $recovered['logical_digest'], 'post-race recovery retains complete logical parity: ' . $point . '/' . $race );
 		}
 	}
 

@@ -34,6 +34,9 @@ sites to replace an owner or insert a malformed undrained writer between the fin
 check and SQL at initial copying, backup insertion, authority flip, original-option
 deletion, stable publication, reverse-option insertion and sentinel removal.
 Each case requires refusal, unchanged exact target rows and retained raced evidence.
+After the fixture drains/removes only its own injected evidence, explicit recovery
+must reach the recorded destination with complete logical parity. Denied initial
+intent has no pending record and retries ordinary admission, not fabricated recovery.
 Existing conversion/retirement/source-race and other-blog isolation checks remain.
 The diagnostics handoff records executed receipts and exact source/ZIP identity;
 only those receipts, not this test description, establish execution success.
