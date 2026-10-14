@@ -71,6 +71,51 @@ class LegacyOptionDecoderTest extends TestCase {
 			catch ( \RuntimeException $error ) { $this->assertNotEmpty( $error->getMessage() ); }
 		}
 	}
+
+	public function test_reverse_encoding_admits_exact_size_before_native_serialization(): void {
+		$value = array( 'binary' => "\0\xff", 'nested' => array( 9 => PHP_INT_MIN, '09' => -0.0, 'float' => 1.25e-100 ) );
+		$raw = serialize( $value ); $sizes = array();
+		$decoder = new LegacyOptionDecoder( strlen( $raw ) );
+		$this->assertSame( $raw, $decoder->encode( $value, function ( $bytes ) use ( &$sizes ) { $sizes[] = $bytes; } ) );
+		$this->assertSame( array( strlen( $raw ) ), $sizes );
+		$this->assertSame( $raw, serialize( $decoder->decode( $raw ) ) );
+	}
+
+	public function test_reverse_encoding_checks_bytes_nodes_depth_and_heads_before_admission(): void {
+		$value = array( 'key' => array( 'value' => 'x' ) ); $raw = serialize( $value );
+		$called = false;
+		foreach ( array( array( new LegacyOptionDecoder( strlen( $raw ) - 1 ), $value ),
+			array( new LegacyOptionDecoder( 1000, 1 ), $value ), array( new LegacyOptionDecoder( 1000, 2, 4 ), $value ),
+			array( new LegacyOptionDecoder(), array_fill( 0, 101, null ) ), array( new LegacyOptionDecoder(), array( new DecoderHookProbe() ) ) ) as $case ) {
+			try { $case[0]->encode( $case[1], function () use ( &$called ) { $called = true; } ); $this->fail( 'Unbounded reverse serialization accepted.' ); }
+			catch ( \RuntimeException $error ) { $this->assertFalse( $called ); }
+		}
+	}
+
+	public function test_reverse_encoding_propagates_admission_refusal_and_reuses_safely(): void {
+		$decoder = new LegacyOptionDecoder();
+		try { $decoder->encode( array( 'x' ), function () { throw new \RuntimeException( 'Memory admission refused.' ); } ); $this->fail(); }
+		catch ( \RuntimeException $error ) { $this->assertSame( 'Memory admission refused.', $error->getMessage() ); }
+		$this->assertSame( serialize( array( 'x' ) ), $decoder->encode( array( 'x' ), function () {} ) );
+	}
+
+	public function test_reverse_encoding_matches_native_bytes_at_structural_and_integer_boundaries(): void {
+		$decoder = new LegacyOptionDecoder( PHP_INT_MAX );
+		foreach ( array( array(), array_fill( 0, 100, null ), array( array_fill( 0, 14998, false ) ),
+			array( PHP_INT_MIN => PHP_INT_MAX, '009' => "\0\xff\\\"", 'empty' => array(), 'float' => -0.0, 'tiny' => 1.25e-100 ) ) as $value ) {
+			$raw = serialize( $value );
+			$this->assertSame( $raw, $decoder->encode( $value, function ( $bytes ) use ( $raw ) { $this->assertSame( strlen( $raw ), $bytes ); } ) );
+		}
+	}
+
+	public function test_reverse_encoding_refuses_aliases_cycles_and_nonfinite_scalars(): void {
+		$item = array( 'key' => 'value' ); $aliases = array( &$item, &$item );
+		$cycle = array(); $cycle['cycle'] =& $cycle;
+		foreach ( array( $aliases, $cycle, array( INF ), array( NAN ) ) as $value ) {
+			try { ( new LegacyOptionDecoder() )->encode( $value, function () {} ); $this->fail( 'Unsupported graph accepted.' ); }
+			catch ( \RuntimeException $error ) { $this->assertNotEmpty( $error->getMessage() ); }
+		}
+	}
 }
 
 class DecoderHookProbe {

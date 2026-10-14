@@ -172,7 +172,7 @@ class StorageConversion {
 				}
 				$target = $this->table_snapshot( false );
 			} else {
-				$raw = serialize( $source['value'] ); $this->budget( strlen( $raw ) );
+				$raw = ( new LegacyOptionDecoder( $this->policy['max_raw_bytes'] ) )->encode( $source['value'], function ( $bytes ) { $this->budget( $bytes ); } );
 				if ( ! $this->option_present( FOOGALLERY_MIGRATE_OPTION_DATA ) ) { $this->insert_option( FOOGALLERY_MIGRATE_OPTION_DATA, $raw ); }
 				$target = $this->option_snapshot();
 			}

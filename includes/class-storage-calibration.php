@@ -12,6 +12,12 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 class StorageCalibration {
 	/** Exact PHP/WordPress/allocator/codec implementation identity, not a SAPI waiver. */
 	public static function fingerprint() {
+		$runtime = self::identity();
+		return null === $runtime ? null : hash( 'sha256', json_encode( $runtime ) );
+	}
+
+	/** Read-only evidence identity; current environment is NOT allocator startup attestation. */
+	public static function identity() {
 		global $wp_version;
 		if ( ! is_string( $wp_version ) || '' === $wp_version ) { return null; }
 		$extensions = array();
@@ -19,21 +25,25 @@ class StorageCalibration {
 		ksort( $extensions );
 		$runtime = array( PHP_VERSION, PHP_SAPI, PHP_INT_SIZE, PHP_OS, php_uname( 'm' ), php_uname( 'r' ), PHP_DEBUG, PHP_ZTS, getenv( 'USE_ZEND_ALLOC' ),
 			bin2hex( pack( 'L', 1 ) ), $wp_version, $extensions );
+		$runtime['allocator_environment'] = array();
+		foreach ( array( 'USE_ZEND_ALLOC', 'ZEND_MM_SEG_SIZE', 'ZEND_MM_MEM_TYPE', 'ZEND_MM_COMPACT' ) as $name ) {
+			$runtime['allocator_environment'][$name] = getenv( $name );
+		}
 		foreach ( array( 'memory_limit', 'max_execution_time', 'precision', 'serialize_precision', 'zend.enable_gc', 'opcache.enable', 'opcache.enable_cli', 'opcache.jit', 'opcache.jit_buffer_size' ) as $setting ) {
 			$runtime[$setting] = ini_get( $setting );
 		}
 		// These bytes define the bounded coordinator and its hydration/staging path.
 		foreach ( array( 'storage-calibration', 'storage-operations', 'storage-conversion', 'storage-retirement', 'storage-preflight',
-			'legacy-state-codec', 'legacy-record-codec', 'legacy-table-snapshot', 'legacy-table-reader',
+			'legacy-option-decoder', 'legacy-collection-envelope', 'legacy-state-codec', 'legacy-record-codec', 'legacy-table-snapshot', 'legacy-table-reader',
 			'legacy-transaction-connection', 'storage-control', 'storage-maintenance-gate', 'storage-authority',
-			'legacy-storage-schema', 'migrator-engine', 'init' ) as $class ) {
+			'legacy-storage-schema', 'migrator-settings', 'content-scan-repository', 'image-tag-queue-repository', 'migrator-engine', 'init' ) as $class ) {
 			$path = dirname( __FILE__ ) . '/class-' . $class . '.php';
 			if ( ! is_readable( $path ) ) { return null; }
 			$hash = hash_file( 'sha256', $path );
 			if ( ! is_string( $hash ) ) { return null; }
 			$runtime[$class] = $hash;
 		}
-		return hash( 'sha256', json_encode( $runtime ) );
+		return $runtime;
 	}
 
 	/**

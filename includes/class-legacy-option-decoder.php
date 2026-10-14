@@ -39,6 +39,57 @@ class LegacyOptionDecoder {
 		return $value;
 	}
 
+	/**
+	 * Reverse conversion: prove the same structural/byte domain and admit memory
+	 * BEFORE serializing the complete table-origin graph. This is not an allocator
+	 * proof: measuring one finite float still uses native scalar serialization and
+	 * its configured serialize_precision workspace must be covered by calibration.
+	 */
+	public function encode( $value, $admit ) {
+		if ( ! is_array( $value ) || ! is_callable( $admit ) ) { $this->fail(); }
+		$nodes = 0; $bytes = 0;
+		$this->measure( $value, 0, $nodes, $bytes );
+		call_user_func( $admit, $bytes );
+		$raw = serialize( $value );
+		if ( ! is_string( $raw ) || strlen( $raw ) !== $bytes ) { $this->fail(); }
+		// Aliased references can serialize differently from the measured logical
+		// tree. Refuse those tokens without hydrating a second full graph.
+		$offset = 0; $nodes = 0;
+		$this->scan( $raw, $offset, 0, $nodes, false );
+		if ( $offset !== $bytes ) { $this->fail(); }
+		return $raw;
+	}
+
+	private function measure( $value, $depth, &$nodes, &$bytes ) {
+		if ( $depth > $this->max_depth || ++$nodes > $this->max_nodes ) { $this->fail(); }
+		if ( is_array( $value ) ) {
+			$count = count( $value );
+			if ( ( 0 === $depth && $count > 100 ) || $count > ( $this->max_nodes - $nodes ) / 2 ) { $this->fail(); }
+			$this->add_bytes( 5 + strlen( (string) $count ), $bytes ); // a:<count>:{...}
+			foreach ( $value as $key => $item ) {
+				$this->measure( $key, $depth + 1, $nodes, $bytes );
+				$this->measure( $item, $depth + 1, $nodes, $bytes );
+			}
+		} else if ( is_string( $value ) ) {
+			$length = strlen( $value );
+			$this->add_bytes( $length, $bytes );
+			$this->add_bytes( 6 + strlen( (string) $length ), $bytes ); // s:<bytes>:"...";
+		} else if ( is_int( $value ) ) {
+			$this->add_bytes( 3 + strlen( (string) $value ), $bytes );
+		} else if ( is_bool( $value ) || null === $value ) {
+			$this->add_bytes( null === $value ? 2 : 4, $bytes );
+		} else if ( is_float( $value ) && is_finite( $value ) ) {
+			$scalar = serialize( $value );
+			if ( strlen( $scalar ) > 131 ) { $this->fail(); } // same 128-byte float token cap as scan().
+			$this->add_bytes( strlen( $scalar ), $bytes );
+		} else { $this->fail(); }
+	}
+
+	private function add_bytes( $amount, &$bytes ) {
+		if ( $amount > $this->max_bytes - $bytes ) { $this->fail(); }
+		$bytes += $amount;
+	}
+
 	private function scan( $raw, &$offset, $depth, &$nodes, $key ) {
 		if ( $depth > $this->max_depth || ++$nodes > $this->max_nodes || $offset >= strlen( $raw ) ) { $this->fail(); }
 		$type = $raw[$offset];
