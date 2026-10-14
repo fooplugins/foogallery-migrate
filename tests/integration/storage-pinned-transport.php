@@ -24,7 +24,7 @@ $original = $wpdb; $blog = (int) get_current_blog_id();
 $observer_wpdb = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
 $observer_wpdb->prefix = $wpdb->prefix; $observer_wpdb->base_prefix = $wpdb->base_prefix;
 $observer = new FgmKilledTransport( $observer_wpdb ); $observer->options = $wpdb->options;
-$schema = new LegacyStorageSchema( $observer ); $tables = array_keys( $schema->definitions() );
+$schema = new LegacyStorageSchema( $observer_wpdb ); $tables = array_keys( $schema->definitions() );
 $names = array( FOOGALLERY_MIGRATE_OPTION_DATA, StorageAuthority::CONTROL_OPTION, StorageAuthority::AUTHORITY_OPTION, StorageAuthority::MAINTENANCE_OPTION, StorageAuthority::STORAGE_BACKUP_OPTION );
 foreach ( $tables as $table ) {
 	if ( null !== $observer->get_var( $observer->prepare( 'SHOW TABLES LIKE %s', $observer->esc_like( $table ) ) ) ) { throw new RuntimeException( 'Refusing existing tables.' ); }
