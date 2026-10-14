@@ -45,10 +45,7 @@ class LegacyStateCodec {
 	}
 
 	public function decode( $json ) {
-		// This is a per-record guard, not a serialized-option conversion preflight.
-		if ( ! is_string( $json ) || strlen( $json ) > $this->max_bytes ) {
-			$this->fail( 'Record exceeds the encoded byte budget.' );
-		}
+		$this->inspect_json( $json );
 		$envelope = json_decode( $json, true, 512 );
 		if ( JSON_ERROR_NONE !== json_last_error() || ! is_array( $envelope ) ||
 			array_keys( $envelope ) !== array( 'version', 'value' ) || self::VERSION !== $envelope['version'] ) {
@@ -56,6 +53,59 @@ class LegacyStateCodec {
 		}
 		$nodes = 0;
 		return $this->untag( $envelope['value'], 0, $nodes );
+	}
+
+	/**
+	 * Bound native JSON work BEFORE hydration, including rejected prefixes and
+	 * duplicate keys. This constant-space lexical pass is NOT a JSON validator
+	 * or memory admission: native syntax and logical checks still follow it.
+	 * Each logical tag contributes at most three tokens; each entry contributes
+	 * one pair container. Four envelope tokens + 4N is a conservative ceiling.
+	 * A logical nesting edge adds three JSON containers; an empty array adds one.
+	 */
+	public function inspect_json( $json ) {
+		if ( ! is_string( $json ) || strlen( $json ) > $this->max_bytes || strlen( $json ) > 2147483646 ) {
+			$this->fail( 'Record exceeds the encoded byte budget.' );
+		}
+		// Avoid native integer overflow even for caller-supplied PHP_INT_MAX.
+		$limit = $this->max_nodes > ( ( PHP_INT_MAX - 4 ) >> 2 ) ? PHP_INT_MAX : 4 * $this->max_nodes + 4;
+		$depth_limit = 3 * $this->max_depth + 3;
+		$length = strlen( $json ); $tokens = 0; $depth = 0; $peak = 0;
+		for ( $offset = 0; $offset < $length; ++$offset ) {
+			$char = $json[$offset];
+			if ( ' ' === $char || "	" === $char || "\r" === $char || "\n" === $char || ',' === $char || ':' === $char ) { continue; }
+			if ( ']' === $char || '}' === $char ) {
+				if ( $depth < 1 ) { $this->fail( 'Malformed JSON prefix.' ); }
+				--$depth; continue;
+			}
+			if ( $tokens >= $limit ) { $this->fail( 'Record exceeds the native JSON token budget.' ); }
+			++$tokens;
+			if ( '[' === $char || '{' === $char ) {
+				if ( ++$depth > $depth_limit ) { $this->fail( 'Record exceeds the native JSON depth budget.' ); }
+				$peak = max( $peak, $depth ); continue;
+			}
+			if ( '"' === $char ) {
+				for ( ++$offset; $offset < $length && '"' !== $json[$offset]; ++$offset ) {
+					if ( '\\' === $json[$offset] ) { ++$offset; }
+				}
+				if ( $offset >= $length ) { $this->fail( 'Malformed JSON string prefix.' ); }
+				continue;
+			}
+			// The v1 envelope only uses native integer 1 and boolean scalars.
+			// Integers, floats, null and binary strings in logical state are TAGGED.
+			// Do not let a malformed huge decimal reach malloc-backed strtod.
+			$start = $offset;
+			for ( ; $offset < $length; ++$offset ) {
+				$char = $json[$offset];
+				if ( ' ' === $char || "	" === $char || "\r" === $char || "\n" === $char || ',' === $char || ':' === $char || '[' === $char || ']' === $char || '{' === $char || '}' === $char || '"' === $char ) { break; }
+				if ( $offset - $start >= 5 ) { $this->fail( 'Unsupported native JSON scalar.' ); }
+			}
+			$scalar = substr( $json, $start, $offset - $start );
+			if ( '1' !== $scalar && 'true' !== $scalar && 'false' !== $scalar ) { $this->fail( 'Unsupported native JSON scalar.' ); }
+			--$offset;
+		}
+		if ( 0 !== $depth ) { $this->fail( 'Malformed JSON container prefix.' ); }
+		return array( 'bytes_scanned' => $length, 'tokens' => $tokens, 'max_depth' => $peak );
 	}
 
 	/** Hex hashes are passed to SQL via prepared strings and fixed UNHEX(). */
