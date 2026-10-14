@@ -13,6 +13,9 @@ $capture = function () use ( $observer, $names, $tables, $writers, $object, $sou
 	if ( ! empty( $observer->last_error ) ) { throw new RuntimeException( 'Independent observer failed.' ); }
 	return $state;
 };
+// Shared-table hashes contain binary bytes. json_encode may return false;
+// serialize preserves every captured byte instead of hashing an empty string.
+$digest = function ( $state ) { return hash( 'sha256', serialize( $state ) ); };
 $process = null; $pipes = array();
 $start = function ( $operation ) use ( &$process, &$pipes, $blog, $root, $target, $phase, $object ) {
 	$process = proc_open( array( PHP_BINARY, __DIR__ . '/storage-native-death-worker.php', rtrim( ABSPATH, '/' ) ), array( array( 'pipe', 'r' ), array( 'pipe', 'w' ), array( 'pipe', 'w' ) ), $pipes );
@@ -65,9 +68,9 @@ try {
 		$assert( 0 === $rc && '' === $out && '' === $err && is_array( $probe ) && $probe['pid'] === $fresh_status['pid'] && $probe['pid'] !== getmypid() && $probe['pid'] !== $hello['pid'], 'separately bootstrapped purpose-authorized public recovery ' . $label . '/' . $age );
 		$assert( false === $probe['response']['success'] && 'foogallery_migrate_storage_recovery_required' === $probe['response']['data']['code'] && true === $probe['runtime_blocked'] && true === $probe['output_retained'], 'dead or aged owner blocks even completed output and stable destination ' . $label . '/' . $age );
 		$assert( $frozen === $capture(), 'fresh refused recovery neither clears owner nor rewrites any backend/output ' . $label . '/' . $age );
-		$probes[] = array( 'age' => $age, 'exit' => $rc, 'stderr_bytes' => strlen( $err ), 'state_sha256' => hash( 'sha256', json_encode( $frozen ) ), 'receipt' => $probe );
+		$probes[] = array( 'age' => $age, 'exit' => $rc, 'stderr_bytes' => strlen( $err ), 'state_sha256' => $digest( $frozen ), 'receipt' => $probe );
 	}
-	$native_deaths[] = array( 'from' => $mode, 'to' => $target, 'phase' => $phase, 'backend' => $control['backend'], 'blog_id' => $blog, 'parent_pid' => getmypid(), 'worker_pid' => $hello['pid'], 'thread' => $hello['thread'], 'signal' => $status['termsig'], 'migrated_id' => (int) $object->migrated_id, 'before_sha256' => hash( 'sha256', json_encode( $before ) ), 'after_sha256' => hash( 'sha256', json_encode( $after ) ), 'probes' => $probes );
+	$native_deaths[] = array( 'from' => $mode, 'to' => $target, 'phase' => $phase, 'backend' => $control['backend'], 'blog_id' => $blog, 'parent_pid' => getmypid(), 'worker_pid' => $hello['pid'], 'thread' => $hello['thread'], 'signal' => $status['termsig'], 'migrated_id' => (int) $object->migrated_id, 'before_sha256' => $digest( $before ), 'after_sha256' => $digest( $after ), 'probes' => $probes );
 } finally { $finish(); }
 // Only outer invocation teardown may remove these rows; no recovery is run after
 // removal and no success is claimed from cleanup. Preserve evidence until here.
