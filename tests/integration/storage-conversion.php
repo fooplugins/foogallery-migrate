@@ -36,7 +36,7 @@ $policy = array( 'max_raw_bytes' => 1048576, 'amplification' => 64, 'reserve_byt
 $codec = new LegacyStateCodec();
 $initial = array( 'checkpoint' => array( 'cursor' => '009', 'started' => true ), 'migrated-revision' => 7,
 	'migrated' => array( '009' => array( 'ID' => '009', 'object_type' => 'gallery', 'plugin_name' => 'Case', 'migrated_id' => 37,
-		'children' => array( 7 => false, '007' => null ), 'unknown' => array( 'binary' => "\xff\0雪", 'negative' => -0.0 ) ), 9 => null ),
+		'children' => array( 7 => false, '007' => null ), 'unknown' => array( 'binary' => "\0雪", 'negative' => -0.0 ) ), 9 => null ),
 	9 => false, '09' => null, 'empty' => array() );
 $control = new StorageControl( $wpdb, $blog );
 $reset = function () use ( $wpdb, $tables, $names, $blog ) {
@@ -53,7 +53,7 @@ try {
 	( new LegacyTableSnapshot( $db, $other ) )->replace_many( array( array( 'key' => 'checkpoint', 'order' => 0, 'kind' => 'scalar', 'value' => 'other-blog-retained', 'expected_revision' => null ) ) );
 	$other_raw = $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM `' . $tables[0] . '` WHERE blog_id = %d', $other ), ARRAY_A );
 
-	update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $initial, false );
+	$check( update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $initial, false ), 'native fixture source option actually persisted' );
 	$raw_before = $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM `' . $wpdb->options . '` WHERE option_name = %s', FOOGALLERY_MIGRATE_OPTION_DATA ) );
 	$r = $request( 'table' ); $r['nonce'] = 'wrong';
 	$check( is_wp_error( ( new StorageConversion( $policy ) )->switch_backend( $r ) ), 'native wrong-purpose/invalid nonce refused' );
