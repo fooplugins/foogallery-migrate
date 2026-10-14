@@ -24,7 +24,9 @@ class FgmNativeDeathConnection extends LegacyTransactionConnection {
 		$next = array( 'copying' => 'verified', 'verified' => 'flipped', 'flipped' => 'stable' );
 		$set = stripslashes( substr( $sql, 0, (int) strpos( $sql, ' WHERE ' ) ) );
 		$phase_cas = isset( $next[$this->phase] ) && 0 === strpos( $sql, 'UPDATE' ) && false !== strpos( $sql, "'" . StorageAuthority::CONTROL_OPTION . "'" ) && false !== strpos( $set, '"phase":"' . $next[$this->phase] . '"' );
-		$stable_release = 'stable' === $this->phase && 0 === strpos( $sql, 'DELETE FROM' ) && false !== strpos( $sql, "'" . StorageAuthority::MAINTENANCE_OPTION . "'" );
+		// A source-option DELETE also mentions maintenance inside its guard.
+		// Stop only at the exact owned marker release, after stable committed.
+		$stable_release = 'stable' === $this->phase && 0 === strpos( $sql, 'DELETE FROM' ) && false !== strpos( $sql, "WHERE option_name = '" . StorageAuthority::MAINTENANCE_OPTION . "' AND" );
 		if ( $phase_cas || $stable_release ) {
 			$thread = (int) $this->get_var( 'SELECT CONNECTION_ID()' );
 			if ( $thread < 1 || ! $this->is_current() ) { throw new RuntimeException( 'Owned session unavailable.' ); }
