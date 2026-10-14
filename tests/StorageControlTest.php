@@ -20,6 +20,19 @@ class StorageControlTest extends TestCase {
 		$this->assertFalse( StorageControl::runtime_ready( $record, null ) );
 	}
 
+	public function test_v2_retirement_evidence_is_closed_and_only_reverse_records_bind_it(): void {
+		$record = $this->record(); $record['version'] = 2; $record['retained_digest'] = null;
+		$this->assertSame( $record, StorageControl::decode( json_encode( $record ), 1 ) );
+		$record['from'] = 'table'; $record['to'] = 'option'; $record['backend'] = 'option'; $record['phase'] = 'stable'; $record['epoch'] = 2;
+		$record['retained_digest'] = str_repeat( 'd', 64 );
+		$this->assertSame( $record, StorageControl::decode( json_encode( $record ), 1 ) );
+		foreach ( array( null, '', true, str_repeat( 'D', 64 ), str_repeat( 'd', 63 ) ) as $bad ) {
+			$invalid = $record; $invalid['retained_digest'] = $bad;
+			try { StorageControl::decode( json_encode( $invalid ), 1 ); $this->fail( 'Unbound reverse evidence must refuse.' ); }
+			catch ( \RuntimeException $error ) { $this->assertNotEmpty( $error->getMessage() ); }
+		}
+	}
+
 	public function test_table_authority_requires_exact_site_switch_and_epoch_sentinel_even_when_empty(): void {
 		$record = $this->record(); $record['backend'] = 'table'; $record['epoch'] = 1; $record['phase'] = 'stable';
 		$sentinel = StorageControl::sentinel( $record );

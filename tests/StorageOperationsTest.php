@@ -68,6 +68,17 @@ class StorageOperationsTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_nonce']['action'] = 'foogallery_migrate_storage_recover_1';
 		$this->error( 'decode_policy_required', ( new StorageConversion() )->recover( $r ) );
 	}
+	public function test_replace_requires_distinct_confirmation_and_nonce_before_calibration(): void {
+		$receiver = new StorageOperations(); $r = $this->request();
+		$this->error( 'invalid_request', $receiver->dispatch( 'replace', $r ) );
+		$r['confirmation'] = 'replace-retained-with-table';
+		$this->error( 'invalid_nonce', $receiver->dispatch( 'replace', $r ) );
+		$GLOBALS['foogallery_migrate_test_nonce']['action'] = 'foogallery_migrate_storage_option_reimport_1';
+		$this->error( 'calibration_required', $receiver->dispatch( 'replace', $r ) );
+		$this->error( 'decode_policy_required', ( new StorageConversion() )->replace_retained( $r ) );
+		$r['target'] = 'option';
+		$this->error( 'invalid_request', $receiver->dispatch( 'replace', $r ) );
+	}
 	public function test_http_receiver_rejects_get_and_unknown_transport_fields(): void {
 		$_POST = array_merge( $this->request(), array( 'action' => 'foogallery_migrate_storage', 'operation' => 'switch' ) );
 		$_SERVER['REQUEST_METHOD'] = 'GET';

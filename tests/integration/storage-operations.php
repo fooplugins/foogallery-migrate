@@ -107,6 +107,18 @@ try {
 		}
 		remove_filter( 'foogallery_migrate_storage_calibration', $synthetic );
 		$check( $logical === ( new LegacyStateCodec() )->snapshot_digest( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) ), 'complete reverse logical parity: ' . $shape );
+		// Replacement is a separate destructive confirmation, never ordinary switch.
+		add_filter( 'foogallery_migrate_storage_calibration', $synthetic );
+		$result = $response( 'switch', $request( 'table' ) );
+		$check( false === $result['success'], 'ordinary repeat switch retains evidence: ' . $shape );
+		$replacement = $request( 'table' ); $replacement['confirmation'] = 'replace-retained-with-table';
+		$replacement['nonce'] = wp_create_nonce( 'foogallery_migrate_storage_option_reimport_' . $blog );
+		$result = $response( 'replace', $replacement );
+		$check( true === $result['success'] && 3 === $result['data']['epoch'] && 'table' === $result['data']['backend'], 'explicit native receiver replacement succeeds: ' . $shape );
+		$result = $response( 'switch', $request( 'option' ) );
+		$check( true === $result['success'] && 4 === $result['data']['epoch'], 'replacement remains reversible: ' . $shape );
+		$check( $logical === ( new LegacyStateCodec() )->snapshot_digest( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) ), 'repeat receiver preserves complete logical state: ' . $shape );
+		remove_filter( 'foogallery_migrate_storage_calibration', $synthetic );
 	}
 	$reset();
 } finally {
