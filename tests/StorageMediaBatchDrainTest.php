@@ -16,6 +16,7 @@ class StorageMediaBatchDrainTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_blog_id'] = 1;
 		foreach ( array( 'options', 'posts', 'post_meta', 'post_meta_updates', 'plugins', 'attachment_url_to_postid', 'imported_attachments', 'set_object_terms', 'object_terms' ) as $name ) { $GLOBALS['foogallery_migrate_test_' . $name] = array(); }
 		$GLOBALS['foogallery_migrate_test_taxonomies'] = array( FOOGALLERY_ATTACHMENT_TAXONOMY_TAG );
+		$GLOBALS['foogallery_migrate_test_attachment_url_to_postid']['https://example.invalid/media-drain.jpg'] = 0;
 		$this->engine = new MigratorEngine();
 		$GLOBALS['foogallery_migrate_engine_instance'] = $this->engine;
 	}
