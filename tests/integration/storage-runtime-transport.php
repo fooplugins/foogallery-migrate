@@ -117,10 +117,12 @@ try {
 		catch ( RuntimeException $error ) { $check( true, $fault . ': fresh engine cannot adopt authority via healthy wpdb' ); }
 		// A different request can claim maintenance, but retained writer is NOT
 		// drained. No stale-owner policy or fixture deletion is product recovery.
-		$waiter = new StorageMaintenanceGate( $observer, $blog, $original->prefix );
+		$victim = $wpdb; $wpdb = $observer_wpdb;
+		$waiter = StorageMaintenanceGate::current();
 		$check( true === $waiter->acquire_maintenance(), $fault . ': independent request claims maintenance' );
 		$check( is_wp_error( $waiter->maintenance_ready( function () { return true; } ) ), $fault . ': retained writer blocks independent conversion readiness' );
 		$check( true === $waiter->release_maintenance(), $fault . ': waiter releases only its own marker' );
+		$wpdb = $victim;
 		foreach ( $tables as $table ) { $check( $other_raw[$table] === $observer->get_results( $observer->prepare( 'SELECT * FROM `' . $table . '` WHERE blog_id = %d ORDER BY id', array( $other ) ), ARRAY_A ), $fault . ': other SQL blog stays byte-identical: ' . $table ); }
 	}
 } finally {
