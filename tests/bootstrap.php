@@ -382,6 +382,9 @@ function wp_set_object_terms( $object_id, $terms, $taxonomy, $append = false ) {
 	$terms = array_values( array_unique( array_filter( array_map( 'strval', $terms ) ) ) );
 	$GLOBALS['foogallery_migrate_test_object_terms'][ $taxonomy ][ $object_id ] = $terms;
 	$GLOBALS['foogallery_migrate_test_set_object_terms'][] = compact( 'object_id', 'terms', 'taxonomy', 'append' );
+	if ( isset( $GLOBALS['foogallery_migrate_test_terms_callback'] ) ) {
+		call_user_func( $GLOBALS['foogallery_migrate_test_terms_callback'] );
+	}
 
 	return $terms;
 }
