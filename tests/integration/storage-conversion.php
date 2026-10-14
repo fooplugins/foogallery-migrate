@@ -95,9 +95,9 @@ try {
 			$check( is_wp_error( ( new StorageConversion( $policy ) )->switch_backend( $request( 'table' ) ) ), 'unsupported serialized source refuses actual authorized coordinator' );
 			$check( ! StorageDecoderWakeupProbe::$invoked && ! $unexpected_autoload, 'refusal invokes no historical object hook/autoload' );
 			$check( $hostile === $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM `' . $wpdb->options . '` WHERE option_name = %s', FOOGALLERY_MIGRATE_OPTION_DATA ) ), 'refusal retains exact hostile source bytes' );
-			$check( null === $control->read( StorageAuthority::CONTROL_OPTION ) && null === $control->read( StorageAuthority::AUTHORITY_OPTION ) && null === $control->read( StorageAuthority::STORAGE_BACKUP_OPTION ), 'decode refusal publishes no intent, authority or backup' );
+			$check( null === $control->read( StorageAuthority::CONTROL_OPTION ) && null === $control->read( StorageAuthority::AUTHORITY_OPTION ) && null === $wpdb->get_var( $wpdb->prepare( 'SELECT 1 FROM `' . $wpdb->options . '` WHERE option_name = %s', StorageAuthority::STORAGE_BACKUP_OPTION ) ), 'decode refusal publishes no intent, authority or backup' );
 			$check( '0' === (string) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM `' . $tables[0] . '` WHERE blog_id = %d', $blog ) ) && '0' === (string) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM `' . $tables[1] . '` WHERE blog_id = %d', $blog ) ), 'decode refusal stages no current-blog state/records' );
-			$check( null === $control->read( StorageAuthority::MAINTENANCE_OPTION ), 'decode refusal releases only acquired maintenance marker' );
+			$check( null === $wpdb->get_var( $wpdb->prepare( 'SELECT 1 FROM `' . $wpdb->options . '` WHERE option_name = %s', StorageAuthority::MAINTENANCE_OPTION ) ), 'decode refusal releases only acquired maintenance marker' );
 		}
 	} finally { spl_autoload_unregister( $loader ); }
 	$wpdb->query( $wpdb->prepare( 'UPDATE `' . $wpdb->options . '` SET option_value = %s WHERE option_name = %s', array( $raw_before, FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
