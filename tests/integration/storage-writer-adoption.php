@@ -94,7 +94,7 @@ try {
 	}
 	remove_filter( 'pre_option_' . FOOGALLERY_MIGRATE_OPTION_DATA, $trap );
 	remove_filter( 'pre_option_' . FOOGALLERY_MIGRATE_OPTION_SETTINGS, $trap );
-	unset( $foogallery_migrate_engine_instance );
+	unset( $GLOBALS['foogallery_migrate_engine_instance'] );
 	$engine = foogallery_migrate_migrator_instance();
 	$check( true === $engine->set_migrator_setting( 'writer_adoption_test', true ) && 1 === $writer_count(), 'real production engine persists under one admission' );
 	$check( true === $gate->acquire_maintenance(), 'real engine admits maintenance behind active writer' );
@@ -120,7 +120,7 @@ try {
 	$gate->shutdown_writer();
 	$gate->release_maintenance();
 	foreach ( array( FOOGALLERY_MIGRATE_OPTION_DATA, FOOGALLERY_MIGRATE_OPTION_SETTINGS, StorageAuthority::CONTROL_OPTION, StorageAuthority::MAINTENANCE_OPTION ) as $name ) { delete_option( $name ); }
-	unset( $foogallery_migrate_engine_instance );
+	unset( $GLOBALS['foogallery_migrate_engine_instance'] );
 }
 $check( false === StorageAuthority::option_mode_error() && 0 === $writer_count(), 'virgin authority and zero writer rows restored' );
 echo wp_json_encode( array( 'status' => 'pass', 'scope' => 'production writer adoption only; no conversion/recovery acceptance',
