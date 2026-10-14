@@ -292,6 +292,50 @@ try {
 	$check( ! is_wp_error( $result ) && StorageControl::runtime_ready( $result, $control->read( StorageAuthority::AUTHORITY_OPTION ) ), 'empty absent option import still creates matching table authority sentinel' );
 	$check( ! is_wp_error( ( new StorageConversion( $policy ) )->switch_backend( $request( 'option' ) ) ) && array() === get_option( FOOGALLERY_MIGRATE_OPTION_DATA ), 'empty authoritative table reverse exports complete empty option' );
 
+	// A separate PHP process changes ownership/drain after ready() and before
+	// the actual coordinator SQL. Earlier SELECTs alone must never authorize it.
+	foreach ( array( 'copying', 'backup', 'flipped', 'delete-source', 'stable', 'reverse-option', 'remove-sentinel' ) as $point ) {
+		foreach ( array( 'owner-replace', 'writer-add' ) as $race ) {
+			$reset(); update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $initial, false );
+			$reverse = in_array( $point, array( 'reverse-option', 'remove-sentinel' ), true );
+			if ( $reverse ) { $check( ! is_wp_error( ( new StorageConversion( $policy ) )->switch_backend( $request( 'table' ) ) ), 'ownership race reverse fixture forward succeeds: ' . $point . '/' . $race ); }
+			$fired = false; $owner = null; $before_write = null; $target_name = StorageAuthority::CONTROL_OPTION;
+			if ( 'backup' === $point ) { $target_name = StorageAuthority::STORAGE_BACKUP_OPTION; }
+			if ( in_array( $point, array( 'delete-source', 'reverse-option' ), true ) ) { $target_name = FOOGALLERY_MIGRATE_OPTION_DATA; }
+			if ( 'remove-sentinel' === $point ) { $target_name = StorageAuthority::AUTHORITY_OPTION; }
+			$hook = function ( $sql ) use ( &$fired, &$owner, &$before_write, $point, $race, $target_name, $wpdb, $blog ) {
+				if ( $fired ) { return $sql; }
+				$set = stripslashes( substr( $sql, 0, false === strpos( $sql, ' WHERE ' ) ? strlen( $sql ) : strpos( $sql, ' WHERE ' ) ) );
+				$phase = in_array( $point, array( 'copying', 'flipped', 'stable' ), true );
+				$matches = $phase ? ( false !== strpos( $set, '"phase":"' . $point . '"' ) && ( 0 === strpos( $sql, 'UPDATE' ) || 0 === strpos( $sql, 'INSERT' ) ) ) :
+					( 0 === strpos( $sql, in_array( $point, array( 'delete-source', 'remove-sentinel' ), true ) ? 'DELETE' : 'INSERT' ) && false !== strpos( $sql, "'" . $target_name . "'" ) );
+				if ( ! $matches ) { return $sql; }
+				$fired = true;
+				$owner = $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM `' . $wpdb->options . '` WHERE option_name = %s', StorageAuthority::MAINTENANCE_OPTION ) );
+				$before_write = $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM `' . $wpdb->options . '` WHERE option_name = %s', $target_name ), ARRAY_A );
+				$command = escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/storage-owner-race-worker.php' ) . ' ' . escapeshellarg( rtrim( ABSPATH, '/' ) );
+				$process = proc_open( $command, array( array( 'pipe', 'r' ), array( 'pipe', 'w' ), array( 'pipe', 'w' ) ), $pipes );
+				if ( ! is_resource( $process ) ) { throw new RuntimeException( 'Owned race process failed to start.' ); }
+				fwrite( $pipes[0], json_encode( array( 'blog_id' => $blog, 'action' => $race, 'owner' => $owner ) ) ); fclose( $pipes[0] );
+				$out = stream_get_contents( $pipes[1] ); fclose( $pipes[1] ); $err = stream_get_contents( $pipes[2] ); fclose( $pipes[2] );
+				if ( 0 !== proc_close( $process ) || "OWNED_RACE_APPLIED\n" !== $out || '' !== $err ) { throw new RuntimeException( 'Owned separate-process race did not complete cleanly.' ); }
+				return $sql;
+			};
+			add_filter( 'query', $hook ); $failed = ( new StorageConversion( $policy ) )->switch_backend( $request( $reverse ? 'option' : 'table' ) ); remove_filter( 'query', $hook ); $hook = null;
+			$check( $fired && is_wp_error( $failed ), 'separate-process ownership/drain race refuses success: ' . $point . '/' . $race );
+			$check( $before_write === $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM `' . $wpdb->options . '` WHERE option_name = %s', $target_name ), ARRAY_A ), 'raced coordinator SQL leaves exact target/control bytes untouched: ' . $point . '/' . $race );
+			if ( 'owner-replace' === $race ) {
+				$check( 'fixture-lost-owner' === $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM `' . $wpdb->options . '` WHERE option_name = %s', StorageAuthority::MAINTENANCE_OPTION ) ), 'failed coordinator retains foreign owner rather than removing it: ' . $point );
+				// Only the fixture restores its injected owner so this request can end.
+				$wpdb->query( $wpdb->prepare( 'UPDATE `' . $wpdb->options . '` SET option_value = %s WHERE option_name = %s AND option_value = %s', array( $owner, StorageAuthority::MAINTENANCE_OPTION, 'fixture-lost-owner' ) ) );
+				$check( true === StorageMaintenanceGate::current()->release_maintenance(), 'restored fixture owner releases exactly: ' . $point );
+			} else {
+				$check( 'fixture-undrained-writer' === $wpdb->get_var( 'SELECT option_value FROM `' . $wpdb->options . "` WHERE option_name = 'foogallery_migrate_storage_writer_fixture_race'" ), 'raced writer marker retained for drain proof: ' . $point );
+				delete_option( 'foogallery_migrate_storage_writer_fixture_race' );
+			}
+		}
+	}
+
 	// Unsupported historical objects never invoke wakeup and remain untouched.
 	$reset(); update_option( FOOGALLERY_MIGRATE_OPTION_DATA, array( 'old' => (object) array( 'unknown' => true ) ), false );
 	$before = $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM `' . $wpdb->options . '` WHERE option_name = %s', FOOGALLERY_MIGRATE_OPTION_DATA ) );

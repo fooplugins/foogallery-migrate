@@ -85,6 +85,30 @@ class StorageControlTest extends TestCase {
 		$this->assertStringContainsString( 'BINARY option_value = BINARY', implode( '\n', $db->queries ) );
 	}
 
+	public function test_conversion_maintenance_guard_binds_exact_owner_expiry_and_writer_absence(): void {
+		$db = new ControlTestWpdb(); $store = new StorageControl( $db, 1 );
+		$owner = json_encode( array( 'version' => 1, 'blog_id' => 1, 'token' => str_repeat( 'a', 32 ), 'expires' => time() + 300 ) );
+		$sql = $store->maintenance_guard( $owner );
+		$this->assertStringContainsString( 'BINARY maintenance_value = BINARY', $sql );
+		$this->assertStringContainsString( $owner, stripslashes( $sql ) );
+		$this->assertStringContainsString( 'UNIX_TIMESTAMP() <', $sql );
+		$this->assertStringContainsString( 'NOT EXISTS', $sql );
+		$this->assertStringContainsString( 'foogallery_migrate_storage_writer_', $sql );
+		$this->assertStringContainsString( '`wp_options`', $sql );
+	}
+
+	public function test_invalid_maintenance_guard_is_refused_before_sql(): void {
+		$db = new ControlTestWpdb(); $store = new StorageControl( $db, 1 );
+		$valid = array( 'version' => 1, 'blog_id' => 1, 'token' => str_repeat( 'a', 32 ), 'expires' => time() + 300 );
+		$cases = array( '', '{}', str_repeat( 'x', 513 ), json_encode( array_merge( $valid, array( 'blog_id' => 2 ) ) ),
+			json_encode( array_merge( $valid, array( 'expires' => 1 ) ) ), json_encode( array_merge( $valid, array( 'token' => 'bad' ) ) ),
+			json_encode( array_merge( $valid, array( 'unknown' => true ) ) ) );
+		foreach ( $cases as $raw ) {
+			try { $store->maintenance_guard( $raw ); $this->fail( 'Invalid ownership must refuse.' ); }
+			catch ( \RuntimeException $error ) { $this->assertSame( array(), $db->queries ); }
+		}
+	}
+
 	public function test_readback_failure_is_not_a_success_and_retains_written_evidence(): void {
 		$db = new ControlTestWpdb(); $store = new StorageControl( $db, 1 ); $db->fail_after_write = true;
 		try { $store->cas( StorageAuthority::CONTROL_OPTION, null, json_encode( $this->record() ) ); $this->fail(); }
