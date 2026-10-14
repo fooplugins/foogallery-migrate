@@ -64,6 +64,7 @@ $clean = function () use ( $observer, &$created, &$owned_markers, $names, $blog,
 };
 $post_hook = $meta_hook = $option_hook = $generation_hook = $term_hook = $attachment_hook = $discovery_hook = null; $source_id = 991;
 $old_post = $_POST; $old_method = isset( $_SERVER['REQUEST_METHOD'] ) ? $_SERVER['REQUEST_METHOD'] : null;
+$old_fresh_site = get_option( 'fresh_site', false );
 $synthetic = function () { return array( 'version' => 1, 'status' => 'approved', 'fingerprint' => StorageCalibration::fingerprint(), 'evidence_sha256' => str_repeat( 'a', 64 ), 'policy' => array( 'max_raw_bytes' => 1048576, 'amplification' => 64, 'reserve_bytes' => 33554432 ) ); };
 $response = function ( $target, $blog ) {
 	$die = function () { return function () { throw new RuntimeException( 'owned-json-response' ); }; };
@@ -80,6 +81,7 @@ try {
 	$source_attachment = wp_insert_attachment( array( 'post_title' => 'Owned base fixture image', 'post_mime_type' => 'image/gif', 'post_status' => 'inherit', 'guid' => home_url( '/wp-includes/images/blank.gif' ) ) ); $posts[] = $source_attachment;
 	$source_content = '[gallery ids="' . $source_attachment . '" link="none"]';
 	$source_post = wp_insert_post( array( 'post_title' => 'Owned base fixture source', 'post_type' => 'page', 'post_status' => 'publish', 'post_content' => $source_content ) ); $posts[] = $source_post;
+	$assert( 0 === (int) get_option( 'fresh_site' ), 'native source publish changes fresh_site before any engine writer' );
 	foreach ( array( 'option', 'table' ) as $mode ) {
 		foreach ( array( 'gallery-healthy', 'album-healthy', 'gallery-post-loss', 'album-post-loss', 'gallery-meta-loss', 'gallery-error', 'album-blog-loss', 'option-loss', 'media-healthy', 'media-post-loss', 'media-generation-loss', 'media-alt-loss', 'media-term-loss', 'media-error', 'media-reuse-healthy', 'base-healthy', 'base-discovery-loss', 'base-discovery-error', 'base-post-loss' ) as $scenario ) {
 			if ( ( 'table' === $mode && 'option-loss' === $scenario ) || ( ! is_multisite() && 'album-blog-loss' === $scenario ) ) { continue; }
@@ -215,12 +217,13 @@ try {
 				else { $assert( array() === $items, 'independent no history advancement ' . $scenario ); }
 			}
 			if ( 'base-healthy' === $scenario ) {
+				$engine->get_album_migrator()->get_objects_to_migrate( true );
 				$checkpoint_values = array(
 					'albums-state' => $engine->get_album_migrator()->get_state(),
 					\FooPlugins\FooGalleryMigrate\ContentScanRepository::STATE_KEY => array( 'items' => array(), 'progress' => array( 'status' => 'complete' ) ),
 					\FooPlugins\FooGalleryMigrate\ImageTagQueueRepository::STATE_KEY => array( 'items' => array(), 'errors' => array() ),
 				);
-				foreach ( $checkpoint_values as $key => $value ) { $assert( $engine->set_migrator_setting( $key, $value ), 'seed real scalar-array checkpoint ' . $key ); }
+				foreach ( $checkpoint_values as $key => $value ) { $assert( is_array( $value ), 'array checkpoint seed ' . $key ); $assert( $engine->set_migrator_setting( $key, $value ), 'seed real scalar-array checkpoint ' . $key ); }
 				$assert( $engine->storage_is_quiescent(), 'checkpoint seed drained before selection' );
 			}
 			$before = $writers(); $assert( 1 === count( $before ), 'one owned writer before shutdown ' . $scenario );
@@ -266,6 +269,9 @@ try {
 	if ( null !== $gate ) { $gate->shutdown_writer(); }
 	$clean(); $wpdb = $original;
 	foreach ( $posts as $id ) { if ( 'attachment' === get_post_type( $id ) ) { wp_delete_attachment( $id, true ); } else { wp_delete_post( $id, true ); } }
+	// Native publication of our source page changes this preexisting option.
+	// Restore only that demonstrated owned-fixture side effect, not DB drift.
+	if ( false === $old_fresh_site ) { delete_option( 'fresh_site' ); } else { update_option( 'fresh_site', $old_fresh_site ); }
 	$term = get_term_by( 'slug', 'native-output-fixture-tag', FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ); if ( $term ) { wp_delete_term( $term->term_id, FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ); }
 	foreach ( array_reverse( $created ) as $table ) { $observer->query( "DROP TABLE `$table`" ); }
 	wp_cache_flush(); unset( $GLOBALS['foogallery_migrate_engine_instance'] );
