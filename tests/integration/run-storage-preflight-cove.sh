@@ -7,7 +7,7 @@ ZIP=${2:?absolute candidate ZIP}
 OUT=${3:?absolute new evidence directory}
 EXPECTED=${4:?exact candidate commit}
 CASE=${5:-storage-preflight}
-[[ "$CASE" == storage-preflight || "$CASE" == storage-writer-gate || "$CASE" == storage-writer-adoption || "$CASE" == storage-conversion || "$CASE" == storage-operations || "$CASE" == storage-pinned-transport ]] || exit 1
+[[ "$CASE" == storage-preflight || "$CASE" == storage-writer-gate || "$CASE" == storage-writer-adoption || "$CASE" == storage-conversion || "$CASE" == storage-operations || "$CASE" == storage-pinned-transport || "$CASE" == storage-runtime-transport ]] || exit 1
 COVE=/opt/homebrew/bin/cove
 [[ "$SOURCE" == /* && "$ZIP" == /* && "$OUT" == /* ]] || exit 1
 [[ "$SOURCE$ZIP$OUT" != *"'"* ]] || exit 1
