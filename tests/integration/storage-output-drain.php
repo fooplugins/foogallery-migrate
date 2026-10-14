@@ -107,6 +107,7 @@ try {
 			remove_action( 'wp_insert_post', $post_hook, 10 ); remove_action( 'added_post_meta', $meta_hook, 10 ); remove_action( 'updated_post_meta', $meta_hook, 10 ); remove_action( 'added_option', $option_hook, 10 ); remove_action( 'updated_option', $option_hook, 10 );
 			$post_hook = $meta_hook = $option_hook = null;
 			$loss = false !== strpos( $scenario, 'loss' );
+			if ( ! $loss && 'gallery-error' !== $scenario && null !== $caught ) { throw $caught; }
 			if ( $loss ) {
 				$assert( $caught instanceof RuntimeException, 'lost authority refused ' . $scenario );
 				$assert( ! $engine->storage_is_quiescent(), 'lost authority not drained ' . $scenario );
