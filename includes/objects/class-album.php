@@ -58,6 +58,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Album' ) ) {
         }
 
         function create_new_migrated_object() {
+            $this->storage_output_operation( 'create_new_migrated_object_admitted' );
+        }
+
+        protected function create_new_migrated_object_admitted() {
             foogallery_migrate_migrator_instance()->assert_storage_writer();
             // Create an album
             
@@ -68,11 +72,14 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Album' ) ) {
                 }
                 $override_album_settings_id = foogallery_migrate_migrator_instance()->get_override_album_settings();
 
+                foogallery_migrate_migrator_instance()->assert_storage_writer();
                 $this->migrated_id = wp_insert_post( array(
                     'post_title' => $album_title,
                     'post_type' => FOOGALLERY_CPT_ALBUM,
                     'post_status' => 'publish',
                 ) );
+
+                foogallery_migrate_migrator_instance()->assert_storage_writer();
 
                 if ( is_wp_error( $this->migrated_id ) ) {
                     $this->migration_status = self::PROGRESS_ERROR;
@@ -85,7 +92,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Album' ) ) {
                         }
                     }
 
-                    update_post_meta( $this->migrated_id, FOOGALLERY_ALBUM_META_TEMPLATE, $album_template );
+                    $this->update_migrated_meta( FOOGALLERY_ALBUM_META_TEMPLATE, $album_template );
 
                     if ( $override_album_settings_id > 0 ) {
                         $this->inherit_album_settings_from( $override_album_settings_id );
@@ -101,25 +108,29 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Album' ) ) {
          * @return void
          */
         function inherit_album_settings_from( $source_album_id ) {
+            $this->storage_output_operation( 'inherit_album_settings_from_admitted', array( $source_album_id ) );
+        }
+
+        protected function inherit_album_settings_from_admitted( $source_album_id ) {
             foogallery_migrate_migrator_instance()->assert_storage_writer();
             if ( defined( 'FOOGALLERY_META_SETTINGS_OLD' ) ) {
                 $settings = get_post_meta( $source_album_id, FOOGALLERY_META_SETTINGS_OLD, true );
                 if ( ! empty( $settings ) ) {
-                    update_post_meta( $this->migrated_id, FOOGALLERY_META_SETTINGS_OLD, $settings );
+                    $this->update_migrated_meta( FOOGALLERY_META_SETTINGS_OLD, $settings );
                 }
             }
 
             if ( defined( 'FOOGALLERY_ALBUM_META_SORT' ) ) {
                 $sort = get_post_meta( $source_album_id, FOOGALLERY_ALBUM_META_SORT, true );
                 if ( is_scalar( $sort ) && '' !== trim( (string) $sort ) ) {
-                    update_post_meta( $this->migrated_id, FOOGALLERY_ALBUM_META_SORT, $sort );
+                    $this->update_migrated_meta( FOOGALLERY_ALBUM_META_SORT, $sort );
                 }
             }
 
             if ( defined( 'FOOGALLERY_META_CUSTOM_CSS' ) ) {
                 $custom_css = get_post_meta( $source_album_id, FOOGALLERY_META_CUSTOM_CSS, true );
                 if ( is_scalar( $custom_css ) && '' !== trim( (string) $custom_css ) ) {
-                    update_post_meta( $this->migrated_id, FOOGALLERY_META_CUSTOM_CSS, $custom_css );
+                    $this->update_migrated_meta( FOOGALLERY_META_CUSTOM_CSS, $custom_css );
                 }
             }
         }
@@ -130,10 +141,14 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Album' ) ) {
          * @return void
          */
         function migrate_next_child() {
+            $this->storage_output_operation( 'migrate_next_child_admitted' );
+        }
+
+        protected function migrate_next_child_admitted() {
             foogallery_migrate_migrator_instance()->assert_storage_writer();
             parent::migrate_next_child();        
             $galleries = $this->build_child_migrated_id_array();
-            update_post_meta( $this->migrated_id, FOOGALLERY_ALBUM_META_GALLERIES, $galleries );
+            $this->update_migrated_meta( FOOGALLERY_ALBUM_META_GALLERIES, $galleries );
         }
     }
 }

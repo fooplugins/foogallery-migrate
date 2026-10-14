@@ -80,6 +80,7 @@ class LegacyOptionBackend {
 		try { $data = $this->read_all(); }
 		catch ( \RuntimeException $error ) { return false; }
 		$changed = call_user_func( $change, $data );
+		$this->assert_writer();
 		return true === $changed ? true : $this->replace_all( $changed );
 	}
 
@@ -88,6 +89,7 @@ class LegacyOptionBackend {
 		if ( ! is_array( $data ) ) { return false; }
 		$this->assert_writer();
 		update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $data, false );
+		$this->assert_writer();
 		$saved = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
 		// WP caches serialized bytes; reads can create new object identities.
 		// Compare exact serialized state, not object identity or loose equality.

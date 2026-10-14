@@ -22,6 +22,42 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
      */
     abstract class Migratable extends \stdClass {
 
+        // Request-global and conservative across object/engine instances. Never
+        // persisted; this can refuse local drain, not prove another writer dead.
+        private static $storage_output_depth = 0;
+
+        public static function storage_is_quiescent() {
+            return 0 === self::$storage_output_depth;
+        }
+
+        /** Internal synchronous object boundary, not a public callback API. */
+        protected function storage_output_operation( $method, $arguments = array() ) {
+            $engine = foogallery_migrate_migrator_instance();
+            $engine->assert_storage_writer();
+            self::$storage_output_depth++;
+            try {
+                $result = call_user_func_array( array( $this, $method ), $arguments );
+                $engine->assert_storage_writer();
+            } catch ( \Exception $error ) {
+                self::$storage_output_depth--;
+                throw $error;
+            } catch ( \Throwable $error ) {
+                self::$storage_output_depth--;
+                throw $error;
+            }
+            self::$storage_output_depth--;
+            return $result;
+        }
+
+        /** Check both sides of every individual metadata output/hook. */
+        protected function update_migrated_meta( $key, $value ) {
+            $engine = foogallery_migrate_migrator_instance();
+            $engine->assert_storage_writer();
+            $result = update_post_meta( $this->migrated_id, $key, $value );
+            $engine->assert_storage_writer();
+            return $result;
+        }
+
         const META_SOURCE_KEY = '_foogallery_migrate_source_key';
         const PROGRESS_NOT_STARTED = 'not_started';
         const PROGRESS_QUEUED = 'queued';
@@ -108,6 +144,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
                 foreach ( $this->get_children() as $child ) {
                     if ( !$child->migrated ) {
                         $child->migrate();
+                        foogallery_migrate_migrator_instance()->assert_storage_writer();
                         if ( $child->migrated ) {
                             $this->migrated_child_count++;
                         }
@@ -185,6 +222,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
          * @return void
          */
         function migrate() {
+            $this->storage_output_operation( 'migrate_admitted' );
+        }
+
+        private function migrate_admitted() {
             foogallery_migrate_migrator_instance()->assert_storage_writer();
             $migrated_object = false;
             if ( empty( $this->migration_store_checked ) ) {
@@ -213,11 +254,13 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
                     // First, make sure the object is migrated.
                     if ( $this->migrated_id === 0 ) {
                         $this->create_new_migrated_object();
+                        foogallery_migrate_migrator_instance()->assert_storage_writer();
                     }
 
                     // Then migrate the children.
                     if ( $this->has_children() ) {
                         $this->migrate_next_child();
+                        foogallery_migrate_migrator_instance()->assert_storage_writer();
                     }
 
                     // Always calculate the new progress, after an attempted migration.

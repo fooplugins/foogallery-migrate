@@ -74,6 +74,17 @@ class StorageOutputDrainTest extends TestCase {
 		$this->assertCount( 1, $GLOBALS['foogallery_migrate_test_post_meta_updates'] );
 		$this->assertArrayNotHasKey( FOOGALLERY_MIGRATE_OPTION_DATA, $GLOBALS['foogallery_migrate_test_options'] );
 	}
+	public function test_gallery_source_settings_pin_loss_refuses_settings_metadata(): void {
+		$object = $this->object( Gallery::class );
+		$object->plugin = new OutputPinLosingSourcePlugin();
+		$caught = null;
+		try { $object->migrate(); }
+		catch ( \RuntimeException $error ) { $caught = $error; }
+		$this->assertInstanceOf( \RuntimeException::class, $caught );
+		$this->assertCount( 1, $GLOBALS['foogallery_migrate_test_posts'] );
+		$this->assertCount( 2, $GLOBALS['foogallery_migrate_test_post_meta_updates'] );
+		$this->assertFalse( $object->migrated );
+	}
 	public function test_changed_blog_in_post_callback_refuses_metadata(): void {
 		$GLOBALS['foogallery_migrate_test_post_insert_callback'] = function () { $GLOBALS['foogallery_migrate_test_blog_id'] = 2; };
 		$caught = null;
@@ -111,5 +122,12 @@ class StorageOutputDrainTest extends TestCase {
 		catch ( \RuntimeException $error ) { $caught = $error; }
 		$this->assertInstanceOf( \RuntimeException::class, $caught );
 		$this->assertFalse( $this->engine->storage_is_quiescent() );
+	}
+}
+
+class OutputPinLosingSourcePlugin extends FakeSourcePlugin {
+	public function get_gallery_settings( $gallery, $default_settings ) {
+		$GLOBALS['wpdb']->current = false;
+		return $default_settings;
 	}
 }

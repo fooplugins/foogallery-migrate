@@ -8,7 +8,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Language-Team: FooPlugins <info@fooplugins.com>\n"
 "Last-Translator: Brad Vincent <brad@fooplugins.com>\n"
-"POT-Creation-Date: 2026-10-14 12:12+0000\n"
+"POT-Creation-Date: 2026-10-14 12:50+0000\n"
 "Report-Msgid-Bugs-To: https://fooplugins.com\n"
 "X-Poedit-Basepath: ..\n"
 "X-Poedit-KeywordsList: __;_e;_ex:1,2c;_n:1,2;_n_noop:1,2;_nx:1,2,4c;_nx_noop:1,2,3c;_x:1,2c;esc_attr__;esc_attr_e;esc_attr_x:1,2c;esc_html__;esc_html_e;esc_html_x:1,2c\n"
@@ -68,7 +68,7 @@ msgstr ""
 msgid "Invalid status update."
 msgstr ""
 
-#: includes/class-init.php:855, includes/objects/class-migratable.php:275, includes/views/view-migrate-tab-log.php:10
+#: includes/class-init.php:855, includes/objects/class-migratable.php:318, includes/views/view-migrate-tab-log.php:10
 msgid "Not migrated"
 msgstr ""
 
@@ -96,55 +96,55 @@ msgstr ""
 msgid "Invalid object."
 msgstr ""
 
-#: includes/class-migrator-engine.php:477, includes/class-migrator-engine.php:499
+#: includes/class-migrator-engine.php:490, includes/class-migrator-engine.php:512
 msgid "FooGallery media tags are not available."
 msgstr ""
 
-#: includes/class-migrator-engine.php:507
+#: includes/class-migrator-engine.php:520
 msgid "No image tag sync is queued."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1103, includes/class-migrator-engine.php:1138
+#: includes/class-migrator-engine.php:1128, includes/class-migrator-engine.php:1167
 msgid "Migrated object not found."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1107
+#: includes/class-migrator-engine.php:1132
 msgid "Invalid migrated object."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1123
+#: includes/class-migrator-engine.php:1148
 msgid "Migrated object could not be updated."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1262, includes/class-migrator-engine.php:1368
+#: includes/class-migrator-engine.php:1295, includes/class-migrator-engine.php:1405
 msgid "Gallery not found."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1306
+#: includes/class-migrator-engine.php:1339
 msgid "Migrated gallery state could not be reset."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1311, includes/class-migrator-engine.php:1324, includes/class-migrator-engine.php:1327, includes/class-migrator-engine.php:1372, includes/class-migrator-engine.php:1375
+#: includes/class-migrator-engine.php:1344, includes/class-migrator-engine.php:1357, includes/class-migrator-engine.php:1360, includes/class-migrator-engine.php:1409, includes/class-migrator-engine.php:1412
 msgid "Migrated gallery state could not be saved."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1419, includes/objects/class-image.php:260
+#: includes/class-migrator-engine.php:1456, includes/objects/class-image.php:260
 msgid "Attachment file is missing after migration."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1432
+#: includes/class-migrator-engine.php:1469
 msgid "Attachment file size could not be determined after migration."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1455
+#: includes/class-migrator-engine.php:1492
 msgid "Attachment file could not be loaded after migration."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1475
+#: includes/class-migrator-engine.php:1512
 msgid "One or more images are missing after migration."
 msgstr ""
 
-#: includes/class-migrator-settings.php:802, includes/class-migrator-settings.php:818, includes/objects/class-migratable.php:361
+#: includes/class-migrator-settings.php:802, includes/class-migrator-settings.php:818, includes/objects/class-migratable.php:404
 msgid "Unknown Error"
 msgstr ""
 
@@ -534,39 +534,39 @@ msgstr ""
 msgid "Image import failed."
 msgstr ""
 
-#: includes/objects/class-migratable.php:277, includes/views/view-migrate-tab-log.php:11
+#: includes/objects/class-migratable.php:320, includes/views/view-migrate-tab-log.php:11
 msgid "Queued for migration"
 msgstr ""
 
-#: includes/objects/class-migratable.php:283, includes/views/view-migrate-tab-log.php:12
+#: includes/objects/class-migratable.php:326, includes/views/view-migrate-tab-log.php:12
 msgid "Migrating..."
 msgstr ""
 
-#: includes/objects/class-migratable.php:280
+#: includes/objects/class-migratable.php:323
 msgid "Migrated %d of %d %s"
 msgstr ""
 
-#: includes/objects/class-migratable.php:289
+#: includes/objects/class-migratable.php:332
 msgid "Done!"
 msgstr ""
 
-#: includes/objects/class-migratable.php:287
+#: includes/objects/class-migratable.php:330
 msgid "Done! %d %s migrated"
 msgstr ""
 
-#: includes/objects/class-migratable.php:295
+#: includes/objects/class-migratable.php:338
 msgid "Nothing to migrate!"
 msgstr ""
 
-#: includes/objects/class-migratable.php:293
+#: includes/objects/class-migratable.php:336
 msgid "No %s to migrate!"
 msgstr ""
 
-#: includes/objects/class-migratable.php:298
+#: includes/objects/class-migratable.php:341
 msgid "Error while migrating!"
 msgstr ""
 
-#: includes/objects/class-migratable.php:301
+#: includes/objects/class-migratable.php:344
 msgid "Unknown status!"
 msgstr ""
 

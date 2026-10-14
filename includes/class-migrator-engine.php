@@ -114,6 +114,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 return $this->storage_guarded && $this->storage_gate === StorageMaintenanceGate::current() &&
                     $this->storage_gate->connection()->is_current() &&
                     0 === $this->storage_operation_depth &&
+                    Objects\Migratable::storage_is_quiescent() &&
                     ! $this->migrated_batch_active && empty( $this->pending_migrated_objects );
             } catch ( \Exception $error ) { return false; }
             catch ( \Throwable $error ) { return false; }
@@ -133,11 +134,11 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * Nested operations share the writer but cannot drain the outer call.
          * No finally: retain the declared PHP 5.4 syntax floor.
          */
-        private function storage_operation( $method ) {
+        private function storage_operation( $method, $arguments = array() ) {
             $this->assert_storage_writer();
             $this->storage_operation_depth++;
             try {
-                $result = $this->$method();
+                $result = call_user_func_array( array( $this, $method ), $arguments );
                 $this->assert_storage_writer();
             } catch ( \Exception $error ) {
                 $this->storage_operation_depth--;
@@ -193,6 +194,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return bool Whether the setting was persisted.
          */
         public function set_migrator_setting( $name, $value ) {
+            return $this->storage_operation( 'set_migrator_setting_admitted', array( $name, $value ) );
+        }
+
+        private function set_migrator_setting_admitted( $name, $value ) {
             return $this->settings()->set_migrator_setting( $name, $value );
         }
 
@@ -212,6 +217,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return void
          */
         public function save_settings( $settings ) {
+            $this->storage_operation( 'save_settings_admitted', array( $settings ) );
+        }
+
+        private function save_settings_admitted( $settings ) {
             $this->settings()->save_settings( $settings );
         }
 
@@ -302,6 +311,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return void
          */
         public function clear_migrator_setting() {
+            return $this->storage_operation( 'clear_migrator_setting_admitted' );
+        }
+
+        private function clear_migrator_setting_admitted() {
             $this->assert_storage_writer();
 			if ( ! $this->settings()->can_clear_migrator_state() ) { throw new \RuntimeException( 'Whole table-state reset is not admitted. No partial history clear or option fallback.' ); }
 			if ( ! $this->migrated_store()->clear() ) {
@@ -968,6 +981,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return void
          */
         public function add_migrated_object( $object ) {
+            return $this->storage_operation( 'add_migrated_object_admitted', array( $object ) );
+        }
+
+        private function add_migrated_object_admitted( $object ) {
             $this->assert_storage_writer();
             if ( ! is_object( $object ) || ! method_exists( $object, 'unique_identifier' ) ) {
                 return false;
@@ -1006,6 +1023,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
 
         /** @return bool */
         public function flush_migrated_object_batch() {
+            return $this->storage_operation( 'flush_migrated_object_batch_admitted' );
+        }
+
+        private function flush_migrated_object_batch_admitted() {
             $this->assert_storage_writer();
             $records = array_values( $this->pending_migrated_objects );
 			$changed = false;
@@ -1097,6 +1118,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return Migratable|\WP_Error
          */
         public function update_migrated_object_status( $unique_identifier, $status ) {
+            return $this->storage_operation( 'update_migrated_object_status_admitted', array( $unique_identifier, $status ) );
+        }
+
+        private function update_migrated_object_status_admitted( $unique_identifier, $status ) {
             $this->assert_storage_writer();
             $object = $this->get_migrated_object( $unique_identifier );
             if ( false === $object ) {
@@ -1133,6 +1158,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return bool|\WP_Error
          */
         public function delete_migrated_object( $unique_identifier ) {
+            return $this->storage_operation( 'delete_migrated_object_admitted', array( $unique_identifier ) );
+        }
+
+        private function delete_migrated_object_admitted( $unique_identifier ) {
             $this->assert_storage_writer();
             if ( ! $this->has_object_been_migrated( $unique_identifier ) ) {
                 return new \WP_Error( 'foogallery_migrate_missing_object', __( 'Migrated object not found.', 'foogallery-migrate' ) );
@@ -1240,6 +1269,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return bool|\WP_Error
          */
         public function retry_gallery_migration( $unique_identifier ) {
+            return $this->storage_operation( 'retry_gallery_migration_admitted', array( $unique_identifier ) );
+        }
+
+        private function retry_gallery_migration_admitted( $unique_identifier ) {
             $this->assert_storage_writer();
             $gallery_migrator = $this->get_gallery_migrator();
             $galleries = $gallery_migrator->get_objects_to_migrate();
@@ -1337,6 +1370,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array|\WP_Error
          */
         public function check_for_migration_errors( $unique_identifier = '' ) {
+            return $this->storage_operation( 'check_for_migration_errors_admitted', array( $unique_identifier ) );
+        }
+
+        private function check_for_migration_errors_admitted( $unique_identifier ) {
             $this->assert_storage_writer();
             $gallery_migrator = $this->get_gallery_migrator();
             $galleries = $gallery_migrator->get_objects_to_migrate();

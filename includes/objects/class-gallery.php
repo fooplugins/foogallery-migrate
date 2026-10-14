@@ -42,6 +42,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Gallery' ) ) {
         }
 
         function create_new_migrated_object() {
+            $this->storage_output_operation( 'create_new_migrated_object_admitted' );
+        }
+
+        protected function create_new_migrated_object_admitted() {
             foogallery_migrate_migrator_instance()->assert_storage_writer();
             $existing = get_posts(
                 array(
@@ -64,13 +68,15 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Gallery' ) ) {
                     'post_type'   => FOOGALLERY_CPT_GALLERY,
                     'post_status' => 'publish',
                 );
+                foogallery_migrate_migrator_instance()->assert_storage_writer();
                 $this->migrated_id = wp_insert_post( $foogallery_args );
+                foogallery_migrate_migrator_instance()->assert_storage_writer();
             }
 
             if ( is_wp_error( $this->migrated_id ) ) {
                 $this->migration_status = self::PROGRESS_ERROR;
             } else {
-				update_post_meta( $this->migrated_id, self::META_SOURCE_KEY, $this->unique_identifier() );
+				$this->update_migrated_meta( self::META_SOURCE_KEY, $this->unique_identifier() );
 
                 // Determine the best possible gallery template.
                 $gallery_template = $this->plugin->get_migration_gallery_template( $this );
@@ -80,7 +86,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Gallery' ) ) {
                 }
 
                 // Set the gallery template.
-                update_post_meta( $this->migrated_id, FOOGALLERY_META_TEMPLATE, $gallery_template );
+                $this->update_migrated_meta( FOOGALLERY_META_TEMPLATE, $gallery_template );
 
                 $gallery_settings = $this->get_initial_gallery_settings();
 
@@ -88,7 +94,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Gallery' ) ) {
                 $gallery_settings = $this->plugin->get_gallery_settings( $this, $gallery_settings );
 
                 // Set the gallery settings.
-                update_post_meta( $this->migrated_id, FOOGALLERY_META_SETTINGS, $gallery_settings );
+                $this->update_migrated_meta( FOOGALLERY_META_SETTINGS, $gallery_settings );
 
                 $this->inherit_gallery_custom_css();
             }
@@ -122,6 +128,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Gallery' ) ) {
          * @return void
          */
         function inherit_gallery_custom_css() {
+            $this->storage_output_operation( 'inherit_gallery_custom_css_admitted' );
+        }
+
+        protected function inherit_gallery_custom_css_admitted() {
             if ( ! defined( 'FOOGALLERY_META_CUSTOM_CSS' ) ) {
                 return;
             }
@@ -133,7 +143,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Gallery' ) ) {
 
             $custom_css = get_post_meta( $override_gallery_settings_id, FOOGALLERY_META_CUSTOM_CSS, true );
             if ( is_scalar( $custom_css ) && '' !== trim( (string) $custom_css ) ) {
-                update_post_meta( $this->migrated_id, FOOGALLERY_META_CUSTOM_CSS, $custom_css );
+                $this->update_migrated_meta( FOOGALLERY_META_CUSTOM_CSS, $custom_css );
             }
         }
 
@@ -143,11 +153,15 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Gallery' ) ) {
          * @return void
          */
         function migrate_next_child() {
+            $this->storage_output_operation( 'migrate_next_child_admitted' );
+        }
+
+        protected function migrate_next_child_admitted() {
             foogallery_migrate_migrator_instance()->assert_storage_writer();
             parent::migrate_next_child();
 
             $attachments = $this->build_child_migrated_id_array();
-            update_post_meta( $this->migrated_id, FOOGALLERY_META_ATTACHMENTS, $attachments );
+            $this->update_migrated_meta( FOOGALLERY_META_ATTACHMENTS, $attachments );
         }
     }
 }
