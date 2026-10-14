@@ -102,6 +102,76 @@ try {
 	$check( is_wp_error( ( new StorageConversion( $policy ) )->switch_backend( $request( 'table' ) ) ), 'repeat import refuses retained inactive table generations instead of silently erasing evidence' );
 	$check( 'stable' === StorageControl::decode( $control->read( StorageAuthority::CONTROL_OPTION ), $blog )['phase'], 'repeat-import refusal retains existing stable option authority' );
 
+	$replacement = $request( 'table' ); $replacement['confirmation'] = 'replace-retained-with-table';
+	$replacement['nonce'] = wp_create_nonce( 'foogallery_migrate_storage_option_reimport_' . $blog );
+	$retained_bytes = function () use ( $wpdb, $tables, $blog, $control ) {
+		return serialize( array(
+			$wpdb->get_results( $wpdb->prepare( 'SELECT * FROM `' . $tables[0] . '` WHERE blog_id = %d ORDER BY id', $blog ), ARRAY_A ),
+			$wpdb->get_results( $wpdb->prepare( 'SELECT * FROM `' . $tables[1] . '` WHERE blog_id = %d ORDER BY id', $blog ), ARRAY_A ),
+			$wpdb->get_results( $wpdb->prepare( 'SELECT * FROM `' . $wpdb->options . '` WHERE option_name = %s', StorageAuthority::STORAGE_BACKUP_OPTION ), ARRAY_A ),
+			$control->read( StorageAuthority::CONTROL_OPTION ), $control->read( StorageAuthority::AUTHORITY_OPTION ),
+		) );
+	};
+	$preserved = $retained_bytes(); $stable = $control->read( StorageAuthority::CONTROL_OPTION );
+	$check( 2 === StorageControl::decode( $stable, $blog )['version'], 'new reverse binds v2 all-generation and backup evidence' );
+	$legacy = StorageControl::decode( $stable, $blog ); $legacy['version'] = 1; unset( $legacy['retained_digest'] );
+	$control->cas( StorageAuthority::CONTROL_OPTION, $stable, json_encode( $legacy ) );
+	$check( is_wp_error( ( new StorageConversion( $policy ) )->replace_retained( $replacement ) ), 'previous v1 reverse is explicitly unclassified for destructive replacement' );
+	$check( $control->read( StorageAuthority::CONTROL_OPTION ) === json_encode( $legacy ), 'legacy replacement refusal preserves raw control' );
+	$control->cas( StorageAuthority::CONTROL_OPTION, json_encode( $legacy ), $stable );
+	$wpdb->query( $wpdb->prepare( 'UPDATE `' . $wpdb->options . '` SET option_value = %s WHERE option_name = %s', array( 'changed retained backup', StorageAuthority::STORAGE_BACKUP_OPTION ) ) );
+	$changed = $retained_bytes();
+	$check( is_wp_error( ( new StorageConversion( $policy ) )->replace_retained( $replacement ) ) && $changed === $retained_bytes(), 'changed retained backup refuses with all changed evidence byte-identically retained' );
+	$wpdb->query( $wpdb->prepare( 'UPDATE `' . $wpdb->options . '` SET option_value = %s WHERE option_name = %s', array( $backup, StorageAuthority::STORAGE_BACKUP_OPTION ) ) );
+	$wpdb->query( $wpdb->prepare( 'UPDATE `' . $tables[0] . '` SET payload_bytes = payload_bytes + 1 WHERE blog_id = %d', $blog ) );
+	$changed = $retained_bytes();
+	$check( is_wp_error( ( new StorageConversion( $policy ) )->replace_retained( $replacement ) ) && $changed === $retained_bytes(), 'changed inactive head metadata refuses without erasing generations' );
+	$wpdb->query( $wpdb->prepare( 'UPDATE `' . $tables[0] . '` SET payload_bytes = payload_bytes - 1 WHERE blog_id = %d', $blog ) );
+	$check( $preserved === $retained_bytes(), 'fixture restores exact captured inactive evidence' );
+
+	// These native trigger failures occur after earlier retirement DELETEs. The
+	// pinned adapter bypasses wpdb query filters; rollback must restore ALL rows.
+	$trigger = $wpdb->base_prefix . 'foogm_fixture_retire_fail';
+	foreach ( array( 'head-delete', 'backup-delete', 'control-update', 'control-readback' ) as $fault ) {
+		if ( 'head-delete' === $fault ) {
+			$sql = 'BEFORE DELETE ON `' . $tables[0] . "` FOR EACH ROW BEGIN IF OLD.blog_id = " . $blog . " THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Owned retirement head failure'; END IF; END";
+		} elseif ( 'backup-delete' === $fault ) {
+			$sql = 'BEFORE DELETE ON `' . $wpdb->options . "` FOR EACH ROW BEGIN IF OLD.option_name = '" . StorageAuthority::STORAGE_BACKUP_OPTION . "' THEN SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Owned retirement backup failure'; END IF; END";
+		} else {
+			$effect = 'control-readback' === $fault ? "SET NEW.option_value = '{}';" : "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Owned retirement control failure';";
+			$sql = 'BEFORE UPDATE ON `' . $wpdb->options . "` FOR EACH ROW BEGIN IF OLD.option_name = '" . StorageAuthority::CONTROL_OPTION . "' THEN " . $effect . ' END IF; END';
+		}
+		$check( false !== $wpdb->query( 'CREATE TRIGGER `' . $trigger . '` ' . $sql ), 'native retirement fault installed: ' . $fault );
+		$suppressed = $wpdb->suppress_errors( true );
+		try { $failed = ( new StorageConversion( $policy ) )->replace_retained( $replacement ); }
+		finally { $wpdb->query( 'DROP TRIGGER `' . $trigger . '`' ); $wpdb->suppress_errors( $suppressed ); }
+		$check( is_wp_error( $failed ) && $preserved === $retained_bytes(), 'native retirement rollback restores exact generations, backup and stable control: ' . $fault );
+	}
+	$check( false !== $wpdb->query( 'START TRANSACTION' ), 'ambient transaction opened explicitly' );
+	$wpdb->query( 'INSERT INTO `' . $wpdb->options . "` (option_name, option_value, autoload) VALUES ('foogm_retire_ambient_fixture', 'owned', 'no')" );
+	$failed = ( new StorageConversion( $policy ) )->replace_retained( $replacement );
+	$wpdb->query( 'ROLLBACK' );
+	$check( is_wp_error( $failed ) && null === $wpdb->get_var( 'SELECT option_id FROM `' . $wpdb->options . "` WHERE option_name = 'foogm_retire_ambient_fixture'" ) && $preserved === $retained_bytes(), 'replacement refuses ambient transaction without committing its work' );
+
+	// The new import uses the current option, never the old retained backup/table.
+	$expected[9] = false; unset( $expected['09'] ); $expected['new-key'] = array( 'unknown' => null, 3 => 'new' );
+	update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $expected, false );
+	$current_raw = $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM `' . $wpdb->options . '` WHERE option_name = %s', FOOGALLERY_MIGRATE_OPTION_DATA ) );
+	$trigger = $wpdb->base_prefix . 'foogm_fixture_repeat_insert_fail';
+	$check( false !== $wpdb->query( 'CREATE TRIGGER `' . $trigger . '` BEFORE INSERT ON `' . $tables[1] . "` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Owned repeat import failure'" ), 'post-retirement native import fault installed' );
+	$suppressed = $wpdb->suppress_errors( true );
+	try { $failed = ( new StorageConversion( $policy ) )->replace_retained( $replacement ); }
+	finally { $wpdb->query( 'DROP TRIGGER `' . $trigger . '`' ); $wpdb->suppress_errors( $suppressed ); }
+	$pending = StorageControl::decode( $control->read( StorageAuthority::CONTROL_OPTION ), $blog );
+	$check( is_wp_error( $failed ) && 'copying' === $pending['phase'] && 2 === $pending['epoch'] && 'option' === $pending['backend'], 'committed retirement plus interrupted copy publishes new authoritative recovery evidence' );
+	$check( null === $wpdb->get_var( $wpdb->prepare( 'SELECT option_id FROM `' . $wpdb->options . '` WHERE option_name = %s', StorageAuthority::STORAGE_BACKUP_OPTION ) ) && $codec->snapshot_digest( $expected ) === $codec->snapshot_digest( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) ), 'post-retirement failure retains exact current source instead of reviving stale backup' );
+	$result = ( new StorageConversion( $policy ) )->recover( $request( 'table', true ) );
+	$check( ! is_wp_error( $result ) && 3 === $result['epoch'] && 'stable' === $result['phase'], 'explicit recovery completes replacement from new immutable source' );
+	$check( $current_raw === $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM `' . $wpdb->options . '` WHERE option_name = %s', StorageAuthority::STORAGE_BACKUP_OPTION ) ), 'replacement retains a fresh exact physical backup, not previous import bytes' );
+	$result = ( new StorageConversion( $policy ) )->switch_backend( $request( 'option' ) );
+	$check( ! is_wp_error( $result ) && 4 === $result['epoch'] && $codec->snapshot_digest( $expected ) === $codec->snapshot_digest( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) ), 'repeat reverse retains new keys, deletions and typed logical revision parity' );
+	$check( $other_raw === $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM `' . $tables[0] . '` WHERE blog_id = %d', $other ), ARRAY_A ), 'retirement rollback, recovery and repeat switches leave other SQL blog byte-identical' );
+
 	// A native failed INSERT rolls back all destination generations, not source.
 	$reset(); update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $initial, false );
 	// Snapshot SQL deliberately uses its owned native handle, bypassing the

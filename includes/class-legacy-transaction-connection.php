@@ -47,6 +47,11 @@ class LegacyTransactionConnection {
 		return $this->wpdb->esc_like( $value );
 	}
 
+	/** The coordinator must not continue on a superseded WordPress connection. */
+	public function is_current() {
+		return is_object( $this->wpdb ) && $this->wpdb->dbh === $this->handle && $this->handle instanceof \mysqli;
+	}
+
 	public function query( $sql ) {
 		$result = $this->execute( $sql );
 		if ( false === $result ) { return false; }

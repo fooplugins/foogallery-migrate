@@ -27,8 +27,9 @@ class StorageControl {
 		$r = json_decode( $raw, true, 8 );
 		$keys = array( 'version', 'blog_id', 'backend', 'epoch', 'switch_id', 'from', 'to', 'phase', 'table_id',
 			'source_digest', 'logical_digest', 'schema', 'codec', 'created', 'updated' );
+		if ( is_array( $r ) && isset( $r['version'] ) && 2 === $r['version'] ) { $keys[] = 'retained_digest'; }
 		if ( JSON_ERROR_NONE !== json_last_error() || ! is_array( $r ) || array_keys( $r ) !== $keys || json_encode( $r ) !== $raw ||
-			1 !== $r['version'] || $blog !== $r['blog_id'] || 1 !== $r['schema'] || 1 !== $r['codec'] ||
+			! in_array( $r['version'], array( 1, 2 ), true ) || $blog !== $r['blog_id'] || 1 !== $r['schema'] || 1 !== $r['codec'] ||
 			! is_int( $r['epoch'] ) || $r['epoch'] < 0 || ! is_int( $r['created'] ) || $r['created'] < 1 ||
 			! is_int( $r['updated'] ) || $r['updated'] < $r['created'] ||
 			! in_array( $r['backend'], array( 'option', 'table' ), true ) ||
@@ -39,6 +40,8 @@ class StorageControl {
 			$length = in_array( $key, array( 'switch_id', 'table_id' ), true ) ? 32 : 64;
 			if ( ! is_string( $r[$key] ) || ! preg_match( '/^[a-f0-9]{' . $length . '}$/D', $r[$key] ) ) { self::fail(); }
 		}
+		if ( 2 === $r['version'] && ( 'table' === $r['to'] ? null !== $r['retained_digest'] :
+			( ! is_string( $r['retained_digest'] ) || ! preg_match( '/^[a-f0-9]{64}$/D', $r['retained_digest'] ) ) ) ) { self::fail(); }
 		$before_flip = in_array( $r['phase'], array( 'copying', 'verified' ), true );
 		if ( $r['backend'] !== ( $before_flip ? $r['from'] : $r['to'] ) ||
 			( ! $before_flip && $r['epoch'] < 1 ) || ( 'table' === $r['backend'] && $r['epoch'] < 1 ) ||

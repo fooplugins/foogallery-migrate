@@ -32,7 +32,16 @@ class StorageConversion {
 
 	/** Switch only from a validated stable backend; no source/destination merge. */
 	public function switch_backend( $request ) {
-		$authorized = self::authorize_request( $request, false, $this->blog );
+		return $this->switch_storage( $request, false );
+	}
+
+	/** Explicitly replace a verified v2 reverse's inactive generations/backup. */
+	public function replace_retained( $request ) {
+		return $this->switch_storage( $request, true );
+	}
+
+	private function switch_storage( $request, $replacement ) {
+		$authorized = self::authorize_request( $request, false, $this->blog, $replacement );
 		if ( is_wp_error( $authorized ) ) { return $authorized; }
 		$budget = StoragePreflight::decode_budget( 0, ini_get( 'memory_limit' ), memory_get_usage( true ), $this->policy );
 		if ( is_wp_error( $budget ) ) { return $budget; }
@@ -47,23 +56,34 @@ class StorageConversion {
 			$from = null === $previous ? 'option' : $previous['backend'];
 			$this->require_true( $from !== $request['target'] );
 			$this->storage(); // Verified existing schema only; never DDL here.
+			$retirement = new StorageRetirement( $this->connection, $this->prefix, $this->blog, $this->policy, $this->deadline );
+			if ( $replacement ) {
+				$this->require_true( null !== $previous && 2 === $previous['version'] && 'table' === $previous['from'] && 'option' === $previous['to'] && 'option' === $from );
+			}
 			$source = 'option' === $from ? $this->option_snapshot() : $this->table_snapshot( true );
-			if ( 'option' === $from ) {
-				// Existing/inactive table generations need a separate explicit cleanup
-				// or replacement protocol; this bounded first-import never erases them.
-				$this->require_true( 0 === count( $this->heads() ) );
+			if ( 'option' === $from && ! $replacement ) {
+				// Include orphan/staged records, not only visible state heads.
+				$retirement->assert_empty();
 				$this->require_true( ! $this->option_present( StorageAuthority::STORAGE_BACKUP_OPTION ) );
-			} else { $this->require_true( ! $this->option_present( FOOGALLERY_MIGRATE_OPTION_DATA ) ); }
+			} elseif ( 'table' === $from ) { $this->require_true( ! $this->option_present( FOOGALLERY_MIGRATE_OPTION_DATA ) ); }
 			$id = substr( hash( 'sha256', wp_generate_password( 64, true, true ) ), 0, 32 );
 			$now = time();
-			$record = array( 'version' => 1, 'blog_id' => $this->blog, 'backend' => $from,
+			$record = array( 'version' => null === $previous ? 2 : $previous['version'], 'blog_id' => $this->blog, 'backend' => $from,
 				'epoch' => null === $previous ? 0 : $previous['epoch'], 'switch_id' => $id,
 				'from' => $from, 'to' => $request['target'], 'phase' => 'copying',
 				'table_id' => 'option' === $from ? $id : $previous['table_id'],
 				'source_digest' => $source['physical'], 'logical_digest' => $this->codec->snapshot_digest( $source['value'] ),
 				'schema' => 1, 'codec' => 1, 'created' => $now, 'updated' => $now );
+			if ( 2 === $record['version'] ) { $record['retained_digest'] = 'table' === $from ? $retirement->capture() : null; }
 			$this->ready(); $new = json_encode( $record ); StorageControl::decode( $new, $this->blog );
-			$this->controls->cas( StorageAuthority::CONTROL_OPTION, $raw, $new );
+			if ( $replacement ) {
+				$owner = $this->gate->maintenance_identity();
+				$retirement->replace( $raw, $new, $source['physical'], $owner, function () {
+					$this->context();
+					$this->require_true( MigratorEngine::storage_maintenance_is_quiescent() );
+					$this->require_true( MigratorEngine::storage_maintenance_is_quiescent() );
+				} );
+			} else { $this->controls->cas( StorageAuthority::CONTROL_OPTION, $raw, $new ); }
 			$result = $this->advance( $record, $source );
 			$this->end(); return $result;
 		} catch ( \Exception $error ) { return $this->failed( $error ); }
@@ -93,15 +113,16 @@ class StorageConversion {
 	}
 
 	/** Shared receiver authorization; never reads or writes storage. */
-	public static function authorize_request( $r, $recovery = false, $blog = null ) {
+	public static function authorize_request( $r, $recovery = false, $blog = null, $replacement = false ) {
 		if ( ! current_user_can( 'manage_options' ) ) { return self::error( 'forbidden' ); }
 		$blog = null === $blog ? get_current_blog_id() : $blog;
 		if ( ! is_array( $r ) || count( $r ) !== 5 || ! isset( $r['blog_id'], $r['scope'], $r['target'], $r['confirmation'], $r['nonce'] ) ||
 			! is_int( $blog ) || $blog < 1 || $blog !== get_current_blog_id() ||
 			( $r['blog_id'] !== $blog && $r['blog_id'] !== (string) $blog ) || 'site' !== $r['scope'] ||
 			! in_array( $r['target'], array( 'table', 'option' ), true ) || ! is_string( $r['nonce'] ) ||
-			$r['confirmation'] !== ( $recovery ? 'recover-storage' : 'switch-to-' . $r['target'] ) ) { return self::error( 'invalid_request' ); }
-		$purpose = $recovery ? 'recover' : ( 'table' === $r['target'] ? 'option_import' : 'table_export' );
+			( $replacement && ( $recovery || 'table' !== $r['target'] ) ) ||
+			$r['confirmation'] !== ( $replacement ? 'replace-retained-with-table' : ( $recovery ? 'recover-storage' : 'switch-to-' . $r['target'] ) ) ) { return self::error( 'invalid_request' ); }
+		$purpose = $replacement ? 'option_reimport' : ( $recovery ? 'recover' : ( 'table' === $r['target'] ? 'option_import' : 'table_export' ) );
 		$nonce = wp_verify_nonce( $r['nonce'], 'foogallery_migrate_storage_' . $purpose . '_' . $blog );
 		if ( 1 !== $nonce && 2 !== $nonce ) { return self::error( 'invalid_nonce' ); }
 		return true;
@@ -114,10 +135,15 @@ class StorageConversion {
 	}
 
 	private function ready() {
-		global $wpdb;
-		$this->require_true( $wpdb === $this->db && $this->blog === get_current_blog_id() && $this->prefix === $wpdb->prefix && microtime( true ) <= $this->deadline );
+		$this->context();
 		$this->require_true( $this->gate->renew_maintenance() );
 		$this->require_true( $this->gate->maintenance_ready( array( 'FooPlugins\\FooGalleryMigrate\\MigratorEngine', 'storage_maintenance_is_quiescent' ) ) );
+	}
+
+	private function context() {
+		global $wpdb;
+		$this->require_true( $wpdb === $this->db && $this->blog === get_current_blog_id() && $this->prefix === $wpdb->prefix && microtime( true ) <= $this->deadline );
+		if ( null !== $this->connection ) { $this->require_true( $this->connection->is_current() ); }
 	}
 
 	private function storage() {

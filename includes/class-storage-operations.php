@@ -15,11 +15,11 @@ class StorageOperations {
 
 	/** Strict semantic request: exactly the coordinator's five existing fields. */
 	public function dispatch( $operation, $request ) {
-		if ( ! in_array( $operation, array( 'preflight', 'switch', 'recover' ), true ) ||
+		if ( ! in_array( $operation, array( 'preflight', 'switch', 'recover', 'replace' ), true ) ||
 			( 'preflight' === $operation && ( ! is_array( $request ) || ! isset( $request['target'] ) || 'table' !== $request['target'] ) ) ) {
 			return self::invalid();
 		}
-		$authorized = StorageConversion::authorize_request( $request, 'recover' === $operation );
+		$authorized = StorageConversion::authorize_request( $request, 'recover' === $operation, null, 'replace' === $operation );
 		if ( is_wp_error( $authorized ) ) { return $authorized; }
 		// Never pass POST to configuration. There is deliberately no shipped policy.
 		$profile = null === $this->calibration ? apply_filters( 'foogallery_migrate_storage_calibration', null ) : $this->calibration;
@@ -27,7 +27,8 @@ class StorageOperations {
 		if ( is_wp_error( $policy ) ) { return $policy; }
 		if ( 'preflight' === $operation ) { return ( new StoragePreflight( null, $policy ) )->option_import( $request ); }
 		$manager = new StorageConversion( $policy );
-		$result = 'recover' === $operation ? $manager->recover( $request ) : $manager->switch_backend( $request );
+		if ( 'replace' === $operation ) { $result = $manager->replace_retained( $request ); }
+		else { $result = 'recover' === $operation ? $manager->recover( $request ) : $manager->switch_backend( $request ); }
 		if ( is_wp_error( $result ) ) { return $result; }
 		// Do not expose digests, switch IDs, source payloads or internal errors.
 		return array( 'blog_id' => $result['blog_id'], 'backend' => $result['backend'], 'epoch' => $result['epoch'], 'phase' => $result['phase'] );

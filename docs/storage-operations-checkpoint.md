@@ -19,6 +19,10 @@ values and foreign sites refuse. Operations are exactly:
 - `switch`: table/option target, matching confirmation and import/export nonce.
 - `recover`: explicit `recover-storage` and dedicated recovery nonce.
 
+The follow-on `storage-repeat-selection-checkpoint.md` adds a separate `replace`
+operation, `replace-retained-with-table` confirmation and `option_reimport` nonce.
+Ordinary switching never implies consent to retire inactive recovery evidence.
+
 Nonce actions remain `foogallery_migrate_storage_<purpose>_<current-blog-id>`, with
 purposes `option_import`, `table_export`, `recover`. `manage_options`, exact site
 scope and nonce validation precede evaluation of trusted calibration configuration.
@@ -102,8 +106,9 @@ merge, production operation, deployment/release/SVN or compatibility waiver.
 
 1. Independently justify and approve a worst-case runtime/SAPI-specific operating
    envelope (or retain refusal), and later deliver the approved UI/preflight UX.
-2. Define/prove inactive generation/backup replacement for repeat selection and
-   classify previously proposed table state without erasing recovery evidence.
+2. The follow-on repeat-selection checkpoint integrates explicit atomic inactive
+   generation/backup replacement and refuses unclassified prior state. Its native
+   finite receipts do not waive independent review, hard-death or process-race proof.
 3. Safe stale-owner/drain proof, hard process death, uncertain readback/ownership,
    separate-process writer/DDL races and delayed cleanup remain unaccepted.
 4. Safe supported-runtime decoding and exact literal PHP5.4.0/WP5.0 and

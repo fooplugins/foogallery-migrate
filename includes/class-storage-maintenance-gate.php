@@ -180,6 +180,13 @@ class StorageMaintenanceGate {
 		} catch ( \Exception $error ) { return self::unhealthy(); }
 	}
 
+	public function maintenance_identity() {
+		$this->context();
+		if ( null === $this->maintenance_raw ) { throw new \RuntimeException( 'No owned storage maintenance identity.' ); }
+		$this->owned_live( StorageAuthority::MAINTENANCE_OPTION, $this->maintenance_raw );
+		return $this->maintenance_raw;
+	}
+
 	/** Only this request's exact raw ownership may release, including after expiry. */
 	public function release_maintenance() {
 		try {
