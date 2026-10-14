@@ -46,12 +46,17 @@ $reset = function () use ( $wpdb, $tables, $names, $blog ) {
 };
 $created = array(); $hook = null;
 try {
+	$check( update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $initial, false ), 'native source fixture exists before schema-denial test' );
+	$check( is_wp_error( ( new StorageConversion( $policy ) )->switch_backend( $request( 'table' ) ) ), 'missing existing schema refuses conversion without provisioning' );
+	$check( null === $control->read( StorageAuthority::CONTROL_OPTION ), 'schema denial creates no control or destination' );
+	delete_option( FOOGALLERY_MIGRATE_OPTION_DATA );
 	foreach ( $schema->statements() as $index => $ddl ) { $created[] = $tables[$index]; dbDelta( $ddl ); }
 	$check( $schema->verify(), 'verified existing InnoDB schema; coordinator performs no provisioning' );
 	$db = new LegacyTransactionConnection( $wpdb );
 	$other = $blog + 1000;
 	( new LegacyTableSnapshot( $db, $other ) )->replace_many( array( array( 'key' => 'checkpoint', 'order' => 0, 'kind' => 'scalar', 'value' => 'other-blog-retained', 'expected_revision' => null ) ) );
 	$other_raw = $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM `' . $tables[0] . '` WHERE blog_id = %d', $other ), ARRAY_A );
+	$other_records = $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM `' . $tables[1] . '` WHERE blog_id = %d', $other ), ARRAY_A );
 
 	$check( update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $initial, false ), 'native fixture source option actually persisted' );
 	$raw_before = $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM `' . $wpdb->options . '` WHERE option_name = %s', FOOGALLERY_MIGRATE_OPTION_DATA ) );
@@ -99,10 +104,9 @@ try {
 		$reset(); update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $initial, false );
 		$fired = false;
 		$hook = function ( $sql ) use ( $fault, &$fired ) {
+			$set = stripslashes( substr( $sql, 0, (int) strpos( $sql, ' WHERE ' ) ) );
 			$matches = 'delete-source' === $fault ? ( 0 === strpos( $sql, 'DELETE FROM' ) && false !== strpos( $sql, "'foogallery-migrate-data'" ) ) :
-				( 0 === strpos( $sql, 'UPDATE' ) && false !== strpos( $sql, 'storage_control' ) && false !== strpos( $sql, '\\"phase\\":\\"' . $fault . '\\"' ) );
-			// WordPress SQL escaping does not necessarily escape double quotes.
-			if ( 'delete-source' !== $fault ) { $matches = 0 === strpos( $sql, 'UPDATE' ) && false !== strpos( $sql, 'storage_control' ) && ( false !== strpos( $sql, '"phase":"' . $fault . '"' ) || $matches ); }
+				( 0 === strpos( $sql, 'UPDATE' ) && false !== strpos( $sql, 'storage_control' ) && false !== strpos( $set, '"phase":"' . $fault . '"' ) );
 			if ( ! $fired && $matches ) { $fired = true; throw new RuntimeException( 'Fixture interrupt before ' . $fault ); }
 			return $sql;
 		};
@@ -113,6 +117,43 @@ try {
 		$result = ( new StorageConversion( $policy ) )->recover( $request( 'table', true ) );
 		$check( ! is_wp_error( $result ) && 'table' === $result['backend'] && 'stable' === $result['phase'], 'authoritative phase recovery succeeds without merging: ' . $fault );
 	}
+
+	foreach ( array( 'verified', 'flipped', 'remove-sentinel', 'stable' ) as $fault ) {
+		$reset(); update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $initial, false );
+		$check( ! is_wp_error( ( new StorageConversion( $policy ) )->switch_backend( $request( 'table' ) ) ), 'reverse interruption fixture forward import succeeds: ' . $fault );
+		$fired = false;
+		$hook = function ( $sql ) use ( $fault, &$fired ) {
+			$set = stripslashes( substr( $sql, 0, (int) strpos( $sql, ' WHERE ' ) ) );
+			$matches = 'remove-sentinel' === $fault ? ( 0 === strpos( $sql, 'DELETE FROM' ) && false !== strpos( $sql, StorageAuthority::AUTHORITY_OPTION ) ) :
+				( 0 === strpos( $sql, 'UPDATE' ) && false !== strpos( $sql, 'storage_control' ) && false !== strpos( $set, '"phase":"' . $fault . '"' ) );
+			if ( ! $fired && $matches ) { $fired = true; throw new RuntimeException( 'Fixture reverse interrupt before ' . $fault ); }
+			return $sql;
+		};
+		add_filter( 'query', $hook ); $failed = ( new StorageConversion( $policy ) )->switch_backend( $request( 'option' ) ); remove_filter( 'query', $hook ); $hook = null;
+		$check( $fired && is_wp_error( $failed ), 'reverse interruption fired without success: ' . $fault );
+		$pending = StorageControl::decode( $control->read( StorageAuthority::CONTROL_OPTION ), $blog );
+		$check( 'stable' !== $pending['phase'] && ! StorageControl::runtime_ready( $pending, $control->read( StorageAuthority::AUTHORITY_OPTION ) ), 'reverse pending phase denies ordinary runtime: ' . $fault );
+		if ( 'remove-sentinel' === $fault || 'stable' === $fault ) {
+			( new LegacyTableBackend( $db, $blog ) )->mutate_scalars( array( 9 => true ) ); // Now NONauthoritative.
+		}
+		$result = ( new StorageConversion( $policy ) )->recover( $request( 'option', true ) );
+		$check( ! is_wp_error( $result ) && 'option' === $result['backend'] && 'stable' === $result['phase'], 'reverse phase recovery uses recorded authority, not inactive source: ' . $fault );
+		$check( $codec->snapshot_digest( $initial ) === $codec->snapshot_digest( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) ), 'reverse recovery retains exact destination logical state: ' . $fault );
+	}
+
+	// Destination verification failure is not repaired by overwriting or merging.
+	$reset(); update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $initial, false ); $fired = false;
+	$hook = function ( $sql ) use ( &$fired, $db, $blog ) {
+		$set = stripslashes( substr( $sql, 0, (int) strpos( $sql, ' WHERE ' ) ) );
+		if ( ! $fired && 0 === strpos( $sql, 'UPDATE' ) && false !== strpos( $sql, 'storage_control' ) && false !== strpos( $set, '"phase":"verified"' ) ) {
+			$fired = true; ( new LegacyTableBackend( $db, $blog ) )->mutate_scalars( array( 9 => true ) );
+		}
+		return $sql;
+	};
+	add_filter( 'query', $hook ); $failed = ( new StorageConversion( $policy ) )->switch_backend( $request( 'table' ) ); remove_filter( 'query', $hook ); $hook = null;
+	$pending = StorageControl::decode( $control->read( StorageAuthority::CONTROL_OPTION ), $blog );
+	$check( $fired && is_wp_error( $failed ) && 'verified' === $pending['phase'] && 'option' === $pending['backend'], 'destination parity failure retains source authority after staging' );
+	$check( is_wp_error( ( new StorageConversion( $policy ) )->recover( $request( 'table', true ) ) ) && $codec->snapshot_digest( $initial ) === $codec->snapshot_digest( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) ), 'mismatched destination recovery refuses rather than merging or rewriting source' );
 
 	// Atomic source dependency in final authority CAS, not only a prior SELECT.
 	$reset(); update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $initial, false ); $fired = false;
@@ -129,6 +170,27 @@ try {
 	update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $initial, false );
 	$check( ! is_wp_error( ( new StorageConversion( $policy ) )->recover( $request( 'table', true ) ) ), 'explicit fixture restoration permits recovery from exact immutable source' );
 
+	// Reverse final-CAS dependencies include every current source head revision.
+	$reset(); update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $initial, false );
+	$check( ! is_wp_error( ( new StorageConversion( $policy ) )->switch_backend( $request( 'table' ) ) ), 'reverse source-race fixture forward import succeeds' );
+	$fired = false;
+	$hook = function ( $sql ) use ( &$fired, $db, $blog ) {
+		$set = stripslashes( substr( $sql, 0, (int) strpos( $sql, ' WHERE ' ) ) );
+		if ( ! $fired && 0 === strpos( $sql, 'UPDATE' ) && false !== strpos( $sql, 'storage_control' ) && false !== strpos( $set, '"phase":"flipped"' ) ) {
+			$fired = true; ( new LegacyTableBackend( $db, $blog ) )->mutate_scalars( array( 9 => true ) );
+		}
+		return $sql;
+	};
+	add_filter( 'query', $hook ); $failed = ( new StorageConversion( $policy ) )->switch_backend( $request( 'option' ) ); remove_filter( 'query', $hook ); $hook = null;
+	$pending = StorageControl::decode( $control->read( StorageAuthority::CONTROL_OPTION ), $blog );
+	$check( $fired && is_wp_error( $failed ) && 'table' === $pending['backend'] && 'verified' === $pending['phase'], 'atomic table source head/revision dependencies deny racing reverse flip' );
+	$check( is_wp_error( ( new StorageConversion( $policy ) )->recover( $request( 'option', true ) ) ), 'reverse recovery refuses changed authoritative source even with complete stale destination option' );
+
+	$reset();
+	$result = ( new StorageConversion( $policy ) )->switch_backend( $request( 'table' ) );
+	$check( ! is_wp_error( $result ) && StorageControl::runtime_ready( $result, $control->read( StorageAuthority::AUTHORITY_OPTION ) ), 'empty absent option import still creates matching table authority sentinel' );
+	$check( ! is_wp_error( ( new StorageConversion( $policy ) )->switch_backend( $request( 'option' ) ) ) && array() === get_option( FOOGALLERY_MIGRATE_OPTION_DATA ), 'empty authoritative table reverse exports complete empty option' );
+
 	// Unsupported historical objects never invoke wakeup and remain untouched.
 	$reset(); update_option( FOOGALLERY_MIGRATE_OPTION_DATA, array( 'old' => (object) array( 'unknown' => true ) ), false );
 	$before = $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM `' . $wpdb->options . '` WHERE option_name = %s', FOOGALLERY_MIGRATE_OPTION_DATA ) );
@@ -140,6 +202,7 @@ try {
 	$check( is_wp_error( ( new StorageConversion( $policy ) )->recover( $request( 'table', true ) ) ), 'live foreign maintenance owner is not silently replaced' );
 	$check( true === $gate->release_maintenance(), 'original fixture owner still owns and releases exact marker' );
 	$check( $other_raw === $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM `' . $tables[0] . '` WHERE blog_id = %d', $other ), ARRAY_A ), 'all conversions/failures retain other scoped heads' );
+	$check( $other_records === $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM `' . $tables[1] . '` WHERE blog_id = %d', $other ), ARRAY_A ), 'all conversions/failures retain other scoped record bytes' );
 } finally {
 	if ( is_callable( $hook ) ) { remove_filter( 'query', $hook ); }
 	foreach ( $names as $name ) { delete_option( $name ); }
