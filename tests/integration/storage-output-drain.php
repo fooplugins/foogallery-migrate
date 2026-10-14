@@ -71,6 +71,7 @@ try {
 				$assert( $schema->verify(), 'verified schema ' . $scenario );
 				update_option( FOOGALLERY_MIGRATE_OPTION_DATA, array( 'fixture' => $scenario ), false );
 				$assert( ( new MigratorSettings() )->set_migrator_setting( MigratorSettings::KEY_MIGRATED, array() ), 'seed normal compact history ' . $scenario );
+				$assert( ( new MigratorSettings() )->set_migrator_setting( MigratorSettings::KEY_MIGRATED_REVISION, 0 ), 'seed normal history revision ' . $scenario );
 				$request = array( 'blog_id' => $blog, 'scope' => 'site', 'target' => 'table', 'confirmation' => 'switch-to-table', 'nonce' => wp_create_nonce( 'foogallery_migrate_storage_option_import_' . $blog ) );
 				$assert( ! is_wp_error( ( new StorageConversion( array( 'max_raw_bytes' => 1048576, 'amplification' => 64, 'reserve_bytes' => 33554432 ) ) )->switch_backend( $request ) ), 'actual coordinator conversion ' . $scenario );
 				$authority = StorageAuthority::runtime_record( $gate );
@@ -102,7 +103,7 @@ try {
 				else {
 					$class = 0 === strpos( $scenario, 'album' ) ? Album::class : Gallery::class;
 					$object = new $class( new NativeOutputSource() ); $object->ID = $source_id++; $object->title = 'Native output fixture';
-					$child = new Image( $object->plugin ); $child->ID = 992; $child->migrated = true; $child->migrated_id = 993; $object->children = array( $child );
+					$child = new Image( $object->plugin ); $child->ID = 992; $child->source_url = 'https://example.invalid/already-migrated.png'; $child->migrated = true; $child->migrated_id = 993; $object->children = array( $child );
 					$object->migrate();
 				}
 			} catch ( Throwable $error ) { $caught = $error; }
