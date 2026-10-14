@@ -1,5 +1,12 @@
 # Source-derived safety prerequisite: partial, not calibration approval
 
+14 October conditional continuation: the received controlled launch evidence
+closes B/mode only for the exact LP64/nondebug/NTS CLI contexts, not historical
+or production startups. See `storage-source-safety-phase-ledger.md` for the new
+pre-native table JSON guard, conditional allocator/container derivation, complete
+allocating-phase inventory and still-open numeric/reserve proof. The startup
+request below is retained as historical evidence, NOT a new blocking request.
+
 This checkpoint implements two local prerequisites behind the unchanged public
 admission boundary. It does not supply a numeric memory policy, enable PHP<7,
 approve a runtime, or establish Milestone A acceptance. The adopted proposal and
