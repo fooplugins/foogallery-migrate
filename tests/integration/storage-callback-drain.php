@@ -91,11 +91,12 @@ try {
 			finally { restore_current_blog(); }
 		}
 		// Deliberate real mysqli handle replacement, NOT a network fault or hard death.
+		$pin = $gate->connection();
 		$replacement = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST ); $calls = 0;
 		$hook = function () use ( $replacement, &$calls ) { global $wpdb; $calls++; $wpdb->dbh = $replacement->dbh; };
 		add_action( 'set_object_terms', $hook );
 		try { $engine->continue_image_tag_sync(); throw new LogicException( 'Changed pin reported success.' ); }
-		catch ( RuntimeException $error ) { $check( 1 === $calls && false === $gate->connection()->is_current() && false === $engine->storage_is_quiescent(), $mode . ': native handle replacement refuses subsequent output and latches pin' ); }
+		catch ( RuntimeException $error ) { $check( 1 === $calls && false === $pin->is_current() && false === $engine->storage_is_quiescent(), $mode . ': native handle replacement refuses subsequent output and latches pin' ); }
 		remove_action( 'set_object_terms', $hook ); $hook = null;
 		$owned_writers = $writers(); $check( 1 === count( $owned_writers ), $mode . ': uncertain owned writer retained' );
 		$gate->shutdown_writer(); $check( $owned_writers === $writers(), $mode . ': shutdown cannot release uncertain writer' );
