@@ -123,7 +123,12 @@ try {
 			if ( $object ) {
 				// Independent real transport observes persisted completion, not just
 				// the request object; losses/errors must not append history.
-				if ( 'table' === $mode ) { $history = ( new LegacyTableBackend( new LegacyTransactionConnection( $observer ), $blog ) )->read( MigratorSettings::KEY_MIGRATED ); $history = $history['value']; }
+				if ( 'table' === $mode ) {
+					$read = ( new LegacyTableBackend( new LegacyTransactionConnection( $observer ), $blog ) )->history_read( 'identifiers', array( $object->unique_identifier() ) );
+					$history = array( 'items' => array() );
+					foreach ( $read['result'] as $row ) { if ( $row['found'] ) { $history['items'][$object->unique_identifier()] = $row['value']; } }
+					$assert( $read['context'][0]['root']['root_count'] === count( $history['items'] ), 'independent bounded history count ' . $scenario );
+				}
 				else { $raw = $observer->get_var( $observer->prepare( "SELECT option_value FROM `{$observer->options}` WHERE option_name=%s", FOOGALLERY_MIGRATE_OPTION_DATA ) ); $state = null === $raw ? array() : unserialize( $raw, array( 'allowed_classes' => false ) ); $history = isset( $state[MigratorSettings::KEY_MIGRATED] ) ? $state[MigratorSettings::KEY_MIGRATED] : array(); }
 				$items = isset( $history['items'] ) ? $history['items'] : array();
 				if ( ! $loss && 'gallery-error' !== $scenario ) { $record = isset( $items[$object->unique_identifier()] ) ? $items[$object->unique_identifier()] : array(); $assert( count( $items ) === 1 && ! empty( $record['migrated'] ) && (int) $record['migrated_id'] === (int) $object->migrated_id, 'independent persisted completion ' . $scenario ); }

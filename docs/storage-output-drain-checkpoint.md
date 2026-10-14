@@ -46,7 +46,9 @@ avoided using distinct fixture source identities.
 Native fixture-development failures are retained separately from final PASS
 receipts: repeated source identity/reuse, omitted WP schema helper, missing
 initialized history and invalid child identity. They did not authorize a
-production fallback or schema rewrite. Fixture cleanup may remove only exact
+production fallback or schema rewrite. A scalar-read attempt against indexed
+history was also refused; the observer now uses the bounded identifier API.
+Fixture cleanup may remove only exact
 fixture-owned marker bytes; this is not a product recovery protocol. The native
 runner independently checks all data-row equality and removes owned sites/DBs.
 
