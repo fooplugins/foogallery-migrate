@@ -93,7 +93,7 @@ class StorageControlTest extends TestCase {
 		$this->assertStringContainsString( $owner, stripslashes( $sql ) );
 		$this->assertStringContainsString( 'UNIX_TIMESTAMP() <', $sql );
 		$this->assertStringContainsString( 'NOT EXISTS', $sql );
-		$this->assertStringContainsString( 'foogallery_migrate_storage_writer_', $sql );
+		$this->assertStringContainsString( 'foogallery_migrate_storage_writer_', stripslashes( $sql ) );
 		$this->assertStringContainsString( '`wp_options`', $sql );
 	}
 
@@ -134,6 +134,7 @@ class ControlTestWpdb {
 	public $rows = array();
 	public $queries = array();
 	public $fail_after_write = false;
+	public function esc_like( $value ) { return addcslashes( $value, '_%\\' ); }
 	public function prepare( $sql, $args ) {
 		foreach ( (array) $args as $arg ) { $sql = preg_replace( '/%[sd]/', "'" . addslashes( (string) $arg ) . "'", $sql, 1 ); }
 		return $sql;

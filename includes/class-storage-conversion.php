@@ -83,7 +83,7 @@ class StorageConversion {
 					$this->require_true( MigratorEngine::storage_maintenance_is_quiescent() );
 					$this->require_true( MigratorEngine::storage_maintenance_is_quiescent() );
 				} );
-			} else { $this->controls->cas( StorageAuthority::CONTROL_OPTION, $raw, $new ); }
+			} else { $this->controls->cas( StorageAuthority::CONTROL_OPTION, $raw, $new, null, $this->gate->maintenance_identity() ); }
 			$result = $this->advance( $record, $source );
 			$this->end(); return $result;
 		} catch ( \Exception $error ) { return $this->failed( $error ); }
@@ -186,7 +186,7 @@ class StorageConversion {
 				$pending = $r; ++$pending['epoch'];
 				$sentinel = json_encode( StorageControl::sentinel( $pending ) );
 				$existing = $this->controls->read( StorageAuthority::AUTHORITY_OPTION );
-				if ( null === $existing ) { $this->controls->cas( StorageAuthority::AUTHORITY_OPTION, null, $sentinel ); }
+				if ( null === $existing ) { $this->controls->cas( StorageAuthority::AUTHORITY_OPTION, null, $sentinel, null, $this->gate->maintenance_identity() ); }
 				else { $this->require_true( $existing === $sentinel ); }
 			} else {
 				$this->require_true( $this->controls->read( StorageAuthority::AUTHORITY_OPTION ) === json_encode( StorageControl::sentinel( $r ) ) );
@@ -204,7 +204,7 @@ class StorageConversion {
 				if ( $this->option_present( FOOGALLERY_MIGRATE_OPTION_DATA ) ) {
 					$this->require_true( $this->raw_option_digest( FOOGALLERY_MIGRATE_OPTION_DATA ) === $r['source_digest'] );
 					$raw = $this->option_raw();
-					$this->write( $this->db->prepare( 'DELETE FROM `' . $this->prefix . 'options` WHERE option_name = %s AND BINARY option_value = BINARY %s', array( FOOGALLERY_MIGRATE_OPTION_DATA, $raw ) ) );
+					$this->write( $this->db->prepare( 'DELETE FROM `' . $this->prefix . 'options` WHERE option_name = %s AND BINARY option_value = BINARY %s', array( FOOGALLERY_MIGRATE_OPTION_DATA, $raw ) ) . $this->maintenance_guard() );
 					$this->invalidate( FOOGALLERY_MIGRATE_OPTION_DATA );
 					$this->require_true( ! $this->option_present( FOOGALLERY_MIGRATE_OPTION_DATA ) );
 				}
@@ -213,7 +213,7 @@ class StorageConversion {
 				$old = $r; --$old['epoch'];
 				if ( null !== $sentinel ) {
 					$this->require_true( $sentinel === json_encode( StorageControl::sentinel( $old ) ) );
-					$this->controls->cas( StorageAuthority::AUTHORITY_OPTION, $sentinel, null );
+					$this->controls->cas( StorageAuthority::AUTHORITY_OPTION, $sentinel, null, null, $this->gate->maintenance_identity() );
 				}
 			}
 			$this->ready(); $r = $this->phase( $r, 'stable', $active );
@@ -240,7 +240,7 @@ class StorageConversion {
 			$dependencies[] = array( 'kind' => 'sentinel', 'value' => $sentinel );
 			$guard = array( 'kind' => 'all', 'value' => $dependencies );
 		}
-		$this->controls->cas( StorageAuthority::CONTROL_OPTION, $old, $new, $guard ); return $r;
+		$this->ready(); $this->controls->cas( StorageAuthority::CONTROL_OPTION, $old, $new, $guard, $this->gate->maintenance_identity() ); return $r;
 	}
 
 	private function snapshot_guard( $backend, $physical ) {
@@ -346,11 +346,12 @@ class StorageConversion {
 
 	private function insert_option( $name, $raw ) {
 		$this->ready();
-		$this->write( $this->db->prepare( 'INSERT INTO `' . $this->prefix . "options` ( option_name, option_value, autoload ) VALUES ( %s, %s, 'no' )", array( $name, $raw ) ) );
+		$this->write( $this->db->prepare( 'INSERT INTO `' . $this->prefix . "options` ( option_name, option_value, autoload ) SELECT %s, %s, 'no' WHERE 1 = 1", array( $name, $raw ) ) . $this->maintenance_guard() );
 		$this->invalidate( $name );
 		$this->require_true( $this->raw_option_digest( $name ) === hash( 'sha256', 'present:' . hash( 'sha256', $raw ) ) );
 	}
 
+	private function maintenance_guard() { return $this->controls->maintenance_guard( $this->gate->maintenance_identity() ); }
 	private function write( $sql ) { $this->require_true( 1 === $this->db->query( $sql ) && empty( $this->db->last_error ) ); }
 	private function invalidate( $name ) { wp_cache_delete( $name, 'options' ); wp_cache_delete( 'alloptions', 'options' ); wp_cache_delete( 'notoptions', 'options' ); }
 	private function require_true( $value ) { if ( true !== $value ) { throw new \RuntimeException( 'Retain recorded authority and all conversion evidence; storage recovery is required.' ); } }

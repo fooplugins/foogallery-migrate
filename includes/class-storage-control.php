@@ -70,12 +70,13 @@ class StorageControl {
 	}
 
 	/** No cached negatives, INSERT IGNORE, collation equality or unowned delete. */
-	public function cas( $name, $old, $new, $source_guard = null ) {
+	public function cas( $name, $old, $new, $source_guard = null, $maintenance_raw = null ) {
 		$this->context(); $this->name( $name );
 		if ( ( null !== $old && ( ! is_string( $old ) || strlen( $old ) > self::MAX_BYTES ) ) ||
 			( null !== $new && ( ! is_string( $new ) || strlen( $new ) > self::MAX_BYTES ) ) || ( null === $old && null === $new ) ) { self::fail(); }
 		if ( null === $old ) {
-			$sql = $this->db->prepare( 'INSERT INTO `' . $this->prefix . "options` ( option_name, option_value, autoload ) VALUES ( %s, %s, 'no' )", array( $name, $new ) );
+			$sql = $this->db->prepare( 'INSERT INTO `' . $this->prefix . "options` ( option_name, option_value, autoload )" .
+				( null === $maintenance_raw ? " VALUES ( %s, %s, 'no' )" : " SELECT %s, %s, 'no' WHERE 1 = 1" ), array( $name, $new ) );
 		} elseif ( null === $new ) {
 			$sql = $this->db->prepare( 'DELETE FROM `' . $this->prefix . 'options` WHERE option_name = %s AND BINARY option_value = BINARY %s', array( $name, $old ) );
 		} else {
@@ -85,11 +86,33 @@ class StorageControl {
 			if ( StorageAuthority::CONTROL_OPTION !== $name || null === $old || null === $new ) { self::fail(); }
 			$sql .= $this->source_guard( $source_guard );
 		}
+		if ( null !== $maintenance_raw ) { $sql .= $this->maintenance_guard( $maintenance_raw ); }
 		$result = $this->db->query( $sql );
 		if ( 1 !== $result || ! empty( $this->db->last_error ) ) { self::fail(); }
 		wp_cache_delete( $name, 'options' ); wp_cache_delete( 'alloptions', 'options' ); wp_cache_delete( 'notoptions', 'options' );
 		if ( $this->read( $name ) !== $new ) { self::fail(); }
 		return true;
+	}
+
+	/**
+	 * Same-statement conversion dependency, not authority to acquire or take over.
+	 * LIMIT prevents derived-table merging into a target-table subquery on MySQL.
+	 * All writer markers block, even malformed/expired ones; TTL is not drain proof.
+	 */
+	public function maintenance_guard( $raw ) {
+		$this->context();
+		if ( ! is_string( $raw ) || strlen( $raw ) > 512 ) { self::fail(); }
+		$r = json_decode( $raw, true, 4 );
+		if ( JSON_ERROR_NONE !== json_last_error() || ! is_array( $r ) ||
+			array_keys( $r ) !== array( 'version', 'blog_id', 'token', 'expires' ) || json_encode( $r ) !== $raw ||
+			1 !== $r['version'] || $this->blog !== $r['blog_id'] || ! is_string( $r['token'] ) ||
+			! preg_match( '/^[a-f0-9]{32}$/D', $r['token'] ) || ! is_int( $r['expires'] ) || $r['expires'] <= time() ) { self::fail(); }
+		$table = '`' . $this->prefix . 'options`';
+		return $this->db->prepare( ' AND EXISTS (SELECT 1 FROM (SELECT option_value AS maintenance_value FROM ' . $table .
+			' WHERE option_name = %s LIMIT 1) AS maintenance_owner WHERE BINARY maintenance_value = BINARY %s)' .
+			' AND UNIX_TIMESTAMP() < %d AND NOT EXISTS (SELECT 1 FROM (SELECT option_name FROM ' . $table .
+			' WHERE option_name LIKE %s LIMIT 1) AS storage_writers)',
+			array( StorageAuthority::MAINTENANCE_OPTION, $raw, $r['expires'], $this->db->esc_like( StorageMaintenanceGate::WRITER_PREFIX ) . '%' ) );
 	}
 
 	/** Atomic flip dependency, closed shapes and fixed source names only. */
