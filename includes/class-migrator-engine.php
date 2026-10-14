@@ -51,6 +51,8 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         /** True only for the production options factory, not inert injected seams. */
         private $storage_guarded = false;
         private $storage_gate;
+        private $storage_control;
+        private $production_backend;
 
         /**
          * @param MigratedStore|MigratedHistoryRepository|null $migrated_store Optional injected store.
@@ -62,11 +64,12 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 return;
             }
             $this->storage_gate = StorageMaintenanceGate::current();
-            $error = StorageAuthority::option_mode_error( $this->storage_gate );
+            $error = StorageAuthority::runtime_record( $this->storage_gate );
             if ( is_wp_error( $error ) ) {
                 throw new \RuntimeException( $error->get_error_message() );
             }
             $this->storage_guarded = true;
+            $this->storage_control = $error;
         }
 
         /** Defensive admission before state, source callbacks or output changes. */
@@ -74,7 +77,31 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
             if ( ! $this->storage_guarded ) { return true; }
             $error = StorageAuthority::admit_option_writer( $this->storage_gate );
             if ( is_wp_error( $error ) ) { throw new \RuntimeException( $error->get_error_message() ); }
+            $this->assert_storage_context();
             return true;
+        }
+
+        public function assert_storage_context() {
+            if ( ! $this->storage_guarded ) { return true; }
+            $current = StorageAuthority::runtime_record( $this->storage_gate );
+            if ( is_wp_error( $current ) || $current !== $this->storage_control || $this->storage_gate !== StorageMaintenanceGate::current() ) {
+                throw new \RuntimeException( 'Migration storage authority/context changed; discard the cached engine and use recovery without fallback.' );
+            }
+            return true;
+        }
+
+        private function production_backend() {
+            $this->assert_storage_context();
+            if ( ! isset( $this->production_backend ) ) {
+                $admission = $this->storage_guarded ? array( $this, 'assert_storage_writer' ) : null;
+                if ( is_array( $this->storage_control ) && 'table' === $this->storage_control['backend'] ) {
+                    global $wpdb;
+                    $connection = new LegacyTransactionConnection( $wpdb );
+                    ( new LegacyStorageSchema( $connection ) )->verify();
+                    $this->production_backend = new LegacyTableBackend( $connection, get_current_blog_id(), 10000, 16777216, 10, $admission, array( $this, 'assert_storage_context' ) );
+                } else { $this->production_backend = new LegacyOptionBackend( $admission ); }
+            }
+            return $this->production_backend;
         }
 
         /** The current engine is synchronous; pending request-local work is not drained. */
@@ -99,9 +126,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return MigratorSettings
          */
         protected function settings() {
+            $this->assert_storage_context();
             if ( ! isset( $this->settings ) ) {
                 $admission = $this->storage_guarded ? array( $this, 'assert_storage_writer' ) : null;
-                $this->settings = new MigratorSettings( new LegacyOptionBackend( $admission ), $admission );
+                $this->settings = new MigratorSettings( $this->production_backend(), $admission );
             }
 
             return $this->settings;
@@ -109,9 +137,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
 
         /** @return MigratedStore|MigratedHistoryRepository */
         protected function migrated_store() {
+            $this->assert_storage_context();
             if ( ! isset( $this->migrated_store ) ) {
                 $admission = $this->storage_guarded ? array( $this, 'assert_storage_writer' ) : null;
-                $this->migrated_store = new MigratedHistoryRepository( new LegacyOptionBackend( $admission ), $this->settings() );
+                $this->migrated_store = new MigratedHistoryRepository( $this->production_backend(), $this->settings() );
             }
 
             return $this->migrated_store;

@@ -77,6 +77,16 @@ class StorageControlTest extends TestCase {
 		try { $store->cas( StorageAuthority::CONTROL_OPTION, null, json_encode( $this->record() ) ); $this->fail(); }
 		catch ( \RuntimeException $error ) { $this->assertArrayHasKey( StorageAuthority::CONTROL_OPTION, $db->rows ); }
 	}
+
+	public function test_production_authority_never_falls_back_from_malformed_or_interrupted_control(): void {
+		$db = new ControlTestWpdb(); $GLOBALS['wpdb'] = $db;
+		try {
+			foreach ( array( '', '{}', json_encode( $this->record() ) ) as $raw ) {
+				$db->rows[StorageAuthority::CONTROL_OPTION] = $raw;
+				$this->assertInstanceOf( \WP_Error::class, StorageAuthority::runtime_record() );
+			}
+		} finally { unset( $GLOBALS['wpdb'] ); }
+	}
 }
 
 /** SQL shape/CAS spy, not a native database atomicity receipt. */

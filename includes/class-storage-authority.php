@@ -81,14 +81,43 @@ class StorageAuthority {
 		return false;
 	}
 
-	/** Production option writer admission; no public table selection or fallback. */
+	/** Fresh validated runtime authority. Null means unambiguous virgin options;
+	 * unknown/interrupted/mismatched evidence is NEVER an option fallback.
+	 */
+	public static function runtime_record( $writer = null ) {
+		global $wpdb;
+		try {
+			$blog = get_current_blog_id(); $control = new StorageControl( $wpdb, $blog );
+			$raw = $control->read( self::CONTROL_OPTION );
+			if ( null === $raw ) {
+				$error = self::option_mode_error( $writer );
+				return is_wp_error( $error ) ? $error : null;
+			}
+			$r = StorageControl::decode( $raw, $blog );
+			if ( ! StorageControl::runtime_ready( $r, $control->read( self::AUTHORITY_OPTION ) ) ) { return self::recovery_error(); }
+			$markers = array( 'foogallery_migrate_storage', MigratedStore::SCHEMA_OPTION, MigratedStore::MIGRATION_OPTION );
+			if ( ! $writer instanceof StorageMaintenanceGate || true !== $writer->assert_writer() ) { $markers[] = self::MAINTENANCE_OPTION; }
+			$found = $wpdb->get_var( $wpdb->prepare( 'SELECT 1 AS present FROM `' . $wpdb->prefix . 'options` WHERE option_name IN (' . implode( ', ', array_fill( 0, count( $markers ), '%s' ) ) . ') LIMIT 1', $markers ) );
+			if ( ! empty( $wpdb->last_error ) || null !== $found ) { return self::recovery_error(); }
+			foreach ( array( MigratedStore::TABLE_SUFFIX, self::STATE_TABLE_SUFFIX ) as $suffix ) {
+				$found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $wpdb->prefix . $suffix ) ) );
+				if ( ! empty( $wpdb->last_error ) || null !== $found ) { return self::recovery_error(); }
+			}
+			$live = $wpdb->get_var( $wpdb->prepare( 'SELECT 1 AS present FROM `' . $wpdb->prefix . 'options` WHERE option_name = %s LIMIT 1', FOOGALLERY_MIGRATE_OPTION_DATA ) );
+			if ( ! empty( $wpdb->last_error ) || ( 'table' === $r['backend'] ? null !== $live : null === $live ) ) { return self::recovery_error(); }
+			return $r;
+		} catch ( \Exception $error ) { return self::recovery_error(); }
+		catch ( \Throwable $error ) { return self::recovery_error(); }
+	}
+
+	/** Compatibility entrypoint now admits only the validated current backend. */
 	public static function admit_option_writer( $gate = null ) {
 		try {
 			if ( null === $gate ) { $gate = StorageMaintenanceGate::current(); }
 			if ( ! $gate instanceof StorageMaintenanceGate ) { return self::recovery_error(); }
 			$result = $gate->admit_request_writer();
 			if ( is_wp_error( $result ) ) { return $result; }
-			$error = self::option_mode_error( $gate );
+			$error = self::runtime_record( $gate );
 			if ( is_wp_error( $error ) ) { return $error; }
 			return $gate->assert_writer();
 		} catch ( \RuntimeException $error ) { return self::recovery_error(); }

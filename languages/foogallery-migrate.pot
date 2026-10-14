@@ -8,7 +8,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Language-Team: FooPlugins <info@fooplugins.com>\n"
 "Last-Translator: Brad Vincent <brad@fooplugins.com>\n"
-"POT-Creation-Date: 2026-10-14 08:28+0000\n"
+"POT-Creation-Date: 2026-10-14 08:39+0000\n"
 "Report-Msgid-Bugs-To: https://fooplugins.com\n"
 "X-Poedit-Basepath: ..\n"
 "X-Poedit-KeywordsList: __;_e;_ex:1,2c;_n:1,2;_n_noop:1,2;_nx:1,2,4c;_nx_noop:1,2,3c;_x:1,2c;esc_attr__;esc_attr_e;esc_attr_x:1,2c;esc_html__;esc_html_e;esc_html_x:1,2c\n"
@@ -96,51 +96,51 @@ msgstr ""
 msgid "Invalid object."
 msgstr ""
 
-#: includes/class-migrator-engine.php:410, includes/class-migrator-engine.php:429
+#: includes/class-migrator-engine.php:439, includes/class-migrator-engine.php:458
 msgid "FooGallery media tags are not available."
 msgstr ""
 
-#: includes/class-migrator-engine.php:437
+#: includes/class-migrator-engine.php:466
 msgid "No image tag sync is queued."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1031, includes/class-migrator-engine.php:1066
+#: includes/class-migrator-engine.php:1060, includes/class-migrator-engine.php:1095
 msgid "Migrated object not found."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1035
+#: includes/class-migrator-engine.php:1064
 msgid "Invalid migrated object."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1051
+#: includes/class-migrator-engine.php:1080
 msgid "Migrated object could not be updated."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1190, includes/class-migrator-engine.php:1296
+#: includes/class-migrator-engine.php:1219, includes/class-migrator-engine.php:1325
 msgid "Gallery not found."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1234
+#: includes/class-migrator-engine.php:1263
 msgid "Migrated gallery state could not be reset."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1239, includes/class-migrator-engine.php:1252, includes/class-migrator-engine.php:1255, includes/class-migrator-engine.php:1300, includes/class-migrator-engine.php:1303
+#: includes/class-migrator-engine.php:1268, includes/class-migrator-engine.php:1281, includes/class-migrator-engine.php:1284, includes/class-migrator-engine.php:1329, includes/class-migrator-engine.php:1332
 msgid "Migrated gallery state could not be saved."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1347, includes/objects/class-image.php:260
+#: includes/class-migrator-engine.php:1376, includes/objects/class-image.php:260
 msgid "Attachment file is missing after migration."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1360
+#: includes/class-migrator-engine.php:1389
 msgid "Attachment file size could not be determined after migration."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1383
+#: includes/class-migrator-engine.php:1412
 msgid "Attachment file could not be loaded after migration."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1403
+#: includes/class-migrator-engine.php:1432
 msgid "One or more images are missing after migration."
 msgstr ""
 
@@ -152,7 +152,7 @@ msgstr ""
 msgid "(no title) #%d"
 msgstr ""
 
-#: includes/class-storage-authority.php:100
+#: includes/class-storage-authority.php:129
 msgid "Migration storage requires recovery before continuing. No migration state was changed. Retain the database and contact your site administrator; do not delete storage markers, restore the legacy history snapshot over current state, or restart migrations from stale options."
 msgstr ""
 

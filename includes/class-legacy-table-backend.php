@@ -1,6 +1,6 @@
 <?php
 /**
- * Inert compact table-backend seam; NOT selectable by the engine yet.
+ * Compact table backend; production selection requires validated authority.
  * The storage manager must verify authority/manifest and admit reads/writers.
  * No option fallback, provisioning, whole-state facade or implicit conversion.
  *
@@ -12,40 +12,50 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 class LegacyTableBackend {
 	private $repository;
+	private $admission;
+	private $read_admission;
 
-	public function __construct( $db, $blog, $max_rows = 10000, $max_bytes = 16777216, $max_seconds = 10 ) {
+	public function __construct( $db, $blog, $max_rows = 10000, $max_bytes = 16777216, $max_seconds = 10, $admission = null, $read_admission = null ) {
+		if ( ( null !== $admission && ! is_callable( $admission ) ) || ( null !== $read_admission && ! is_callable( $read_admission ) ) ) { throw new \InvalidArgumentException( 'Invalid table admission callback.' ); }
+		$this->admission = $admission; $this->read_admission = $read_admission;
 		$this->repository = new LegacyTableRepository( $db, $blog, $max_rows, $max_bytes, $max_seconds );
 	}
 
+	private function repository( $write = false ) {
+		$callback = $write ? $this->admission : $this->read_admission;
+		if ( null !== $callback && true !== call_user_func( $callback ) ) { throw new \RuntimeException( 'Table backend admission failed.' ); }
+		return $this->repository;
+	}
+
 	/** Small/scalar heads only; collections MUST use bounded root/page APIs. */
-	public function read( $key ) { return $this->repository->read_scalar( $key ); }
-	public function metadata_many( $keys ) { return $this->repository->metadata_many( $keys ); }
-	public function history_read( $operation, $request = array() ) { return $this->repository->history_read( $operation, $request ); }
-	public function history_mutate( $operation, $request, $companions = array() ) { return $this->repository->history_mutate( $operation, $request, $companions ); }
-	public function mutate_scalars( $values ) { return $this->repository->mutate_scalars( $values ); }
-	public function delete_scalar( $key ) { return $this->repository->delete_scalar( $key ); }
-	public function content_scan_state() { return $this->repository->content_scan_state(); }
-	public function change_content_scan( $change ) { return $this->repository->change_content_scan( $change ); }
-	public function change_image_tag_queue( $change ) { return $this->repository->change_image_tag_queue( $change ); }
-	public function read_scalars( $keys ) { return $this->repository->read_scalars( $keys ); }
-	public function collection_snapshot( $key ) { return $this->repository->collection_snapshot( $key ); }
-	public function read_collection( $key ) { return $this->repository->read_collection( $key ); }
-	public function replace_collection( $key, $value, $companions = array() ) { return $this->repository->replace_collection( $key, $value, $companions ); }
-	public function update_collection_record( $key, $locator, $value ) { return $this->repository->update_collection_record( $key, $locator, $value ); }
-	public function history_page( $key, $limit, $filters, $cursor = null ) { return $this->repository->history_page( $key, $limit, $filters, $cursor ); }
-	public function history_source_identity( $type, $plugin, $id ) { return $this->repository->history_source_identity( $type, $plugin, $id ); }
-	public function roots( $key, $keys ) { return $this->repository->roots( $key, $keys ); }
-	public function page( $key, $limit, $cursor = null ) { return $this->repository->page( $key, $limit, $cursor ); }
-	public function count_roots( $key ) { return $this->repository->count_roots( $key ); }
-	public function identifiers( $key, $identifiers ) { return $this->repository->identifiers( $key, $identifiers ); }
-	public function identifier_presence( $key, $identifiers ) { return $this->repository->identifier_presence( $key, $identifiers ); }
-	public function source_identities( $key, $identities, $numeric = false ) { return $this->repository->source_identities( $key, $identities, $numeric ); }
-	public function filtered_page( $key, $limit, $filters, $cursor = null ) { return $this->repository->filtered_page( $key, $limit, $filters, $cursor ); }
-	public function aggregate( $key, $filters = array() ) { return $this->repository->aggregate( $key, $filters ); }
-	public function projection_summary( $key ) { return $this->repository->projection_summary( $key ); }
-	public function export_page( $key, $limit, $cursor = null ) { return $this->repository->export_page( $key, $limit, $cursor ); }
+	public function read( $key ) { return $this->repository()->read_scalar( $key ); }
+	public function metadata_many( $keys ) { return $this->repository()->metadata_many( $keys ); }
+	public function history_read( $operation, $request = array() ) { return $this->repository()->history_read( $operation, $request ); }
+	public function history_mutate( $operation, $request, $companions = array() ) { return $this->repository( true )->history_mutate( $operation, $request, $companions ); }
+	public function mutate_scalars( $values ) { return $this->repository( true )->mutate_scalars( $values ); }
+	public function delete_scalar( $key ) { return $this->repository( true )->delete_scalar( $key ); }
+	public function content_scan_state() { return $this->repository()->content_scan_state(); }
+	public function change_content_scan( $change ) { return $this->repository( true )->change_content_scan( $change ); }
+	public function change_image_tag_queue( $change ) { return $this->repository( true )->change_image_tag_queue( $change ); }
+	public function read_scalars( $keys ) { return $this->repository()->read_scalars( $keys ); }
+	public function collection_snapshot( $key ) { return $this->repository()->collection_snapshot( $key ); }
+	public function read_collection( $key ) { return $this->repository()->read_collection( $key ); }
+	public function replace_collection( $key, $value, $companions = array() ) { return $this->repository( true )->replace_collection( $key, $value, $companions ); }
+	public function update_collection_record( $key, $locator, $value ) { return $this->repository( true )->update_collection_record( $key, $locator, $value ); }
+	public function history_page( $key, $limit, $filters, $cursor = null ) { return $this->repository()->history_page( $key, $limit, $filters, $cursor ); }
+	public function history_source_identity( $type, $plugin, $id ) { return $this->repository()->history_source_identity( $type, $plugin, $id ); }
+	public function roots( $key, $keys ) { return $this->repository()->roots( $key, $keys ); }
+	public function page( $key, $limit, $cursor = null ) { return $this->repository()->page( $key, $limit, $cursor ); }
+	public function count_roots( $key ) { return $this->repository()->count_roots( $key ); }
+	public function identifiers( $key, $identifiers ) { return $this->repository()->identifiers( $key, $identifiers ); }
+	public function identifier_presence( $key, $identifiers ) { return $this->repository()->identifier_presence( $key, $identifiers ); }
+	public function source_identities( $key, $identities, $numeric = false ) { return $this->repository()->source_identities( $key, $identities, $numeric ); }
+	public function filtered_page( $key, $limit, $filters, $cursor = null ) { return $this->repository()->filtered_page( $key, $limit, $filters, $cursor ); }
+	public function aggregate( $key, $filters = array() ) { return $this->repository()->aggregate( $key, $filters ); }
+	public function projection_summary( $key ) { return $this->repository()->projection_summary( $key ); }
+	public function export_page( $key, $limit, $cursor = null ) { return $this->repository()->export_page( $key, $limit, $cursor ); }
 
 	/** Existing heads only; expected-revision CAS and aggregate affected budgets. */
-	public function patch_many( $changes ) { return $this->repository->patch_many( $changes ); }
-	public function patch_lists_and_scalars( $changes ) { return $this->repository->patch_lists_and_scalars( $changes ); }
+	public function patch_many( $changes ) { return $this->repository( true )->patch_many( $changes ); }
+	public function patch_lists_and_scalars( $changes ) { return $this->repository( true )->patch_lists_and_scalars( $changes ); }
 }

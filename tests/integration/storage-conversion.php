@@ -73,6 +73,10 @@ try {
 	$actual = array(); foreach ( $initial as $key => $value ) { $actual[$key] = $reader->read_bounded( $key ); }
 	$check( $codec->snapshot_digest( $initial ) === $codec->snapshot_digest( $actual ), 'full typed-key/order/revision/unknown/binary/negative-zero parity' );
 	$check( $other_raw === $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM `' . $tables[0] . '` WHERE blog_id = %d', $other ), ARRAY_A ), 'forward switch retains other SQL blog scope byte-identically' );
+	$engine = foogallery_migrate_migrator_instance();
+	$check( false === $engine->get_migrator_setting( 9, 'missing' ), 'production factory reads authoritative table scalar, never missing stale option' );
+	$check( $engine->set_migrator_setting( 9, true ), 'production engine guarded scalar write reaches table backend' );
+	StorageMaintenanceGate::current()->shutdown_writer();
 
 	// Direct admitted-backend primitive fixture mutation, not public UI acceptance.
 	$backend = new LegacyTableBackend( $db, $blog );
@@ -85,6 +89,11 @@ try {
 	$check( $codec->snapshot_digest( $expected ) === $codec->snapshot_digest( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) ), 'reverse exports new table mutation and logical revision, not stale retained backup' );
 	$check( $backup === $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM `' . $wpdb->options . '` WHERE option_name = %s', StorageAuthority::STORAGE_BACKUP_OPTION ) ) && null === $control->read( StorageAuthority::AUTHORITY_OPTION ), 'reverse retains backup and removes sentinel only after option flip' );
 	$check( 'no' === $wpdb->get_var( $wpdb->prepare( 'SELECT autoload FROM `' . $wpdb->options . '` WHERE option_name = %s', FOOGALLERY_MIGRATE_OPTION_DATA ) ), 'fresh reverse option is non-autoloaded' );
+	try { $engine->set_migrator_setting( 9, false ); $check( false, 'cached old epoch must refuse write' ); }
+	catch ( RuntimeException $error ) { $check( true, 'cached table engine refuses post-reverse authority epoch write' ); }
+	StorageMaintenanceGate::current()->shutdown_writer();
+	unset( $GLOBALS['foogallery_migrate_engine_instance'] );
+	$check( true === foogallery_migrate_migrator_instance()->get_migrator_setting( 9 ), 'fresh production option factory reads verified reverse export' );
 
 	foreach ( array( 'verified', 'flipped', 'delete-source', 'stable' ) as $fault ) {
 		$reset(); update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $initial, false );
