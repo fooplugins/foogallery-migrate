@@ -9,6 +9,7 @@ if ( ! $root || ! is_file( $root . '/migrate.php' ) ) { throw new RuntimeExcepti
 require $root . '/migrate.php';
 require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
+use FooPlugins\FooGalleryMigrate\MigratorSettings;
 use FooPlugins\FooGalleryMigrate\StorageMaintenanceGate;
 use FooPlugins\FooGalleryMigrate\StorageConversion;
 use FooPlugins\FooGalleryMigrate\StorageAuthority;
@@ -69,6 +70,7 @@ try {
 				if ( ! $created ) { foreach ( $schema->statements() as $i => $ddl ) { $created[] = $tables[$i]; dbDelta( $ddl ); } }
 				$assert( $schema->verify(), 'verified schema ' . $scenario );
 				update_option( FOOGALLERY_MIGRATE_OPTION_DATA, array( 'fixture' => $scenario ), false );
+				$assert( ( new MigratorSettings() )->set_migrator_setting( MigratorSettings::KEY_MIGRATED, array() ), 'seed normal compact history ' . $scenario );
 				$request = array( 'blog_id' => $blog, 'scope' => 'site', 'target' => 'table', 'confirmation' => 'switch-to-table', 'nonce' => wp_create_nonce( 'foogallery_migrate_storage_option_import_' . $blog ) );
 				$assert( ! is_wp_error( ( new StorageConversion( array( 'max_raw_bytes' => 1048576, 'amplification' => 64, 'reserve_bytes' => 33554432 ) ) )->switch_backend( $request ) ), 'actual coordinator conversion ' . $scenario );
 				$authority = StorageAuthority::runtime_record( $gate );
