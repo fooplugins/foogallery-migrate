@@ -265,13 +265,11 @@ class StorageConversion {
 		$this->ready(); $before = $this->raw_option_digest( FOOGALLERY_MIGRATE_OPTION_DATA ); $raw = $this->option_raw();
 		$value = array();
 		if ( null !== $raw ) {
-			// No custom PHP serialization parser and no object wakeup/autoload.
-			// Literal PHP5.4 decoding remains unaccepted; refuse rather than invoke
-			// arbitrary historical objects on runtimes lacking allowed_classes.
-			$this->require_true( PHP_VERSION_ID >= 70000 );
 			$this->budget( strlen( $raw ) );
-			$value = @unserialize( $raw, array( 'allowed_classes' => false ) );
-			$this->require_true( is_array( $value ) && serialize( $value ) === $raw );
+			// Structural proof before native hydration also protects PHP5.4, which
+			// lacks allowed_classes. This is NOT streaming conversion and does not
+			// reduce the calibrated whole-option memory requirement.
+			$value = ( new LegacyOptionDecoder( $this->policy['max_raw_bytes'] ) )->decode( $raw );
 		}
 		$this->require_true( count( $value ) <= 100 );
 		$this->codec->snapshot_digest( $value ); // Reject objects, depth overflow and unsupported scalars.

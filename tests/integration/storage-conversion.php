@@ -16,6 +16,12 @@ use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
 
+class StorageDecoderWakeupProbe {
+	public static $invoked = false;
+	public function __wakeup() { self::$invoked = true; }
+	public function __unserialize( $data ) { self::$invoked = true; }
+}
+
  global $wpdb;
 $blog = (int) get_current_blog_id(); $schema = new LegacyStorageSchema( $wpdb ); $tables = array_keys( $schema->definitions() );
 $names = array( FOOGALLERY_MIGRATE_OPTION_DATA, StorageAuthority::CONTROL_OPTION, StorageAuthority::AUTHORITY_OPTION, StorageAuthority::MAINTENANCE_OPTION, StorageAuthority::STORAGE_BACKUP_OPTION, 'foogallery_migrate_storage_writer_fixture_race' );
@@ -67,6 +73,35 @@ try {
 	$check( is_wp_error( ( new StorageConversion() )->switch_backend( $request( 'table' ) ) ), 'no calibrated trusted policy refuses source decode' );
 	$check( $raw_before === $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM `' . $wpdb->options . '` WHERE option_name = %s', FOOGALLERY_MIGRATE_OPTION_DATA ) ) && null === $control->read( StorageAuthority::CONTROL_OPTION ), 'missing-policy denial retains exact source and no pending control' );
 	$check( null === $wpdb->get_var( $wpdb->prepare( 'SELECT 1 FROM `' . $wpdb->options . '` WHERE option_name = %s', StorageAuthority::MAINTENANCE_OPTION ) ), 'owned maintenance marker released after refusal' );
+
+	// Raw SQL avoids WordPress hydrating the hostile source before the actual
+	// coordinator. Objects/custom objects/references are unsupported evidence,
+	// not a reason to discard history or publish the staged destination.
+	$unexpected_autoload = false;
+	$absent_class = 'StorageDecoderAbsentClass';
+	$loader = function ( $name ) use ( &$unexpected_autoload ) { if ( 'StorageDecoderAbsentClass' === $name ) { $unexpected_autoload = true; } };
+	spl_autoload_register( $loader );
+	try {
+		foreach ( array(
+			serialize( array( new StorageDecoderWakeupProbe() ) ),
+			'a:1:{i:0;O:' . strlen( $absent_class ) . ':"' . $absent_class . '":0:{}}',
+			'a:1:{i:0;C:' . strlen( $absent_class ) . ':"' . $absent_class . '":0:{}}',
+			'a:1:{i:0;R:1;}', 'a:1:{i:0;r:1;}',
+			str_repeat( 'a:1:{i:0;', 66 ) . 'N;' . str_repeat( '}', 66 ),
+			'a:1:{i:0;s:99999999999999999999:"x";}',
+			'a:2:{i:0;N;i:0;b:0;}',
+		) as $hostile ) {
+			$wpdb->query( $wpdb->prepare( 'UPDATE `' . $wpdb->options . '` SET option_value = %s WHERE option_name = %s', array( $hostile, FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
+			$check( is_wp_error( ( new StorageConversion( $policy ) )->switch_backend( $request( 'table' ) ) ), 'unsupported serialized source refuses actual authorized coordinator' );
+			$check( ! StorageDecoderWakeupProbe::$invoked && ! $unexpected_autoload, 'refusal invokes no historical object hook/autoload' );
+			$check( $hostile === $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM `' . $wpdb->options . '` WHERE option_name = %s', FOOGALLERY_MIGRATE_OPTION_DATA ) ), 'refusal retains exact hostile source bytes' );
+			$check( null === $control->read( StorageAuthority::CONTROL_OPTION ) && null === $control->read( StorageAuthority::AUTHORITY_OPTION ) && null === $control->read( StorageAuthority::STORAGE_BACKUP_OPTION ), 'decode refusal publishes no intent, authority or backup' );
+			$check( '0' === (string) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM `' . $tables[0] . '` WHERE blog_id = %d', $blog ) ) && '0' === (string) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM `' . $tables[1] . '` WHERE blog_id = %d', $blog ) ), 'decode refusal stages no current-blog state/records' );
+			$check( null === $control->read( StorageAuthority::MAINTENANCE_OPTION ), 'decode refusal releases only acquired maintenance marker' );
+		}
+	} finally { spl_autoload_unregister( $loader ); }
+	$wpdb->query( $wpdb->prepare( 'UPDATE `' . $wpdb->options . '` SET option_value = %s WHERE option_name = %s', array( $raw_before, FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
+	$check( $raw_before === $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM `' . $wpdb->options . '` WHERE option_name = %s', FOOGALLERY_MIGRATE_OPTION_DATA ) ), 'valid fixture source restored exactly before forward conversion' );
 
 	$result = ( new StorageConversion( $policy ) )->switch_backend( $request( 'table' ) );
 	$check( ! is_wp_error( $result ), 'authorized native forward switch succeeds' );
