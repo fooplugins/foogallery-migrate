@@ -108,7 +108,7 @@ try {
 	// Atomic source dependency in final authority CAS, not only a prior SELECT.
 	$reset(); update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $initial, false ); $fired = false;
 	$hook = function ( $sql ) use ( &$fired, $initial ) {
-		if ( ! $fired && 0 === strpos( $sql, 'UPDATE' ) && false !== strpos( $sql, 'storage_control' ) && false !== strpos( $sql, '"phase":"flipped"' ) ) {
+		if ( ! $fired && 0 === strpos( $sql, 'UPDATE' ) && false !== strpos( $sql, 'storage_control' ) && false !== strpos( stripslashes( $sql ), '"phase":"flipped"' ) ) {
 			$fired = true; $changed = $initial; $changed['migrated-revision'] = 999; update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $changed, false );
 		}
 		return $sql;
