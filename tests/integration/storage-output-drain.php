@@ -59,7 +59,7 @@ $clean = function () use ( $observer, &$created, &$owned_markers, $names, $blog,
 	foreach ( $names as $name ) { $observer->query( $observer->prepare( "DELETE FROM `{$observer->options}` WHERE option_name=%s", $name ) ); }
 	wp_cache_flush(); unset( $GLOBALS['foogallery_migrate_engine_instance'] );
 };
-$post_hook = $meta_hook = $option_hook = $generation_hook = $term_hook = null; $source_id = 991;
+$post_hook = $meta_hook = $option_hook = $generation_hook = $term_hook = $attachment_hook = null; $source_id = 991;
 try {
 	$assert( current_user_can( 'manage_options' ), 'administrator fixture' );
 	foreach ( array( 'option', 'table' ) as $mode ) {
@@ -114,6 +114,9 @@ try {
 			};
 			$option_hook = function ( $name ) use ( $engine, $assert, $lose ) { if ( FOOGALLERY_MIGRATE_OPTION_DATA === $name ) { $assert( ! $engine->storage_is_quiescent(), 'option hook active' ); $lose(); } };
 			add_action( 'wp_insert_post', $post_hook, 10, 3 ); add_action( 'added_post_meta', $meta_hook, 10, 3 ); add_action( 'updated_post_meta', $meta_hook, 10, 3 );
+			// WordPress attachments emit add_attachment, not wp_insert_post.
+			$attachment_hook = function ( $id ) use ( $post_hook ) { $post_hook( $id, get_post( $id ), false ); };
+			add_action( 'add_attachment', $attachment_hook );
 			add_filter( 'wp_generate_attachment_metadata', $generation_hook ); add_action( 'set_object_terms', $term_hook, 10, 4 );
 			$object = false;
 			try {
@@ -137,7 +140,8 @@ try {
 			} catch ( Throwable $error ) { $caught = $error; }
 			remove_action( 'wp_insert_post', $post_hook, 10 ); remove_action( 'added_post_meta', $meta_hook, 10 ); remove_action( 'updated_post_meta', $meta_hook, 10 ); remove_action( 'added_option', $option_hook, 10 ); remove_action( 'updated_option', $option_hook, 10 );
 			remove_filter( 'wp_generate_attachment_metadata', $generation_hook ); remove_action( 'set_object_terms', $term_hook, 10 );
-			$post_hook = $meta_hook = $option_hook = $generation_hook = $term_hook = null;
+			remove_action( 'add_attachment', $attachment_hook );
+			$post_hook = $meta_hook = $option_hook = $generation_hook = $term_hook = $attachment_hook = null;
 			$loss = false !== strpos( $scenario, 'loss' );
 			if ( ! $loss && 'gallery-error' !== $scenario && 'media-error' !== $scenario && null !== $caught ) { throw $caught; }
 			if ( $loss ) {
@@ -180,6 +184,7 @@ try {
 } finally {
 	if ( null !== $post_hook ) { remove_action( 'wp_insert_post', $post_hook, 10 ); remove_action( 'added_post_meta', $meta_hook, 10 ); remove_action( 'updated_post_meta', $meta_hook, 10 ); remove_action( 'added_option', $option_hook, 10 ); remove_action( 'updated_option', $option_hook, 10 ); }
 	if ( null !== $generation_hook ) { remove_filter( 'wp_generate_attachment_metadata', $generation_hook ); remove_action( 'set_object_terms', $term_hook, 10 ); }
+	if ( null !== $attachment_hook ) { remove_action( 'add_attachment', $attachment_hook ); }
 	while ( get_current_blog_id() !== $blog && ms_is_switched() ) { restore_current_blog(); }
 	if ( null !== $gate ) { $gate->shutdown_writer(); }
 	$clean(); $wpdb = $original;
