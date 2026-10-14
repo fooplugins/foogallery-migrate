@@ -103,19 +103,17 @@ try {
 	$check( 'stable' === StorageControl::decode( $control->read( StorageAuthority::CONTROL_OPTION ), $blog )['phase'], 'repeat-import refusal retains existing stable option authority' );
 
 	// A native failed INSERT rolls back all destination generations, not source.
-	$reset(); update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $initial, false ); $fired = false;
-	$hook = function ( $sql ) use ( &$fired, $tables ) {
-		if ( ! $fired && 0 === strpos( $sql, 'INSERT INTO `' . $tables[1] . '`' ) ) {
-			$fired = true; return 'INSERT INTO `foogm_disposable_missing_conversion_table` (id) VALUES (1)';
-		}
-		return $sql;
-	};
+	$reset(); update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $initial, false );
+	// Snapshot SQL deliberately uses its owned native handle, bypassing the
+	// WordPress query filter. A fixture-owned database trigger faults that path.
+	$trigger = $wpdb->base_prefix . 'foogm_fixture_conversion_fail';
+	$check( false !== $wpdb->query( 'CREATE TRIGGER `' . $trigger . '` BEFORE INSERT ON `' . $tables[1] . "` FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Disposable conversion write failure'" ), 'native SQL failure trigger actually installed on owned fixture table' );
 	$suppressed = $wpdb->suppress_errors( true );
 	try {
-		add_filter( 'query', $hook ); $failed = ( new StorageConversion( $policy ) )->switch_backend( $request( 'table' ) );
-	} finally { remove_filter( 'query', $hook ); $hook = null; $wpdb->suppress_errors( $suppressed ); }
+		$failed = ( new StorageConversion( $policy ) )->switch_backend( $request( 'table' ) );
+	} finally { $wpdb->query( 'DROP TRIGGER `' . $trigger . '`' ); $wpdb->suppress_errors( $suppressed ); }
 	$pending = StorageControl::decode( $control->read( StorageAuthority::CONTROL_OPTION ), $blog );
-	$check( $fired && is_wp_error( $failed ) && 'copying' === $pending['phase'] && 'option' === $pending['backend'], 'native destination SQL failure retains pending option authority' );
+	$check( is_wp_error( $failed ) && 'copying' === $pending['phase'] && 'option' === $pending['backend'], 'native destination SQL failure retains pending option authority' );
 	$check( 0 === (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM `' . $tables[0] . '` WHERE blog_id = %d', $blog ) ) && 0 === (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM `' . $tables[1] . '` WHERE blog_id = %d', $blog ) ), 'failed native destination INSERT rolls back all current-blog heads and records' );
 	$check( $codec->snapshot_digest( $initial ) === $codec->snapshot_digest( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) ), 'native SQL failure leaves exact logical source intact' );
 	$check( ! is_wp_error( ( new StorageConversion( $policy ) )->recover( $request( 'table', true ) ) ), 'native SQL failure recovers copying phase after exact source and rollback verification' );
