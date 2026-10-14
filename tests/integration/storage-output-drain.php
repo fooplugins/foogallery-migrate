@@ -51,7 +51,7 @@ $writers = function () use ( $observer, $pattern ) { return $observer->get_resul
 foreach ( $tables as $table ) { if ( null !== $observer->get_var( $observer->prepare( 'SHOW TABLES LIKE %s', $observer->esc_like( $table ) ) ) ) { throw new RuntimeException( 'Refusing preexisting tables.' ); } }
 foreach ( $names as $name ) { if ( null !== $observer->get_var( $observer->prepare( "SELECT 1 FROM `{$observer->options}` WHERE option_name=%s", $name ) ) ) { throw new RuntimeException( 'Refusing preexisting state.' ); } }
 if ( array() !== $writers() ) { throw new RuntimeException( 'Refusing preexisting writers.' ); }
-$checks = array(); $native_recoveries = array(); $posts = array(); $owned_markers = array(); $created = array(); $gate = null;
+$checks = array(); $native_recoveries = array(); $native_deaths = array(); $posts = array(); $owned_markers = array(); $created = array(); $gate = null;
 $assert = function ( $condition, $label ) use ( &$checks ) { if ( ! $condition ) { throw new RuntimeException( $label ); } $checks[] = $label; };
 $clean = function () use ( $observer, &$created, &$owned_markers, $names, $blog, $assert ) {
 	foreach ( $owned_markers as $row ) {
@@ -84,7 +84,8 @@ try {
 	$source_post = wp_insert_post( array( 'post_title' => 'Owned base fixture source', 'post_type' => 'page', 'post_status' => 'publish', 'post_content' => $source_content ) ); $posts[] = $source_post;
 	$assert( 0 === (int) get_option( 'fresh_site' ), 'native source publish changes fresh_site before any engine writer' );
 	foreach ( array( 'option', 'table' ) as $mode ) {
-		foreach ( array( 'gallery-healthy', 'album-healthy', 'gallery-post-loss', 'album-post-loss', 'gallery-meta-loss', 'gallery-error', 'album-blog-loss', 'option-loss', 'media-healthy', 'media-post-loss', 'media-generation-loss', 'media-alt-loss', 'media-term-loss', 'media-error', 'media-reuse-healthy', 'base-healthy', 'base-discovery-loss', 'base-discovery-error', 'base-post-loss', 'base-recovery-copying', 'base-recovery-verified', 'base-recovery-flipped' ) as $scenario ) {
+		$scenarios = defined( 'FOOGM_STORAGE_NATIVE_DEATH_ONLY' ) ? array( 'base-death-copying', 'base-death-verified', 'base-death-flipped', 'base-death-stable' ) : array( 'gallery-healthy', 'album-healthy', 'gallery-post-loss', 'album-post-loss', 'gallery-meta-loss', 'gallery-error', 'album-blog-loss', 'option-loss', 'media-healthy', 'media-post-loss', 'media-generation-loss', 'media-alt-loss', 'media-term-loss', 'media-error', 'media-reuse-healthy', 'base-healthy', 'base-discovery-loss', 'base-discovery-error', 'base-post-loss', 'base-recovery-copying', 'base-recovery-verified', 'base-recovery-flipped' );
+		foreach ( $scenarios as $scenario ) {
 			if ( ( 'table' === $mode && 'option-loss' === $scenario ) || ( ! is_multisite() && 'album-blog-loss' === $scenario ) ) { continue; }
 			$clean();
 			// A latched failed transport is NOT reset by restoring its handle. Each
@@ -217,7 +218,7 @@ try {
 				if ( ! $loss && 'gallery-error' !== $scenario && 'media-error' !== $scenario ) { $record = isset( $items[$object->unique_identifier()] ) ? $items[$object->unique_identifier()] : array(); $assert( count( $items ) === 1 && ! empty( $record['migrated'] ) && (int) $record['migrated_id'] === (int) $object->migrated_id, 'independent persisted completion ' . $scenario ); }
 				else { $assert( array() === $items, 'independent no history advancement ' . $scenario ); }
 			}
-			if ( 'base-healthy' === $scenario || 0 === strpos( $scenario, 'base-recovery-' ) ) {
+			if ( 'base-healthy' === $scenario || 0 === strpos( $scenario, 'base-recovery-' ) || 0 === strpos( $scenario, 'base-death-' ) ) {
 				$assert( $engine->get_album_migrator()->calculate_migration_state( array() ), 'persist actual empty album summary' );
 				$checkpoint_values = array(
 					'albums-state' => $engine->get_album_migrator()->get_state(),
@@ -230,13 +231,19 @@ try {
 			$before = $writers(); $assert( 1 === count( $before ), 'one owned writer before shutdown ' . $scenario );
 			$gate->shutdown_writer();
 			if ( ! $pin->is_current() ) { $assert( $before === $writers(), 'uncertain marker retained ' . $scenario ); }
-			if ( 'base-healthy' === $scenario || 0 === strpos( $scenario, 'base-recovery-' ) ) {
+			if ( 'base-healthy' === $scenario || 0 === strpos( $scenario, 'base-recovery-' ) || 0 === strpos( $scenario, 'base-death-' ) ) {
 				$assert( array() === $writers(), 'base completion releases owned marker before selection' );
 				// Explicit owned-fixture schema provisioning, never implicit DDL.
 				if ( ! $created ) { foreach ( $schema->statements() as $i => $ddl ) { $created[] = $tables[$i]; dbDelta( $ddl ); } }
 				$assert( $schema->verify(), 'explicit fixture schema before public selection' );
 				unset( $GLOBALS['foogallery_migrate_engine_instance'] ); add_filter( 'foogallery_migrate_storage_calibration', $synthetic );
 				$target = 'option' === $mode ? 'table' : 'option';
+				if ( 0 === strpos( $scenario, 'base-death-' ) ) {
+					require __DIR__ . '/storage-native-death-observer.php';
+					remove_filter( 'foogallery_migrate_storage_calibration', $synthetic );
+					$owned_markers = $writers(); $clean(); wp_delete_post( $object->migrated_id, true );
+					continue;
+				}
 				if ( 0 === strpos( $scenario, 'base-recovery-' ) ) { require __DIR__ . '/storage-native-recovery.php'; }
 				else { $result = $response( $target, $blog ); }
 				$assert( true === $result['success'] && $target === $result['data']['backend'] && 'stable' === $result['data']['phase'], 'public receiver selects authoritative backend after real base output ' . $mode );
@@ -285,4 +292,4 @@ try {
 	wp_cache_flush(); unset( $GLOBALS['foogallery_migrate_engine_instance'] );
 }
 $assert( array() === $writers() && false === StorageAuthority::option_mode_error(), 'virgin option authority and no writer remnants' );
-echo wp_json_encode( array( 'status' => 'pass', 'scope' => 'real base/core discovery/output, public selection and fresh-process phase recovery after handled SQL interruption; direct gallery/album/media hooks; synthetic FooGallery settings/calibration; NOT stale-owner takeover, network/PHP death recovery or full output audit', 'native_recoveries' => $native_recoveries, 'checks' => $checks, 'check_count' => count( $checks ), 'blog_id' => $blog, 'wordpress' => get_bloginfo( 'version' ), 'php' => PHP_VERSION, 'database' => $observer->get_var( 'SELECT VERSION()' ) ) ) . PHP_EOL;
+echo wp_json_encode( array( 'status' => 'pass', 'scope' => defined( 'FOOGM_STORAGE_NATIVE_DEATH_ONLY' ) ? 'real base/core completed output, physical public-switch SIGKILL and fresh authorized recovery refusal; NOT stale-owner admission or network-lost ACK proof' : 'real base/core discovery/output, public selection and fresh-process phase recovery after handled SQL interruption; direct gallery/album/media hooks; synthetic FooGallery settings/calibration; NOT stale-owner takeover, network/PHP death recovery or full output audit', 'native_recoveries' => $native_recoveries, 'native_deaths' => $native_deaths, 'checks' => $checks, 'check_count' => count( $checks ), 'blog_id' => $blog, 'wordpress' => get_bloginfo( 'version' ), 'php' => PHP_VERSION, 'database' => $observer->get_var( 'SELECT VERSION()' ) ) ) . PHP_EOL;
