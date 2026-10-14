@@ -99,6 +99,26 @@ try {
 	StorageMaintenanceGate::current()->shutdown_writer();
 	unset( $GLOBALS['foogallery_migrate_engine_instance'] );
 	$check( true === foogallery_migrate_migrator_instance()->get_migrator_setting( 9 ), 'fresh production option factory reads verified reverse export' );
+	$check( is_wp_error( ( new StorageConversion( $policy ) )->switch_backend( $request( 'table' ) ) ), 'repeat import refuses retained inactive table generations instead of silently erasing evidence' );
+	$check( 'stable' === StorageControl::decode( $control->read( StorageAuthority::CONTROL_OPTION ), $blog )['phase'], 'repeat-import refusal retains existing stable option authority' );
+
+	// A native failed INSERT rolls back all destination generations, not source.
+	$reset(); update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $initial, false ); $fired = false;
+	$hook = function ( $sql ) use ( &$fired, $tables ) {
+		if ( ! $fired && 0 === strpos( $sql, 'INSERT INTO `' . $tables[1] . '`' ) ) {
+			$fired = true; return 'INSERT INTO `foogm_disposable_missing_conversion_table` (id) VALUES (1)';
+		}
+		return $sql;
+	};
+	$suppressed = $wpdb->suppress_errors( true );
+	try {
+		add_filter( 'query', $hook ); $failed = ( new StorageConversion( $policy ) )->switch_backend( $request( 'table' ) );
+	} finally { remove_filter( 'query', $hook ); $hook = null; $wpdb->suppress_errors( $suppressed ); }
+	$pending = StorageControl::decode( $control->read( StorageAuthority::CONTROL_OPTION ), $blog );
+	$check( $fired && is_wp_error( $failed ) && 'copying' === $pending['phase'] && 'option' === $pending['backend'], 'native destination SQL failure retains pending option authority' );
+	$check( 0 === (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM `' . $tables[0] . '` WHERE blog_id = %d', $blog ) ) && 0 === (int) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM `' . $tables[1] . '` WHERE blog_id = %d', $blog ) ), 'failed native destination INSERT rolls back all current-blog heads and records' );
+	$check( $codec->snapshot_digest( $initial ) === $codec->snapshot_digest( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) ), 'native SQL failure leaves exact logical source intact' );
+	$check( ! is_wp_error( ( new StorageConversion( $policy ) )->recover( $request( 'table', true ) ) ), 'native SQL failure recovers copying phase after exact source and rollback verification' );
 
 	foreach ( array( 'verified', 'flipped', 'delete-source', 'stable' ) as $fault ) {
 		$reset(); update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $initial, false );
