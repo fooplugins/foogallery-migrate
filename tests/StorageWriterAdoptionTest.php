@@ -135,6 +135,14 @@ class StorageWriterAdoptionTest extends TestCase {
 		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'not admitted', $error->getMessage() ); }
 		$this->assertSame( $before, $GLOBALS['foogallery_migrate_test_options'] );
 	}
+	public function test_source_screen_post_admits_before_engine_or_state_hydration(): void {
+		$_POST['foogallery_migrate_detect'] = 'nonce';
+		$GLOBALS['foogallery_migrate_test_options'][StorageAuthority::MAINTENANCE_OPTION] = '';
+		$before = $GLOBALS['foogallery_migrate_test_options'];
+		try { require __DIR__ . '/../includes/views/view-migrate-tab-sources.php'; $this->fail( 'View must refuse before engine access.' ); }
+		catch ( \FooGalleryMigrateTestDie $error ) { $this->assertStringContainsString( 'storage', $error->getMessage() ); }
+		$this->assertSame( $before, $GLOBALS['foogallery_migrate_test_options'] );
+	}
 }
 class AuthorityWakeupTrap {
 	public function __wakeup() { throw new \RuntimeException( 'Control was hydrated.' ); }

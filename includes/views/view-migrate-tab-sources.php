@@ -2,7 +2,14 @@
 if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
-    $migrator = foogallery_migrate_migrator_instance();    
+    $detection_submit = array_key_exists( 'foogallery_migrate_detect', $_POST );
+    if ( $detection_submit ) {
+        if ( ! current_user_can( 'manage_options' ) ) { wp_die( esc_html__( 'Unauthorized.', 'foogallery-migrate' ) ); }
+        check_admin_referer( 'foogallery_migrate_detect', 'foogallery_migrate_detect' );
+        $storage_error = \FooPlugins\FooGalleryMigrate\StorageAuthority::admit_option_writer();
+        if ( is_wp_error( $storage_error ) ) { wp_die( esc_html( $storage_error->get_error_message() ) ); }
+    }
+    $migrator = foogallery_migrate_migrator_instance();
 ?>
 <script>
     jQuery(function ($) {
@@ -20,15 +27,12 @@ if ( ! defined( 'ABSPATH' ) ) {
     </script>
 <?php
     //Check if the detect button has been pressed.   
-    if ( array_key_exists( 'foogallery_migrate_detect', $_POST ) ) {
+    if ( $detection_submit ) {
         if ( ! current_user_can( 'manage_options' ) ) {
             wp_die( esc_html__( 'Unauthorized.', 'foogallery-migrate' ) );
         }
         if ( check_admin_referer( 'foogallery_migrate_detect', 'foogallery_migrate_detect' ) ) {
-            $storage_error = \FooPlugins\FooGalleryMigrate\StorageAuthority::admit_option_writer();
-            if ( is_wp_error( $storage_error ) ) {
-                echo '<div class="notice notice-error inline"><p>' . esc_html( $storage_error->get_error_message() ) . '</p></div>';
-            } else if ( isset( $_POST['clear_migration_history'] ) ) {
+            if ( isset( $_POST['clear_migration_history'] ) ) {
                 $migrator->clear_migrator_setting();
             } else if ( isset( $_POST['check_migration_errors'] ) ) {
                 $migration_error_check_result = $migrator->check_for_migration_errors();

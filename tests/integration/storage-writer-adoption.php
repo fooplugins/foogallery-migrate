@@ -39,7 +39,11 @@ $die = function () { return function ( $message ) { throw new StorageAdoptionDen
 $race = null;
 $denied = function ( $init, $method ) use ( $check ) {
 	ob_start();
-	try { $init->$method(); throw new RuntimeException( 'Endpoint returned without denial: ' . $method ); }
+	try {
+		if ( 'source-screen-post' === $method ) { require FOOGM_STORAGE_TEST_ROOT . '/includes/views/view-migrate-tab-sources.php'; }
+		else { $init->$method(); }
+		throw new RuntimeException( 'Endpoint returned without denial: ' . $method );
+	}
 	catch ( StorageAdoptionDenied $error ) {
 		$output = ob_get_contents();
 		$json = json_decode( $output, true );
@@ -51,7 +55,7 @@ $methods = array( 'ajax_start_migration', 'ajax_continue_migration', 'ajax_cance
 	'ajax_retry_gallery_migration', 'ajax_check_gallery_errors', 'ajax_sync_image_tags', 'ajax_start_album_migration',
 	'ajax_continue_album_migration', 'ajax_cancel_album_migration', 'ajax_refresh_album_migration', 'ajax_replace_content',
 	'ajax_refresh_content', 'ajax_refresh_content_status', 'ajax_update_migrated_status', 'ajax_delete_migrated_object',
-	'save_settings', 'detect_wordpress_core_galleries', 'migrate_content_no_js', 'refresh_content_no_js', 'refresh_content_status_no_js' );
+	'save_settings', 'detect_wordpress_core_galleries', 'migrate_content_no_js', 'refresh_content_no_js', 'refresh_content_status_no_js', 'source-screen-post' );
 try {
 	$check( add_option( FOOGALLERY_MIGRATE_OPTION_DATA, array( 'opaque' => array( '09' => false, 9 => null, 'bytes' => "snow 雪\x00" ) ), '', 'no' ), 'seed retained opaque state' );
 	$check( add_option( FOOGALLERY_MIGRATE_OPTION_SETTINGS, array( 'retained' => 'settings' ), '', 'no' ), 'seed retained settings' );
@@ -67,7 +71,7 @@ try {
 		foreach ( $methods as $method ) {
 			$_POST = array( 'object_id' => 'retained', 'status' => 'completed', 'foogallery_migrate_retry_gallery_id' => 'retained',
 				'foogallery_migrate_check_gallery_id' => 'retained', 'wordpress_gallery_mode' => 'create' );
-			foreach ( array( 'foogallery_migrate', 'foogallery_album_migrate', 'foogallery_content_migrate', 'foogallery_migrate_settings', 'foogallery_migrate_detect_wordpress_core', 'foogallery_migrate_image_tags', 'foogallery_migrate_log' ) as $nonce ) {
+			foreach ( array( 'foogallery_migrate', 'foogallery_album_migrate', 'foogallery_content_migrate', 'foogallery_migrate_settings', 'foogallery_migrate_detect_wordpress_core', 'foogallery_migrate_image_tags', 'foogallery_migrate_log', 'foogallery_migrate_detect' ) as $nonce ) {
 				$_POST[$nonce] = wp_create_nonce( $nonce );
 			}
 			$_POST['action'] = str_replace( array( 'ajax_continue_migration', 'ajax_cancel_migration', 'ajax_refresh_migration', 'ajax_continue_album_migration', 'ajax_cancel_album_migration', 'ajax_refresh_album_migration' ), array( 'foogallery_migrate_continue', 'foogallery_migrate_cancel', 'foogallery_migrate_refresh', 'foogallery_album_migrate_continue', 'foogallery_album_migrate_cancel', 'foogallery_album_migrate_refresh' ), $method );
