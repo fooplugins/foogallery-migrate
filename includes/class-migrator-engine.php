@@ -53,6 +53,8 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         private $storage_gate;
         private $storage_control;
         private $production_backend;
+        /** Request-local source/output calls not yet returned to their caller. */
+        private $storage_operation_depth = 0;
 
         /**
          * @param MigratedStore|MigratedHistoryRepository|null $migrated_store Optional injected store.
@@ -111,6 +113,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
             try {
                 return $this->storage_guarded && $this->storage_gate === StorageMaintenanceGate::current() &&
                     $this->storage_gate->connection()->is_current() &&
+                    0 === $this->storage_operation_depth &&
                     ! $this->migrated_batch_active && empty( $this->pending_migrated_objects );
             } catch ( \Exception $error ) { return false; }
             catch ( \Throwable $error ) { return false; }
@@ -124,6 +127,27 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
             global $foogallery_migrate_engine_instance;
             return ! isset( $foogallery_migrate_engine_instance ) ||
                 ( $foogallery_migrate_engine_instance instanceof self && $foogallery_migrate_engine_instance->storage_is_quiescent() );
+        }
+
+        /** Internal synchronous boundary; not a callback or fault-injection API.
+         * Nested operations share the writer but cannot drain the outer call.
+         * No finally: retain the declared PHP 5.4 syntax floor.
+         */
+        private function storage_operation( $method ) {
+            $this->assert_storage_writer();
+            $this->storage_operation_depth++;
+            try {
+                $result = $this->$method();
+                $this->assert_storage_writer();
+            } catch ( \Exception $error ) {
+                $this->storage_operation_depth--;
+                throw $error;
+            } catch ( \Throwable $error ) {
+                $this->storage_operation_depth--;
+                throw $error;
+            }
+            $this->storage_operation_depth--;
+            return $result;
         }
 
         /**
@@ -302,11 +326,16 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array<Plugin>
          */
         public function run_detection() {
-            $this->assert_storage_writer();
+            return $this->storage_operation( 'run_detection_admitted' );
+        }
+
+        private function run_detection_admitted() {
             $plugins = foogallery_migrate_get_available_plugins();
 
             foreach ( $plugins as $plugin ) {
+                $this->assert_storage_writer();
                 $plugin->is_detected = $plugin->detect();
+                $this->assert_storage_writer();
             }
             $this->set_migrator_setting( self::KEY_PLUGINS, $plugins );
 
@@ -438,7 +467,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array|\WP_Error
          */
         public function start_image_tag_sync() {
-            $this->assert_storage_writer();
+            return $this->storage_operation( 'start_image_tag_sync_admitted' );
+        }
+
+        private function start_image_tag_sync_admitted() {
             if ( ! $this->can_assign_image_tag_terms() ) {
                 return new \WP_Error(
                     'foogallery_migrate_image_tags_unavailable',
@@ -457,7 +489,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array|\WP_Error
          */
         public function continue_image_tag_sync() {
-            $this->assert_storage_writer();
+            return $this->storage_operation( 'continue_image_tag_sync_admitted' );
+        }
+
+        private function continue_image_tag_sync_admitted() {
             if ( ! $this->can_assign_image_tag_terms() ) {
                 return new \WP_Error(
                     'foogallery_migrate_image_tags_unavailable',
@@ -492,7 +527,9 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                     continue;
                 }
 
+                $this->assert_storage_writer();
                 $result = wp_set_object_terms( $attachment_id, $tags, FOOGALLERY_ATTACHMENT_TAXONOMY_TAG, true );
+                $this->assert_storage_writer();
                 if ( is_wp_error( $result ) ) {
                     $this->add_image_tag_sync_error( $state, $item, $result->get_error_message() );
                     continue;
