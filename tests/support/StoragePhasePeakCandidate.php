@@ -137,6 +137,14 @@ class StoragePhasePeakCandidate {
 		$live['headroom_proof_complete'] = false; $live['fits_justified_helper_budget'] = false;
 		$live['missing_headroom_terms'] = array( 'scanner_box_and_cache_lowering', 'exact_compiled_frame_bound',
 			'exceptional_VM_page_retention', 'complete_trace_capacity_family' );
+		// Source narrows the VM obligation to this fixed helper, NOT all historical
+		// callers. PHP5.6 reserves used_stack, then releases that tail at frame_base.
+		// Reservation R and retained top C therefore require separate derivations;
+		// depth/live pages alone cannot count repeated page acquire/free cycles.
+		$live['vm_retention_obligation'] = array( 'status' => 'fixed_helper_reservation_and_retained_top_unresolved',
+			'methods' => array( 'decode', 'scan', 'unsigned', 'token', 'literal', 'fail' ),
+			'reservation_includes_released_argument_tail' => '5.6.20' === $domain['source_version'],
+			'historical_arena_bound_proven' => false );
 		$live['excluded_domains'] = array( 'SQL_driver_transport', 'table_origin', 'native_decimal', 'full_operation', 'arbitrary_hooks', 'RSS_native_stack' );
 		return $live;
 	}

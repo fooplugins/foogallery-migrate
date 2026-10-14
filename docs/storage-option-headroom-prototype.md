@@ -119,3 +119,94 @@ production conversion/recovery. SQL/driver/transport/table/native-decimal/full-
 operation costs remain incomplete. Retain SAME literal validator/final delayed
 teardown,32bit,AIGPL combined A+B,independent review/publication/actual-merge gates.
 No new cards or external infrastructure/capability question is requested here.
+
+## 6. Bounded retention checkpoint: a precise fixed-helper lowering gap
+
+Run461 follows OPS `ops-option-headroom-remediation.md`, not a new general
+allocator prototype or public admission. It delivers executable source-path
+witnesses and identifies one precise indispensable input to a useful retention
+argument: version-specific VM reservation R and retained top C for the fixed
+`LegacyOptionDecoder::{decode,scan,unsigned,token,literal,fail}` methods, including
+their nested internal-call argument tail. Those descriptors have NOT been derived.
+The result now exposes `vm_retention_obligation`; all four original missing terms,
+arithmetic, budget examples and unconditional non-admission remain unchanged.
+
+### Why the missing descriptor matters on the actual bounded path
+
+`class-legacy-option-decoder.php:93-160` repeatedly calls scan for keys/values at
+127-128, unsigned -> token at136-139, and literal at154-156. Calls return before
+the next sibling; token/literal allocate substring and concatenation temporaries,
+and malformed input can construct a RuntimeException while ancestor frames and
+material state are live. Native graph/parity allocation at37-38 is a distinct
+phase: do not invent a simultaneous graph inside the lexical scan. Loaded helpers
+and prepared PCRE are already required; unknown caller history is NOT the question.
+
+PHP5.4.0 `Zend/zend_vm_execute.h:358-365` requests the aligned execute-data header
++ CV slots (last_var, doubled without a symbol table) + T temp_variables, retaining
+that allocation for the frame. PHP5.6.20 `Zend/zend_execute.c:1625-1630,1673-1698`
+requests header + T + CV + nested_calls*call_slot + used_stack*zval-pointer tail,
+then sets top to `zend_vm_stack_frame_base` at1686. `zend_execute.h:264-267` defines
+that base AFTER call slots, BEFORE the argument tail. Thus 5.6 R includes a tail
+not present in C. Even a bound on C alone does not bound whether an R request
+crosses the parent's remaining space. T/last_var/nested_calls/used_stack and the
+associated box/runtime-cache paths are compiler outputs for these fixed methods,
+not numeric constants inferable from array depth or the proposed page count.
+
+Both versions' `zend_execute.h` implement default count16368, page request
+aligned24 + count*8, extension on insufficient residual space, and efree when
+returning to the page's first frame:5.4 lines164-190,208-213,243-269,272-290;
+5.6 lines167-193,211-216,235-261,270-288. Parent top is restored on child return.
+Consequently a sibling loop can acquire/free a page repeatedly with one live
+child page throughout. The witness uses hypothetical R/C values solely to test
+this transition, NOT to certify actual helper compiler coefficients. In 5.4 it
+requires C=R; in 5.6 it also tests C<R. A future derivation must discharge the
+actual descriptor and relevant ordinary allocation interleavings, not multiply
+every input node by a whole segment or demand an exact census of all prior callers.
+
+### Executed allocator witnesses and their limits
+
+`StorageVmRetentionWitness` is a small restricted transition witness, not a
+legacy runtime, general allocator emulator or memory estimator. Explicit domain:
+LP64,8-byte alignment,NTS,nondebug,default no cookies/heap protection,256KiB
+segments; large requests1024..130968 only, <=64 allocations; no realloc/rest/cache
+branch. Ambiguous searches refuse unless there is one exact-size match. BOTH
+retained allocators have the same source rules used by these specific traces:
+block/minimum/segment lowering at `zend_alloc.c:336-404,528-543`; exact-size large
+search at5.4:1803-1873 /5.6:1807-1877; normal segment acquisition and split at
+5.4:1953-2040 /5.6:1957-2044; large free/coalescing/whole-segment release at
+5.4:2056-2115 /5.6:2060-2119; segment real-size subtraction at5.4:915-925 /
+5.6:919-929. Requests exceed the small-cache threshold (64*8+32=544), and are
+below the oversized/rest threshold. Source excerpts are byte-compared against
+BOTH original retained archives in this checkpoint's source manifest.
+
+Two default page requests each130968 lower to130984 and fit in262112 usable bytes,
+leaving144. Return the child, coalesce with the tail, allocate ordinary8192
+(true8208) from that free region, then reacquire a default page: the remaining
+122920 hole is too small and a second262144 segment is acquired. Peak live VM
+pages is still2, but acquisitions are3 and arena footprint524288. Freeing the
+parent restores an exact-size hole; a subsequent page reuses it. Releasing all
+VM pages leaves the material-pinned segment; releasing the pin frees it. The
+uncarved control reacquires eight times without growing beyond one segment.
+This simultaneously covers material state, reuse and final coalescing rather
+than assuming every page acquisition permanently consumes a fresh segment.
+
+These are executable counterexamples to equating page-allocation history with
+live-page high-water, and to treating live block bytes as real segment usage.
+They are NOT a counterexample to the complete proposed arena_family inequality,
+not claimed reachable by this helper, and not evidence of a >128MiB helper peak.
+The ordinary8192 pin isolates the allocator branch; helper scanner small-cache
+temporaries need their own source lowering. No observation certifies coefficients.
+The original headroom formula remains proposed/unproved, not newly falsified or
+approved by these examples. Trace-family/compiler/cache terms remain unresolved.
+
+### Test-first receiving gate
+
+New9-case suite ran before witness/metadata implementation: exit2,7 missing-class
+errors and2 missing-obligation failures (2 assertions). Initial GREEN:9tests /
+50assertions exit0 on PHP8.5.11. Final full/frozen/build/probe/hash/origin receipts
+are in `checkpoint-vm-retention/verification.json`; source/package identifiers
+and exact totals in its seven-part handoff. PHP5 source tracing is not PHP5
+runtime execution. No public source changed. Stop PARTIAL with the precise
+R/C lowering blocker for ONE fresh native independent exact-candidate review
+through OPS; useful justified helper fits, actual endpoints/end-to-end recovery,
+literal final/delayed teardown/32bit and all children remain held.
