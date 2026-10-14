@@ -8,7 +8,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Language-Team: FooPlugins <info@fooplugins.com>\n"
 "Last-Translator: Brad Vincent <brad@fooplugins.com>\n"
-"POT-Creation-Date: 2026-10-14 02:27+0000\n"
+"POT-Creation-Date: 2026-10-14 07:49+0000\n"
 "Report-Msgid-Bugs-To: https://fooplugins.com\n"
 "X-Poedit-Basepath: ..\n"
 "X-Poedit-KeywordsList: __;_e;_ex:1,2c;_n:1,2;_n_noop:1,2;_nx:1,2,4c;_nx_noop:1,2,3c;_x:1,2c;esc_attr__;esc_attr_e;esc_attr_x:1,2c;esc_html__;esc_html_e;esc_html_x:1,2c\n"
@@ -25,142 +25,142 @@ msgstr ""
 msgid "The FooGallery plugin is required for the FooGallery Migrate plugin to work. Activate it now if you have it installed, or "
 msgstr ""
 
-#: includes/class-init.php:140, includes/class-init.php:186, includes/class-init.php:216, includes/class-init.php:236, includes/class-init.php:264, includes/class-init.php:372, includes/class-init.php:410, includes/class-init.php:432, includes/class-init.php:452, includes/class-init.php:481, includes/class-init.php:501, includes/class-init.php:520, includes/class-init.php:544, includes/class-init.php:582, includes/class-init.php:604, includes/class-init.php:623, includes/class-init.php:647, includes/class-init.php:697, includes/class-init.php:747, includes/class-init.php:791, includes/class-init.php:848, includes/views/view-migrate-tab-sources.php:25
+#: includes/class-init.php:140, includes/class-init.php:187, includes/class-init.php:218, includes/class-init.php:239, includes/class-init.php:268, includes/class-init.php:386, includes/class-init.php:425, includes/class-init.php:448, includes/class-init.php:469, includes/class-init.php:499, includes/class-init.php:520, includes/class-init.php:540, includes/class-init.php:565, includes/class-init.php:604, includes/class-init.php:627, includes/class-init.php:647, includes/class-init.php:672, includes/class-init.php:723, includes/class-init.php:774, includes/class-init.php:819, includes/class-init.php:877, includes/views/view-migrate-tab-sources.php:25
 msgid "Unauthorized."
 msgstr ""
 
-#: includes/class-init.php:148
+#: includes/class-init.php:149
 msgid "Choose a valid WordPress gallery migration mode."
 msgstr ""
 
-#: includes/class-init.php:151
+#: includes/class-init.php:152
 msgid "The WordPress gallery migration mode could not be saved."
 msgstr ""
 
-#: includes/class-init.php:397, includes/class-init.php:419, includes/class-init.php:569, includes/class-init.php:591
+#: includes/class-init.php:412, includes/class-init.php:435, includes/class-init.php:591, includes/class-init.php:614
 msgid "Migration state could not be saved. Please retry."
 msgstr ""
 
-#: includes/class-init.php:477, includes/class-init.php:692, includes/class-init.php:742, includes/class-init.php:788, includes/class-init.php:845
+#: includes/class-init.php:495, includes/class-init.php:718, includes/class-init.php:769, includes/class-init.php:816, includes/class-init.php:874
 msgid "Invalid request."
 msgstr ""
 
 #. translators: %d: migrated occurrence count.
-#: includes/class-init.php:665, includes/views/view-migrate-tab-content.php:12
+#: includes/class-init.php:691, includes/views/view-migrate-tab-content.php:12
 msgid "Successfully migrated and replaced %d gallery occurrence."
 msgid_plural "Successfully migrated and replaced %d gallery occurrences."
 msgstr[0] ""
 msgstr[1] ""
 
-#: includes/class-init.php:672
+#: includes/class-init.php:698
 msgid "Errors:"
 msgstr ""
 
-#: includes/class-init.php:729, includes/views/view-migrate-tab-content.php:24
+#: includes/class-init.php:756, includes/views/view-migrate-tab-content.php:24
 msgid "The content scan stopped before completion. Previously saved results are safe; use the scan button to retry."
 msgstr ""
 
-#: includes/class-init.php:775, includes/views/view-migrate-tab-content.php:31
+#: includes/class-init.php:803, includes/views/view-migrate-tab-content.php:31
 msgid "The status refresh stopped before completion. Previously saved results are safe; use Refresh Status to retry."
 msgstr ""
 
-#: includes/class-init.php:814
+#: includes/class-init.php:843
 msgid "Invalid status update."
 msgstr ""
 
-#: includes/class-init.php:825, includes/objects/class-migratable.php:274, includes/views/view-migrate-tab-log.php:10
+#: includes/class-init.php:854, includes/objects/class-migratable.php:275, includes/views/view-migrate-tab-log.php:10
 msgid "Not migrated"
 msgstr ""
 
-#: includes/class-init.php:826
+#: includes/class-init.php:855
 msgid "Queued"
 msgstr ""
 
-#: includes/class-init.php:827
+#: includes/class-init.php:856
 msgid "Started"
 msgstr ""
 
-#: includes/class-init.php:828, includes/views/view-migrate-tab-log.php:13
+#: includes/class-init.php:857, includes/views/view-migrate-tab-log.php:13
 msgid "Completed"
 msgstr ""
 
-#: includes/class-init.php:829, includes/views/view-migrate-tab-log.php:14
+#: includes/class-init.php:858, includes/views/view-migrate-tab-log.php:14
 msgid "Nothing to migrate"
 msgstr ""
 
-#: includes/class-init.php:830, includes/migrators/class-gallery-migrator.php:236, includes/views/view-migrate-tab-log.php:15, includes/views/view-migrate-tab-log.php:148, includes/views/view-migrate.php:110
+#: includes/class-init.php:859, includes/migrators/class-gallery-migrator.php:236, includes/views/view-migrate-tab-log.php:15, includes/views/view-migrate-tab-log.php:148, includes/views/view-migrate.php:110
 msgid "Error"
 msgstr ""
 
-#: includes/class-init.php:857
+#: includes/class-init.php:887
 msgid "Invalid object."
 msgstr ""
 
-#: includes/class-migrator-engine.php:375, includes/class-migrator-engine.php:393
+#: includes/class-migrator-engine.php:400, includes/class-migrator-engine.php:419
 msgid "FooGallery media tags are not available."
 msgstr ""
 
-#: includes/class-migrator-engine.php:401
+#: includes/class-migrator-engine.php:427
 msgid "No image tag sync is queued."
 msgstr ""
 
-#: includes/class-migrator-engine.php:991, includes/class-migrator-engine.php:1025
+#: includes/class-migrator-engine.php:1021, includes/class-migrator-engine.php:1056
 msgid "Migrated object not found."
 msgstr ""
 
-#: includes/class-migrator-engine.php:995
+#: includes/class-migrator-engine.php:1025
 msgid "Invalid migrated object."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1011
+#: includes/class-migrator-engine.php:1041
 msgid "Migrated object could not be updated."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1148, includes/class-migrator-engine.php:1253
+#: includes/class-migrator-engine.php:1180, includes/class-migrator-engine.php:1286
 msgid "Gallery not found."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1192
+#: includes/class-migrator-engine.php:1224
 msgid "Migrated gallery state could not be reset."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1197, includes/class-migrator-engine.php:1210, includes/class-migrator-engine.php:1213, includes/class-migrator-engine.php:1257, includes/class-migrator-engine.php:1260
+#: includes/class-migrator-engine.php:1229, includes/class-migrator-engine.php:1242, includes/class-migrator-engine.php:1245, includes/class-migrator-engine.php:1290, includes/class-migrator-engine.php:1293
 msgid "Migrated gallery state could not be saved."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1304, includes/objects/class-image.php:256
+#: includes/class-migrator-engine.php:1337, includes/objects/class-image.php:260
 msgid "Attachment file is missing after migration."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1317
+#: includes/class-migrator-engine.php:1350
 msgid "Attachment file size could not be determined after migration."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1340
+#: includes/class-migrator-engine.php:1373
 msgid "Attachment file could not be loaded after migration."
 msgstr ""
 
-#: includes/class-migrator-engine.php:1360
+#: includes/class-migrator-engine.php:1393
 msgid "One or more images are missing after migration."
 msgstr ""
 
-#: includes/class-migrator-settings.php:798, includes/class-migrator-settings.php:814, includes/objects/class-migratable.php:360
+#: includes/class-migrator-settings.php:802, includes/class-migrator-settings.php:818, includes/objects/class-migratable.php:361
 msgid "Unknown Error"
 msgstr ""
 
-#: includes/class-migrator-settings.php:856
+#: includes/class-migrator-settings.php:860
 msgid "(no title) #%d"
 msgstr ""
 
-#: includes/class-storage-authority.php:82
+#: includes/class-storage-authority.php:98
 msgid "Migration storage requires recovery before continuing. No migration state was changed. Retain the database and contact your site administrator; do not delete storage markers, restore the legacy history snapshot over current state, or restart migrations from stale options."
 msgstr ""
 
-#: includes/class-storage-maintenance-gate.php:283
+#: includes/class-storage-maintenance-gate.php:288
 msgid "Migration storage is busy or requires recovery. No new storage operation was admitted."
 msgstr ""
 
-#: includes/class-storage-maintenance-gate.php:287
+#: includes/class-storage-maintenance-gate.php:292
 msgid "Migration storage ownership could not be verified. Retain storage markers and retry or request recovery."
 msgstr ""
 
@@ -180,11 +180,11 @@ msgstr ""
 msgid "Update WordPress now."
 msgstr ""
 
-#: includes/migrators/class-album-migrator.php:64, includes/migrators/class-content-migrator.php:1945, includes/migrators/class-gallery-migrator.php:62
+#: includes/migrators/class-album-migrator.php:64, includes/migrators/class-content-migrator.php:1948, includes/migrators/class-gallery-migrator.php:62
 msgid "Select All"
 msgstr ""
 
-#: includes/migrators/class-album-migrator.php:69, includes/migrators/class-content-migrator.php:1488
+#: includes/migrators/class-album-migrator.php:69, includes/migrators/class-content-migrator.php:1490
 msgid "Album"
 msgstr ""
 
@@ -242,195 +242,195 @@ msgstr ""
 msgid "Refresh Albums"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1492
+#: includes/migrators/class-content-migrator.php:1494
 msgid "Image"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1496
+#: includes/migrators/class-content-migrator.php:1498
 msgid "Dynamic Gallery"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1499, includes/migrators/class-gallery-migrator.php:67
+#: includes/migrators/class-content-migrator.php:1501, includes/migrators/class-gallery-migrator.php:67
 msgid "Gallery"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1529
+#: includes/migrators/class-content-migrator.php:1532
 msgid "%1$s %2$s from %3$s in post \"%4$s\" has not been migrated yet."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1543
+#: includes/migrators/class-content-migrator.php:1546
 msgid "Published post or page %d not found."
 msgstr ""
 
 #. translators: %s: post title.
-#: includes/migrators/class-content-migrator.php:1551, includes/migrators/class-content-migrator.php:1622
+#: includes/migrators/class-content-migrator.php:1554, includes/migrators/class-content-migrator.php:1625
 msgid "Post or page \"%s\" changed during migration and was not updated. Refresh the scan and try again."
 msgstr ""
 
 #. translators: %s: post title.
-#: includes/migrators/class-content-migrator.php:1604
+#: includes/migrators/class-content-migrator.php:1607
 msgid "The selected gallery occurrence in \"%s\" changed after detection and was not replaced. Refresh the scan and try again."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1635
+#: includes/migrators/class-content-migrator.php:1638
 msgid "Error updating post \"%s\": %s"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1690
+#: includes/migrators/class-content-migrator.php:1693
 msgid "One or more selected content items are no longer available. Refresh the scan and try again."
 msgstr ""
 
 #. translators: %s: post title.
-#: includes/migrators/class-content-migrator.php:1702
+#: includes/migrators/class-content-migrator.php:1705
 msgid "The selected gallery occurrence in \"%s\" changed after detection. Refresh the scan and try again."
 msgstr ""
 
 #. translators: %s: post title.
-#: includes/migrators/class-content-migrator.php:1718
+#: includes/migrators/class-content-migrator.php:1721
 msgid "The selected gallery in \"%s\" has not been migrated yet."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1753
+#: includes/migrators/class-content-migrator.php:1756
 msgid "One or more selected core galleries changed after detection. Refresh the scan and try again."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1770
+#: includes/migrators/class-content-migrator.php:1773
 msgid "One or more core galleries could not be migrated. Review the Galleries tab for details."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1785
+#: includes/migrators/class-content-migrator.php:1788
 msgid "One or more core galleries could not be verified after migration. Review the Galleries tab for details."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1842
+#: includes/migrators/class-content-migrator.php:1845
 msgid "WordPress galleries: Reusable FooGallery mode"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1843
+#: includes/migrators/class-content-migrator.php:1846
 msgid "Selected occurrences will create editable FooGallery records before the source content is replaced."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1839
+#: includes/migrators/class-content-migrator.php:1842
 msgid "WordPress galleries: Dynamic replacement mode"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1840
+#: includes/migrators/class-content-migrator.php:1843
 msgid "Selected occurrences will be replaced with dynamic FooGalleries. No FooGallery records will be created."
 msgstr ""
 
 #. translators: %d is the number of posts and pages already scanned.
-#: includes/migrators/class-content-migrator.php:1850
+#: includes/migrators/class-content-migrator.php:1853
 msgid "Content scan paused after %d posts/pages. Use Resume Scan to continue from the saved position."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1894
+#: includes/migrators/class-content-migrator.php:1897
 msgid "%d gallery occurrence found."
 msgid_plural "%d gallery occurrences found."
 msgstr[0] ""
 msgstr[1] ""
 
-#: includes/migrators/class-content-migrator.php:1949
+#: includes/migrators/class-content-migrator.php:1952
 msgid "Post/Page"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1952
+#: includes/migrators/class-content-migrator.php:1955
 msgid "Source Plugin"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1955
+#: includes/migrators/class-content-migrator.php:1958
 msgid "Source Context"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1958, includes/views/view-migrate-tab-log.php:143
+#: includes/migrators/class-content-migrator.php:1961, includes/views/view-migrate-tab-log.php:143
 msgid "Type"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1961
+#: includes/migrators/class-content-migrator.php:1964
 msgid "Migrated ID"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1964, includes/views/view-migrate-tab-log.php:147
+#: includes/migrators/class-content-migrator.php:1967, includes/views/view-migrate-tab-log.php:147
 msgid "Status"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:2032
+#: includes/migrators/class-content-migrator.php:2035
 msgid "Migrate source gallery first"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:2033
+#: includes/migrators/class-content-migrator.php:2036
 msgid "Migrate it from the Galleries tab."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:2030
+#: includes/migrators/class-content-migrator.php:2033
 msgid "Ready to migrate & replace"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:2028, includes/migrators/class-content-migrator.php:2022
+#: includes/migrators/class-content-migrator.php:2031, includes/migrators/class-content-migrator.php:2025
 msgid "Ready to replace"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:2025
+#: includes/migrators/class-content-migrator.php:2028
 msgid "Ready for dynamic replacement"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:2026
+#: includes/migrators/class-content-migrator.php:2029
 msgid "No FooGallery record will be created."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:2023
+#: includes/migrators/class-content-migrator.php:2026
 msgid "The destination FooGallery is ready."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1861
+#: includes/migrators/class-content-migrator.php:1864
 msgid "Content has not been scanned yet."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1859
+#: includes/migrators/class-content-migrator.php:1862
 msgid "No gallery shortcodes or blocks found in your content."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:1863
+#: includes/migrators/class-content-migrator.php:1866
 msgid "Scan published posts and pages for gallery shortcodes and blocks."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:2053
+#: includes/migrators/class-content-migrator.php:2056
 msgid "Gallery migration statuses are out of date."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:2054
+#: includes/migrators/class-content-migrator.php:2057
 msgid "More galleries have been migrated since this content scan. Use Refresh Status to update the saved statuses without rescanning post content."
 msgstr ""
 
 #. translators: 1: checked occurrence count, 2: total occurrence count.
-#: includes/migrators/class-content-migrator.php:2061
+#: includes/migrators/class-content-migrator.php:2064
 msgid "Status refresh paused after %1$d of %2$d occurrences. Use Resume Status Refresh to continue."
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:2070
+#: includes/migrators/class-content-migrator.php:2073
 msgid "Migrate & Replace Selected"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:2074, includes/views/view-migrate-tab-content.php:35
+#: includes/migrators/class-content-migrator.php:2077, includes/views/view-migrate-tab-content.php:35
 msgid "Resume Status Refresh"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:2074, includes/views/view-migrate-tab-content.php:34
+#: includes/migrators/class-content-migrator.php:2077, includes/views/view-migrate-tab-content.php:34
 msgid "Refresh Status"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:2079, includes/views/view-migrate-tab-content.php:27
+#: includes/migrators/class-content-migrator.php:2082, includes/views/view-migrate-tab-content.php:27
 msgid "Resume Scan"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:2079
+#: includes/migrators/class-content-migrator.php:2082
 msgid "Rescan Content"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:2079
+#: includes/migrators/class-content-migrator.php:2082
 msgid "Scan Content"
 msgstr ""
 
-#: includes/migrators/class-content-migrator.php:2082
+#: includes/migrators/class-content-migrator.php:2085
 msgid "Rescan after changing post content; replaced occurrences will disappear from these results."
 msgstr ""
 
@@ -506,51 +506,51 @@ msgstr ""
 msgid "Migrated %d of %d %s (%d of %d images) "
 msgstr ""
 
-#: includes/objects/class-image.php:201
+#: includes/objects/class-image.php:203
 msgid "Unable to copy local image for migration."
 msgstr ""
 
-#: includes/objects/class-image.php:166
+#: includes/objects/class-image.php:167
 msgid "Invalid source URL for migration."
 msgstr ""
 
-#: includes/objects/class-image.php:296
+#: includes/objects/class-image.php:301
 msgid "Image import failed."
 msgstr ""
 
-#: includes/objects/class-migratable.php:276, includes/views/view-migrate-tab-log.php:11
+#: includes/objects/class-migratable.php:277, includes/views/view-migrate-tab-log.php:11
 msgid "Queued for migration"
 msgstr ""
 
-#: includes/objects/class-migratable.php:282, includes/views/view-migrate-tab-log.php:12
+#: includes/objects/class-migratable.php:283, includes/views/view-migrate-tab-log.php:12
 msgid "Migrating..."
 msgstr ""
 
-#: includes/objects/class-migratable.php:279
+#: includes/objects/class-migratable.php:280
 msgid "Migrated %d of %d %s"
 msgstr ""
 
-#: includes/objects/class-migratable.php:288
+#: includes/objects/class-migratable.php:289
 msgid "Done!"
 msgstr ""
 
-#: includes/objects/class-migratable.php:286
+#: includes/objects/class-migratable.php:287
 msgid "Done! %d %s migrated"
 msgstr ""
 
-#: includes/objects/class-migratable.php:294
+#: includes/objects/class-migratable.php:295
 msgid "Nothing to migrate!"
 msgstr ""
 
-#: includes/objects/class-migratable.php:292
+#: includes/objects/class-migratable.php:293
 msgid "No %s to migrate!"
 msgstr ""
 
-#: includes/objects/class-migratable.php:297
+#: includes/objects/class-migratable.php:298
 msgid "Error while migrating!"
 msgstr ""
 
-#: includes/objects/class-migratable.php:300
+#: includes/objects/class-migratable.php:301
 msgid "Unknown status!"
 msgstr ""
 
@@ -780,80 +780,80 @@ msgstr ""
 msgid "Are you sure you want to clear migration histories? This may result in duplicate album/galleries and media attachments!"
 msgstr ""
 
-#: includes/views/view-migrate-tab-sources.php:53
+#: includes/views/view-migrate-tab-sources.php:52
 msgid "We detected the following gallery plugins to migrate:"
 msgstr ""
 
-#: includes/views/view-migrate-tab-sources.php:49
+#: includes/views/view-migrate-tab-sources.php:48
 msgid "No other gallery plugins have been detected, so there is nothing to migrate!"
 msgstr ""
 
 #. translators: %d: detected gallery occurrence count.
-#: includes/views/view-migrate-tab-sources.php:80
+#: includes/views/view-migrate-tab-sources.php:79
 msgid "Found %d WordPress core gallery. You can migrate it in Blocks / Shortcodes."
 msgid_plural "Found %d WordPress core galleries. You can migrate them in Blocks / Shortcodes."
 msgstr[0] ""
 msgstr[1] ""
 
-#: includes/views/view-migrate-tab-sources.php:75
+#: includes/views/view-migrate-tab-sources.php:74
 msgid "No valid WordPress core galleries were found in published posts or pages."
 msgstr ""
 
-#: includes/views/view-migrate-tab-sources.php:70
+#: includes/views/view-migrate-tab-sources.php:69
 msgid "The scan started and found %d WordPress core gallery so far. Continue it in Blocks / Shortcodes."
 msgid_plural "The scan started and found %d WordPress core galleries so far. Continue it in Blocks / Shortcodes."
 msgstr[0] ""
 msgstr[1] ""
 
-#: includes/views/view-migrate-tab-sources.php:116
+#: includes/views/view-migrate-tab-sources.php:115
 msgid "Built-in WordPress galleries"
 msgstr ""
 
-#: includes/views/view-migrate-tab-sources.php:117
+#: includes/views/view-migrate-tab-sources.php:116
 msgid "Scan published posts and pages for valid [gallery] shortcodes and core Gallery blocks. Detection does not change content."
 msgstr ""
 
-#: includes/views/view-migrate-tab-sources.php:119
+#: includes/views/view-migrate-tab-sources.php:118
 msgid "Detect WordPress Galleries"
 msgstr ""
 
-#: includes/views/view-migrate-tab-sources.php:124
+#: includes/views/view-migrate-tab-sources.php:123
 msgid "Choose how WordPress galleries should be migrated"
 msgstr ""
 
-#: includes/views/view-migrate-tab-sources.php:127
+#: includes/views/view-migrate-tab-sources.php:126
 msgid "Replace with dynamic FooGalleries"
 msgstr ""
 
-#: includes/views/view-migrate-tab-sources.php:128
+#: includes/views/view-migrate-tab-sources.php:127
 msgid "Stores the image selection directly in each post or page. No FooGallery records are created, and results appear only in Blocks / Shortcodes."
 msgstr ""
 
-#: includes/views/view-migrate-tab-sources.php:132
+#: includes/views/view-migrate-tab-sources.php:131
 msgid "Create reusable FooGallery records"
 msgstr ""
 
-#: includes/views/view-migrate-tab-sources.php:133
+#: includes/views/view-migrate-tab-sources.php:132
 msgid "Creates an editable FooGallery for each occurrence, then replaces the source content with its ID. Results appear in Galleries and Blocks / Shortcodes."
 msgstr ""
 
-#: includes/views/view-migrate-tab-sources.php:136
+#: includes/views/view-migrate-tab-sources.php:135
 msgid "Changing mode does not delete FooGalleries created by an earlier migration."
 msgstr ""
 
-#: includes/views/view-migrate-tab-sources.php:137
+#: includes/views/view-migrate-tab-sources.php:136
 msgid "Scan WordPress Galleries"
 msgstr ""
 
-#: includes/views/view-migrate-tab-sources.php:152
+#: includes/views/view-migrate-tab-sources.php:151
 msgid "Run Detection Again"
 msgstr ""
 
-#: includes/views/view-migrate-tab-sources.php:154
+#: includes/views/view-migrate-tab-sources.php:153
 msgid "Clear Migration History"
 msgstr ""
 
-#: includes/views/view-migrate-tab-sources.php:155
+#: includes/views/view-migrate-tab-sources.php:154
 msgid "Check For Migration Errors"
 msgstr ""
 
