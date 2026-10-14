@@ -79,7 +79,7 @@ try {
 	$assert( current_user_can( 'manage_options' ), 'administrator fixture' );
 	$source_attachment = wp_insert_attachment( array( 'post_title' => 'Owned base fixture image', 'post_mime_type' => 'image/gif', 'post_status' => 'inherit', 'guid' => home_url( '/wp-includes/images/blank.gif' ) ) ); $posts[] = $source_attachment;
 	$source_content = '[gallery ids="' . $source_attachment . '" link="none"]';
-	$source_post = wp_insert_post( array( 'post_title' => 'Owned base fixture source', 'post_type' => 'post', 'post_status' => 'publish', 'post_content' => $source_content ) ); $posts[] = $source_post;
+	$source_post = wp_insert_post( array( 'post_title' => 'Owned base fixture source', 'post_type' => 'page', 'post_status' => 'publish', 'post_content' => $source_content ) ); $posts[] = $source_post;
 	foreach ( array( 'option', 'table' ) as $mode ) {
 		foreach ( array( 'gallery-healthy', 'album-healthy', 'gallery-post-loss', 'album-post-loss', 'gallery-meta-loss', 'gallery-error', 'album-blog-loss', 'option-loss', 'media-healthy', 'media-post-loss', 'media-generation-loss', 'media-alt-loss', 'media-term-loss', 'media-error', 'media-reuse-healthy', 'base-healthy', 'base-discovery-loss', 'base-discovery-error', 'base-post-loss' ) as $scenario ) {
 			if ( ( 'table' === $mode && 'option-loss' === $scenario ) || ( ! is_multisite() && 'album-blog-loss' === $scenario ) ) { continue; }
@@ -153,10 +153,10 @@ try {
 					$objects = $migrator->get_objects_to_migrate( true ); remove_filter( 'query', $discovery_hook ); $discovery_hook = null;
 					$assert( 1 === count( $objects ) && 1 === $discovery_calls, 'actual shortcode discovery ' . $scenario ); $object = $objects[0];
 					$assert( $engine->storage_is_quiescent(), 'discovery normal return drained ' . $scenario );
-					$migrator->queue_objects_for_migration( array( $object->unique_identifier() ) );
+					$assert( $migrator->queue_objects_for_migration( array( $object->unique_identifier() => array( 'title' => $object->title ) ) ), 'real base queue call succeeded ' . $scenario );
 					$assert( 1 === $migrator->get_state()['queued'], 'real base queue persisted ' . $scenario );
 					$migrator->migrate(); $object = $migrator->get_objects_to_migrate()[0];
-					$assert( 100 === $migrator->get_state()['progress'], 'real base turn persisted completion ' . $scenario );
+					$assert( 100 === (int) $migrator->get_state()['progress'], 'real base turn persisted completion ' . $scenario );
 					$assert( array( $source_attachment ) === get_post_meta( $object->migrated_id, FOOGALLERY_META_ATTACHMENTS, true ), 'real attachment reused by base turn ' . $scenario );
 				}
 				elseif ( 0 === strpos( $scenario, 'media-' ) ) {
@@ -230,11 +230,13 @@ try {
 				$assert( $stale instanceof RuntimeException, 'cached base engine refuses switched authority ' . $mode );
 				$fresh = foogallery_migrate_migrator_instance(); $saved = $fresh->get_migrated_object( $object->unique_identifier() );
 				$assert( is_object( $saved ) && $saved->migrated && $saved->migrated_id === $object->migrated_id, 'fresh engine reads authoritative completed history ' . $mode );
-				$assert( 100 === $fresh->get_gallery_migrator()->get_state()['progress'], 'selected backend retains base checkpoint ' . $mode );
+				$assert( 100 === (int) $fresh->get_gallery_migrator()->get_state()['progress'], 'selected backend retains base checkpoint ' . $mode );
 				$assert( $source_content === get_post( $source_post )->post_content, 'selection never rewrites source content ' . $mode );
 			}
 			$owned_markers = $writers();
 			$clean();
+			// Keep the next base-post-loss case on a genuine insertion path.
+			if ( 'base-healthy' === $scenario ) { wp_delete_post( $object->migrated_id, true ); }
 		}
 	}
 } finally {
