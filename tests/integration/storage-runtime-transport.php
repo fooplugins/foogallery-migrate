@@ -112,8 +112,14 @@ try {
 		catch ( RuntimeException $error ) { $check( $pin->fired && ! $pin->is_current(), $fault . ': lost receipt refuses actual writer and latches shared pin' ); }
 		$check( array() === $queries, $fault . ': writer and authority SQL never use wpdb replay/query-filter path' );
 		remove_filter( 'query', $capture ); $capture = null;
-		$check( 'committed-without-receipt' === ( new LegacyTableBackend( $observer, $blog ) )->read( 'checkpoint' ), $fault . ': independent observer proves real commit despite reported refusal' );
+		$check( array( 'found' => true, 'value' => 'committed-without-receipt' ) === ( new LegacyTableBackend( $observer, $blog ) )->read( 'checkpoint' ), $fault . ': independent observer proves real commit despite lost receipt' );
 		$check( $options === $raw_options(), $fault . ': control, sentinel and backup stay byte-identical' );
+		// Legitimate pre-write renewal may cross a second boundary. Freeze the
+		// exact persisted marker AT loss, not the earlier expiry value.
+		$at_loss = $observer->get_results( $observer->prepare( 'SELECT option_name, option_value, autoload FROM `' . $original->options . '` WHERE option_name LIKE %s ORDER BY option_name', array( $writer_pattern ) ), ARRAY_A );
+		$check( 1 === count( $at_loss ) && $writers[0]['option_name'] === $at_loss[0]['option_name'] &&
+			json_decode( $writers[0]['option_value'], true )['token'] === json_decode( $at_loss[0]['option_value'], true )['token'], $fault . ': same admitted writer owner retained at loss' );
+		$writers = $at_loss;
 		$sql_count = count( $pin->sql );
 		$check( is_wp_error( StorageAuthority::runtime_record( $gate ) ) && is_wp_error( StorageAuthority::option_mode_error( $gate ) ), $fault . ': no option fallback on healthy wpdb' );
 		$check( false === $engine->storage_is_quiescent(), $fault . ': unusable writer cannot affirm complete drain' );
