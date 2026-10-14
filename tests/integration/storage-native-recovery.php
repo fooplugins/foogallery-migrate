@@ -23,9 +23,10 @@ finally { remove_filter( 'query', $interrupt ); }
 $label = $mode . '/' . $phase;
 $assert( $fired && false === $failed['success'], 'native output public switch refuses interrupted conversion ' . $label );
 $controls = new \FooPlugins\FooGalleryMigrate\StorageControl( $observer, $blog );
+$maintenance = function () use ( $observer ) { return $observer->get_var( $observer->prepare( 'SELECT option_value FROM `' . $observer->options . '` WHERE option_name=%s', \FooPlugins\FooGalleryMigrate\StorageAuthority::MAINTENANCE_OPTION ) ); };
 $pending = \FooPlugins\FooGalleryMigrate\StorageControl::decode( $controls->read( \FooPlugins\FooGalleryMigrate\StorageAuthority::CONTROL_OPTION ), $blog );
 $assert( $phase === $pending['phase'] && ( 'flipped' === $phase ? $target : $mode ) === $pending['backend'], 'pending public conversion records exact authoritative phase ' . $label );
-$assert( null === $controls->read( \FooPlugins\FooGalleryMigrate\StorageAuthority::MAINTENANCE_OPTION ) && array() === $writers(), 'handled interruption proves owner release and writer drain without deleting evidence ' . $label );
+$assert( null === $maintenance() && array() === $writers(), 'handled interruption proves owner release and writer drain without deleting evidence ' . $label );
 $assert( is_wp_error( \FooPlugins\FooGalleryMigrate\StorageAuthority::runtime_record() ) && is_wp_error( \FooPlugins\FooGalleryMigrate\StorageAuthority::option_mode_error() ), 'pending conversion permits no runtime or option fallback ' . $label );
 try { new \FooPlugins\FooGalleryMigrate\MigratorEngine(); throw new LogicException( 'Pending authority admitted engine.' ); }
 catch ( RuntimeException $error ) { $assert( true, 'fresh engine refuses pending public conversion ' . $label ); }
@@ -73,7 +74,7 @@ $assert( true === $result['success'] && $target === $result['data']['backend'] &
 $assert( true === $worker['history_retained'] && 100 === $worker['progress'], 'separate fresh engine retains real completed output and checkpoint ' . $label );
 $stable = \FooPlugins\FooGalleryMigrate\StorageControl::decode( $controls->read( \FooPlugins\FooGalleryMigrate\StorageAuthority::CONTROL_OPTION ), $blog );
 $assert( $stable['logical_digest'] === $pending['logical_digest'] && $stable['epoch'] === $pending['epoch'] + ( 'flipped' === $phase ? 0 : 1 ) && \FooPlugins\FooGalleryMigrate\StorageControl::runtime_ready( $stable, $controls->read( \FooPlugins\FooGalleryMigrate\StorageAuthority::AUTHORITY_OPTION ) ), 'independent committed recovery parity epoch and sentinel proof ' . $label );
-$assert( null === $controls->read( \FooPlugins\FooGalleryMigrate\StorageAuthority::MAINTENANCE_OPTION ) && array() === $writers(), 'fresh public recovery releases only its own admission ' . $label );
+$assert( null === $maintenance() && array() === $writers(), 'fresh public recovery releases only its own admission ' . $label );
 if ( 'flipped' === $phase ) {
 	$after_recovery = $capture();
 	if ( 'table' === $mode ) { foreach ( $tables as $table ) { $assert( $inactive[$table] === $after_recovery[$table], 'post-flip public recovery neither trusts nor rewrites inactive table ' . $label ); } }
