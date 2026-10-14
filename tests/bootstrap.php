@@ -164,6 +164,9 @@ function get_option( $name, $default = false ) {
 }
 
 function update_option( $name, $value, $autoload = null ) {
+	if ( isset( $GLOBALS['foogallery_migrate_test_option_update_callback'] ) ) {
+		call_user_func( $GLOBALS['foogallery_migrate_test_option_update_callback'], $name );
+	}
 	if ( isset( $GLOBALS['foogallery_migrate_test_option_writes'] ) ) {
 		$GLOBALS['foogallery_migrate_test_option_writes'][] = array( $name, $autoload );
 	}
@@ -448,6 +451,9 @@ function wp_insert_post( $args ) {
 	$post_id++;
 	$post = (object) array_merge( $args, array( 'ID' => $post_id ) );
 	$GLOBALS['foogallery_migrate_test_posts'][ $post_id ] = $post;
+	if ( isset( $GLOBALS['foogallery_migrate_test_post_insert_callback'] ) ) {
+		call_user_func( $GLOBALS['foogallery_migrate_test_post_insert_callback'] );
+	}
 	return $post_id;
 }
 
@@ -524,6 +530,9 @@ function add_post_meta( $post_id, $meta_key, $meta_value, $unique = false ) {
 function update_post_meta( $post_id, $meta_key, $meta_value ) {
 	$GLOBALS['foogallery_migrate_test_post_meta'][ $post_id ][ $meta_key ] = $meta_value;
 	$GLOBALS['foogallery_migrate_test_post_meta_updates'][] = compact( 'post_id', 'meta_key', 'meta_value' );
+	if ( isset( $GLOBALS['foogallery_migrate_test_meta_update_callback'] ) ) {
+		call_user_func( $GLOBALS['foogallery_migrate_test_meta_update_callback'] );
+	}
 	return true;
 }
 
