@@ -51,6 +51,7 @@ class StorageOperations {
 			'foogallery_migrate_storage' !== $_POST['action'] || ! is_string( $_POST['operation'] ) ) {
 			$result = self::invalid();
 		} else {
+			$receiver->incoming_memory->observe_receiver( $_POST );
 			$request = wp_unslash( $_POST ); $operation = $request['operation'];
 			unset( $request['action'], $request['operation'] );
 			$receiver->incoming_memory->sample();

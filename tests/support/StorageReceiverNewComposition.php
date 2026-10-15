@@ -19,6 +19,7 @@ class StorageReceiverNewComposition {
 	}
 	public function bindings() {
 		return array( 'retained_helpers' => $this->arguments->bindings(),
+			'receiver_observer_sha256' => '3c9f49d5d9bccf2c47eee9fda84e920d76847f2b9e41266b30957804dae4eae9',
 			'stripslashes_sha256' => array( '5.4.0' => 'e14702dccbbf63d669303604f0255b3f28ef4523e782e55b1935a6e498191b9c',
 				'5.6.20' => '471dfa81c9b58223dd16addca27a77018f18359a9889bf696f127442c5114daa' ),
 			'stripslashes_sites' => array( '5.4.0' => 'ext/standard/string.c:3028-3065,3132-3142',
@@ -27,6 +28,43 @@ class StorageReceiverNewComposition {
 	private function add( $a, $b ) {
 		if ( $b > PHP_INT_MAX - $a ) { throw new \InvalidArgumentException( 'receiver_composition_overflow' ); }
 		return $a + $b;
+	}
+	/**
+	 * Consume the ACTUAL receiver's internal projection without retaining input
+	 * values. Conditional PHP5 nominal copy families reuse the existing helpers;
+	 * semantic VM sites below are counts, NOT certified box/stack/arena bytes.
+	 */
+	public function receiver_events( $observed ) {
+		if ( ! is_array( $observed ) || ! isset( $observed['status'], $observed['leaf_visits'], $observed['string_lengths_upper'], $observed['key_request_bytes'] ) ||
+			'SCALAR_RECEIVER_EVENTS_ONLY' !== $observed['status'] || 7 !== $observed['leaf_visits'] ||
+			! is_array( $observed['string_lengths_upper'] ) || ! is_array( $observed['key_request_bytes'] ) ||
+			7 !== count( $observed['string_lengths_upper'] ) || 7 !== count( $observed['key_request_bytes'] ) ) {
+			throw new \InvalidArgumentException( 'receiver_scalar_events_unresolved' );
+		}
+		$strings = 0; $copies = 0;
+		foreach ( $observed['string_lengths_upper'] as $length ) {
+			if ( null === $length ) { continue; }
+			if ( ! is_int( $length ) || $length < 0 || $length > PHP_INT_MAX - 1 ) { throw new \InvalidArgumentException( 'receiver_scalar_length' ); }
+			++$strings; $copies = $this->add( $copies, $this->trace->nominal( $length + 1 ) );
+		}
+		$v = $this->local->hash_vector( 7 );
+		$root = $this->add( $this->add( $this->trace->nominal( 32 ), $this->trace->nominal( 72 ) ), $v['vector_nominal'] );
+		foreach ( $observed['key_request_bytes'] as $bytes ) {
+			if ( ! is_int( $bytes ) || $bytes < 0 || $bytes > PHP_INT_MAX - 72 ) { throw new \InvalidArgumentException( 'receiver_scalar_key' ); }
+			$root = $this->add( $root, $this->trace->nominal( 72 + $bytes ) );
+		}
+		return array( 'status' => 'ACTUAL_SCALAR_RECEIVER_SELECTED_NEW_EVENTS_ONLY',
+			'events' => array( 'wp_unslash_calls' => 1, 'stripslashes_deep_calls' => 1, 'map_deep_calls' => 8,
+				'callback_calls' => 7, 'string_callback_calls' => 7, 'stripslashes_calls' => $strings,
+				'wp_unslash_return_sites' => 1, 'stripslashes_deep_return_sites' => 1, 'callback_result_sites' => 7,
+				'foreach_resets' => 1, 'foreach_fetch_attempts' => 8, 'root_assignments' => 7,
+				'map_deep_return_sites' => 8, 'string_callback_return_sites' => 7,
+				'root_cow_copy_selected_upper' => 1, 'reference_visits_deduplicated' => false ),
+			'input_duplicate_nominal_upper' => $copies, 'selected_root_copy_nominal' => $root,
+			'selected_copy_family_nominal_sum' => $this->add( $copies, $root ),
+			'original_backing_extent' => null, 'originals_retained_without_free_credit' => true,
+			'vm_allocation_bytes' => null, 'observer_allocation_bytes' => null, 'failure_cleanup_overlap_bytes' => null,
+			'rejected_graph_upper' => null, 'whole_operation_new_upper' => null, 'safe_admission_approved' => false );
 	}
 	/** INPUT duplicate survives shortening: do not charge output strlen instead. */
 	public function string_copy( $input, $normalized ) {
