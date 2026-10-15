@@ -26,8 +26,30 @@ class LegacyOptionDurableScanTest extends TestCase {
     private function next($r, $bytes = 257, $nodes = 53) { return LegacyOptionDurableScan::advance($r['switch_id'], $r['generation'], $this->policy(), $bytes, $nodes, 1); }
     private function raw() { return $GLOBALS['wpdb']->rows[StorageAuthority::CONTROL_OPTION]; }
     private function refused($callback) {
-        try { $callback(); $this->fail('Expected refusal'); }
-        catch (\RuntimeException $error) { $this->assertNotSame('', $error->getMessage()); }
+        try { $callback(); }
+        catch (\RuntimeException $error) {
+            $this->assertNotSame('', $error->getMessage());
+            return;
+        }
+        $this->fail('Expected refusal');
+    }
+    public function test_refused_helper_rejects_a_nonthrowing_callback(): void {
+        $this->expectException(\PHPUnit\Framework\AssertionFailedError::class);
+        $this->expectExceptionMessage('Expected refusal');
+        $this->refused(function() {});
+    }
+    public static function nonrefusing_status_receipts(): array {
+        return array('partial' => array(false), 'complete' => array(true));
+    }
+    /** @dataProvider nonrefusing_status_receipts */
+    public function test_refused_helper_rejects_a_returned_status_receipt($complete): void {
+        if ($complete) { $this->fresh(array(FOOGALLERY_MIGRATE_OPTION_DATA => 'a:0:{}')); }
+        $r = LegacyOptionDurableScan::start($this->policy(), 257, 53, 1);
+        $this->assertSame($complete, $r['done']);
+        $this->assertSame($r['generation'], LegacyOptionDurableScan::status($r['switch_id'])['generation']);
+        $this->expectException(\PHPUnit\Framework\AssertionFailedError::class);
+        $this->expectExceptionMessage('Expected refusal');
+        $this->refused(function() use ($r) { return LegacyOptionDurableScan::status($r['switch_id']); });
     }
     public function test_twenty_k_checkpoint_resumes_through_fresh_owners(): void {
         $this->refused(function() { (new LegacyOptionDecoder())->decode($this->source); });
