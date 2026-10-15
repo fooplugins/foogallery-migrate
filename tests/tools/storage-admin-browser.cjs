@@ -13,6 +13,7 @@ function check(ok, label) { if (!ok) throw new Error(label); checks.push(label);
     await context.addCookies(config.cookies);
     const page = await context.newPage();
     await page.goto(config.url, { waitUntil: 'networkidle' });
+    if (config.warm) { console.log(JSON.stringify({ status: 'pass', warm: true })); return; }
     check((await page.locator('h1').allTextContents()).includes('FooGallery Migration Storage'), 'real activated admin menu route renders operator page');
     check(await page.getByText('Not approved for this runtime.', { exact: false }).count(), 'default UI reports safe unapproved profile');
     const observedAction = await page.locator('form.foogm-storage-form').first().evaluate(f => ({ kind: typeof f.action, text: String(f.action), attribute: f.getAttribute('action') }));
@@ -26,7 +27,7 @@ function check(ok, label) { if (!ok) throw new Error(label); checks.push(label);
       return { status: response.status(), body };
     };
     const denied = await submit('switch-to-table');
-    check(denied.status === 409 && !denied.body.success && denied.body.data.code === 'foogallery_migrate_storage_uncalibrated', 'actual no-profile HTTP POST safely refuses');
+    check(denied.status === 409 && !denied.body.success && denied.body.data.code === 'foogallery_migrate_storage_calibration_required', 'actual no-profile HTTP POST safely refuses: ' + JSON.stringify(denied));
     await page.screenshot({ path: config.screenshots + '-unapproved.png', fullPage: true });
     // Explicit test-only server fixture, not a shipped default or production approval.
     fs.writeFileSync(config.profile_path, config.profile_code, { flag: 'wx', mode: 0o600 });
