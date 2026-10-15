@@ -119,6 +119,13 @@ for topology in single multi; do
       url="https://$site.localhost/"
       [[ "$scope" != multi-2 ]] || url="https://$site.localhost/second/"
       id="$kind-$scope-$CASE"
+      if [[ "$CASE" == storage-aigpl-browser ]]; then
+        # Warm ordinary authenticated core/FooGallery admin side effects BEFORE
+        # the strict snapshot. Keep the generated session header private.
+        "$COVE" wp "$site" --url="$url" "${skips[@]}" --user=1 eval '$token = WP_Session_Tokens::get_instance(1)->create(time()+600); echo "Cookie: " . SECURE_AUTH_COOKIE . "=" . wp_generate_auth_cookie(1,time()+600,"secure_auth",$token) . "; " . LOGGED_IN_COOKIE . "=" . wp_generate_auth_cookie(1,time()+600,"logged_in",$token);' > "$setup"
+        curl --fail --silent --show-error --insecure --header "@$setup" "${url}wp-admin/options-general.php" --output /dev/null
+        : > "$setup"
+      fi
       "$COVE" wp "$site" --url="$url" "${skips[@]}" --user=1 eval 'get_option("siteurl"); current_user_can("manage_options");' > /dev/null 2>&1
       dump --skip-comments --skip-dump-date --skip-extended-insert --no-create-info --compact "$database" > "$before"
       harness="$OUT/source/tests/integration/$CASE.php"
