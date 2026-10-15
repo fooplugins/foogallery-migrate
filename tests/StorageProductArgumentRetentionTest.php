@@ -175,4 +175,12 @@ class StorageProductArgumentRetentionTest extends TestCase {
 			catch ( \InvalidArgumentException $e ) { $this->assertSame( 'product_argument_domain', $e->getMessage() ); }
 		}
 	}
+	public function test_unsupported_record_root_is_rejected_before_field_access() {
+		$t = new StorageProductCallerTrace( '5.4.0' ); $m = new StorageProductArgumentRetention( '5.4.0' );
+		foreach ( array( new \stdClass(), 'not-a-record', null ) as $bad ) {
+			$args = $this->arguments( $t->paths()[2] ); $args['record'] = $bad;
+			try { $m->retention( 2, $args, $this->capacities() ); $this->fail( 'unsupported record root accepted' ); }
+			catch ( \InvalidArgumentException $e ) { $this->assertSame( 'product_argument_domain', $e->getMessage() ); }
+		}
+	}
 }

@@ -73,7 +73,8 @@ class StorageProductArgumentRetention {
 		$values = array( 'request' => $arguments['request'], 'operation' => $path['operation'] );
 		if ( 'recover' !== $path['operation'] ) { $values['replacement'] = 'replace' === $path['operation']; }
 		if ( 'direct' !== $path['phase'] ) {
-			if ( ! isset( $arguments['record']['version'] ) || ! in_array( $arguments['record']['version'], array( 1, 2 ), true ) || ! array_key_exists( 'source', $arguments ) ) { $this->fail(); }
+			if ( ! isset( $arguments['record'] ) || ! is_array( $arguments['record'] ) || ! isset( $arguments['record']['version'] ) ||
+				! in_array( $arguments['record']['version'], array( 1, 2 ), true ) || ! array_key_exists( 'source', $arguments ) ) { $this->fail(); }
 			$keys = 1 === $arguments['record']['version'] ? array_slice( $shapes['record'], 0, 15 ) : $shapes['record'];
 			$this->shape( $arguments['record'], $keys );
 			foreach ( $arguments['record'] as $value ) { if ( is_array( $value ) ) { $this->fail(); } }
