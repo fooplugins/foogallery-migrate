@@ -29,7 +29,7 @@ class StorageAdmin {
 			$schema = new LegacyStorageSchema( $wpdb );
 			try {
 				$schema->verify(); $s['schema'] = 'verified';
-				$table = $schema->records_table();
+				$tables = array_keys( $schema->definitions() ); $table = $tables[1];
 				$s['records'] = $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM `' . $table . '` WHERE blog_id=%d', $blog ) );
 				if ( $wpdb->last_error ) { throw new \RuntimeException( __( 'Record count is unavailable.', 'foogallery-migrate' ) ); }
 			} catch ( \RuntimeException $error ) {
