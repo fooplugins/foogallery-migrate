@@ -41,7 +41,7 @@ try {
 		update_post_meta( $id, '_wp_attached_file', $relative ); update_post_meta( $id, '_wp_attachment_metadata', array( 'width' => 1, 'height' => 1, 'file' => $relative, 'sizes' => array() ) ); $ids[] = $id;
 	}
 	$source = $make( array( 'post_type' => Aigpl::POST_TYPE, 'post_status' => 'publish', 'post_title' => 'Owned 204-image AIGPL' ) ); update_post_meta( $source, Aigpl::META_GALLERY_IMAGES, $ids );
-	foreach ( array( 'option', 'table' ) as $mode ) {
+	foreach ( array( defined( 'FOOGM_AIGPL_MODE' ) ? FOOGM_AIGPL_MODE : 'table' ) as $mode ) {
 		foreach ( $names as $name ) { delete_option( $name ); }
 		unset( $GLOBALS['foogallery_migrate_engine_instance'] );
 		$settings = new MigratorSettings(); $settings->set_migrator_setting( MigratorSettings::KEY_MIGRATED, array() ); $settings->set_migrator_setting( MigratorSettings::KEY_MIGRATED_REVISION, 0 );
@@ -51,7 +51,7 @@ try {
 			$profile = array( 'version' => 1, 'status' => 'approved', 'fingerprint' => StorageCalibration::fingerprint(), 'evidence_sha256' => str_repeat( 'a', 64 ), 'policy' => array( 'max_raw_bytes' => 8388608, 'amplification' => 64, 'reserve_bytes' => 33554432 ) );
 			$request = array( 'blog_id' => (string) $blog, 'scope' => 'site', 'target' => 'table', 'confirmation' => 'switch-to-table', 'nonce' => wp_create_nonce( 'foogallery_migrate_storage_option_import_' . $blog ) );
 			$switched = ( new StorageOperations( $profile ) )->dispatch( 'switch', $request );
-			$check( ! is_wp_error( $switched ), 'public route selects normal table runtime ' . $mode );
+			$check( ! is_wp_error( $switched ), 'public route selects normal table runtime ' . $mode . ( is_wp_error( $switched ) ? ': ' . $switched->get_error_code() : '' ) );
 		}
 		$engine = new MigratorEngine(); $GLOBALS['foogallery_migrate_engine_instance'] = $engine; $engine->save_settings( array( 'images_per_turn' => 5 ) );
 		$plugin = new Aigpl();
