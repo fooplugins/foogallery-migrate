@@ -3,7 +3,8 @@
  * Internal trusted structural-scan owner. No endpoint, conversion or publication.
  * Each request separately admits/reacquires the WHOLE option (<=16MiB), hashes it
  * in PHP and again in the source-fenced SQL CAS. These O(N) setup/commit costs
- * are NOT scanner step work or covered by its cooperative deadline. No graph is
+ * are NOT parser bytes. Entry-deadline fences stop subsequent work; they do not
+ * interrupt blocking acquisition/hash/SQL or bound their runtime. No graph is
  * decoded. Only parser work is sliced; total request work is not O(step bytes).
  *
  * @package FooPlugins\FooGalleryMigrate
@@ -23,15 +24,18 @@ final class LegacyOptionDurableScan {
 	private $length;
 	private $digest;
 	private $taking = false;
+	private $deadline;
 
-	private function __construct( $policy ) {
+	private function __construct( $policy, $deadline = null ) {
 		global $wpdb;
+		$this->deadline = $deadline;
 		$this->gate = StorageMaintenanceGate::current();
 		$this->connection = $this->gate->connection();
 		$this->prefix = $wpdb->prefix; $this->blog = get_current_blog_id();
 		$this->controls = new StorageControl( $this->connection, $this->blog );
 		$this->policy = $policy; $this->memory = new StorageMemoryBaseline();
 		$this->idle_connection();
+		$this->time();
 	}
 	private function __clone() {}
 	public function __sleep() { self::fail(); }
@@ -39,11 +43,13 @@ final class LegacyOptionDurableScan {
 
 	/** Internal caller supplies trusted calibration, never request policy/parser. */
 	public static function start( $policy, $bytes = 4096, $nodes = 256, $seconds = 0.01 ) {
-		return ( new self( $policy ) )->run( null, null, $bytes, $nodes, $seconds );
+		$deadline = self::entry_deadline( $seconds );
+		return ( new self( $policy, $deadline ) )->run( null, null, $bytes, $nodes );
 	}
 	public static function advance( $id, $generation, $policy, $bytes = 4096, $nodes = 256, $seconds = 0.01 ) {
+		$deadline = self::entry_deadline( $seconds );
 		if ( ! is_string( $id ) || ! preg_match( '/^[a-f0-9]{32}$/D', $id ) || ! is_int( $generation ) || $generation < 1 ) { self::fail(); }
-		return ( new self( $policy ) )->run( $id, $generation, $bytes, $nodes, $seconds );
+		return ( new self( $policy, $deadline ) )->run( $id, $generation, $bytes, $nodes );
 	}
 
 	/** Read-after-uncertain-write receipt: does not replay or advance a checkpoint. */
@@ -54,8 +60,10 @@ final class LegacyOptionDurableScan {
 		return $owner->receipt( $r );
 	}
 
-	private function run( $id, $generation, $bytes, $nodes, $seconds ) {
+	private function run( $id, $generation, $bytes, $nodes ) {
+		$this->time();
 		$this->budget( 0 ); // Fail closed before a source read, even with unlimited PHP memory.
+		$this->time();
 		if ( true !== $this->gate->acquire_maintenance() ) { self::fail(); }
 		try {
 			$this->ready();
@@ -73,9 +81,12 @@ final class LegacyOptionDurableScan {
 			}
 			if ( null !== $this->controls->read( StorageAuthority::AUTHORITY_OPTION ) ) { self::fail(); }
 			$raw = $this->source();
+			$this->time();
 			$this->taking = true;
 			$scanner = LegacyOptionStructuralScan::owned( $raw, $this );
-			$result = $scanner->step( null, $bytes, $nodes, $seconds );
+			$this->time();
+			$result = $scanner->step( null, $bytes, $nodes, $this->deadline - microtime( true ) );
+			$this->time();
 			$parser = $result['cursor']['parser'];
 			$parser['key_prefix'] = base64_encode( $parser['key_prefix'] );
 			$this->record['updated'] = max( time(), $this->record['updated'] );
@@ -85,7 +96,9 @@ final class LegacyOptionDurableScan {
 			$new = json_encode( $this->record );
 			StorageControl::decode( $new, $this->blog ); // Includes unchanged 2048-byte storage cap.
 			$this->ready();
-			$this->controls->cas( StorageAuthority::CONTROL_OPTION, $old, $new, array( 'kind' => 'option', 'value' => $this->digest ), $this->gate->maintenance_identity() );
+			$maintenance = $this->gate->maintenance_identity();
+			$this->time();
+			$this->controls->cas( StorageAuthority::CONTROL_OPTION, $old, $new, array( 'kind' => 'option', 'value' => $this->digest ), $maintenance, $this->deadline );
 			if ( true !== $this->gate->release_maintenance() ) { self::fail(); }
 			$receipt = $this->receipt( $this->record );
 			$receipt['bytes'] = $result['bytes']; $receipt['nodes'] = $result['nodes'];
@@ -102,6 +115,7 @@ final class LegacyOptionDurableScan {
 
 	/** Capability is never returned to callers; consumed synchronously only once. */
 	public function take_state( $digest, $length ) {
+		$this->time();
 		if ( ! $this->taking || $length !== $this->length || ! is_string( $digest ) || ! preg_match( '/^[a-f0-9]{64}$/D', $digest ) ) { self::fail(); }
 		$this->taking = false; $this->digest = $digest;
 		$physical = hash( 'sha256', 'present:' . $digest );
@@ -114,11 +128,15 @@ final class LegacyOptionDurableScan {
 	}
 
 	private function source() {
+		$this->time();
 		$db = $this->connection;
 		$length = $db->get_var( $db->prepare( 'SELECT LENGTH(option_value) FROM `' . $this->prefix . 'options` WHERE option_name = %s LIMIT 1', array( FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
+		$this->time();
 		if ( ! empty( $db->last_error ) || ! is_numeric( $length ) || (string) (int) $length !== (string) $length || (int) $length < 0 || (int) $length > 16777216 ) { self::fail(); }
 		$this->length = (int) $length; $this->budget( $this->length );
+		$this->time();
 		$raw = $db->get_var( $db->prepare( "SELECT CONCAT('v:', option_value) FROM `" . $this->prefix . 'options` WHERE option_name = %s AND LENGTH(option_value) = %d LIMIT 1', array( FOOGALLERY_MIGRATE_OPTION_DATA, $this->length ) ) );
+		$this->time();
 		if ( ! empty( $db->last_error ) || ! is_string( $raw ) || 'v:' !== substr( $raw, 0, 2 ) || strlen( $raw ) !== $this->length + 2 ) { self::fail(); }
 		return substr( $raw, 2 );
 	}
@@ -137,8 +155,19 @@ final class LegacyOptionDurableScan {
 			false === $db->query( 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ' ) || ! empty( $db->last_error ) ) { self::fail(); }
 	}
 	private function ready() {
+		$this->time();
 		$this->idle_connection();
+		$this->time();
 		if ( true !== $this->gate->maintenance_ready( array( 'FooPlugins\\FooGalleryMigrate\\MigratorEngine', 'storage_maintenance_is_quiescent' ) ) ) { self::fail(); }
+		$this->time();
+	}
+	private static function entry_deadline( $seconds ) {
+		$entry = microtime( true );
+		if ( ( ! is_int( $seconds ) && ! is_float( $seconds ) ) || ! is_finite( (float) $seconds ) || $seconds <= 0 || $seconds > 1 ) { self::fail(); }
+		return $entry + $seconds;
+	}
+	private function time() {
+		if ( null !== $this->deadline && microtime( true ) >= $this->deadline ) { self::fail(); }
 	}
 	private function read_verified() { return $this->verify( $this->controls->read( StorageAuthority::CONTROL_OPTION ) ); }
 	private function verify( $raw ) {

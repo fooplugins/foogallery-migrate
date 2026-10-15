@@ -14,7 +14,7 @@ class StorageProductCallerTrace {
 		return array( 'product_files' => array(
 			'includes/class-storage-conversion.php' => '63723bd9cd3ca15580f448f41cec492ab0f552dd228a32bb4a9f1e6e082283dd',
 			'includes/class-storage-operations.php' => '957291fa4d17323fd877e0d11045a042afe17f962b58148a5e7bd5d07f6d89b8',
-			'includes/class-storage-control.php' => 'ab223311df57816ce5c78a9ffa039e513fd155e7b25551000d182b9237fed652', // v1/v2 paths only; durable v3 is NOT modeled/approved here.
+			'includes/class-storage-control.php' => '07d75b5bee41d0f69b3adbc1681acf05b8377ef040a8a987bdf67bc2ef78f616', // decode/v1/v2 paths unchanged; optional CAS deadline/durable v3 NOT modeled or approved here.
 			'includes/class-legacy-option-decoder.php' => 'cf7ef2038a5395f70d64f9f2702c3735066a74048cb00dfddc0f97202b1777c3' ),
 			'original_material_members_manifest_sha256' => '2b304920b0de417aa34d8263629a24bec279052919b0fabb98da207686fa826a',
 			'local_bindings' => ( new StorageScannerTraceWitness( $this->version ) )->bindings() );

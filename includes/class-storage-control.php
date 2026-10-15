@@ -78,8 +78,9 @@ class StorageControl {
 	}
 
 	/** No cached negatives, INSERT IGNORE, collation equality or unowned delete. */
-	public function cas( $name, $old, $new, $source_guard = null, $maintenance_raw = null ) {
+	public function cas( $name, $old, $new, $source_guard = null, $maintenance_raw = null, $deadline = null ) {
 		$this->context(); $this->name( $name );
+		if ( null !== $deadline && ( ( ! is_float( $deadline ) && ! is_int( $deadline ) ) || ! is_finite( (float) $deadline ) ) ) { self::fail(); }
 		if ( ( null !== $old && ( ! is_string( $old ) || strlen( $old ) > self::MAX_BYTES ) ) ||
 			( null !== $new && ( ! is_string( $new ) || strlen( $new ) > self::MAX_BYTES ) ) || ( null === $old && null === $new ) ) { self::fail(); }
 		if ( null === $old ) {
@@ -96,6 +97,8 @@ class StorageControl {
 			$sql .= $this->source_guard( $source_guard );
 		}
 		if ( null !== $maintenance_raw ) { $sql .= $this->maintenance_guard( $maintenance_raw ); }
+		// Trusted caller's entry fence, not interruption of query/SHA2/readback.
+		if ( null !== $deadline && microtime( true ) >= $deadline ) { self::fail(); }
 		$result = $this->db->query( $sql );
 		if ( 1 !== $result || ! empty( $this->db->last_error ) ) { self::fail(); }
 		wp_cache_delete( $name, 'options' ); wp_cache_delete( 'alloptions', 'options' ); wp_cache_delete( 'notoptions', 'options' );
