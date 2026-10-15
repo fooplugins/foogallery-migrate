@@ -272,6 +272,8 @@ function current_user_can( $capability, ...$args ) {
 	return true;
 }
 
+function wp_create_nonce( $action = -1 ) { return 'nonce-' . $action; }
+
 function wp_verify_nonce( $nonce, $action = -1 ) {
 	$expected = isset( $GLOBALS['foogallery_migrate_test_nonce'] ) ? $GLOBALS['foogallery_migrate_test_nonce'] : array();
 	return isset( $expected['action'], $expected['value'], $expected['result'] ) &&

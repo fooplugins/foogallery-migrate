@@ -29,6 +29,9 @@ $active = is_multisite() ? get_site_option( 'active_sitewide_plugins', null ) : 
 $initial = array( 'fixture' => array( 'ordered' => array( '009', false, null, -0.0 ) ) );
 try {
 	$check( $absent(), 'ordinary plugin bootstrap creates no tables' );
+	$cli = WP_CLI::runcommand( 'foogallery-migrate storage status', array( 'return' => 'all', 'exit_error' => false, 'launch' => false ) );
+	$cli_status = json_decode( trim( $cli->stdout ), true );
+	$check( 0 === $cli->return_code && is_array( $cli_status ) && 'option' === $cli_status['backend'] && $absent(), 'registered actual CLI status never provisions' );
 	$r = $request( 'table' ); $r['nonce'] = 'wrong';
 	$check( is_wp_error( $receiver->dispatch( 'switch', $r ) ) && $absent(), 'wrong nonce never provisions' );
 	$check( is_wp_error( ( new StorageOperations() )->dispatch( 'switch', $request( 'table' ) ) ) && $absent(), 'missing calibration never provisions' );
@@ -61,6 +64,12 @@ try {
 	$check( is_array( $record ) && 'table' === $record['backend'], 'normal runtime factory observes table authority' );
 	$trusted_profile = function () use ( $profile ) { return $profile; };
 	add_filter( 'foogallery_migrate_storage_calibration', $trusted_profile );
+	$cli = WP_CLI::runcommand( 'foogallery-migrate storage switch --target=option --confirm=switch-to-option', array( 'return' => 'all', 'exit_error' => false, 'launch' => false ) );
+	$cli_reverse = json_decode( trim( $cli->stdout ), true );
+	$check( 0 === $cli->return_code && is_array( $cli_reverse ) && 'option' === $cli_reverse['backend'] && $initial === get_option( FOOGALLERY_MIGRATE_OPTION_DATA ), 'actual CLI shares calibrated receiver and reverses exact logical state' );
+	$cli = WP_CLI::runcommand( 'foogallery-migrate storage replace --target=table --confirm=replace-retained-with-table', array( 'return' => 'all', 'exit_error' => false, 'launch' => false ) );
+	$cli_replace = json_decode( trim( $cli->stdout ), true );
+	$check( 0 === $cli->return_code && is_array( $cli_replace ) && 'table' === $cli_replace['backend'], 'actual CLI uses distinct retained-replacement purpose' );
 	$status = StorageAdmin::status();
 	remove_filter( 'foogallery_migrate_storage_calibration', $trusted_profile );
 	$check( $status['calibrated'], 'operator status uses the same trusted profile filter as public receiver' );

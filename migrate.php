@@ -38,6 +38,9 @@ if ( require_once FOOGM_PATH . 'includes/startup-checks.php' ) {
 
     // Production uses the native loader; Composer is for development tools only.
     spl_autoload_register( 'foogallery_migrate_autoloader' );
+    if ( defined( 'WP_CLI' ) && WP_CLI ) {
+        FooPlugins\FooGalleryMigrate\StorageCli::register();
+    }
 
     register_activation_hook( FOOGM_FILE, 'foogallery_migrate_activate' );
     register_deactivation_hook( FOOGM_FILE, 'foogallery_migrate_deactivate' );
