@@ -98,6 +98,7 @@ for topology in single multi; do
   fi
   skips=(--skip-plugins --skip-themes)
   if [[ "$CASE" == storage-aigpl* ]]; then
+    "$COVE" wp "$site" --skip-plugins --skip-themes config set DISABLE_WP_CRON true --raw > "$OUT/raw/$topology-disable-cron.txt" 2>&1
     activate=--activate
     [[ "$topology" != multi ]] || activate=--activate-network
     "$COVE" wp "$site" --skip-plugins --skip-themes plugin install foogallery "$activate" > "$OUT/raw/$topology-foogallery-install.txt" 2>&1
