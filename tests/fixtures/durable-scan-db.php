@@ -18,6 +18,9 @@ namespace FooPlugins\FooGalleryMigrate\Tests {
         public $sha_bytes = 0;
         public $queries = array();
         public $fault = '';
+        public $autocommit = '1';
+        public $ambient_transaction = false;
+        public $idle_query_failure = false;
         public function __construct($rows = array()) { $this->rows = $rows; }
         public function is_current() { return true; }
         public function prepare($sql, $args) { $args = is_array($args) ? $args : array_slice(func_get_args(), 1); return $sql . ' /*SCANARGS ' . base64_encode(serialize($args)) . ' */'; }
@@ -28,6 +31,7 @@ namespace FooPlugins\FooGalleryMigrate\Tests {
         }
         public function get_var($sql) {
             $this->queries[] = $sql; $this->last_error = '';
+            if ('SELECT @@SESSION.autocommit' === $sql) { return $this->autocommit; }
             $all = $this->args($sql); $args = $all ? $all[0] : array();
             if (0 === strpos($sql, 'SHOW TABLES')) { return null; }
             if (false !== strpos($sql, 'option_name IN')) {
@@ -52,6 +56,10 @@ namespace FooPlugins\FooGalleryMigrate\Tests {
         }
         public function query($sql) {
             $this->queries[] = $sql; $this->last_error = '';
+            if ('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ' === $sql) {
+                if ($this->ambient_transaction || $this->idle_query_failure) { $this->last_error = 'Transaction characteristic change refused'; return false; }
+                return 0;
+            }
             $all = $this->args($sql); $a = $all[0];
             $insert = 0 === strpos($sql, 'INSERT');
             $update = 0 === strpos($sql, 'UPDATE');

@@ -146,6 +146,24 @@ class LegacyOptionDurableScanTest extends TestCase {
         }
         $this->assertSame(strlen($raw), $r['offset']);
     }
+    public function test_durable_receipts_refuse_non_idle_connections_before_any_owned_write(): void {
+        foreach (array('autocommit', 'ambient_transaction', 'idle_query_failure') as $mode) {
+            foreach (array('start', 'advance', 'status') as $entry) {
+                $db = $this->fresh(array(FOOGALLERY_MIGRATE_OPTION_DATA => $this->source));
+                $r = 'start' === $entry ? null : LegacyOptionDurableScan::start($this->policy(), 257, 53, 1);
+                $before = $db->rows; $reads = $db->raw_reads; $db->queries = array();
+                $db->$mode = 'autocommit' === $mode ? '0' : true;
+                $this->refused(function() use ($entry, $r) {
+                    if ('start' === $entry) { LegacyOptionDurableScan::start($this->policy()); }
+                    elseif ('advance' === $entry) { $this->next($r); }
+                    else { LegacyOptionDurableScan::status($r['switch_id']); }
+                });
+                $this->assertSame($before, $db->rows);
+                $this->assertSame($reads, $db->raw_reads);
+                foreach ($db->queries as $sql) { $this->assertDoesNotMatchRegularExpression('/^(INSERT|UPDATE|DELETE|START TRANSACTION|COMMIT|ROLLBACK)/', $sql); }
+            }
+        }
+    }
     public function test_step_and_acquisition_caps_are_not_enlarged(): void {
         $this->refused(function() { LegacyOptionDurableScan::start($this->policy(), 65537, 53, 1); });
         $this->assertArrayNotHasKey(StorageAuthority::CONTROL_OPTION, $GLOBALS['wpdb']->rows);

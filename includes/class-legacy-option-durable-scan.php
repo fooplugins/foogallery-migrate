@@ -31,6 +31,7 @@ final class LegacyOptionDurableScan {
 		$this->prefix = $wpdb->prefix; $this->blog = get_current_blog_id();
 		$this->controls = new StorageControl( $this->connection, $this->blog );
 		$this->policy = $policy; $this->memory = new StorageMemoryBaseline();
+		$this->idle_connection();
 	}
 	private function __clone() {}
 	public function __sleep() { self::fail(); }
@@ -125,7 +126,18 @@ final class LegacyOptionDurableScan {
 		$r = StoragePreflight::decode_budget( $bytes, ini_get( 'memory_limit' ), $this->memory->sample(), $this->policy );
 		if ( is_wp_error( $r ) || true !== $r['decode_admitted'] ) { self::fail(); }
 	}
+	/** A same-session readback inside someone else's transaction is not durable.
+	 * Match the existing repository guard: SET without SESSION/GLOBAL refuses
+	 * active transactions without committing or rolling back the caller's work.
+	 */
+	private function idle_connection() {
+		$db = $this->connection;
+		$mode = $db->get_var( 'SELECT @@SESSION.autocommit' );
+		if ( ! empty( $db->last_error ) || '1' !== (string) $mode ||
+			false === $db->query( 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ' ) || ! empty( $db->last_error ) ) { self::fail(); }
+	}
 	private function ready() {
+		$this->idle_connection();
 		if ( true !== $this->gate->maintenance_ready( array( 'FooPlugins\\FooGalleryMigrate\\MigratorEngine', 'storage_maintenance_is_quiescent' ) ) ) { self::fail(); }
 	}
 	private function read_verified() { return $this->verify( $this->controls->read( StorageAuthority::CONTROL_OPTION ) ); }
