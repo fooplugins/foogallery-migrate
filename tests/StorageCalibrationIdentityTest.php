@@ -27,7 +27,7 @@ class StorageCalibrationIdentityTest extends TestCase {
 		$GLOBALS['wp_version'] = '6.9-test';
 		try {
 			$identity = StorageCalibration::identity();
-			foreach ( array( 'legacy-option-decoder', 'legacy-collection-envelope', 'migrator-settings', 'content-scan-repository', 'image-tag-queue-repository' ) as $class ) {
+			foreach ( array( 'legacy-option-decoder', 'legacy-collection-envelope', 'migrator-settings', 'content-scan-repository', 'image-tag-queue-repository', 'storage-memory-baseline' ) as $class ) {
 				$this->assertSame( hash_file( 'sha256', dirname( __DIR__ ) . '/includes/class-' . $class . '.php' ), $identity[$class] );
 			}
 			foreach ( array( 'USE_ZEND_ALLOC', 'ZEND_MM_SEG_SIZE', 'ZEND_MM_MEM_TYPE', 'ZEND_MM_COMPACT' ) as $name ) {

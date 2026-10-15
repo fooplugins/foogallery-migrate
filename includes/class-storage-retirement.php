@@ -18,8 +18,9 @@ class StorageRetirement {
 	private $blog;
 	private $policy;
 	private $deadline;
+	private $memory;
 
-	public function __construct( $connection, $prefix, $blog, $policy, $deadline ) {
+	public function __construct( $connection, $prefix, $blog, $policy, $deadline, $memory = null ) {
 		if ( ! ( $connection instanceof LegacyTransactionConnection ) || ! is_int( $blog ) || $blog < 1 ||
 			! is_string( $prefix ) || ! preg_match( '/^[A-Za-z0-9_]+$/D', $prefix ) ||
 			! preg_match( '/^[A-Za-z0-9_]+$/D', $connection->base_prefix ) ) { $this->fail(); }
@@ -27,6 +28,7 @@ class StorageRetirement {
 		$this->states = $connection->base_prefix . StorageAuthority::SHARED_STATE_TABLE_SUFFIX;
 		$this->records = $connection->base_prefix . StorageAuthority::SHARED_RECORDS_TABLE_SUFFIX;
 		$this->policy = $policy; $this->deadline = $deadline;
+		$this->memory = null === $memory ? new StorageMemoryBaseline() : $memory;
 	}
 
 	/** Uncontrolled/proposed/orphan state is evidence, never a first-import target. */
@@ -56,7 +58,7 @@ class StorageRetirement {
 			$count = $this->rows( $this->db->prepare( 'SELECT COUNT(*) AS n FROM `' . $table . '` WHERE blog_id = %d', array( $this->blog ) ) );
 			if ( 1 !== count( $count ) || (int) $count[0]['n'] > 10000 ) { $this->fail(); }
 			$limit = (int) $count[0]['n'] + 1;
-			$budget = StoragePreflight::decode_budget( $limit * 256, ini_get( 'memory_limit' ), memory_get_usage( true ), $this->policy );
+			$budget = StoragePreflight::decode_budget( $limit * 256, ini_get( 'memory_limit' ), $this->memory->sample(), $this->policy );
 			if ( is_wp_error( $budget ) ) { $this->fail(); }
 			$sql = 'SELECT id, (' . implode( ' + ', $lengths ) . ') AS bytes, SHA2(CONCAT(' . implode( ', ', $hashes ) . '), 256) AS digest FROM `' . $table . '` WHERE blog_id = %d ORDER BY id LIMIT ' . $limit;
 			$rows = $this->rows( $this->db->prepare( $sql . ( $lock ? ' FOR UPDATE' : '' ), array( $this->blog ) ) );

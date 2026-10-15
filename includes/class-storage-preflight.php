@@ -12,15 +12,17 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 class StoragePreflight {
 	private $wpdb;
 	private $policy;
+	private $incoming_memory;
 
 	/**
 	 * Policy must come from trusted, benchmarked server configuration, never POST.
 	 * There is deliberately no default amplification factor or raw-size ceiling.
 	 */
-	public function __construct( $database = null, $policy = null ) {
+	public function __construct( $database = null, $policy = null, $memory = null ) {
 		global $wpdb;
 		$this->wpdb = null === $database ? $wpdb : $database;
 		$this->policy = $policy;
+		$this->incoming_memory = $memory;
 	}
 
 	/**
@@ -32,6 +34,8 @@ class StoragePreflight {
 	 * @return array|\WP_Error
 	 */
 	public function option_import( $request ) {
+		$memory = null === $this->incoming_memory ? new StorageMemoryBaseline() : $this->incoming_memory;
+		$this->incoming_memory = null; $memory->sample();
 		if ( ! current_user_can( 'manage_options' ) ) {
 			return self::error( 'forbidden', 'You are not authorized to inspect migration storage.' );
 		}
@@ -55,7 +59,7 @@ class StoragePreflight {
 		}
 		$bytes = $this->option_size();
 		if ( is_wp_error( $bytes ) ) { return $bytes; }
-		$budget = self::decode_budget( $bytes, ini_get( 'memory_limit' ), memory_get_usage( true ), $this->policy );
+		$budget = self::decode_budget( $bytes, ini_get( 'memory_limit' ), $memory->sample(), $this->policy );
 		if ( is_wp_error( $budget ) ) { return $budget; }
 		$budget['blog_id'] = $blog_id;
 		$budget['conversion_ready'] = false;

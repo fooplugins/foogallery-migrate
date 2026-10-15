@@ -290,6 +290,10 @@ function wp_send_json_error( $data = null, $status_code = null, $flags = 0 ) {
 	throw new FooGalleryMigrateTestJsonResponse( $data, $status_code );
 }
 
+function wp_send_json_success( $data = null, $status_code = null, $flags = 0 ) {
+	throw new FooGalleryMigrateTestJsonResponse( $data, $status_code );
+}
+
 function sanitize_text_field( $value ) {
 	return is_scalar( $value ) ? trim( (string) $value ) : '';
 }

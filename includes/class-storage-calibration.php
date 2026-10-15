@@ -37,7 +37,7 @@ class StorageCalibration {
 			$runtime[$setting] = ini_get( $setting );
 		}
 		// These bytes define the bounded coordinator and its hydration/staging path.
-		foreach ( array( 'storage-calibration', 'storage-operations', 'storage-conversion', 'storage-retirement', 'storage-preflight',
+		foreach ( array( 'storage-calibration', 'storage-operations', 'storage-conversion', 'storage-retirement', 'storage-preflight', 'storage-memory-baseline',
 			'legacy-option-decoder', 'legacy-collection-envelope', 'legacy-state-codec', 'legacy-record-codec', 'legacy-table-snapshot', 'legacy-table-reader',
 			'legacy-transaction-connection', 'storage-control', 'storage-maintenance-gate', 'storage-authority',
 			'legacy-storage-schema', 'migrator-settings', 'content-scan-repository', 'image-tag-queue-repository', 'migrator-engine', 'init' ) as $class ) {

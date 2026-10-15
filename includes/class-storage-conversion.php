@@ -21,12 +21,15 @@ class StorageConversion {
 	private $snapshot;
 	private $codec;
 	private $deadline;
+	private $incoming_memory;
+	private $memory;
 
 	/** Policy must come from trusted runtime calibration, never request fields. */
-	public function __construct( $policy = null ) {
+	public function __construct( $policy = null, $memory = null ) {
 		global $wpdb;
 		$this->db = $wpdb; $this->blog = get_current_blog_id(); $this->prefix = $wpdb->prefix;
 		$this->policy = $policy; $this->controls = new StorageControl( $wpdb, $this->blog );
+		$this->incoming_memory = $memory;
 		$this->codec = new LegacyStateCodec();
 	}
 
@@ -41,9 +44,10 @@ class StorageConversion {
 	}
 
 	private function switch_storage( $request, $replacement ) {
+		$this->start_memory();
 		$authorized = self::authorize_request( $request, false, $this->blog, $replacement );
 		if ( is_wp_error( $authorized ) ) { return $authorized; }
-		$budget = StoragePreflight::decode_budget( 0, ini_get( 'memory_limit' ), memory_get_usage( true ), $this->policy );
+		$budget = StoragePreflight::decode_budget( 0, ini_get( 'memory_limit' ), $this->memory->sample(), $this->policy );
 		if ( is_wp_error( $budget ) ) { return $budget; }
 		try {
 			$this->begin();
@@ -56,7 +60,7 @@ class StorageConversion {
 			$from = null === $previous ? 'option' : $previous['backend'];
 			$this->require_true( $from !== $request['target'] );
 			$this->storage(); // Verified existing schema only; never DDL here.
-			$retirement = new StorageRetirement( $this->connection, $this->prefix, $this->blog, $this->policy, $this->deadline );
+			$retirement = new StorageRetirement( $this->connection, $this->prefix, $this->blog, $this->policy, $this->deadline, $this->memory );
 			if ( $replacement ) {
 				$this->require_true( null !== $previous && 2 === $previous['version'] && 'table' === $previous['from'] && 'option' === $previous['to'] && 'option' === $from );
 			}
@@ -94,9 +98,10 @@ class StorageConversion {
 	 * live foreign/expired marker is retained and requires separate safe proof.
 	 */
 	public function recover( $request ) {
+		$this->start_memory();
 		$authorized = self::authorize_request( $request, true, $this->blog );
 		if ( is_wp_error( $authorized ) ) { return $authorized; }
-		$budget = StoragePreflight::decode_budget( 0, ini_get( 'memory_limit' ), memory_get_usage( true ), $this->policy );
+		$budget = StoragePreflight::decode_budget( 0, ini_get( 'memory_limit' ), $this->memory->sample(), $this->policy );
 		if ( is_wp_error( $budget ) ) { return $budget; }
 		try {
 			$this->begin(); $this->storage();
@@ -129,6 +134,7 @@ class StorageConversion {
 	}
 
 	private function begin() {
+		$this->memory->sample();
 		$this->deadline = microtime( true ) + 10;
 		$this->gate = StorageMaintenanceGate::current();
 		$this->connection = $this->gate->connection();
@@ -154,6 +160,8 @@ class StorageConversion {
 	}
 
 	private function advance( $r, $source ) {
+		// Record and source are already live here; keep their backing charged.
+		$this->memory->sample();
 		if ( 'copying' === $r['phase'] ) {
 			$this->ready();
 			if ( 'table' === $r['to'] ) {
@@ -293,8 +301,14 @@ class StorageConversion {
 	}
 
 	private function budget( $bytes ) {
-		$result = StoragePreflight::decode_budget( $bytes, ini_get( 'memory_limit' ), memory_get_usage( true ), $this->policy );
+		$result = StoragePreflight::decode_budget( $bytes, ini_get( 'memory_limit' ), $this->memory->sample(), $this->policy );
 		$this->require_true( ! is_wp_error( $result ) && true === $result['decode_admitted'] );
+	}
+
+	/** Consume receiver context once; direct/reused coordinators get a fresh operation. */
+	private function start_memory() {
+		$this->memory = null === $this->incoming_memory ? new StorageMemoryBaseline() : $this->incoming_memory;
+		$this->incoming_memory = null; $this->memory->sample();
 	}
 
 	private function heads() {

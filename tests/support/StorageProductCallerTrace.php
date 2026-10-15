@@ -12,8 +12,8 @@ class StorageProductCallerTrace {
 	}
 	public function bindings() {
 		return array( 'product_files' => array(
-			'includes/class-storage-conversion.php' => '11158f6e31151ace2ed99457ef370e75666561c8c7ad591f7d48aa3a9f0c6073',
-			'includes/class-storage-operations.php' => '35335d238e11ecbaf2caffa1a06a876c97fdd464aecdf2dc1622e219c29816d8',
+			'includes/class-storage-conversion.php' => 'ef8edcef2bfa56e1d2ef1ef4a90e278ac701249c85e51395c0ee615c4d9eeccb',
+			'includes/class-storage-operations.php' => '6564431c7b92e1e5f0e25f046c4c2d0cde7c58dc50afc27864670b47b0872fba',
 			'includes/class-storage-control.php' => '79a800d83585512117a3c672c2df2e6e0b90a7fa8aaa9b1c297c8b085a9615a4',
 			'includes/class-legacy-option-decoder.php' => 'cf7ef2038a5395f70d64f9f2702c3735066a74048cb00dfddc0f97202b1777c3' ),
 			'original_material_members_manifest_sha256' => '2b304920b0de417aa34d8263629a24bec279052919b0fabb98da207686fa826a',
@@ -36,33 +36,33 @@ class StorageProductCallerTrace {
 	public function paths() {
 		$out = array();
 		foreach ( array( 'switch', 'replace', 'recover' ) as $operation ) {
-			foreach ( array( 'direct' => null, 'copying' => 177, 'verified' => 184, 'flipped' => 205 ) as $phase => $line ) {
+			foreach ( array( 'direct' => null, 'copying' => 185, 'verified' => 192, 'flipped' => 213 ) as $phase => $line ) {
 				// Replacement is authorized ONLY toward table. Its advance branches
 				// use table_snapshot, never the option decode being modeled here.
 				if ( 'replace' === $operation && null !== $line ) { continue; }
 				foreach ( array( false, true ) as $handle ) {
 					$f = array( $this->frame( 'StorageConversion', 'option_snapshot', array() ) );
-					$e = array( $this->edge( 'conversion', 276, 'decode', '->decode( $raw )' ) );
+					$e = array( $this->edge( 'conversion', 284, 'decode', '->decode( $raw )' ) );
 					if ( null !== $line ) {
 						$f[] = $this->frame( 'StorageConversion', 'advance', array( 'record', 'source' ) );
 						$e[] = $this->edge( 'conversion', $line, 'option_snapshot', '$this->option_snapshot()' );
 					}
 					if ( 'recover' === $operation ) {
 						$f[] = $this->frame( 'StorageConversion', 'recover', array( 'request' ) );
-						$e[] = $this->edge( 'conversion', null === $line ? 107 : 110, null === $line ? 'option_snapshot' : 'advance', null === $line ? '$this->option_snapshot()' : '$this->advance( $r, $source )' );
+						$e[] = $this->edge( 'conversion', null === $line ? 112 : 115, null === $line ? 'option_snapshot' : 'advance', null === $line ? '$this->option_snapshot()' : '$this->advance( $r, $source )' );
 					} else {
 						$f[] = $this->frame( 'StorageConversion', 'switch_storage', array( 'request', 'replacement' ) );
-						$e[] = $this->edge( 'conversion', null === $line ? 63 : 87, null === $line ? 'option_snapshot' : 'advance', null === $line ? '$this->option_snapshot()' : '$this->advance( $record, $source )' );
+						$e[] = $this->edge( 'conversion', null === $line ? 67 : 91, null === $line ? 'option_snapshot' : 'advance', null === $line ? '$this->option_snapshot()' : '$this->advance( $record, $source )' );
 						$method = 'replace' === $operation ? 'replace_retained' : 'switch_backend';
 						$f[] = $this->frame( 'StorageConversion', $method, array( 'request' ) );
-						$e[] = $this->edge( 'conversion', 'replace' === $operation ? 40 : 35, 'switch_storage', '$this->switch_storage( $request, ' . ( 'replace' === $operation ? 'true' : 'false' ) . ' )' );
+						$e[] = $this->edge( 'conversion', 'replace' === $operation ? 43 : 38, 'switch_storage', '$this->switch_storage( $request, ' . ( 'replace' === $operation ? 'true' : 'false' ) . ' )' );
 					}
 					$f[] = $this->frame( 'StorageOperations', 'dispatch', array( 'operation', 'request' ) );
 					$callee = 'recover' === $operation ? 'recover' : ( 'replace' === $operation ? 'replace_retained' : 'switch_backend' );
-					$e[] = $this->edge( 'operations', 'replace' === $operation ? 30 : 31, $callee, '->' . $callee . '( $request )' );
+					$e[] = $this->edge( 'operations', 'replace' === $operation ? 35 : 36, $callee, '->' . $callee . '( $request )' );
 					if ( $handle ) {
 						$f[] = $this->frame( 'StorageOperations', 'handle', array() );
-						$e[] = $this->edge( 'operations', 48, 'dispatch', '->dispatch( $operation, $request )' );
+						$e[] = $this->edge( 'operations', 57, 'dispatch', '->dispatch( $operation, $request )' );
 					}
 					$out[] = array( 'operation' => $operation, 'phase' => $phase, 'receiver_handle' => $handle,
 						'decode_direction' => null === $line ? 'option_to_table' : 'table_to_option',
