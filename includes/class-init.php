@@ -27,6 +27,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
 		 */
 		public function __construct() {
             add_action( 'admin_notices', array($this, 'foogallery_check') );
+            add_action( 'admin_menu', array( 'FooPlugins\\FooGalleryMigrate\\StorageAdmin', 'register' ) );
 
             add_action( 'foogallery_admin_menu_after', array( $this, 'add_menu' ) );
 
