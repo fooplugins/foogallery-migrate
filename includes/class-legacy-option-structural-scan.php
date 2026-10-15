@@ -50,6 +50,17 @@ class LegacyOptionStructuralScan {
 			'token' => '', 'remaining' => 0, 'key_prefix' => '' );
 	}
 
+	/** Only the final server-owned adapter can admit portable parser state. */
+	public static function owned( $raw, LegacyOptionDurableScan $owner ) {
+		$scanner = new self( $raw );
+		$state = $owner->take_state( $scanner->digest, $scanner->length );
+		if ( null !== $state ) {
+			$scanner->state = $state['parser'];
+			$scanner->sequence = $state['generation'];
+		}
+		return $scanner;
+	}
+
 	private function __clone() {}
 	public function __sleep() { $this->fail(); }
 	public function __wakeup() { $this->fail(); }

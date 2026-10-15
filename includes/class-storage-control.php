@@ -27,22 +27,30 @@ class StorageControl {
 		$r = json_decode( $raw, true, 8 );
 		$keys = array( 'version', 'blog_id', 'backend', 'epoch', 'switch_id', 'from', 'to', 'phase', 'table_id',
 			'source_digest', 'logical_digest', 'schema', 'codec', 'created', 'updated' );
-		if ( is_array( $r ) && isset( $r['version'] ) && 2 === $r['version'] ) { $keys[] = 'retained_digest'; }
+		$scan = is_array( $r ) && isset( $r['version'] ) && 3 === $r['version'];
+		if ( is_array( $r ) && isset( $r['version'] ) && in_array( $r['version'], array( 2, 3 ), true ) ) { $keys[] = 'retained_digest'; }
+		if ( $scan ) { $keys[] = 'scan'; }
 		if ( JSON_ERROR_NONE !== json_last_error() || ! is_array( $r ) || array_keys( $r ) !== $keys || json_encode( $r ) !== $raw ||
-			! in_array( $r['version'], array( 1, 2 ), true ) || $blog !== $r['blog_id'] || 1 !== $r['schema'] || 1 !== $r['codec'] ||
+			! in_array( $r['version'], array( 1, 2, 3 ), true ) || $blog !== $r['blog_id'] || 1 !== $r['schema'] || 1 !== $r['codec'] ||
 			! is_int( $r['epoch'] ) || $r['epoch'] < 0 || ! is_int( $r['created'] ) || $r['created'] < 1 ||
 			! is_int( $r['updated'] ) || $r['updated'] < $r['created'] ||
 			! in_array( $r['backend'], array( 'option', 'table' ), true ) ||
 			! in_array( $r['from'], array( 'option', 'table' ), true ) ||
 			! in_array( $r['to'], array( 'option', 'table' ), true ) || $r['from'] === $r['to'] ||
-			! in_array( $r['phase'], array( 'copying', 'verified', 'flipped', 'stable' ), true ) ) { self::fail(); }
+			! in_array( $r['phase'], $scan ? array( 'scanning', 'scanned' ) : array( 'copying', 'verified', 'flipped', 'stable' ), true ) ) { self::fail(); }
 		foreach ( array( 'switch_id', 'table_id', 'source_digest', 'logical_digest' ) as $key ) {
+			if ( $scan && 'logical_digest' === $key && null === $r[$key] ) { continue; }
 			$length = in_array( $key, array( 'switch_id', 'table_id' ), true ) ? 32 : 64;
 			if ( ! is_string( $r[$key] ) || ! preg_match( '/^[a-f0-9]{' . $length . '}$/D', $r[$key] ) ) { self::fail(); }
 		}
 		if ( 2 === $r['version'] && ( 'table' === $r['to'] ? null !== $r['retained_digest'] :
 			( ! is_string( $r['retained_digest'] ) || ! preg_match( '/^[a-f0-9]{64}$/D', $r['retained_digest'] ) ) ) ) { self::fail(); }
-		$before_flip = in_array( $r['phase'], array( 'copying', 'verified' ), true );
+		if ( $scan && ( 'option' !== $r['from'] || null !== $r['logical_digest'] || null !== $r['retained_digest'] ||
+			! is_array( $r['scan'] ) || array_keys( $r['scan'] ) !== array( 'generation', 'done', 'parser', 'mac' ) ||
+			! is_int( $r['scan']['generation'] ) || $r['scan']['generation'] < 1 || ! is_bool( $r['scan']['done'] ) ||
+			( 'scanned' === $r['phase'] ) !== $r['scan']['done'] || ! is_array( $r['scan']['parser'] ) ||
+			! is_string( $r['scan']['mac'] ) || ! preg_match( '/^[a-f0-9]{64}$/D', $r['scan']['mac'] ) ) ) { self::fail(); }
+		$before_flip = in_array( $r['phase'], array( 'copying', 'verified', 'scanning', 'scanned' ), true );
 		if ( $r['backend'] !== ( $before_flip ? $r['from'] : $r['to'] ) ||
 			( ! $before_flip && $r['epoch'] < 1 ) || ( 'table' === $r['backend'] && $r['epoch'] < 1 ) ||
 			( 'table' === $r['to'] && $r['table_id'] !== $r['switch_id'] ) ) { self::fail(); }
@@ -76,14 +84,15 @@ class StorageControl {
 			( null !== $new && ( ! is_string( $new ) || strlen( $new ) > self::MAX_BYTES ) ) || ( null === $old && null === $new ) ) { self::fail(); }
 		if ( null === $old ) {
 			$sql = $this->db->prepare( 'INSERT INTO `' . $this->prefix . "options` ( option_name, option_value, autoload )" .
-				( null === $maintenance_raw ? " VALUES ( %s, %s, 'no' )" : " SELECT %s, %s, 'no' WHERE 1 = 1" ), array( $name, $new ) );
+				( null === $maintenance_raw && null === $source_guard ? " VALUES ( %s, %s, 'no' )" : " SELECT %s, %s, 'no' WHERE 1 = 1" ), array( $name, $new ) );
 		} elseif ( null === $new ) {
 			$sql = $this->db->prepare( 'DELETE FROM `' . $this->prefix . 'options` WHERE option_name = %s AND BINARY option_value = BINARY %s', array( $name, $old ) );
 		} else {
 			$sql = $this->db->prepare( 'UPDATE `' . $this->prefix . "options` SET option_value = %s, autoload = 'no' WHERE option_name = %s AND BINARY option_value = BINARY %s", array( $new, $name, $old ) );
 		}
 		if ( null !== $source_guard ) {
-			if ( StorageAuthority::CONTROL_OPTION !== $name || null === $old || null === $new ) { self::fail(); }
+			if ( StorageAuthority::CONTROL_OPTION !== $name || null === $new ||
+				( null === $old && ( null === $maintenance_raw || ! is_array( $source_guard ) || ! isset( $source_guard['kind'] ) || 'option' !== $source_guard['kind'] ) ) ) { self::fail(); }
 			$sql .= $this->source_guard( $source_guard );
 		}
 		if ( null !== $maintenance_raw ) { $sql .= $this->maintenance_guard( $maintenance_raw ); }
