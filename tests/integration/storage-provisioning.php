@@ -7,6 +7,7 @@ use FooPlugins\FooGalleryMigrate\StorageAuthority;
 use FooPlugins\FooGalleryMigrate\StorageCalibration;
 use FooPlugins\FooGalleryMigrate\StorageOperations;
 use FooPlugins\FooGalleryMigrate\StorageControl;
+use FooPlugins\FooGalleryMigrate\StorageAdmin;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
 global $wpdb;
@@ -58,8 +59,12 @@ try {
 	$check( null === $wpdb->get_var( $wpdb->prepare( 'SELECT 1 FROM `' . $main_options . '` WHERE option_name=%s', LegacyStorageSchema::LOCK_OPTION ) ), 'owned installation schema lock released' );
 	$record = StorageAuthority::runtime_record();
 	$check( is_array( $record ) && 'table' === $record['backend'], 'normal runtime factory observes table authority' );
+	$status = StorageAdmin::status();
+	$check( 'table' === $status['backend'] && 'verified' === $status['schema'] && null !== $status['records'], 'operator status reads verified real table metadata without a missing schema API' );
 	$result = $receiver->dispatch( 'switch', $request( 'option' ) );
 	$check( ! is_wp_error( $result ) && $initial === get_option( FOOGALLERY_MIGRATE_OPTION_DATA ), 'public reverse switch preserves exact logical state' );
+	$status = StorageAdmin::status();
+	$check( 'option' === $status['backend'] && $status['retained'] && '' === $status['problem'], 'operator status remains usable after reverse with retained copy' );
 } finally {
 	foreach ( $names as $name ) { delete_option( $name ); }
 	foreach ( array_reverse( $tables ) as $table ) { $wpdb->query( 'DROP TABLE IF EXISTS `' . $table . '`' ); }
