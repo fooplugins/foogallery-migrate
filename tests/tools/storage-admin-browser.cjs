@@ -12,6 +12,14 @@ function check(ok, label) { if (!ok) throw new Error(label); checks.push(label);
     const context = await browser.newContext({ ignoreHTTPSErrors: true });
     await context.addCookies(config.cookies);
     const page = await context.newPage();
+    const captured = [];
+    // Forward the real request unchanged and retain its real response before
+    // the product's immediate success reload invalidates Chromium's body ID.
+    await page.route('**/wp-admin/admin-post.php', async route => {
+      const response = await route.fetch({ maxRetries: 0, maxRedirects: 0, timeout: 30000 });
+      const body = await response.body(); captured.push({ status: response.status(), body: JSON.parse(body.toString()) });
+      await route.fulfill({ response, body });
+    });
     await page.goto(config.url, { waitUntil: 'networkidle' });
     if (config.warm) { console.log(JSON.stringify({ status: 'pass', warm: true })); return; }
     check((await page.locator('h1').allTextContents()).includes('FooGallery Migration Storage'), 'real activated admin menu route renders operator page');
@@ -20,11 +28,12 @@ function check(ok, label) { if (!ok) throw new Error(label); checks.push(label);
     const submit = async (confirmation) => {
       const form = page.locator('form.foogm-storage-form').filter({ has: page.locator('input[value="' + confirmation + '"]') });
       await form.locator('input[type=checkbox]').check();
+      const index = captured.length;
       const waiting = page.waitForResponse(r => r.url().includes('/admin-post.php') && r.request().method() === 'POST');
       await form.locator('button').click();
-      const response = await waiting; const body = await response.json();
+      await waiting; const { status, body } = captured[index];
       if (body.success) { await page.waitForLoadState('networkidle'); await page.waitForTimeout(150); }
-      return { status: response.status(), body };
+      return { status, body };
     };
     const denied = await submit('switch-to-table');
     check(denied.status === 409 && !denied.body.success && denied.body.data.code === 'foogallery_migrate_storage_calibration_required', 'actual no-profile HTTP POST safely refuses: ' + JSON.stringify(denied));

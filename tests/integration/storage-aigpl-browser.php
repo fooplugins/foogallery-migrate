@@ -12,6 +12,10 @@ foreach ( array( LegacyStorageSchema::VERSION_OPTION, LegacyStorageSchema::LOCK_
 $names = array( FOOGALLERY_MIGRATE_OPTION_DATA, FOOGALLERY_MIGRATE_OPTION_SETTINGS, StorageAuthority::CONTROL_OPTION, StorageAuthority::AUTHORITY_OPTION, StorageAuthority::MAINTENANCE_OPTION, StorageAuthority::STORAGE_BACKUP_OPTION, 'active_plugins' );
 $missing = new stdClass(); $saved = array(); foreach ( $names as $name ) { $saved[$name] = get_option( $name, $missing ); }
 $network_active = is_multisite() ? get_site_option( 'active_sitewide_plugins', null ) : null;
+// Only restore this third-party SDK's observed sticky-admin-notice state;
+// never normalize or whitelist storage/plugin data in the strict dump diff.
+$sdk_row = $wpdb->get_row( $wpdb->prepare( 'SELECT option_value,autoload FROM `' . $wpdb->options . '` WHERE option_name=%s', 'fs_accounts' ), ARRAY_A );
+$sdk_network = is_multisite() ? $wpdb->get_row( $wpdb->prepare( 'SELECT meta_value FROM `' . $wpdb->sitemeta . '` WHERE site_id=%d AND meta_key=%s', get_current_network_id(), 'fs_accounts' ), ARRAY_A ) : null;
 $old_sessions = get_user_meta( 1, 'session_tokens', true ); $had_sessions = metadata_exists( 'user', 1, 'session_tokens' );
 $profile_path = WPMU_PLUGIN_DIR . '/fgm-owned-browser-' . wp_generate_password( 12, false, false ) . '.php';
 if ( file_exists( $profile_path ) ) { throw new RuntimeException( 'Refusing existing profile path.' ); }
@@ -37,6 +41,8 @@ try {
 	foreach ( array_reverse( $tables ) as $table ) { $wpdb->query( 'DROP TABLE IF EXISTS `' . $table . '`' ); }
 	foreach ( $saved as $name => $value ) { if ( $missing === $value ) { delete_option( $name ); } else { update_option( $name, $value ); } }
 	foreach ( array( LegacyStorageSchema::VERSION_OPTION, LegacyStorageSchema::LOCK_OPTION ) as $name ) { $wpdb->query( $wpdb->prepare( 'DELETE FROM `' . $main_options . '` WHERE option_name=%s', $name ) ); }
+	if ( null !== $sdk_row ) { $wpdb->query( $wpdb->prepare( 'UPDATE `' . $wpdb->options . '` SET option_value=%s,autoload=%s WHERE option_name=%s', $sdk_row['option_value'], $sdk_row['autoload'], 'fs_accounts' ) ); }
+	if ( null !== $sdk_network ) { $wpdb->query( $wpdb->prepare( 'UPDATE `' . $wpdb->sitemeta . '` SET meta_value=%s WHERE site_id=%d AND meta_key=%s', $sdk_network['meta_value'], get_current_network_id(), 'fs_accounts' ) ); }
 	if ( $had_sessions ) { update_user_meta( 1, 'session_tokens', $old_sessions ); } else { delete_user_meta( 1, 'session_tokens' ); }
 	if ( is_multisite() ) { if ( null !== $network_active ) { update_site_option( 'active_sitewide_plugins', $network_active ); } else { delete_site_option( 'active_sitewide_plugins' ); } }
 }
