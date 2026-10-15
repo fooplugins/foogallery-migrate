@@ -79,7 +79,7 @@ class StorageAdmin {
 			for (var i = 0; i < forms.length; i++) { forms[i].addEventListener('submit', function (event) {
 				event.preventDefault(); var form = this, button = form.querySelector('button'), xhr = new XMLHttpRequest();
 				button.disabled = true; result.textContent = '';
-				xhr.open('POST', form.action); xhr.timeout = 30000;
+				xhr.open('POST', form.getAttribute('action')); xhr.timeout = 30000;
 				xhr.onload = function () { button.disabled = false; try { var data = JSON.parse(xhr.responseText); result.textContent = data.data.message; if (data.success) { window.location.reload(); } } catch (error) { result.textContent = <?php echo wp_json_encode( __( 'The response could not be read. Reload to inspect the recorded phase before retrying; no automatic retry was sent.', 'foogallery-migrate' ) ); ?>; } };
 				xhr.onerror = xhr.ontimeout = function () { button.disabled = false; result.textContent = <?php echo wp_json_encode( __( 'The connection ended. Reload to inspect the recorded phase before retrying; the operation may have persisted.', 'foogallery-migrate' ) ); ?>; };
 				xhr.send(new FormData(form));
