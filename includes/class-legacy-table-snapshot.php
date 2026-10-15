@@ -23,11 +23,12 @@ class LegacyTableSnapshot {
 	private $max_rows;
 	private $max_bytes;
 	private $deadline;
+	private $memory_admission;
 	private $busy = false;
 	private $tainted = false;
 
 	/** Bounds apply to the entire affected replacement, including companion keys. */
-	public function __construct( $wpdb, $blog_id, $max_rows = 10000, $max_bytes = 16777216, $deadline = null ) {
+	public function __construct( $wpdb, $blog_id, $max_rows = 10000, $max_bytes = 16777216, $deadline = null, $memory_admission = null ) {
 		if ( ! ( $wpdb instanceof LegacyTransactionConnection ) ) { $this->fail( 'A pinned, non-replaying transaction connection is required.' ); }
 		foreach ( array( $blog_id, $max_rows, $max_bytes ) as $number ) {
 			if ( ! is_int( $number ) || $number < 1 ) { $this->fail( 'Invalid site or snapshot budget.' ); }
@@ -38,6 +39,8 @@ class LegacyTableSnapshot {
 		$this->max_bytes = $max_bytes;
 		if ( null !== $deadline && ( ! is_float( $deadline ) || ! is_finite( $deadline ) ) ) { $this->fail( 'Invalid shared deadline.' ); }
 		$this->deadline = $deadline;
+		if ( null !== $memory_admission && ! is_callable( $memory_admission ) ) { $this->fail( 'Invalid snapshot memory admission.' ); }
+		$this->memory_admission = $memory_admission;
 		$this->codec = new LegacyStateCodec();
 		$this->records = new LegacyRecordCodec( $this->codec, $max_rows, $max_bytes );
 		$this->definitions = ( new LegacyStorageSchema( $wpdb ) )->definitions();
@@ -97,15 +100,19 @@ class LegacyTableSnapshot {
 			foreach ( $dependencies as $entry ) { if ( $reader->head( $entry['key'] ) !== $entry['head'] ) { $this->fail( 'Snapshot read dependency changed.' ); } $this->tick(); }
 			$staged = array();
 			foreach ( $prepared as $hash => $change ) {
+				$this->admit_memory( $change['encoded_bytes'] );
 				$staged[ $hash ] = $this->stage( $change );
 			}
 			foreach ( $staged as $hash => $stage ) {
 				$change = $prepared[ $hash ];
 				$value = $this->read_generation( $change['key'], $stage['id'], $stage['generation'], $change['root_payload'], $change['stats'] );
+				$this->admit_memory( $change['encoded_bytes'] );
 				if ( $this->codec->snapshot_digest( $value ) !== $change['digest'] ) { $this->fail( 'Staged logical snapshot does not match its source.' ); }
+				unset( $value );
 			}
 			$result = array();
 			foreach ( $staged as $hash => $stage ) {
+				$this->admit_memory( 0 );
 				$change = $prepared[ $hash ];
 				$args = array( $stage['generation'], $stage['revision'] + 1, $change['order'], $change['kind'],
 					LegacyStateCodec::VERSION, $change['stats']['record_count'], $change['stats']['payload_bytes'] + strlen( $change['root_payload'] ),
@@ -152,12 +159,14 @@ class LegacyTableSnapshot {
 		$sql = 'SELECT HEX(snapshot_digest) AS snapshot_digest, digest_revision, digest_status FROM `' . $this->state_table . '` WHERE blog_id = %d AND id = %d AND revision = %d AND active_generation = %d LIMIT 1';
 		$digests = $this->read( $this->wpdb->prepare( $sql, array( $this->blog_id, $head['id'], $head['revision'], $head['active_generation'] ) ) );
 		if ( count( $digests ) !== 1 || 'current' !== $digests[0]['digest_status'] || $this->number( $digests[0]['digest_revision'] ) !== $head['revision'] || ! is_string( $digests[0]['snapshot_digest'] ) || ! preg_match( '/^[0-9a-f]{64}$/Di', $digests[0]['snapshot_digest'] ) ) { $this->fail( 'Snapshot digest is absent, dirty or stale.' ); }
+		$this->admit_memory( $head['payload_bytes'] + $key_bytes );
 		$root = $this->root_payload( $head['id'] );
 		$metadata = $this->codec->decode( $root );
 		if ( ! is_array( $metadata ) || ! isset( $metadata['kind'] ) || $metadata['kind'] !== $head['state_kind'] ) { $this->fail( 'Root metadata does not match state kind.' ); }
 		$stats = array( 'record_count' => $head['record_count'], 'payload_bytes' => $head['payload_bytes'] - strlen( $root ) );
 		$value = $this->read_generation( $key, $head['id'], $head['active_generation'], $root, $stats );
 		if ( $reader->head( $key ) !== $head ) { $this->fail( 'Snapshot changed during read; restart.' ); }
+		$this->admit_memory( $head['payload_bytes'] + $key_bytes );
 		if ( $this->codec->snapshot_digest( $value ) !== strtolower( $digests[0]['snapshot_digest'] ) ) { $this->fail( 'Complete snapshot digest mismatch.' ); }
 		return $value;
 	}
@@ -241,6 +250,7 @@ class LegacyTableSnapshot {
 
 	private function preflight( $changes ) {
 		if ( ! is_array( $changes ) || ! count( $changes ) || count( $changes ) > 100 ) { $this->fail( 'Replacement needs 1 to 100 explicit changes.' ); }
+		$this->admit_memory( 0 );
 		$prepared = array(); $orders = array(); $total_rows = 0; $total_bytes = 0;
 		foreach ( $changes as $change ) {
 			$fields = array( 'key', 'order', 'kind', 'value', 'expected_revision' );
@@ -274,11 +284,12 @@ class LegacyTableSnapshot {
 			$bytes = strlen( $change['root_payload'] ) + strlen( $this->codec->key_value( $change['key'] ) ) + $stats['encoded_bytes'];
 			if ( $bytes > $this->max_bytes - $total_bytes ) { $this->fail( 'Snapshot exceeds the encoded byte budget.' ); }
 			$total_bytes += $bytes;
+			$change['encoded_bytes'] = $bytes;
 			$change['stats'] = $stats;
 			$prepared[ $hash ] = $change;
 		}
 		// Complete digests only after every affected bucket passes preflight.
-		foreach ( $prepared as &$change ) { $this->tick(); $change['digest'] = $this->codec->snapshot_digest( $change['value'] ); $this->tick(); }
+		foreach ( $prepared as &$change ) { $this->tick(); $this->admit_memory( $total_bytes ); $change['digest'] = $this->codec->snapshot_digest( $change['value'] ); $this->tick(); }
 		unset( $change );
 		return $prepared;
 	}
@@ -341,6 +352,8 @@ class LegacyTableSnapshot {
 		$stats = $this->generation_stats( $id, $generation );
 		if ( $stats['record_count'] !== $expected['record_count'] || $stats['payload_bytes'] !== $expected['payload_bytes'] ) { $this->fail( 'Staged record count/byte parity failed.' ); }
 		if ( $stats['record_count'] > $this->max_rows || $stats['encoded_bytes'] > $this->max_bytes - strlen( $root ) - strlen( $this->codec->key_value( $key ) ) ) { $this->fail( 'Snapshot exceeds the row/byte budget before payload fetch.' ); }
+		$encoded_bytes = $stats['encoded_bytes'] + strlen( $root ) + strlen( $this->codec->key_value( $key ) );
+		$this->admit_memory( $encoded_bytes );
 		$stored_root = $this->root_payload( $id );
 		if ( $stored_root !== $root ) { $this->fail( 'Root metadata changed or failed staged read-back.' ); }
 		$metadata = $this->codec->decode( $root );
@@ -359,6 +372,9 @@ class LegacyTableSnapshot {
 			. 'AND (' . $bytes . ') <= %d ORDER BY id ASC LIMIT %d';
 		$rows = $this->read( $this->wpdb->prepare( $sql, array( $this->blog_id, $id, $generation, LegacyTableReader::MAX_RECORD_BYTES, $stats['record_count'] + 1 ) ) );
 		if ( count( $rows ) !== $stats['record_count'] ) { $this->fail( 'Missing, extra or oversized snapshot rows.' ); }
+		// Driver rows now coexist with caller/source/prepared graphs. Re-sample
+		// BEFORE constructing ancestry indexes, decoded trees and output values.
+		$this->admit_memory( $encoded_bytes );
 		// Affected-root rewrites legitimately change physical IDs. Reconstruct by
 		// ancestry and logical order, not insertion ID; map order gaps are valid.
 		$result = array(); $roots = array(); $children = array(); $visited = array();
@@ -380,6 +396,7 @@ class LegacyTableSnapshot {
 				$row = $rows[$position]; $tree[] = $row; $hash = strtolower( $row['node_hash'] );
 				if ( isset( $children[$hash] ) ) { foreach ( $children[$hash] as $child ) { $pending[] = $child; } }
 			}
+			$this->admit_memory( $encoded_bytes );
 			$this->rebuild_root( $key, strtolower( $rows[$index]['node_hash'] ), $tree, $result );
 		}
 		if ( count( $visited ) !== count( $rows ) ) { $this->fail( 'Orphaned or cyclic snapshot rows.' ); }
@@ -408,6 +425,20 @@ class LegacyTableSnapshot {
 	private function record_bytes() {
 		return 'OCTET_LENGTH(payload) + OCTET_LENGTH(mutable_payload) + OCTET_LENGTH(key_value) + '
 			. 'COALESCE(OCTET_LENGTH(legacy_identifier_value),0) + COALESCE(OCTET_LENGTH(source_plugin_value),0) + COALESCE(OCTET_LENGTH(source_id_value),0)';
+	}
+
+	/**
+	 * Optional coordinator-owned policy recheck, not a new numerical envelope.
+	 * Encoded bytes reuse the EXISTING calibrated policy as an extra refusal;
+	 * the callback samples material co-live graphs at the actual consumer seam.
+	 * This does not bound preflight encoding, driver transients, VM/observer NEW,
+	 * arena retention, arbitrary hooks or failure/cleanup allocations. No callback
+	 * means the existing standalone repository contract, not safe-memory approval.
+	 */
+	private function admit_memory( $bytes ) {
+		if ( null !== $this->memory_admission && true !== call_user_func( $this->memory_admission, $bytes ) ) {
+			$this->fail( 'Snapshot memory admission was not affirmed.' );
+		}
 	}
 
 	private function generation_stats( $id, $generation ) {

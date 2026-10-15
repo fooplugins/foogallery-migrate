@@ -156,7 +156,8 @@ class StorageConversion {
 
 	private function storage() {
 		$this->require_true( ( new LegacyStorageSchema( $this->connection ) )->verify() );
-		$this->snapshot = new LegacyTableSnapshot( $this->connection, $this->blog, 10000, 16777216, $this->deadline );
+		$this->snapshot = new LegacyTableSnapshot( $this->connection, $this->blog, 10000, 16777216, $this->deadline,
+			function ( $bytes ) { $this->budget( $bytes ); return true; } );
 	}
 
 	private function advance( $r, $source ) {
