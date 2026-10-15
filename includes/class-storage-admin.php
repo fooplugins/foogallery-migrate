@@ -36,7 +36,7 @@ class StorageAdmin {
 				$s['schema'] = 'not ready';
 				if ( null !== $r ) { $s['problem'] = __( 'Shared tables need attention. No automatic repair or cleanup has been attempted.', 'foogallery-migrate' ); }
 			}
-			$profile = defined( 'FOOGM_STORAGE_CALIBRATION' ) ? constant( 'FOOGM_STORAGE_CALIBRATION' ) : null;
+			$profile = apply_filters( 'foogallery_migrate_storage_calibration', null );
 			$s['calibrated'] = ! is_wp_error( StorageCalibration::policy( $profile ) );
 		} catch ( \Exception $error ) { $s['backend'] = 'unavailable'; $s['problem'] = $error->getMessage(); }
 		catch ( \Throwable $error ) { $s['backend'] = 'unavailable'; $s['problem'] = __( 'Storage health could not be read. Current authority has not been changed.', 'foogallery-migrate' ); }
