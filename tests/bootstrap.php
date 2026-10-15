@@ -333,6 +333,10 @@ function checked( $checked, $current = true, $display = true ) {
 }
 
 function apply_filters( $hook_name, $value ) {
+	// Opt-in test instrumentation; never loaded by the plugin or its ZIP.
+	if ( isset( $GLOBALS['foogallery_migrate_test_filters'][$hook_name] ) ) {
+		return call_user_func( $GLOBALS['foogallery_migrate_test_filters'][$hook_name], $value );
+	}
 	return $value;
 }
 
