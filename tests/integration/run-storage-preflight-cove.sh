@@ -7,7 +7,7 @@ ZIP=${2:?absolute candidate ZIP}
 OUT=${3:?absolute new evidence directory}
 EXPECTED=${4:?exact candidate commit}
 CASE=${5:-storage-preflight}
-[[ "$CASE" == storage-preflight || "$CASE" == storage-writer-gate || "$CASE" == storage-writer-adoption || "$CASE" == storage-conversion || "$CASE" == storage-operations || "$CASE" == storage-pinned-transport || "$CASE" == storage-runtime-transport || "$CASE" == storage-callback-drain || "$CASE" == storage-output-drain || "$CASE" == storage-process-death || "$CASE" == storage-native-death || "$CASE" == storage-provisioning || "$CASE" == storage-aigpl || "$CASE" == storage-aigpl-option ]] || exit 1
+[[ "$CASE" == storage-preflight || "$CASE" == storage-writer-gate || "$CASE" == storage-writer-adoption || "$CASE" == storage-conversion || "$CASE" == storage-operations || "$CASE" == storage-pinned-transport || "$CASE" == storage-runtime-transport || "$CASE" == storage-callback-drain || "$CASE" == storage-output-drain || "$CASE" == storage-process-death || "$CASE" == storage-native-death || "$CASE" == storage-provisioning || "$CASE" == storage-aigpl || "$CASE" == storage-aigpl-option || "$CASE" == storage-aigpl-browser ]] || exit 1
 COVE=/opt/homebrew/bin/cove
 [[ "$SOURCE" == /* && "$ZIP" == /* && "$OUT" == /* ]] || exit 1
 [[ "$SOURCE$ZIP$OUT" != *"'"* ]] || exit 1
@@ -48,6 +48,7 @@ cleanup() {
     "$COVE" list --json > "$OUT/sites-after-$site.json" || return 1
     printf '%s\t%s\tabsent-root-and-database\n' "$site" "$database" >> "$OUT/cleanup.tsv" || return 1
     owned=false
+    [[ "$CASE" != storage-aigpl-browser ]] || "$COVE" reload > "$OUT/raw/caddy-cleanup.txt" 2>&1
   fi
 }
 finish() {
@@ -105,6 +106,10 @@ for topology in single multi; do
     "$COVE" wp "$site" --skip-plugins --skip-themes plugin verify-checksums foogallery > "$OUT/raw/$topology-foogallery-checksums.txt" 2>&1
     skips=(--skip-plugins=foogallery-migrate-source,foogallery-migrate-package --skip-themes)
   fi
+  if [[ "$CASE" == storage-aigpl-browser ]]; then
+    [[ -n "${FOOGM_BROWSER_MODULE:-}" && -d "$FOOGM_BROWSER_MODULE" ]] || exit 1
+    "$COVE" reload > "$OUT/raw/$topology-caddy.txt" 2>&1
+  fi
   for kind in source package; do
     plugin="$root/public/wp-content/plugins/foogallery-migrate-$kind"
     [[ ! -e "$plugin" && ! -L "$plugin" ]] || exit 1
@@ -118,6 +123,9 @@ for topology in single multi; do
       dump --skip-comments --skip-dump-date --skip-extended-insert --no-create-info --compact "$database" > "$before"
       harness="$OUT/source/tests/integration/$CASE.php"
       code="define('FOOGM_STORAGE_TEST_DISPOSABLE', true); define('FOOGM_STORAGE_TEST_ROOT', '$plugin'); require '$harness'; echo 'PREFLIGHT_CASE_COMPLETE:$id' . PHP_EOL;"
+      if [[ "$CASE" == storage-aigpl-browser ]]; then
+        code="define('FOOGM_BROWSER_MODULE', '$FOOGM_BROWSER_MODULE'); define('FOOGM_BROWSER_EVIDENCE', '$OUT/raw/$id'); $code"
+      fi
       rc=0
       "$COVE" wp "$site" --url="$url" "${skips[@]}" --user=1 eval "$code" > "$OUT/raw/$id.stdout" 2> "$OUT/raw/$id.stderr" || rc=$?
       if [[ "$rc" == 0 ]]; then
