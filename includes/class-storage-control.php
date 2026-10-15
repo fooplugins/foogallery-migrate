@@ -69,41 +69,53 @@ class StorageControl {
 
 	/** Null means absent; empty/corrupt/oversize evidence is present and invalid. */
 	public function read( $name ) {
-		$this->context(); $this->name( $name );
-		$raw = $this->db->get_var( $this->db->prepare(
-			"SELECT CONCAT('v:', CASE WHEN LENGTH(option_value) <= 2048 THEN option_value ELSE '' END) FROM `" . $this->prefix . "options` WHERE option_name = %s LIMIT 1", array( $name )
-		) );
-		if ( ! empty( $this->db->last_error ) || ( null !== $raw && ( ! is_string( $raw ) || 0 !== strpos( $raw, 'v:' ) ) ) ) { self::fail(); }
-		return null === $raw ? null : substr( $raw, 2 );
+		$span = StorageScalarObserver::begin( 8 );
+		try {
+			$this->context(); $this->name( $name );
+			$raw = $this->db->get_var( $this->db->prepare(
+				"SELECT CONCAT('v:', CASE WHEN LENGTH(option_value) <= 2048 THEN option_value ELSE '' END) FROM `" . $this->prefix . "options` WHERE option_name = %s LIMIT 1", array( $name )
+			) );
+			if ( ! empty( $this->db->last_error ) || ( null !== $raw && ( ! is_string( $raw ) || 0 !== strpos( $raw, 'v:' ) ) ) ) { self::fail(); }
+			$result = null === $raw ? null : substr( $raw, 2 );
+			StorageScalarObserver::end( $span, 1, null === $result ? 0 : strlen( $result ) );
+			return $result;
+		} catch ( \Exception $error ) { StorageScalarObserver::end( $span, 2 ); throw $error; }
+		catch ( \Throwable $error ) { StorageScalarObserver::end( $span, 2 ); throw $error; }
 	}
 
 	/** No cached negatives, INSERT IGNORE, collation equality or unowned delete. */
 	public function cas( $name, $old, $new, $source_guard = null, $maintenance_raw = null, $deadline = null ) {
-		$this->context(); $this->name( $name );
-		if ( null !== $deadline && ( ( ! is_float( $deadline ) && ! is_int( $deadline ) ) || ! is_finite( (float) $deadline ) ) ) { self::fail(); }
-		if ( ( null !== $old && ( ! is_string( $old ) || strlen( $old ) > self::MAX_BYTES ) ) ||
-			( null !== $new && ( ! is_string( $new ) || strlen( $new ) > self::MAX_BYTES ) ) || ( null === $old && null === $new ) ) { self::fail(); }
-		if ( null === $old ) {
-			$sql = $this->db->prepare( 'INSERT INTO `' . $this->prefix . "options` ( option_name, option_value, autoload )" .
-				( null === $maintenance_raw && null === $source_guard ? " VALUES ( %s, %s, 'no' )" : " SELECT %s, %s, 'no' WHERE 1 = 1" ), array( $name, $new ) );
-		} elseif ( null === $new ) {
-			$sql = $this->db->prepare( 'DELETE FROM `' . $this->prefix . 'options` WHERE option_name = %s AND BINARY option_value = BINARY %s', array( $name, $old ) );
-		} else {
-			$sql = $this->db->prepare( 'UPDATE `' . $this->prefix . "options` SET option_value = %s, autoload = 'no' WHERE option_name = %s AND BINARY option_value = BINARY %s", array( $new, $name, $old ) );
-		}
-		if ( null !== $source_guard ) {
-			if ( StorageAuthority::CONTROL_OPTION !== $name || null === $new ||
-				( null === $old && ( null === $maintenance_raw || ! is_array( $source_guard ) || ! isset( $source_guard['kind'] ) || 'option' !== $source_guard['kind'] ) ) ) { self::fail(); }
-			$sql .= $this->source_guard( $source_guard );
-		}
-		if ( null !== $maintenance_raw ) { $sql .= $this->maintenance_guard( $maintenance_raw ); }
-		// Trusted caller's entry fence, not interruption of query/SHA2/readback.
-		if ( null !== $deadline && microtime( true ) >= $deadline ) { self::fail(); }
-		$result = $this->db->query( $sql );
-		if ( 1 !== $result || ! empty( $this->db->last_error ) ) { self::fail(); }
-		wp_cache_delete( $name, 'options' ); wp_cache_delete( 'alloptions', 'options' ); wp_cache_delete( 'notoptions', 'options' );
-		if ( $this->read( $name ) !== $new ) { self::fail(); }
-		return true;
+		$span = StorageScalarObserver::begin( null === $source_guard ? 11 : 7 );
+		try {
+			$this->context(); $this->name( $name );
+			if ( null !== $deadline && ( ( ! is_float( $deadline ) && ! is_int( $deadline ) ) || ! is_finite( (float) $deadline ) ) ) { self::fail(); }
+			if ( ( null !== $old && ( ! is_string( $old ) || strlen( $old ) > self::MAX_BYTES ) ) ||
+				( null !== $new && ( ! is_string( $new ) || strlen( $new ) > self::MAX_BYTES ) ) || ( null === $old && null === $new ) ) { self::fail(); }
+			if ( null === $old ) {
+				$sql = $this->db->prepare( 'INSERT INTO `' . $this->prefix . "options` ( option_name, option_value, autoload )" .
+					( null === $maintenance_raw && null === $source_guard ? " VALUES ( %s, %s, 'no' )" : " SELECT %s, %s, 'no' WHERE 1 = 1" ), array( $name, $new ) );
+			} elseif ( null === $new ) {
+				$sql = $this->db->prepare( 'DELETE FROM `' . $this->prefix . 'options` WHERE option_name = %s AND BINARY option_value = BINARY %s', array( $name, $old ) );
+			} else {
+				$sql = $this->db->prepare( 'UPDATE `' . $this->prefix . "options` SET option_value = %s, autoload = 'no' WHERE option_name = %s AND BINARY option_value = BINARY %s", array( $new, $name, $old ) );
+			}
+			if ( null !== $source_guard ) {
+				if ( StorageAuthority::CONTROL_OPTION !== $name || null === $new ||
+					( null === $old && ( null === $maintenance_raw || ! is_array( $source_guard ) || ! isset( $source_guard['kind'] ) || 'option' !== $source_guard['kind'] ) ) ) { self::fail(); }
+				$sql .= $this->source_guard( $source_guard );
+			}
+			if ( null !== $maintenance_raw ) { $sql .= $this->maintenance_guard( $maintenance_raw ); }
+			// Trusted caller's entry fence, not interruption of query/SHA2/readback.
+			if ( null !== $deadline && microtime( true ) >= $deadline ) { self::fail(); }
+			$result = $this->db->query( $sql );
+			if ( 1 !== $result || ! empty( $this->db->last_error ) ) { self::fail(); }
+			wp_cache_delete( $name, 'options' ); wp_cache_delete( 'alloptions', 'options' ); wp_cache_delete( 'notoptions', 'options' );
+			StorageScalarObserver::end( $span );
+			$span = 0; // Readback is a separate span, not part of the source-fenced query.
+			if ( $this->read( $name ) !== $new ) { self::fail(); }
+			return true;
+		} catch ( \Exception $error ) { StorageScalarObserver::end( $span, 2 ); throw $error; }
+		catch ( \Throwable $error ) { StorageScalarObserver::end( $span, 2 ); throw $error; }
 	}
 
 	/**

@@ -43,13 +43,25 @@ final class LegacyOptionDurableScan {
 
 	/** Internal caller supplies trusted calibration, never request policy/parser. */
 	public static function start( $policy, $bytes = 4096, $nodes = 256, $seconds = 0.01 ) {
-		$deadline = self::entry_deadline( $seconds );
-		return ( new self( $policy, $deadline ) )->run( null, null, $bytes, $nodes );
+		$span = StorageScalarObserver::begin( 1 );
+		try {
+			$deadline = self::entry_deadline( $seconds );
+			$result = ( new self( $policy, $deadline ) )->run( null, null, $bytes, $nodes );
+			StorageScalarObserver::end( $span );
+			return $result;
+		} catch ( \Exception $error ) { StorageScalarObserver::end( $span, 2 ); throw $error; }
+		catch ( \Throwable $error ) { StorageScalarObserver::end( $span, 2 ); throw $error; }
 	}
 	public static function advance( $id, $generation, $policy, $bytes = 4096, $nodes = 256, $seconds = 0.01 ) {
-		$deadline = self::entry_deadline( $seconds );
-		if ( ! is_string( $id ) || ! preg_match( '/^[a-f0-9]{32}$/D', $id ) || ! is_int( $generation ) || $generation < 1 ) { self::fail(); }
-		return ( new self( $policy, $deadline ) )->run( $id, $generation, $bytes, $nodes );
+		$span = StorageScalarObserver::begin( 2 );
+		try {
+			$deadline = self::entry_deadline( $seconds );
+			if ( ! is_string( $id ) || ! preg_match( '/^[a-f0-9]{32}$/D', $id ) || ! is_int( $generation ) || $generation < 1 ) { self::fail(); }
+			$result = ( new self( $policy, $deadline ) )->run( $id, $generation, $bytes, $nodes );
+			StorageScalarObserver::end( $span );
+			return $result;
+		} catch ( \Exception $error ) { StorageScalarObserver::end( $span, 2 ); throw $error; }
+		catch ( \Throwable $error ) { StorageScalarObserver::end( $span, 2 ); throw $error; }
 	}
 
 	/** Read-after-uncertain-write receipt: does not replay or advance a checkpoint. */
@@ -61,6 +73,7 @@ final class LegacyOptionDurableScan {
 	}
 
 	private function run( $id, $generation, $bytes, $nodes ) {
+		$parser_span = 0; $release_span = 0;
 		$this->time();
 		$this->budget( 0 ); // Fail closed before a source read, even with unlimited PHP memory.
 		$this->time();
@@ -85,7 +98,10 @@ final class LegacyOptionDurableScan {
 			$this->taking = true;
 			$scanner = LegacyOptionStructuralScan::owned( $raw, $this );
 			$this->time();
+			$parser_span = StorageScalarObserver::begin( 6 );
 			$result = $scanner->step( null, $bytes, $nodes, $this->deadline - microtime( true ) );
+			StorageScalarObserver::end( $parser_span, 1, $result['bytes'] );
+			$parser_span = 0;
 			$this->time();
 			$parser = $result['cursor']['parser'];
 			$parser['key_prefix'] = base64_encode( $parser['key_prefix'] );
@@ -99,7 +115,11 @@ final class LegacyOptionDurableScan {
 			$maintenance = $this->gate->maintenance_identity();
 			$this->time();
 			$this->controls->cas( StorageAuthority::CONTROL_OPTION, $old, $new, array( 'kind' => 'option', 'value' => $this->digest ), $maintenance, $this->deadline );
-			if ( true !== $this->gate->release_maintenance() ) { self::fail(); }
+			$release_span = StorageScalarObserver::begin( 10 );
+			$released = $this->gate->release_maintenance();
+			StorageScalarObserver::end( $release_span, true === $released ? 1 : 3 );
+			$release_span = 0;
+			if ( true !== $released ) { self::fail(); }
 			$receipt = $this->receipt( $this->record );
 			$receipt['bytes'] = $result['bytes']; $receipt['nodes'] = $result['nodes'];
 			$receipt['source_bytes_acquired'] = $this->length;
@@ -107,9 +127,21 @@ final class LegacyOptionDurableScan {
 			$receipt['source_sql_sha_expressions'] = 1; // Query shape, not a measured physical DB pass count.
 			return $receipt;
 		} catch ( \Exception $error ) {
-			$this->taking = false; $this->gate->release_maintenance(); throw $error;
+			StorageScalarObserver::end( $parser_span, 2 );
+			StorageScalarObserver::end( $release_span, 2 );
+			$this->taking = false;
+			$release_span = StorageScalarObserver::begin( 10 );
+			$released = $this->gate->release_maintenance();
+			StorageScalarObserver::end( $release_span, true === $released ? 1 : 3 );
+			throw $error;
 		} catch ( \Throwable $error ) {
-			$this->taking = false; $this->gate->release_maintenance(); throw $error;
+			StorageScalarObserver::end( $parser_span, 2 );
+			StorageScalarObserver::end( $release_span, 2 );
+			$this->taking = false;
+			$release_span = StorageScalarObserver::begin( 10 );
+			$released = $this->gate->release_maintenance();
+			StorageScalarObserver::end( $release_span, true === $released ? 1 : 3 );
+			throw $error;
 		}
 	}
 
@@ -130,15 +162,28 @@ final class LegacyOptionDurableScan {
 	private function source() {
 		$this->time();
 		$db = $this->connection;
-		$length = $db->get_var( $db->prepare( 'SELECT LENGTH(option_value) FROM `' . $this->prefix . 'options` WHERE option_name = %s LIMIT 1', array( FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
-		$this->time();
-		if ( ! empty( $db->last_error ) || ! is_numeric( $length ) || (string) (int) $length !== (string) $length || (int) $length < 0 || (int) $length > 16777216 ) { self::fail(); }
-		$this->length = (int) $length; $this->budget( $this->length );
-		$this->time();
-		$raw = $db->get_var( $db->prepare( "SELECT CONCAT('v:', option_value) FROM `" . $this->prefix . 'options` WHERE option_name = %s AND LENGTH(option_value) = %d LIMIT 1', array( FOOGALLERY_MIGRATE_OPTION_DATA, $this->length ) ) );
-		$this->time();
-		if ( ! empty( $db->last_error ) || ! is_string( $raw ) || 'v:' !== substr( $raw, 0, 2 ) || strlen( $raw ) !== $this->length + 2 ) { self::fail(); }
-		return substr( $raw, 2 );
+		$admission_span = StorageScalarObserver::begin( 3 );
+		$acquisition_span = 0;
+		try {
+			$length = $db->get_var( $db->prepare( 'SELECT LENGTH(option_value) FROM `' . $this->prefix . 'options` WHERE option_name = %s LIMIT 1', array( FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
+			$this->time();
+			if ( ! empty( $db->last_error ) || ! is_numeric( $length ) || (string) (int) $length !== (string) $length || (int) $length < 0 || (int) $length > 16777216 ) { self::fail(); }
+			$this->length = (int) $length; $this->budget( $this->length );
+			$this->time();
+			StorageScalarObserver::end( $admission_span, 1, $this->length );
+			$admission_span = 0;
+			$acquisition_span = StorageScalarObserver::begin( 4, $this->length );
+			$raw = $db->get_var( $db->prepare( "SELECT CONCAT('v:', option_value) FROM `" . $this->prefix . 'options` WHERE option_name = %s AND LENGTH(option_value) = %d LIMIT 1', array( FOOGALLERY_MIGRATE_OPTION_DATA, $this->length ) ) );
+			$this->time();
+			if ( ! empty( $db->last_error ) || ! is_string( $raw ) || 'v:' !== substr( $raw, 0, 2 ) || strlen( $raw ) !== $this->length + 2 ) { self::fail(); }
+			$result = substr( $raw, 2 );
+			StorageScalarObserver::end( $acquisition_span, 1, $this->length );
+			return $result;
+		} catch ( \Exception $error ) {
+			StorageScalarObserver::end( $acquisition_span, 2 ); StorageScalarObserver::end( $admission_span, 2 ); throw $error;
+		} catch ( \Throwable $error ) {
+			StorageScalarObserver::end( $acquisition_span, 2 ); StorageScalarObserver::end( $admission_span, 2 ); throw $error;
+		}
 	}
 	private function budget( $bytes ) {
 		$r = StoragePreflight::decode_budget( $bytes, ini_get( 'memory_limit' ), $this->memory->sample(), $this->policy );

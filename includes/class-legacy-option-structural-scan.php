@@ -42,7 +42,11 @@ class LegacyOptionStructuralScan {
 			! is_string( $raw ) || strlen( $raw ) > $max_bytes || 'a:' !== substr( $raw, 0, 2 ) ) { $this->fail(); }
 		$this->raw = $raw;
 		$this->length = strlen( $raw );
-		$this->digest = hash( 'sha256', $raw );
+		$hash_span = StorageScalarObserver::begin( 5, $this->length );
+		try { $this->digest = hash( 'sha256', $raw ); }
+		catch ( \Exception $error ) { StorageScalarObserver::end( $hash_span, 2 ); throw $error; }
+		catch ( \Throwable $error ) { StorageScalarObserver::end( $hash_span, 2 ); throw $error; }
+		StorageScalarObserver::end( $hash_span, 1, $this->length );
 		$this->max_depth = $max_depth;
 		$this->id = ++self::$next_id;
 		$this->state = array( 'offset' => 0, 'nodes' => 0, 'started' => false,

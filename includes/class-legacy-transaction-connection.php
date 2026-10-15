@@ -99,9 +99,13 @@ class LegacyTransactionConnection {
 
 	private function execute( $sql ) {
 		$this->last_error = ''; $this->insert_id = 0;
+		$span = 0;
 		try {
 			if ( ! $this->is_current() ) { $this->last_error = 'Pinned storage connection changed; no replay.'; return false; }
+			$span = StorageScalarObserver::begin( 9 );
 			$result = @mysqli_query( $this->handle, $sql );
+			StorageScalarObserver::end( $span, false === $result ? 3 : 1 );
+			$span = 0;
 			if ( false === $result ) {
 				// Client/transport errors and failed COMMIT have uncertain outcomes.
 				// Server rejections (e.g. a constraint) still permit same-handle rollback.
@@ -111,10 +115,12 @@ class LegacyTransactionConnection {
 			$this->insert_id = $this->handle->insert_id;
 			return $result;
 		} catch ( \Exception $error ) {
+			StorageScalarObserver::end( $span, 2 );
 			if ( ! ( $error instanceof \mysqli_sql_exception ) || $error->getCode() >= 2000 || $error->getCode() < 1 ||
 				'COMMIT' === strtoupper( trim( $sql ) ) ) { $this->tainted = true; }
 			$this->last_error = 'Pinned storage query failed; no replay.'; return false;
 		} catch ( \Throwable $error ) {
+			StorageScalarObserver::end( $span, 2 );
 			$this->tainted = true;
 			$this->last_error = 'Pinned storage query failed; no replay.'; return false;
 		}
