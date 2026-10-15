@@ -59,7 +59,11 @@ try {
 	$check( null === $wpdb->get_var( $wpdb->prepare( 'SELECT 1 FROM `' . $main_options . '` WHERE option_name=%s', LegacyStorageSchema::LOCK_OPTION ) ), 'owned installation schema lock released' );
 	$record = StorageAuthority::runtime_record();
 	$check( is_array( $record ) && 'table' === $record['backend'], 'normal runtime factory observes table authority' );
+	$trusted_profile = function () use ( $profile ) { return $profile; };
+	add_filter( 'foogallery_migrate_storage_calibration', $trusted_profile );
 	$status = StorageAdmin::status();
+	remove_filter( 'foogallery_migrate_storage_calibration', $trusted_profile );
+	$check( $status['calibrated'], 'operator status uses the same trusted profile filter as public receiver' );
 	$check( 'table' === $status['backend'] && 'verified' === $status['schema'] && null !== $status['records'], 'operator status reads verified real table metadata without a missing schema API' );
 	$result = $receiver->dispatch( 'switch', $request( 'option' ) );
 	$check( ! is_wp_error( $result ) && $initial === get_option( FOOGALLERY_MIGRATE_OPTION_DATA ), 'public reverse switch preserves exact logical state' );
