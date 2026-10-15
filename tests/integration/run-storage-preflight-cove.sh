@@ -7,7 +7,7 @@ ZIP=${2:?absolute candidate ZIP}
 OUT=${3:?absolute new evidence directory}
 EXPECTED=${4:?exact candidate commit}
 CASE=${5:-storage-preflight}
-[[ "$CASE" == storage-preflight || "$CASE" == storage-writer-gate || "$CASE" == storage-writer-adoption || "$CASE" == storage-conversion || "$CASE" == storage-operations || "$CASE" == storage-pinned-transport || "$CASE" == storage-runtime-transport || "$CASE" == storage-callback-drain || "$CASE" == storage-output-drain || "$CASE" == storage-process-death || "$CASE" == storage-native-death || "$CASE" == storage-provisioning ]] || exit 1
+[[ "$CASE" == storage-preflight || "$CASE" == storage-writer-gate || "$CASE" == storage-writer-adoption || "$CASE" == storage-conversion || "$CASE" == storage-operations || "$CASE" == storage-pinned-transport || "$CASE" == storage-runtime-transport || "$CASE" == storage-callback-drain || "$CASE" == storage-output-drain || "$CASE" == storage-process-death || "$CASE" == storage-native-death || "$CASE" == storage-provisioning || "$CASE" == storage-aigpl ]] || exit 1
 COVE=/opt/homebrew/bin/cove
 [[ "$SOURCE" == /* && "$ZIP" == /* && "$OUT" == /* ]] || exit 1
 [[ "$SOURCE$ZIP$OUT" != *"'"* ]] || exit 1
@@ -96,6 +96,14 @@ for topology in single multi; do
     "$COVE" wp "$site" --skip-plugins --skip-themes site create --slug=second --title='Owned preflight blog' > "$OUT/raw/second-blog.txt" 2>&1
     scopes=(multi-1 multi-2)
   fi
+  skips=(--skip-plugins --skip-themes)
+  if [[ "$CASE" == storage-aigpl ]]; then
+    activate=--activate
+    [[ "$topology" != multi ]] || activate=--activate-network
+    "$COVE" wp "$site" --skip-plugins --skip-themes plugin install foogallery "$activate" > "$OUT/raw/$topology-foogallery-install.txt" 2>&1
+    "$COVE" wp "$site" --skip-plugins --skip-themes plugin verify-checksums foogallery > "$OUT/raw/$topology-foogallery-checksums.txt" 2>&1
+    skips=(--skip-plugins=foogallery-migrate-source,foogallery-migrate-package --skip-themes)
+  fi
   for kind in source package; do
     plugin="$root/public/wp-content/plugins/foogallery-migrate-$kind"
     [[ ! -e "$plugin" && ! -L "$plugin" ]] || exit 1
@@ -105,12 +113,12 @@ for topology in single multi; do
       url="https://$site.localhost/"
       [[ "$scope" != multi-2 ]] || url="https://$site.localhost/second/"
       id="$kind-$scope-$CASE"
-      "$COVE" wp "$site" --url="$url" --skip-plugins --skip-themes --user=1 eval 'get_option("siteurl"); current_user_can("manage_options");' > /dev/null 2>&1
+      "$COVE" wp "$site" --url="$url" "${skips[@]}" --user=1 eval 'get_option("siteurl"); current_user_can("manage_options");' > /dev/null 2>&1
       dump --skip-comments --skip-dump-date --skip-extended-insert --no-create-info --compact "$database" > "$before"
       harness="$OUT/source/tests/integration/$CASE.php"
       code="define('FOOGM_STORAGE_TEST_DISPOSABLE', true); define('FOOGM_STORAGE_TEST_ROOT', '$plugin'); require '$harness'; echo 'PREFLIGHT_CASE_COMPLETE:$id' . PHP_EOL;"
       rc=0
-      "$COVE" wp "$site" --url="$url" --skip-plugins --skip-themes --user=1 eval "$code" > "$OUT/raw/$id.stdout" 2> "$OUT/raw/$id.stderr" || rc=$?
+      "$COVE" wp "$site" --url="$url" "${skips[@]}" --user=1 eval "$code" > "$OUT/raw/$id.stdout" 2> "$OUT/raw/$id.stderr" || rc=$?
       if [[ "$rc" == 0 ]]; then
         php "$OUT/source/tests/integration/validate-storage-preflight.php" "$OUT/raw/$id.stdout" "$id" > "$OUT/raw/$id.validated.txt" 2>&1 || rc=1
       fi
