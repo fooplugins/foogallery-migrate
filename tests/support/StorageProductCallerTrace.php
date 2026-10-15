@@ -12,7 +12,7 @@ class StorageProductCallerTrace {
 	}
 	public function bindings() {
 		return array( 'product_files' => array(
-			'includes/class-storage-conversion.php' => '1d4364bd530339679ddbf7d542e76b49d2de0a55a2ad7bdfb6c595b5ae8d59c2',
+			'includes/class-storage-conversion.php' => '63723bd9cd3ca15580f448f41cec492ab0f552dd228a32bb4a9f1e6e082283dd',
 			'includes/class-storage-operations.php' => '957291fa4d17323fd877e0d11045a042afe17f962b58148a5e7bd5d07f6d89b8',
 			'includes/class-storage-control.php' => '79a800d83585512117a3c672c2df2e6e0b90a7fa8aaa9b1c297c8b085a9615a4',
 			'includes/class-legacy-option-decoder.php' => 'cf7ef2038a5395f70d64f9f2702c3735066a74048cb00dfddc0f97202b1777c3' ),
@@ -36,13 +36,13 @@ class StorageProductCallerTrace {
 	public function paths() {
 		$out = array();
 		foreach ( array( 'switch', 'replace', 'recover' ) as $operation ) {
-			foreach ( array( 'direct' => null, 'copying' => 186, 'verified' => 193, 'flipped' => 214 ) as $phase => $line ) {
+			foreach ( array( 'direct' => null, 'copying' => 191, 'verified' => 198, 'flipped' => 219 ) as $phase => $line ) {
 				// Replacement is authorized ONLY toward table. Its advance branches
 				// use table_snapshot, never the option decode being modeled here.
 				if ( 'replace' === $operation && null !== $line ) { continue; }
 				foreach ( array( false, true ) as $handle ) {
 					$f = array( $this->frame( 'StorageConversion', 'option_snapshot', array() ) );
-					$e = array( $this->edge( 'conversion', 285, 'decode', '->decode( $raw )' ) );
+					$e = array( $this->edge( 'conversion', 290, 'decode', '->decode( $raw )' ) );
 					if ( null !== $line ) {
 						$f[] = $this->frame( 'StorageConversion', 'advance', array( 'record', 'source' ) );
 						$e[] = $this->edge( 'conversion', $line, 'option_snapshot', '$this->option_snapshot()' );

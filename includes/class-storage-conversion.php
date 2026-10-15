@@ -59,7 +59,7 @@ class StorageConversion {
 			} else { $this->require_true( StorageControl::runtime_ready( $previous, $sentinel ) ); }
 			$from = null === $previous ? 'option' : $previous['backend'];
 			$this->require_true( $from !== $request['target'] );
-			$this->storage(); // Verified existing schema only; never DDL here.
+			$this->storage( 'table' === $request['target'] ); // Explicit selection only; recovery never provisions.
 			$retirement = new StorageRetirement( $this->connection, $this->prefix, $this->blog, $this->policy, $this->deadline, $this->memory );
 			if ( $replacement ) {
 				$this->require_true( null !== $previous && 2 === $previous['version'] && 'table' === $previous['from'] && 'option' === $previous['to'] && 'option' === $from );
@@ -154,8 +154,13 @@ class StorageConversion {
 		if ( null !== $this->connection ) { $this->require_true( $this->connection->is_current() ); }
 	}
 
-	private function storage() {
-		$this->require_true( ( new LegacyStorageSchema( $this->connection ) )->verify() );
+	private function storage( $provision = false ) {
+		try { $this->require_true( ( new LegacyStorageSchema( $this->connection ) )->verify() ); }
+		catch ( \RuntimeException $error ) {
+			if ( ! $provision ) { throw $error; }
+			( new StorageProvisioning( $this->gate, $this->deadline ) )->ensure();
+			$this->require_true( ( new LegacyStorageSchema( $this->connection ) )->verify() );
+		}
 		$this->snapshot = new LegacyTableSnapshot( $this->connection, $this->blog, 10000, 16777216, $this->deadline,
 			function ( $bytes ) { $this->budget( $bytes ); return true; } );
 	}

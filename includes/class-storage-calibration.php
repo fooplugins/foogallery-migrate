@@ -40,7 +40,7 @@ class StorageCalibration {
 		foreach ( array( 'storage-calibration', 'storage-operations', 'storage-conversion', 'storage-retirement', 'storage-preflight', 'storage-memory-baseline',
 			'legacy-option-decoder', 'legacy-collection-envelope', 'legacy-state-codec', 'legacy-record-codec', 'legacy-table-snapshot', 'legacy-table-reader',
 			'legacy-transaction-connection', 'storage-control', 'storage-maintenance-gate', 'storage-authority',
-			'legacy-storage-schema', 'migrator-settings', 'content-scan-repository', 'image-tag-queue-repository', 'migrator-engine', 'init' ) as $class ) {
+			'legacy-storage-schema', 'storage-provisioning', 'migrator-settings', 'content-scan-repository', 'image-tag-queue-repository', 'migrator-engine', 'init' ) as $class ) {
 			$path = dirname( __FILE__ ) . '/class-' . $class . '.php';
 			if ( ! is_readable( $path ) ) { return null; }
 			$hash = hash_file( 'sha256', $path );
