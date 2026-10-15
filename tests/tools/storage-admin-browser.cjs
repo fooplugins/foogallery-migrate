@@ -15,6 +15,7 @@ function check(ok, label) { if (!ok) throw new Error(label); checks.push(label);
     await page.goto(config.url, { waitUntil: 'networkidle' });
     check((await page.locator('h1').allTextContents()).includes('FooGallery Migration Storage'), 'real activated admin menu route renders operator page');
     check(await page.getByText('Not approved for this runtime.', { exact: false }).count(), 'default UI reports safe unapproved profile');
+    const observedAction = await page.locator('form.foogm-storage-form').first().evaluate(f => ({ kind: typeof f.action, text: String(f.action), attribute: f.getAttribute('action') }));
     const submit = async (confirmation) => {
       const form = page.locator('form.foogm-storage-form').filter({ has: page.locator('input[value="' + confirmation + '"]') });
       await form.locator('input[type=checkbox]').check();
@@ -33,12 +34,12 @@ function check(ok, label) { if (!ok) throw new Error(label); checks.push(label);
     check(await page.getByText('Runtime capacity profile available.', { exact: false }).count(), 'UI observes same trusted test filter as receiver');
     const invalid = await page.evaluate(async () => {
       const form = document.querySelector('.foogm-storage-form'); const data = new FormData(form); data.set('nonce', 'not-valid');
-      const r = await fetch(form.action, { method: 'POST', body: data }); return { status: r.status, body: await r.json() };
+      const r = await fetch(form.getAttribute('action'), { method: 'POST', body: data }); return { status: r.status, body: await r.json() };
     });
     check(invalid.status === 403 && !invalid.body.success, 'actual HTTP forged nonce rejected');
     const foreign = await page.evaluate(async () => {
       const form = document.querySelector('.foogm-storage-form'); const data = new FormData(form); data.set('blog_id', String(Number(data.get('blog_id')) + 1));
-      const r = await fetch(form.action, { method: 'POST', body: data }); return { status: r.status, body: await r.json() };
+      const r = await fetch(form.getAttribute('action'), { method: 'POST', body: data }); return { status: r.status, body: await r.json() };
     });
     check(!foreign.body.success, 'actual HTTP cross-site request rejected');
     const switched = await submit('switch-to-table');
@@ -59,6 +60,6 @@ function check(ok, label) { if (!ok) throw new Error(label); checks.push(label);
     await page.screenshot({ path: config.screenshots + '-retained.png', fullPage: true });
     const state = JSON.parse(cp.execFileSync(config.cove, ['wp', config.site, '--url=' + config.baseurl, '--skip-plugins', '--skip-themes', 'option', 'get', 'foogallery-migrate-data', '--format=json'], { encoding: 'utf8', timeout: 30000 }));
     check(state.native_browser === 'changed-after-reverse', 'divergent authoritative option content survives replacement and export');
-    console.log(JSON.stringify({ status: 'pass', checks, check_count: checks.length, responses: { denied, invalid, foreign, switched, reversed, replaced, last }, calibration: 'synthetic-owned-routing-filter-only-not-production-approval' }));
+    console.log(JSON.stringify({ status: 'pass', checks, check_count: checks.length, responses: { denied, invalid, foreign, switched, reversed, replaced, last }, dom_named_action: observedAction, calibration: 'synthetic-owned-routing-filter-only-not-production-approval' }));
   } finally { await browser.close(); }
 })().catch(e => { console.error(e.stack); process.exitCode = 1; });

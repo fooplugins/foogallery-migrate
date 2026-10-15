@@ -24,7 +24,7 @@ class StorageAdminTest extends TestCase {
 	public function test_read_only_view_escapes_status_and_emits_exact_site_scoped_post_controls(): void {
 		ob_start(); StorageAdmin::render( array( 'backend' => 'option', 'phase' => 'stable', 'target' => 'option', 'retained' => false, 'option_bytes' => '123', 'records' => null, 'schema' => 'not provisioned', 'problem' => '<script>bad</script>', 'calibrated' => false ) ); $html = ob_get_clean();
 		$this->assertStringNotContainsString( '<script>bad</script>', $html ); $this->assertStringContainsString( '&lt;script&gt;bad&lt;/script&gt;', $html );
-		foreach ( array( 'name="action" value="foogallery_migrate_storage"', 'name="operation" value="switch"', 'name="blog_id" value="7"', 'name="scope" value="site"', 'name="confirmation" value="switch-to-table"', 'name="nonce"', 'type="checkbox" required', 'admin-post.php', 'Not approved for this runtime' ) as $text ) { $this->assertStringContainsString( $text, $html ); }
+		foreach ( array( 'name="action" value="foogallery_migrate_storage"', 'name="operation" value="switch"', 'name="blog_id" value="7"', 'name="scope" value="site"', 'name="confirmation" value="switch-to-table"', 'name="nonce"', 'type="checkbox" required', 'admin-post.php', "form.getAttribute('action')", 'Not approved for this runtime' ) as $text ) { $this->assertStringContainsString( $text, $html ); }
 	}
 	public function test_unauthorized_render_stops_before_status_sql(): void {
 		$GLOBALS['foogallery_migrate_test_capabilities']['manage_options'] = false;
