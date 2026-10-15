@@ -64,6 +64,13 @@ not turn their conditional nominal calculations into approved headroom.
 
 ## Test-first evidence and exact open allocation
 
+Supersession (run477): the run475 external eighth-key witness did NOT pass
+unslash. Its eight-key root was refused by handle's count7 guard. Preserve that
+sealed evidence, but withdraw the transformed-extra-key claim. See
+`storage-receiver-new-composition-checkpoint.md` for separate observed seven-key
+large/nested transformation and early-eight-key refusal controls. The sampled
+baseline implementation claim is unchanged; neither witness proves admission.
+
 Before product edits, `StorageBaselineCompositionTest` fails at actual
 `dispatch`/`handle` preflight baseline carry and the absent internal composition.
 The first RED also exposed missing success-response bootstrap scaffolding; that
