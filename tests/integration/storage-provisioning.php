@@ -24,7 +24,7 @@ $absent = function () use ( $wpdb, $tables ) { foreach ( $tables as $table ) { i
 $profile = array( 'version' => 1, 'status' => 'approved', 'fingerprint' => StorageCalibration::fingerprint(), 'evidence_sha256' => str_repeat( 'a', 64 ), 'policy' => array( 'max_raw_bytes' => 1048576, 'amplification' => 64, 'reserve_bytes' => 33554432 ) );
 // Synthetic trusted routing profile ONLY. Never installed or claimed approved.
 $receiver = new StorageOperations( $profile );
-$active = is_multisite() ? get_site_option( 'active_sitewide_plugins', array() ) : null;
+$active = is_multisite() ? get_site_option( 'active_sitewide_plugins', null ) : null;
 $initial = array( 'fixture' => array( 'ordered' => array( '009', false, null, -0.0 ) ) );
 try {
 	$check( $absent(), 'ordinary plugin bootstrap creates no tables' );
@@ -33,13 +33,26 @@ try {
 	$check( is_wp_error( ( new StorageOperations() )->dispatch( 'switch', $request( 'table' ) ) ) && $absent(), 'missing calibration never provisions' );
 	update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $initial, false );
 	if ( is_multisite() ) {
-		delete_site_option( 'active_sitewide_plugins' );
+		update_site_option( 'active_sitewide_plugins', array() );
 		$result = $receiver->dispatch( 'switch', $request( 'table' ) );
 		$check( is_wp_error( $result ) && $absent(), 'site-only activation cannot provision installation-shared schema' );
 		update_site_option( 'active_sitewide_plugins', array( plugin_basename( FOOGM_FILE ) => time() ) );
 	}
+	$lock = wp_json_encode( array( 'token' => str_repeat( 'b', 64 ), 'expires' => time() + 300 ) );
+	$wpdb->query( $wpdb->prepare( 'INSERT INTO `' . $main_options . '` (option_name, option_value, autoload) VALUES (%s, %s, %s)', array( LegacyStorageSchema::LOCK_OPTION, $lock, 'no' ) ) );
 	$result = $receiver->dispatch( 'switch', $request( 'table' ) );
-	$check( ! is_wp_error( $result ), 'public confirmed selection provisions missing schema and switches' );
+	$check( is_wp_error( $result ) && $absent() && $lock === $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM `' . $main_options . '` WHERE option_name=%s', LegacyStorageSchema::LOCK_OPTION ) ), 'unexpired foreign schema token cannot be replaced or removed' );
+	$lock = wp_json_encode( array( 'token' => str_repeat( 'b', 64 ), 'expires' => time() - 1 ) );
+	$wpdb->query( $wpdb->prepare( 'UPDATE `' . $main_options . '` SET option_value=%s WHERE option_name=%s', array( $lock, LegacyStorageSchema::LOCK_OPTION ) ) );
+	$other = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
+	$advisory = 'foogm-schema-' . substr( hash( 'sha256', DB_NAME . ':' . $main_options ), 0, 48 );
+	$check( '1' === (string) $other->get_var( $other->prepare( 'SELECT GET_LOCK(%s, 0)', $advisory ) ), 'independent live schema owner acquired advisory lock' );
+	try {
+		$result = $receiver->dispatch( 'switch', $request( 'table' ) );
+		$check( is_wp_error( $result ) && $absent() && $lock === $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM `' . $main_options . '` WHERE option_name=%s', LegacyStorageSchema::LOCK_OPTION ) ), 'expiry never steals live installation schema owner' );
+	} finally { $other->get_var( $other->prepare( 'SELECT RELEASE_LOCK(%s)', $advisory ) ); $other->close(); }
+	$result = $receiver->dispatch( 'switch', $request( 'table' ) );
+	$check( ! is_wp_error( $result ), 'public confirmed selection recovers expired dead owner provisions missing schema and switches' );
 	$check( $schema->verify(), 'new shared InnoDB columns and indexes verified' );
 	$check( (string) LegacyStorageSchema::VERSION === $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM `' . $main_options . '` WHERE option_name=%s', LegacyStorageSchema::VERSION_OPTION ) ), 'verified version stored in installation main-site regular options' );
 	$check( null === $wpdb->get_var( $wpdb->prepare( 'SELECT 1 FROM `' . $main_options . '` WHERE option_name=%s', LegacyStorageSchema::LOCK_OPTION ) ), 'owned installation schema lock released' );
@@ -51,7 +64,7 @@ try {
 	foreach ( $names as $name ) { delete_option( $name ); }
 	foreach ( array_reverse( $tables ) as $table ) { $wpdb->query( 'DROP TABLE IF EXISTS `' . $table . '`' ); }
 	foreach ( array( LegacyStorageSchema::VERSION_OPTION, LegacyStorageSchema::LOCK_OPTION ) as $name ) { $wpdb->query( $wpdb->prepare( 'DELETE FROM `' . $main_options . '` WHERE option_name=%s', $name ) ); wp_cache_delete( $name, 'options' ); }
-	if ( is_multisite() ) { if ( $active ) { update_site_option( 'active_sitewide_plugins', $active ); } else { delete_site_option( 'active_sitewide_plugins' ); } }
+	if ( is_multisite() ) { if ( null !== $active ) { update_site_option( 'active_sitewide_plugins', $active ); } else { delete_site_option( 'active_sitewide_plugins' ); } }
 }
 $check( $absent(), 'exact owned tables removed' );
 echo wp_json_encode( array( 'status' => 'pass', 'check_count' => count( $checks ), 'checks' => $checks, 'blog_id' => $blog, 'wordpress' => get_bloginfo( 'version' ), 'php' => PHP_VERSION, 'database' => $wpdb->get_var( 'SELECT VERSION()' ), 'calibration_status' => 'synthetic-routing-only-not-production-approval' ) ) . "\n";
