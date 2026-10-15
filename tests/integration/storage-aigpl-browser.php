@@ -26,7 +26,7 @@ try {
 	if ( ! is_dir( WPMU_PLUGIN_DIR ) && ! wp_mkdir_p( WPMU_PLUGIN_DIR ) ) { throw new RuntimeException( 'Owned MU fixture directory unavailable.' ); }
 	$config = array( 'playwright' => FOOGM_BROWSER_MODULE, 'cookies' => $cookies, 'url' => admin_url( 'options-general.php?page=foogallery-migrate-storage' ), 'baseurl' => home_url( '/' ), 'profile_path' => $profile_path, 'profile_code' => $profile_code, 'cove' => '/opt/homebrew/bin/cove', 'site' => explode( '.', $host )[0], 'screenshots' => FOOGM_BROWSER_EVIDENCE );
 	if ( false === file_put_contents( $private, wp_json_encode( $config ) ) ) { throw new RuntimeException( 'Private browser configuration failed.' ); }
-	$pipes = array(); $process = proc_open( array( '/opt/homebrew/bin/node', __DIR__ . '/../tools/storage-admin-browser.cjs', $private ), array( 1 => array( 'pipe', 'w' ), 2 => array( 'pipe', 'w' ) ), $pipes );
+	$pipes = array(); $process = proc_open( array( '/usr/bin/env', 'node', __DIR__ . '/../tools/storage-admin-browser.cjs', $private ), array( 1 => array( 'pipe', 'w' ), 2 => array( 'pipe', 'w' ) ), $pipes );
 	if ( ! is_resource( $process ) ) { throw new RuntimeException( 'Browser process unavailable.' ); }
 	$output = stream_get_contents( $pipes[1] ); $error = stream_get_contents( $pipes[2] ); fclose( $pipes[1] ); fclose( $pipes[2] ); $exit = proc_close( $process );
 	if ( 0 !== $exit ) { throw new RuntimeException( 'Browser failed: ' . $error ); }
