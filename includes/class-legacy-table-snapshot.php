@@ -129,6 +129,10 @@ class LegacyTableSnapshot {
 			$this->tick();
 		} catch ( \Exception $error ) {
 			$this->rollback( $error );
+		} catch ( \Throwable $error ) {
+			// PHP 7+ callback failures need the same cleanup. Separate catches
+			// retain PHP 5 syntax, where engine errors are not catchable objects.
+			$this->rollback( $error );
 		}
 		try {
 			// Check immediately before issuing COMMIT, while rollback is still safe.
@@ -186,6 +190,8 @@ class LegacyTableSnapshot {
 		$stats = $this->generation_stats( $head['id'], $head['active_generation'] );
 		if ( $stats['record_count'] !== $head['record_count'] || $stats['payload_bytes'] + strlen( $head['root_payload'] ) !== $head['payload_bytes'] ||
 			$stats['record_count'] > $this->max_rows || $stats['encoded_bytes'] > $this->max_bytes - strlen( $head['root_payload'] ) - strlen( $this->codec->key_value( $key ) ) ) { $this->fail( 'Maintenance physical statistics or admission mismatch.' ); }
+		$encoded_bytes = $stats['encoded_bytes'] + strlen( $head['root_payload'] ) + strlen( $this->codec->key_value( $key ) );
+		$this->admit_memory( $encoded_bytes );
 		$envelope = new LegacyCollectionEnvelope(); $envelope->validate( $root, $key );
 		if ( $root['kind'] !== $head['state_kind'] ) { $this->fail( 'Invalid maintenance root.' ); }
 		$bytes = strlen( $head['root_payload'] ) + strlen( $this->codec->key_value( $key ) );
@@ -195,7 +201,12 @@ class LegacyTableSnapshot {
 		$cursor = null; $roots = 0; $rows = 0; $payload = strlen( $head['root_payload'] );
 		do {
 			if ( microtime( true ) > $deadline ) { $this->fail( 'Maintenance time budget exceeded.' ); }
+			// export_page hydrates and reconstructs one complete root internally.
+			// Recheck the existing policy before that work and again while the
+			// returned page and previous loop locals remain live, before hashing.
+			$this->admit_memory( $encoded_bytes );
 			$page = $repository->export_page( $key, 1, $cursor );
+			$this->admit_memory( $encoded_bytes );
 			if ( $page['revision'] !== $expected_revision ) { $this->fail( 'State changed during maintenance.' ); }
 			if ( $page['record_count'] > $this->max_rows - $rows || $page['encoded_bytes'] > $this->max_bytes - $bytes ) { $this->fail( 'Maintenance exceeds total row/byte budget.' ); }
 			$rows += $page['record_count']; $payload += $page['payload_bytes']; $bytes += $page['encoded_bytes'];
@@ -207,6 +218,7 @@ class LegacyTableSnapshot {
 		} while ( count( $page['rows'] ) );
 		if ( $roots !== $root['root_count'] || $rows !== $head['record_count'] || $payload !== $head['payload_bytes'] ||
 			$this->generation_stats( $head['id'], $head['active_generation'] ) !== $stats || $this->maintenance_head( $key ) !== $head ) { $this->fail( 'Maintenance physical parity or revision changed.' ); }
+		$this->admit_memory( $encoded_bytes );
 		$envelope->end_digest( $hash, $root ); $digest = hash_final( $hash );
 		if ( 'current' === $head['digest_status'] && $digest !== $head['logical_digest'] ) { $this->fail( 'Current logical digest mismatch; not repairing corruption.' ); }
 		( new LegacyStorageSchema( $this->wpdb ) )->verify();
@@ -232,15 +244,20 @@ class LegacyTableSnapshot {
 			if ( false === $commit || ! empty( $this->wpdb->last_error ) ) { $this->tainted = true; $this->fail( 'Commit outcome uncertain; reconcile on a fresh connection.' ); }
 			return $verified;
 		} catch ( \Exception $error ) { if ( $this->busy ) { $this->rollback( $error ); } throw $error; }
+		catch ( \Throwable $error ) { if ( $this->busy ) { $this->rollback( $error ); } throw $error; }
 	}
 
 	/** Bounded physical metadata; existing reader head/cursor shapes stay unchanged. */
 	private function maintenance_head( $key ) {
 		$head = ( new LegacyTableReader( $this->wpdb, $this->blog_id ) )->head( $key );
 		if ( false === $head || $head['revision'] < 1 || $head['root_payload_bytes'] > min( $this->max_bytes, LegacyTableReader::MAX_RECORD_BYTES ) ) { $this->fail( 'Missing or oversized maintenance head.' ); }
+		$key_bytes = strlen( $this->codec->key_value( $key ) );
+		if ( $head['record_count'] > $this->max_rows || $head['payload_bytes'] < $head['root_payload_bytes'] || $head['payload_bytes'] > $this->max_bytes - $key_bytes ) { $this->fail( 'Maintenance exceeds total row/byte budget.' ); }
+		$this->admit_memory( $head['payload_bytes'] + $key_bytes );
 		$sql = 'SELECT root_payload, digest_status, digest_revision, HEX(snapshot_digest) AS logical_digest FROM `' . $this->state_table . '` WHERE blog_id = %d AND id = %d AND revision = %d AND active_generation = %d AND OCTET_LENGTH(root_payload) = %d LIMIT 1';
 		$rows = $this->read( $this->wpdb->prepare( $sql, array( $this->blog_id, $head['id'], $head['revision'], $head['active_generation'], $head['root_payload_bytes'] ) ) );
 		if ( count( $rows ) !== 1 || ! in_array( $rows[0]['digest_status'], array( 'dirty', 'current' ), true ) ) { $this->fail( 'Missing or invalid digest metadata.' ); }
+		$this->admit_memory( $head['payload_bytes'] + $key_bytes );
 		$fields = $rows[0]; $fields['digest_revision'] = $this->number( $fields['digest_revision'] );
 		if ( ! is_string( $fields['logical_digest'] ) || ! preg_match( '/^[a-f0-9]{64}$/Di', $fields['logical_digest'] ) || $fields['digest_revision'] > $head['revision'] ||
 			( 'current' === $fields['digest_status'] && $fields['digest_revision'] !== $head['revision'] ) ) { $this->fail( 'Invalid digest revision/hash.' ); }

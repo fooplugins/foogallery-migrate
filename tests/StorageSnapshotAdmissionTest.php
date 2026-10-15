@@ -73,6 +73,24 @@ class StorageSnapshotAdmissionTest extends TestCase {
 		$this->assertContains( 'ROLLBACK', $db->queries );
 	}
 
+	/** @dataProvider stagedCallbackFailures */
+	public function test_post_staging_callback_failures_rollback_and_clear_busy( $class ): void {
+		$db = new SnapshotTestWpdb(); $fault = new $class( 'callback failure' );
+		$repo = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( $db, $fault ) {
+			if ( false !== strpos( implode( "\n", $db->queries ), 'INSERT INTO' ) ) { throw $fault; } return true;
+		} );
+		try { $repo->replace_many( array( $this->change() ) ); $this->fail( 'Missing callback failure.' ); }
+		catch ( \Throwable $error ) { $this->assertSame( $fault, $error ); }
+		$this->assertSame( 'ROLLBACK', end( $db->queries ) );
+		$this->assertNotContains( 'COMMIT', $db->queries );
+		$this->assertStringNotContainsString( 'SET active_generation', implode( "\n", $db->queries ) );
+		$this->assertFalse( ( new \ReflectionProperty( $repo, 'busy' ) )->getValue( $repo ) );
+	}
+
+	public static function stagedCallbackFailures(): array {
+		return array( array( '\\RuntimeException' ), array( '\\Error' ), array( '\\TypeError' ) );
+	}
+
 	public function test_ordinary_scalar_keeps_commit_and_digest_semantics(): void {
 		$db = new SnapshotTestWpdb(); $seen = array();
 		$repo = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( &$seen ) { $seen[] = $bytes; return true; } );

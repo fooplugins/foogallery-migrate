@@ -330,6 +330,11 @@ class StorageConversion {
 
 	private function table_snapshot( $verify_dirty ) {
 		$this->ready(); $heads = $this->heads(); $value = array();
+		// Dirty-head maintenance is material snapshot work too, not a free
+		// metadata pass before the coordinator's operation-owned admission.
+		$encoded_bytes = 0;
+		foreach ( $heads as $head ) { $encoded_bytes += (int) $head['payload_bytes']; }
+		$this->budget( $encoded_bytes );
 		if ( $verify_dirty ) {
 			foreach ( $heads as $head ) {
 				if ( 'dirty' === $head['digest_status'] ) {

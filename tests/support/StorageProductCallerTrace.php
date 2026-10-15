@@ -12,7 +12,7 @@ class StorageProductCallerTrace {
 	}
 	public function bindings() {
 		return array( 'product_files' => array(
-			'includes/class-storage-conversion.php' => 'c67ff0bb494f937cafd7e8781915d3098d4ab160c65aef4f53779b668ab54626',
+			'includes/class-storage-conversion.php' => '1d4364bd530339679ddbf7d542e76b49d2de0a55a2ad7bdfb6c595b5ae8d59c2',
 			'includes/class-storage-operations.php' => '957291fa4d17323fd877e0d11045a042afe17f962b58148a5e7bd5d07f6d89b8',
 			'includes/class-storage-control.php' => '79a800d83585512117a3c672c2df2e6e0b90a7fa8aaa9b1c297c8b085a9615a4',
 			'includes/class-legacy-option-decoder.php' => 'cf7ef2038a5395f70d64f9f2702c3735066a74048cb00dfddc0f97202b1777c3' ),
