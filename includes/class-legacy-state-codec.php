@@ -32,17 +32,30 @@ class LegacyStateCodec {
 			$this->fail( 'Codec nesting budget exceeds the supported envelope.' );
 		}
 		$this->max_bytes = $max_bytes;
-		$this->max_depth = $max_depth;
+		$this->max_depth = null === $scale ? $max_depth : min( $max_depth, $scale->limit( 'max_depth' ) );
 		$this->max_nodes = $max_nodes;
 	}
 
 	/** An explicit scale consumer cannot silently inject an unbudgeted codec. */
 	public function uses_storage_scale( $scale ) { return $this->scale === $scale; }
 
-	public function encode( $value ) {
+	public function encode( $value ) { return $this->encode_at_depth( $value, 0 ); }
+
+	/**
+	 * Internal record split only: values adds ONE container, while mutable
+	 * fields do not. The record codec must admit the complete logical tree
+	 * before emission and verify it again after rebuilding child rows. This
+	 * accounts for storage structure, not an enlarged logical input domain.
+	 * No-scale physical limits retain their existing behavior.
+	 */
+	public function encode_record_payload( $value ) {
+		return $this->encode_at_depth( $value, null === $this->scale ? 0 : -1 );
+	}
+
+	private function encode_at_depth( $value, $depth ) {
 		$nodes = 0;
 		$bytes = 0;
-		$envelope = array( 'version' => self::VERSION, 'value' => $this->tag( $value, 0, $nodes, $bytes ) );
+		$envelope = array( 'version' => self::VERSION, 'value' => $this->tag( $value, $depth, $nodes, $bytes ) );
 		$json = function_exists( 'wp_json_encode' ) ? wp_json_encode( $envelope ) : json_encode( $envelope );
 		if ( ! is_string( $json ) || strlen( $json ) > $this->max_bytes ) {
 			$this->fail( 'Record exceeds the encoded byte budget.' );
@@ -50,15 +63,22 @@ class LegacyStateCodec {
 		return $json;
 	}
 
-	public function decode( $json ) {
-		$this->inspect_json( $json );
+	public function decode( $json ) { return $this->decode_at_depth( $json, 0 ); }
+
+	/** Read counterpart of the explicitly accounted internal split payload. */
+	public function decode_record_payload( $json ) {
+		return $this->decode_at_depth( $json, null === $this->scale ? 0 : -1 );
+	}
+
+	private function decode_at_depth( $json, $depth ) {
+		$this->inspect_json_at_depth( $json, $depth );
 		$envelope = json_decode( $json, true, 512 );
 		if ( JSON_ERROR_NONE !== json_last_error() || ! is_array( $envelope ) ||
 			array_keys( $envelope ) !== array( 'version', 'value' ) || self::VERSION !== $envelope['version'] ) {
 			$this->fail( 'Unsupported or malformed record envelope.' );
 		}
 		$nodes = 0;
-		return $this->untag( $envelope['value'], 0, $nodes );
+		return $this->untag( $envelope['value'], $depth, $nodes );
 	}
 
 	/**
@@ -69,13 +89,17 @@ class LegacyStateCodec {
 	 * one pair container. Four envelope tokens + 4N is a conservative ceiling.
 	 * A logical nesting edge adds three JSON containers; an empty array adds one.
 	 */
-	public function inspect_json( $json ) {
+	public function inspect_json( $json ) { return $this->inspect_json_at_depth( $json, 0 ); }
+
+	private function inspect_json_at_depth( $json, $logical_start ) {
 		if ( ! is_string( $json ) || strlen( $json ) > $this->max_bytes || strlen( $json ) > 2147483646 ) {
 			$this->fail( 'Record exceeds the encoded byte budget.' );
 		}
 		// Avoid native integer overflow even for caller-supplied PHP_INT_MAX.
 		$limit = $this->max_nodes > ( ( PHP_INT_MAX - 4 ) >> 2 ) ? PHP_INT_MAX : 4 * $this->max_nodes + 4;
-		$depth_limit = 3 * $this->max_depth + 3;
+		// One split container requires three more tagged JSON containers;
+		// the existing outer JSON envelope allowance remains unchanged.
+		$depth_limit = 3 * ( $this->max_depth - $logical_start ) + 3;
 		$length = strlen( $json ); $tokens = 0; $depth = 0; $peak = 0;
 		for ( $offset = 0; $offset < $length; ++$offset ) {
 			$char = $json[$offset];

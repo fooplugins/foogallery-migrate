@@ -47,6 +47,10 @@ class LegacyRecordCodec {
 		$preflight = $stats;
 		$this->admit( 0 );
 		$this->preflight_tree( $this->codec->key_hash( $state_key ), null, $key, $record, $item_order, 0, $preflight );
+		// Row ancestry is not logical depth: children contributes two edges,
+		// and ordinary/mutable fields may nest without creating any child row.
+		// Finish the shared logical admission before invoking the consumer.
+		if ( null !== $this->scale ) { $this->codec->snapshot_digest( $record ); }
 		$this->admit( $preflight['encoded_bytes'] );
 		$this->flatten_node( $this->codec->key_hash( $state_key ), null, $key, $record, $item_order, 0, $emit, $stats );
 		return $stats;
@@ -116,7 +120,7 @@ class LegacyRecordCodec {
 		} else {
 			$base = array( 'version' => self::VERSION, 'kind' => 'value', 'value' => $record );
 		}
-		$payload = $this->codec->encode( $base ); $mutation = $this->codec->encode( $mutable );
+		$payload = $this->codec->encode_record_payload( $base ); $mutation = $this->codec->encode( $mutable );
 		$row = array( 'row_kind' => null === $parent ? 'root' : 'child',
 			'node_hash' => $this->codec->node_hash( $state_hash, $parent, $key ), 'parent_node_hash' => $parent,
 			'key_type' => is_int( $key ) ? 'integer' : 'string', 'key_value' => base64_encode( (string) $key ),
@@ -182,7 +186,7 @@ class LegacyRecordCodec {
 			$row['payload_hash'] !== hash( 'sha256', $row['payload'] ) ) { $this->fail( 'Payload integrity/byte-count mismatch.' ); }
 		$row['encoded_bytes'] = $this->encoded_bytes( $row );
 		if ( $row['encoded_bytes'] > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Row exceeds the byte budget.' ); }
-		$row['base'] = $this->codec->decode( $row['payload'] );
+		$row['base'] = $this->codec->decode_record_payload( $row['payload'] );
 		$row['mutable'] = $this->codec->decode( $row['mutable_payload'] );
 		$row['key'] = $key;
 		return $row;
