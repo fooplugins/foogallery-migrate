@@ -57,7 +57,7 @@ class LegacyRecordCodec {
 			'base64_bytes' => 0, 'typed_key_bytes' => 0, 'projection_bytes' => 0,
 			'max_record_fields' => 0, 'max_siblings' => 0, 'active_row_frames' => 0, 'max_ancestor_row_bytes' => 0,
 			'logical_nodes' => 0, 'logical_entries' => 0, 'logical_arrays' => 0, 'logical_string_bytes' => 0,
-			'logical_max_depth' => 0, 'logical_max_width' => 0 );
+			'logical_max_depth' => 0, 'logical_max_width' => 0, 'logical_max_string_bytes' => 0 );
 		$this->footprint_logical( $record, 0, $d );
 		$this->footprint_tree( $key, $record, 0, 0, $d );
 		$d['retained_output_rows'] = 'retaining-row' === $ownership ? $d['records'] : 0;
@@ -129,7 +129,10 @@ class LegacyRecordCodec {
 			$this->footprint_add( $d, 'logical_arrays', 1 ); $this->footprint_add( $d, 'logical_entries', count( $v ) );
 			$d['logical_max_width'] = max( $d['logical_max_width'], count( $v ) );
 			foreach ( $v as $k => $item ) { $this->footprint_logical( $k, $depth + 1, $d ); $this->footprint_logical( $item, $depth + 1, $d ); }
-		} else if ( is_string( $v ) ) { $this->footprint_add( $d, 'logical_string_bytes', strlen( $v ) ); }
+		} else if ( is_string( $v ) ) {
+			$this->footprint_add( $d, 'logical_string_bytes', strlen( $v ) );
+			$d['logical_max_string_bytes'] = max( $d['logical_max_string_bytes'], strlen( $v ) );
+		}
 		else if ( ! is_null( $v ) && ! is_bool( $v ) && ! is_int( $v ) && ( ! is_float( $v ) || ! is_finite( $v ) ) ) { $this->fail( 'Unsupported footprint scalar.' ); }
 	}
 
