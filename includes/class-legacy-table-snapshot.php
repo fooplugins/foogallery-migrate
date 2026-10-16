@@ -24,11 +24,15 @@ class LegacyTableSnapshot {
 	private $max_bytes;
 	private $deadline;
 	private $memory_admission;
+	private $scale;
 	private $busy = false;
 	private $tainted = false;
 
-	/** Bounds apply to the entire affected replacement, including companion keys. */
-	public function __construct( $wpdb, $blog_id, $max_rows = 10000, $max_bytes = 16777216, $deadline = null, $memory_admission = null ) {
+	/** Bounds apply to the entire affected replacement, including companion keys.
+	 * Optional scale is internal HOST TEST admission, NOT production calibration.
+	 * Public conversion callers remain on the unchanged no-scale contract.
+	 */
+	public function __construct( $wpdb, $blog_id, $max_rows = 10000, $max_bytes = 16777216, $deadline = null, $memory_admission = null, $scale = null ) {
 		if ( ! ( $wpdb instanceof LegacyTransactionConnection ) ) { $this->fail( 'A pinned, non-replaying transaction connection is required.' ); }
 		foreach ( array( $blog_id, $max_rows, $max_bytes ) as $number ) {
 			if ( ! is_int( $number ) || $number < 1 ) { $this->fail( 'Invalid site or snapshot budget.' ); }
@@ -37,12 +41,15 @@ class LegacyTableSnapshot {
 		$this->blog_id = $blog_id;
 		$this->max_rows = $max_rows;
 		$this->max_bytes = $max_bytes;
+		if ( null !== $scale && ( ! $scale instanceof StorageScaleAdmission || $max_rows > $scale->limit( 'max_rows' ) || $max_bytes > $scale->limit( 'max_bytes' ) ) ) { $this->fail( 'Invalid finite snapshot scale.' ); }
+		$this->scale = $scale;
+		if ( null !== $scale ) { $scale->bind_snapshot_blog( $blog_id ); }
 		if ( null !== $deadline && ( ! is_float( $deadline ) || ! is_finite( $deadline ) ) ) { $this->fail( 'Invalid shared deadline.' ); }
 		$this->deadline = $deadline;
 		if ( null !== $memory_admission && ! is_callable( $memory_admission ) ) { $this->fail( 'Invalid snapshot memory admission.' ); }
 		$this->memory_admission = $memory_admission;
-		$this->codec = new LegacyStateCodec();
-		$this->records = new LegacyRecordCodec( $this->codec, $max_rows, $max_bytes );
+		$this->codec = new LegacyStateCodec( 1048576, 64, 10000, $scale );
+		$this->records = new LegacyRecordCodec( $this->codec, $max_rows, $max_bytes, $scale );
 		$this->definitions = ( new LegacyStorageSchema( $wpdb ) )->definitions();
 		$tables = array_keys( $this->definitions );
 		$this->state_table = $tables[0];
@@ -63,6 +70,7 @@ class LegacyTableSnapshot {
 	 */
 	public function replace_many( $changes, $guards = array() ) {
 		$this->admit();
+		if ( null !== $this->scale ) { $this->scale->begin_snapshot_write(); }
 		$prepared = $this->preflight( $changes );
 		StorageScalarObserver::milestone( 'snapshot-preflight' );
 		if ( ! is_array( $guards ) || count( $guards ) > 100 ) { $this->fail( 'Invalid snapshot read dependencies.' ); }
@@ -73,6 +81,7 @@ class LegacyTableSnapshot {
 			if ( isset( $dependencies[$hash] ) ) { $this->fail( 'Duplicate snapshot read dependency.' ); }
 			$dependencies[$hash] = $entry;
 		}
+		if ( null !== $this->scale && count( array_unique( array_merge( array_keys( $prepared ), array_keys( $dependencies ) ) ) ) > $this->scale->limit( 'max_heads' ) ) { $this->fail( 'Snapshot lock heads exceed finite admission.' ); }
 		( new LegacyStorageSchema( $this->wpdb ) )->verify();
 		$mode = $this->read( 'SELECT @@SESSION.autocommit AS autocommit' );
 		if ( count( $mode ) !== 1 || $this->number( $mode[0]['autocommit'] ) !== 1 ) { $this->fail( 'Disabled autocommit; caller must supply an idle connection.' ); }
@@ -97,7 +106,7 @@ class LegacyTableSnapshot {
 			foreach ( $locks as $entry ) {
 				$this->read( $this->wpdb->prepare( 'SELECT id FROM `' . $this->state_table . '` WHERE blog_id = %d AND state_key_hash = UNHEX(%s) LIMIT 2 FOR UPDATE', array( $this->blog_id, $this->codec->key_hash( $entry['key'] ) ) ) );
 			}
-			$reader = new LegacyTableReader( $this->wpdb, $this->blog_id );
+			$reader = new LegacyTableReader( $this->wpdb, $this->blog_id, $this->codec );
 			foreach ( $dependencies as $entry ) { if ( $reader->head( $entry['key'] ) !== $entry['head'] ) { $this->fail( 'Snapshot read dependency changed.' ); } $this->tick(); }
 			$staged = array();
 			foreach ( $prepared as $hash => $change ) {
@@ -109,7 +118,7 @@ class LegacyTableSnapshot {
 				$change = $prepared[ $hash ];
 				$value = $this->read_generation( $change['key'], $stage['id'], $stage['generation'], $change['root_payload'], $change['stats'] );
 				$this->admit_memory( $change['encoded_bytes'] );
-				if ( $this->codec->snapshot_digest( $value ) !== $change['digest'] ) { $this->fail( 'Staged logical snapshot does not match its source.' ); }
+				if ( $this->snapshot_digest( $change['key'], $value ) !== $change['digest'] ) { $this->fail( 'Staged logical snapshot does not match its source.' ); }
 				unset( $value );
 			}
 			StorageScalarObserver::milestone( 'snapshot-readback' );
@@ -175,7 +184,7 @@ class LegacyTableSnapshot {
 		$value = $this->read_generation( $key, $head['id'], $head['active_generation'], $root, $stats );
 		if ( $reader->head( $key ) !== $head ) { $this->fail( 'Snapshot changed during read; restart.' ); }
 		$this->admit_memory( $head['payload_bytes'] + $key_bytes );
-		if ( $this->codec->snapshot_digest( $value ) !== strtolower( $digests[0]['snapshot_digest'] ) ) { $this->fail( 'Complete snapshot digest mismatch.' ); }
+		if ( $this->snapshot_digest( $key, $value ) !== strtolower( $digests[0]['snapshot_digest'] ) ) { $this->fail( 'Complete snapshot digest mismatch.' ); }
 		return $value;
 	}
 
@@ -185,6 +194,7 @@ class LegacyTableSnapshot {
 	 * large-state runtime facade. export_page provides revision-bound continuation.
 	 */
 	public function verify_digest( $key, $expected_revision, $max_seconds = 10 ) {
+		if ( null !== $this->scale ) { $this->fail( 'Finite scale propagation is not admitted for maintenance.' ); }
 		$this->admit(); $this->typed_key( $key );
 		if ( ! is_int( $expected_revision ) || $expected_revision < 1 || ! is_int( $max_seconds ) || $max_seconds < 1 ) { $this->fail( 'Invalid maintenance admission.' ); }
 		$deadline = microtime( true ) + $max_seconds;
@@ -286,7 +296,7 @@ class LegacyTableSnapshot {
 			if ( 'scalar' === $change['kind'] ) {
 				$root = array( 'version' => 1, 'kind' => 'scalar', 'value' => $change['value'] );
 			} else if ( in_array( $change['kind'], array( 'map', 'list' ), true ) && is_array( $change['value'] ) ) {
-				$split = ( new LegacyCollectionEnvelope() )->split( $change['key'], $change['kind'], $change['value'] );
+				$split = ( new LegacyCollectionEnvelope( $this->codec ) )->split( $change['key'], $change['kind'], $change['value'] );
 				$value = $split['items']; $change['items'] = $value;
 				if ( count( $value ) > $this->max_rows - $total_rows ) { $this->fail( 'Snapshot exceeds the record budget.' ); }
 				$order = 0;
@@ -305,12 +315,13 @@ class LegacyTableSnapshot {
 			$bytes = strlen( $change['root_payload'] ) + strlen( $this->codec->key_value( $change['key'] ) ) + $stats['encoded_bytes'];
 			if ( $bytes > $this->max_bytes - $total_bytes ) { $this->fail( 'Snapshot exceeds the encoded byte budget.' ); }
 			$total_bytes += $bytes;
+			$this->admit_snapshot( $hash, $stats['record_count'], $bytes );
 			$change['encoded_bytes'] = $bytes;
 			$change['stats'] = $stats;
 			$prepared[ $hash ] = $change;
 		}
 		// Complete digests only after every affected bucket passes preflight.
-		foreach ( $prepared as &$change ) { $this->tick(); $this->admit_memory( $total_bytes ); $change['digest'] = $this->codec->snapshot_digest( $change['value'] ); $this->tick(); }
+		foreach ( $prepared as &$change ) { $this->tick(); $this->admit_memory( $total_bytes ); $change['digest'] = $this->snapshot_digest( $change['key'], $change['value'] ); $this->tick(); }
 		unset( $change );
 		return $prepared;
 	}
@@ -372,8 +383,10 @@ class LegacyTableSnapshot {
 	private function read_generation( $key, $id, $generation, $root, $expected ) {
 		$stats = $this->generation_stats( $id, $generation );
 		if ( $stats['record_count'] !== $expected['record_count'] || $stats['payload_bytes'] !== $expected['payload_bytes'] ) { $this->fail( 'Staged record count/byte parity failed.' ); }
+		if ( isset( $expected['encoded_bytes'] ) && $stats['encoded_bytes'] !== $expected['encoded_bytes'] ) { $this->fail( 'Staged encoded byte parity failed.' ); }
 		if ( $stats['record_count'] > $this->max_rows || $stats['encoded_bytes'] > $this->max_bytes - strlen( $root ) - strlen( $this->codec->key_value( $key ) ) ) { $this->fail( 'Snapshot exceeds the row/byte budget before payload fetch.' ); }
 		$encoded_bytes = $stats['encoded_bytes'] + strlen( $root ) + strlen( $this->codec->key_value( $key ) );
+		$this->admit_snapshot( $this->codec->key_hash( $key ), $stats['record_count'], $encoded_bytes );
 		$this->admit_memory( $encoded_bytes );
 		$stored_root = $this->root_payload( $id );
 		if ( $stored_root !== $root ) { $this->fail( 'Root metadata changed or failed staged read-back.' ); }
@@ -383,7 +396,7 @@ class LegacyTableSnapshot {
 			if ( array_keys( $metadata ) !== array( 'version', 'kind', 'value' ) || 0 !== $stats['record_count'] ) { $this->fail( 'Malformed scalar snapshot.' ); }
 			return $metadata['value'];
 		}
-		$envelope = new LegacyCollectionEnvelope(); $envelope->validate( $metadata, $key );
+		$envelope = new LegacyCollectionEnvelope( $this->codec ); $envelope->validate( $metadata, $key );
 		$columns = array();
 		foreach ( $this->definitions[ $this->record_table ]['columns'] as $name => $spec ) {
 			$columns[] = 'binary(32)' === $spec[0] ? 'HEX(`' . $name . '`) AS `' . $name . '`' : '`' . $name . '`';
@@ -400,6 +413,8 @@ class LegacyTableSnapshot {
 		// ancestry and logical order, not insertion ID; map order gaps are valid.
 		$result = array(); $roots = array(); $children = array(); $visited = array();
 		foreach ( $rows as $index => $row ) {
+			$this->tick();
+			if ( 0 === $index % 256 ) { $this->admit_memory( $encoded_bytes ); }
 			if ( $this->number( $row['blog_id'] ) !== $this->blog_id || $this->number( $row['state_id'] ) !== $id || $this->number( $row['generation'] ) !== $generation ) { $this->fail( 'Staged row escaped site/state/generation scope.' ); }
 			if ( null === $row['parent_node_hash'] ) {
 				$order = $this->number( $row['item_order'] );
@@ -412,6 +427,8 @@ class LegacyTableSnapshot {
 			if ( 'list' === $metadata['kind'] && $order !== $logical_order ) { $this->fail( 'Noncanonical list root order.' ); } ++$logical_order;
 			$tree = array(); $pending = array( $index );
 			for ( $i = 0; $i < count( $pending ); ++$i ) {
+				$this->tick();
+				if ( 0 === $i % 256 ) { $this->admit_memory( $encoded_bytes ); }
 				$position = $pending[$i];
 				if ( isset( $visited[$position] ) ) { $this->fail( 'Cycle or shared ancestry.' ); } $visited[$position] = true;
 				$row = $rows[$position]; $tree[] = $row; $hash = strtolower( $row['node_hash'] );
@@ -457,9 +474,21 @@ class LegacyTableSnapshot {
 	 * means the existing standalone repository contract, not safe-memory approval.
 	 */
 	private function admit_memory( $bytes ) {
+		if ( null !== $this->scale ) { $this->scale->admit_memory( $bytes ); }
 		if ( null !== $this->memory_admission && true !== call_user_func( $this->memory_admission, $bytes ) ) {
 			$this->fail( 'Snapshot memory admission was not affirmed.' );
 		}
+	}
+
+	private function admit_snapshot( $hash, $rows, $bytes ) {
+		if ( null !== $this->scale ) { $this->scale->admit_snapshot( $hash, $rows, $bytes ); }
+	}
+
+	private function snapshot_digest( $key, $value ) {
+		if ( null === $this->scale ) { return $this->codec->snapshot_digest( $value ); }
+		$footprint = $this->codec->snapshot_footprint( $value );
+		$this->scale->admit_snapshot_tokens( $this->codec->key_hash( $key ), $footprint['tokens'] );
+		return $footprint['digest'];
 	}
 
 	private function generation_stats( $id, $generation ) {
@@ -519,6 +548,7 @@ class LegacyTableSnapshot {
 	}
 
 	private function tick() {
+		if ( null !== $this->scale ) { $this->scale->tick(); }
 		if ( null !== $this->deadline && microtime( true ) > $this->deadline ) { $this->fail( 'Shared operation time budget exceeded.' ); }
 	}
 

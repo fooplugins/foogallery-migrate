@@ -152,22 +152,36 @@ class LegacyStateCodec {
 	 * This domain is distinct from the physical envelope hash used above.
 	 */
 	public function snapshot_digest( $value ) {
-		$context = hash_init( 'sha256' );
-		hash_update( $context, "legacy-logical-v1\0" );
-		$this->digest_value( $context, $value, 0 );
-		return hash_final( $context );
+		$result = $this->logical_digest( $value, 0 ); return $result['digest'];
 	}
 
-	private function digest_value( $context, $value, $depth ) {
-		if ( null !== $this->scale ) { $this->scale->tick(); }
+	/** Finite complete-snapshot footprint: its state value starts below the outer array. */
+	public function snapshot_footprint( $value ) {
+		if ( null === $this->scale ) { $this->fail( 'Snapshot footprint requires finite admission.' ); }
+		return $this->logical_digest( $value, 1 );
+	}
+
+	private function logical_digest( $value, $logical_start ) {
+		$context = hash_init( 'sha256' );
+		hash_update( $context, "legacy-logical-v1\0" );
+		$nodes = 0;
+		$this->digest_value( $context, $value, $logical_start, $nodes );
+		return array( 'digest' => hash_final( $context ), 'tokens' => $nodes );
+	}
+
+	private function digest_value( $context, $value, $depth, &$nodes ) {
+		if ( null !== $this->scale ) {
+			$this->scale->tick();
+			if ( ++$nodes > $this->scale->limit( 'max_tokens' ) ) { $this->fail( 'Snapshot exceeds the token budget.' ); }
+		}
 		if ( $depth > $this->max_depth ) {
 			$this->fail( 'Snapshot exceeds the depth budget.' );
 		}
 		if ( is_array( $value ) ) {
 			hash_update( $context, 'array:' . count( $value ) . ':' );
 			foreach ( $value as $key => $item ) {
-				$this->digest_value( $context, $key, $depth + 1 );
-				$this->digest_value( $context, $item, $depth + 1 );
+				$this->digest_value( $context, $key, $depth + 1, $nodes );
+				$this->digest_value( $context, $item, $depth + 1, $nodes );
 			}
 		} else {
 			$encoded = $this->encode( $value );

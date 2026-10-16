@@ -5,7 +5,10 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 class LegacyCollectionEnvelope {
 	private $codec;
-	public function __construct() { $this->codec = new LegacyStateCodec(); }
+	public function __construct( $codec = null ) {
+		if ( null !== $codec && ! $codec instanceof LegacyStateCodec ) { $this->fail( 'Invalid collection codec.' ); }
+		$this->codec = null === $codec ? new LegacyStateCodec() : $codec;
+	}
 
 	/** Only established compact collection keys interpret the marker as a wrapper. */
 	public function split( $key, $kind, $value ) {
