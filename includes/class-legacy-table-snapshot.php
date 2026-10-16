@@ -116,7 +116,7 @@ class LegacyTableSnapshot {
 			StorageScalarObserver::milestone( 'snapshot-staged' );
 			foreach ( $staged as $hash => $stage ) {
 				$change = $prepared[ $hash ];
-				$value = $this->read_generation( $change['key'], $stage['id'], $stage['generation'], $change['root_payload'], $change['stats'] );
+				$value = $this->read_generation( $change['key'], $stage['id'], $stage['generation'], $change['root_payload'], $change['stats'], $change['kind'] );
 				$this->admit_memory( $change['encoded_bytes'] );
 				if ( $this->snapshot_digest( $change['key'], $value ) !== $change['digest'] ) { $this->fail( 'Staged logical snapshot does not match its source.' ); }
 				unset( $value );
@@ -178,10 +178,10 @@ class LegacyTableSnapshot {
 		if ( count( $digests ) !== 1 || 'current' !== $digests[0]['digest_status'] || $this->number( $digests[0]['digest_revision'] ) !== $head['revision'] || ! is_string( $digests[0]['snapshot_digest'] ) || ! preg_match( '/^[0-9a-f]{64}$/Di', $digests[0]['snapshot_digest'] ) ) { $this->fail( 'Snapshot digest is absent, dirty or stale.' ); }
 		$this->admit_memory( $head['payload_bytes'] + $key_bytes );
 		$root = $this->root_payload( $head['id'] );
-		$metadata = $this->codec->decode( $root );
+		$metadata = 'scalar' === $head['state_kind'] ? $this->codec->decode( $root ) : $this->codec->decode_collection_root( $root );
 		if ( ! is_array( $metadata ) || ! isset( $metadata['kind'] ) || $metadata['kind'] !== $head['state_kind'] ) { $this->fail( 'Root metadata does not match state kind.' ); }
 		$stats = array( 'record_count' => $head['record_count'], 'payload_bytes' => $head['payload_bytes'] - strlen( $root ) );
-		$value = $this->read_generation( $key, $head['id'], $head['active_generation'], $root, $stats );
+		$value = $this->read_generation( $key, $head['id'], $head['active_generation'], $root, $stats, $head['state_kind'] );
 		if ( $reader->head( $key ) !== $head ) { $this->fail( 'Snapshot changed during read; restart.' ); }
 		$this->admit_memory( $head['payload_bytes'] + $key_bytes );
 		if ( $this->snapshot_digest( $key, $value ) !== strtolower( $digests[0]['snapshot_digest'] ) ) { $this->fail( 'Complete snapshot digest mismatch.' ); }
@@ -309,7 +309,7 @@ class LegacyTableSnapshot {
 				}
 				$root = $split['root'];
 			} else { $this->fail( 'Unsupported snapshot kind or value.' ); }
-			$change['root_payload'] = $this->codec->encode( $root );
+			$change['root_payload'] = 'scalar' === $change['kind'] ? $this->codec->encode( $root ) : $this->codec->encode_collection_root( $root );
 			if ( strlen( $change['root_payload'] ) > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Root metadata exceeds the row byte budget.' ); }
 			$total_rows += $stats['record_count'];
 			$bytes = strlen( $change['root_payload'] ) + strlen( $this->codec->key_value( $change['key'] ) ) + $stats['encoded_bytes'];
@@ -380,7 +380,7 @@ class LegacyTableSnapshot {
 		$this->insert( $this->record_table, array_merge( $row, array( 'blog_id' => $this->blog_id, 'state_id' => $id, 'generation' => $generation ) ) );
 	}
 
-	private function read_generation( $key, $id, $generation, $root, $expected ) {
+	private function read_generation( $key, $id, $generation, $root, $expected, $kind ) {
 		$stats = $this->generation_stats( $id, $generation );
 		if ( $stats['record_count'] !== $expected['record_count'] || $stats['payload_bytes'] !== $expected['payload_bytes'] ) { $this->fail( 'Staged record count/byte parity failed.' ); }
 		if ( isset( $expected['encoded_bytes'] ) && $stats['encoded_bytes'] !== $expected['encoded_bytes'] ) { $this->fail( 'Staged encoded byte parity failed.' ); }
@@ -390,8 +390,8 @@ class LegacyTableSnapshot {
 		$this->admit_memory( $encoded_bytes );
 		$stored_root = $this->root_payload( $id );
 		if ( $stored_root !== $root ) { $this->fail( 'Root metadata changed or failed staged read-back.' ); }
-		$metadata = $this->codec->decode( $root );
-		if ( ! is_array( $metadata ) || ! isset( $metadata['version'], $metadata['kind'] ) || 1 !== $metadata['version'] ) { $this->fail( 'Malformed root metadata.' ); }
+		$metadata = 'scalar' === $kind ? $this->codec->decode( $root ) : $this->codec->decode_collection_root( $root );
+		if ( ! is_array( $metadata ) || ! isset( $metadata['version'], $metadata['kind'] ) || 1 !== $metadata['version'] || $kind !== $metadata['kind'] ) { $this->fail( 'Malformed root metadata.' ); }
 		if ( 'scalar' === $metadata['kind'] ) {
 			if ( array_keys( $metadata ) !== array( 'version', 'kind', 'value' ) || 0 !== $stats['record_count'] ) { $this->fail( 'Malformed scalar snapshot.' ); }
 			return $metadata['value'];

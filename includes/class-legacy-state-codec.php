@@ -42,6 +42,17 @@ class LegacyStateCodec {
 	public function encode( $value ) { return $this->encode_at_depth( $value, 0 ); }
 
 	/**
+	 * Internal collection root only: root.wrapper.values (and field_order)
+	 * adds one edge relative to the complete state value starting at depth 1.
+	 * Snapshot callers MUST check snapshot_footprint before writing and after
+	 * rebuilding. Only representation depth changes; shared work, node and byte
+	 * accounting and the no-scale physical contract remain unchanged.
+	 */
+	public function encode_collection_root( $value ) {
+		return $this->encode_at_depth( $value, null === $this->scale ? 0 : -1 );
+	}
+
+	/**
 	 * Internal record split only: values adds ONE container, while mutable
 	 * fields do not. The record codec must admit the complete logical tree
 	 * before emission and verify it again after rebuilding child rows. This
@@ -64,6 +75,11 @@ class LegacyStateCodec {
 	}
 
 	public function decode( $json ) { return $this->decode_at_depth( $json, 0 ); }
+
+	/** Apply the same collection-root allowance to lexical scan AND untagging. */
+	public function decode_collection_root( $json ) {
+		return $this->decode_at_depth( $json, null === $this->scale ? 0 : -1 );
+	}
 
 	/** Read counterpart of the explicitly accounted internal split payload. */
 	public function decode_record_payload( $json ) {
