@@ -248,6 +248,8 @@ class MatrixTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), MANIFEST)
         self.assertEqual(json.loads((path / 'manifest.json').read_text()), MANIFEST)
+        self.assertEqual((path / 'manifest.json').read_bytes(), (ROOT / 'tests/integration/storage-a7-manifest.json').read_bytes())
+        self.assertEqual(result.stdout, (path / 'manifest.json').read_bytes())
         for cell in a7.CELLS:
             raw = (path / (cell + '.serialized')).read_bytes()
             self.assertEqual(len(raw), MANIFEST['cells'][cell]['raw_bytes'])
