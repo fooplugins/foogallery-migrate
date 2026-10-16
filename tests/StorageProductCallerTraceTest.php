@@ -6,10 +6,12 @@ use FooPlugins\FooGalleryMigrate\StorageOperations;
 use FooPlugins\FooGalleryMigrate\StorageControl;
 use PHPUnit\Framework\TestCase;
 
+require_once __DIR__ . '/support/StorageProductCallerTraceV2.php';
+
 /** Modern executable source-bound prerequisite, not executed production endpoints/PHP5. */
 class StorageProductCallerTraceTest extends TestCase {
 	public function test_exact_product_bindings_formal_arities_and_callsite_edges() {
-		$m = new StorageProductCallerTrace( '5.4.0' );
+		$m = new StorageProductCallerTraceV2( '5.4.0' );
 		$root = dirname( __DIR__ );
 		foreach ( $m->bindings()['product_files'] as $file => $sha ) { $this->assertSame( $sha, hash_file( 'sha256', $root . '/' . $file ) ); }
 		$paths = $m->paths(); $this->assertCount( 18, $paths );
@@ -28,7 +30,7 @@ class StorageProductCallerTraceTest extends TestCase {
 	}
 
 	public function test_shapes_are_existing_closed_product_arrays_not_deep_copies() {
-		$m = new StorageProductCallerTrace( '5.6.20' ); $s = $m->shapes();
+		$m = new StorageProductCallerTraceV2( '5.6.20' ); $s = $m->shapes();
 		$this->assertSame( array( 'blog_id', 'scope', 'target', 'confirmation', 'nonce' ), $s['request'] );
 		$this->assertSame( array( 'physical', 'value' ), $s['source'] );
 		$this->assertCount( 16, $s['record'] );
@@ -45,7 +47,7 @@ class StorageProductCallerTraceTest extends TestCase {
 	}
 
 	public function test_mutable_slots_not_zval_alias_or_repeated_visit_determine_separation() {
-		$m = new StorageProductCallerTrace( '5.4.0' );
+		$m = new StorageProductCallerTraceV2( '5.4.0' );
 		$a = array( 'slot' => 'dispatch:1', 'identity' => 'request', 'kind' => 'request', 'refcount' => 4, 'is_ref' => false );
 		$b = $a; $b['slot'] = 'switch_backend:0';
 		$r = $m->visit( array( $a, $b, $a, $b ) );
@@ -56,7 +58,7 @@ class StorageProductCallerTraceTest extends TestCase {
 	}
 
 	public function test_joined_trace_vector_is_one_growth_sequence_not_two_rounded_vectors() {
-		$m = new StorageProductCallerTrace( '5.6.20' ); $local = new StorageScannerTraceCapacity( '5.6.20' );
+		$m = new StorageProductCallerTraceV2( '5.6.20' ); $local = new StorageScannerTraceCapacity( '5.6.20' );
 		foreach ( array( array( 8, 1 ), array( 16, 1 ), array( 32, 1 ), array( 7, 1 ), array( 21, 6 ) ) as $pair ) {
 			list( $a, $b ) = $pair; $join = $m->join_vector( $a, $b ); $v = $local->hash_vector( $a + $b ); $old = $local->hash_vector( $a );
 			$this->assertSame( $v['vector_nominal'] - $old['vector_nominal'], $join['catch_delta'] );
@@ -69,7 +71,7 @@ class StorageProductCallerTraceTest extends TestCase {
 
 	public function test_every_local_case_is_joined_with_every_finite_suffix_and_no_proof_flags() {
 		foreach ( array( '5.4.0', '5.6.20' ) as $v ) {
-			$m = new StorageProductCallerTrace( $v ); $local = new StorageScannerTraceCapacity( $v );
+			$m = new StorageProductCallerTraceV2( $v ); $local = new StorageScannerTraceCapacity( $v );
 			$r = $m->envelope( 60000, 16, 1024 );
 			$this->assertCount( 86 * 18, $r['cases'] );
 			$this->assertSame( 'LP64_NTS_NONDEBUG_ALIGNMENT8_ZEND_MM', $r['abi'] );
@@ -85,7 +87,7 @@ class StorageProductCallerTraceTest extends TestCase {
 	}
 
 	public function test_recovery_advance_and_replacement_keep_distinct_source_identities() {
-		$m = new StorageProductCallerTrace( '5.4.0' );
+		$m = new StorageProductCallerTraceV2( '5.4.0' );
 		foreach ( $m->paths() as $path ) {
 			if ( 'replace' === $path['operation'] ) { $this->assertSame( 'direct', $path['phase'] ); }
 			$this->assertSame( 'option_snapshot', $path['frames'][0]['method'] );
@@ -102,14 +104,14 @@ class StorageProductCallerTraceTest extends TestCase {
 	}
 
 	public function test_conditional_file_extent_is_not_a_shipped_256_byte_cap() {
-		$m = new StorageProductCallerTrace( '5.6.20' );
+		$m = new StorageProductCallerTraceV2( '5.6.20' );
 		$a = $m->envelope( 60000, 16, 255 ); $b = $m->envelope( 60000, 16, 4096 );
 		$this->assertGreaterThan( $a['construction_nominal_upper'], $b['construction_nominal_upper'] );
 		$this->assertFalse( $b['filename_extent_proven'] );
 	}
 
 	public function test_array_copy_uses_number_of_elements_not_historical_capacity() {
-		$m = new StorageProductCallerTrace( '5.4.0' );
+		$m = new StorageProductCallerTraceV2( '5.4.0' );
 		$keys = $m->shapes()['record'];
 		$this->assertSame( $m->shallow_array( $keys ), $m->shallow_array( array_slice( $keys, 0, 15 ) ) + $m->nominal( 72 + strlen( $keys[15] ) + 1 ) );
 	}

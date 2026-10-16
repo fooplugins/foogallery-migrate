@@ -7,7 +7,7 @@ use FooPlugins\FooGalleryMigrate\StorageMemoryBaseline;
 use FooPlugins\FooGalleryMigrate\StorageOperations;
 use PHPUnit\Framework\TestCase;
 
-require_once __DIR__ . '/support/StorageReceiverNewComposition.php';
+require_once __DIR__ . '/support/StorageReceiverNewCompositionV2.php';
 
 /** Internal event projection only: not an allocation/admission envelope. */
 class StorageReceiverScalarEventsTest extends TestCase {
@@ -91,7 +91,7 @@ class StorageReceiverScalarEventsTest extends TestCase {
 		$this->assertSame( strlen( $_POST['confirmation'] ), $events['string_lengths_upper'][5] );
 		$this->assertSame( 'switch-to-table', $_POST['confirmation'] );
 		foreach ( array( '5.4.0', '5.6.20' ) as $version ) {
-			$helper = new StorageReceiverNewComposition( $version );
+			$helper = new StorageReceiverNewCompositionV2( $version );
 			$this->assertSame( $helper->bindings()['receiver_observer_sha256'], hash_file( 'sha256', dirname( __DIR__ ) . '/includes/class-storage-memory-baseline.php' ) );
 			$r = $helper->receiver_events( $events );
 			$this->assertSame( 8, $r['events']['map_deep_calls'] );
@@ -110,7 +110,7 @@ class StorageReceiverScalarEventsTest extends TestCase {
 		$post = $this->post(); $post['nonce'] = array( 'nested' => '\\q' );
 		$m = new StorageMemoryBaseline(); $m->observe_receiver( $post );
 		$this->expectException( \InvalidArgumentException::class );
-		( new StorageReceiverNewComposition( '5.4.0' ) )->receiver_events( $m->receiver_events() );
+		( new StorageReceiverNewCompositionV2( '5.4.0' ) )->receiver_events( $m->receiver_events() );
 	}
 	public function test_scalar_types_integer_keys_and_each_string_visit_reuse_existing_copy_helpers() {
 		$post = array( '', '\\', null, false, 1, 1.5, '\\0' );
@@ -118,7 +118,7 @@ class StorageReceiverScalarEventsTest extends TestCase {
 		$this->assertSame( array( 0, 1, null, null, null, null, 2 ), $events['string_lengths_upper'] );
 		$this->assertSame( array_fill( 0, 7, 0 ), $events['key_request_bytes'] );
 		foreach ( array( '5.4.0', '5.6.20' ) as $version ) {
-			$helper = new StorageReceiverNewComposition( $version ); $r = $helper->receiver_events( $events );
+			$helper = new StorageReceiverNewCompositionV2( $version ); $r = $helper->receiver_events( $events );
 			$this->assertSame( 3, $r['events']['stripslashes_calls'] );
 			$copies = $helper->compose( array( array( '', '' ), array( '\\', '' ), array( '\\0', "\0" ) ), array( array_keys( $post ) ) );
 			$this->assertSame( $copies['selected_copy_family_nominal_sum'], $r['selected_copy_family_nominal_sum'] );
@@ -129,7 +129,7 @@ class StorageReceiverScalarEventsTest extends TestCase {
 		$m = new StorageMemoryBaseline(); $m->observe_receiver( $this->post() ); $events = $m->receiver_events();
 		$events['string_lengths_upper'][0] = $bad;
 		$this->expectException( \InvalidArgumentException::class );
-		( new StorageReceiverNewComposition( '5.4.0' ) )->receiver_events( $events );
+		( new StorageReceiverNewCompositionV2( '5.4.0' ) )->receiver_events( $events );
 	}
 	public static function invalid_lengths() { return array( array( -1 ), array( '1' ), array( PHP_INT_MAX ), array( 1073741824 ) ); }
 }

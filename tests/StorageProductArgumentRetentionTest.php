@@ -6,6 +6,8 @@ use FooPlugins\FooGalleryMigrate\StorageControl;
 use FooPlugins\FooGalleryMigrate\LegacyOptionDecoder;
 use PHPUnit\Framework\TestCase;
 
+require_once __DIR__ . '/support/StorageProductArgumentRetentionV2.php';
+
 /** Modern conditional material controls, not a literal-runtime/admission test. */
 class StorageProductArgumentRetentionTest extends TestCase {
 	private $saved_globals;
@@ -56,7 +58,7 @@ class StorageProductArgumentRetentionTest extends TestCase {
 
 	public function test_all_actual_suffixes_capture_only_concurrent_argument_roots() {
 		foreach ( array( '5.4.0', '5.6.20' ) as $version ) {
-			$t = new StorageProductCallerTrace( $version ); $m = new StorageProductArgumentRetention( $version );
+			$t = new StorageProductCallerTraceV2( $version ); $m = new StorageProductArgumentRetentionV2( $version );
 			foreach ( $t->paths() as $id => $path ) {
 				$args = $this->arguments( $path );
 				$purpose = 'recover' === $path['operation'] ? 'recover' : ( 'replace' === $path['operation'] ? 'option_reimport' : ( 'table' === $args['request']['target'] ? 'option_import' : 'table_export' ) );
@@ -78,7 +80,7 @@ class StorageProductArgumentRetentionTest extends TestCase {
 	}
 
 	public function test_nested_sharing_is_not_deep_copy_delta_or_zero_sized_existing_graph() {
-		$m = new StorageProductArgumentRetention( '5.4.0' ); $t = new StorageProductCallerTrace( '5.4.0' );
+		$m = new StorageProductArgumentRetentionV2( '5.4.0' ); $t = new StorageProductCallerTraceV2( '5.4.0' );
 		$shared = str_repeat( 'x', 70000 ); $v = array( $shared, $shared );
 		$expected = $t->nominal( 32 ) + $t->nominal( 72 ) + $t->nominal( 64 ) + 2 * $t->nominal( 72 ) +
 			2 * ( $t->nominal( 32 ) + $t->nominal( 70001 ) );
@@ -91,7 +93,7 @@ class StorageProductArgumentRetentionTest extends TestCase {
 	}
 
 	public function test_historical_sparse_and_empty_array_capacity_is_not_element_count() {
-		$m = new StorageProductArgumentRetention( '5.6.20' ); $t = new StorageProductCallerTrace( '5.6.20' );
+		$m = new StorageProductArgumentRetentionV2( '5.6.20' ); $t = new StorageProductCallerTraceV2( '5.6.20' );
 		$this->assertSame( $t->nominal( 256 ) - $t->nominal( 64 ), $m->extent( array(), 32 ) - $m->extent( array(), 8 ) );
 		$this->assertSame( $t->nominal( 256 ) - $t->nominal( 64 ), $m->extent( array( 'x' => 1 ), 32 ) - $m->extent( array( 'x' => 1 ), 8 ) );
 		$this->assertSame( $t->nominal( 32 ) + $t->nominal( 72 ) + $t->nominal( 8 * 524288 ), $m->extent( array(), 524288 ) );
@@ -101,7 +103,7 @@ class StorageProductArgumentRetentionTest extends TestCase {
 
 	public function test_composition_reuses_one_joined_vector_and_keeps_frontiers_unresolved() {
 		foreach ( array( '5.4.0', '5.6.20' ) as $version ) {
-			$t = new StorageProductCallerTrace( $version ); $m = new StorageProductArgumentRetention( $version );
+			$t = new StorageProductCallerTraceV2( $version ); $m = new StorageProductArgumentRetentionV2( $version );
 			foreach ( $m->bindings()['product_files'] as $file => $hash ) { $this->assertSame( $hash, hash_file( 'sha256', dirname( __DIR__ ) . '/' . $file ) ); }
 			foreach ( array( 0, 2, 4, 6, 10, 16 ) as $id ) {
 				$args = $this->arguments( $t->paths()[$id] );
@@ -123,14 +125,14 @@ class StorageProductArgumentRetentionTest extends TestCase {
 	}
 
 	public function test_unbounded_request_string_is_parameterized_not_capped_by_current_raw() {
-		$t = new StorageProductCallerTrace( '5.4.0' ); $m = new StorageProductArgumentRetention( '5.4.0' );
+		$t = new StorageProductCallerTraceV2( '5.4.0' ); $m = new StorageProductArgumentRetentionV2( '5.4.0' );
 		$args = $this->arguments( $t->paths()[0] ); $small = $m->retention( 0, $args, $this->capacities() );
 		$args['request']['nonce'] = str_repeat( 'n', 100000 ); $large = $m->retention( 0, $args, $this->capacities() );
 		$this->assertSame( $t->nominal( 100001 ) - $t->nominal( 6 ), $large['existing_argument_graph_nominal_upper'] - $small['existing_argument_graph_nominal_upper'] );
 	}
 
 	public function test_v1_record_does_not_require_v2_field_or_duplicate_request_per_frame() {
-		$t = new StorageProductCallerTrace( '5.6.20' ); $m = new StorageProductArgumentRetention( '5.6.20' );
+		$t = new StorageProductCallerTraceV2( '5.6.20' ); $m = new StorageProductArgumentRetentionV2( '5.6.20' );
 		$args = $this->arguments( $t->paths()[2] ); $args['record']['version'] = 1; unset( $args['record']['retained_digest'] );
 		$this->assertSame( $args['record'], StorageControl::decode( json_encode( $args['record'] ), 1 ) );
 		$r = $m->retention( 2, $args, $this->capacities() );
@@ -141,7 +143,7 @@ class StorageProductArgumentRetentionTest extends TestCase {
 	}
 
 	public function test_unsupported_domains_fail_before_composition() {
-		$m = new StorageProductArgumentRetention( '5.4.0' );
+		$m = new StorageProductArgumentRetentionV2( '5.4.0' );
 		foreach ( array( 0, 7, 9, 1048576, '8', -1 ) as $capacity ) {
 			try { $m->extent( array(), $capacity ); $this->fail( 'invalid capacity accepted' ); }
 			catch ( \InvalidArgumentException $e ) { $this->assertSame( 'product_argument_domain', $e->getMessage() ); }
@@ -156,7 +158,7 @@ class StorageProductArgumentRetentionTest extends TestCase {
 	}
 
 	public function test_impossible_null_source_and_incomplete_roots_are_not_zero() {
-		$t = new StorageProductCallerTrace( '5.4.0' ); $m = new StorageProductArgumentRetention( '5.4.0' );
+		$t = new StorageProductCallerTraceV2( '5.4.0' ); $m = new StorageProductArgumentRetentionV2( '5.4.0' );
 		foreach ( array( 'source', 'record', 'request' ) as $key ) {
 			$args = $this->arguments( $t->paths()[2] ); unset( $args[$key] );
 			try { $m->retention( 2, $args, $this->capacities() ); $this->fail( 'missing root accepted' ); }
@@ -166,7 +168,7 @@ class StorageProductArgumentRetentionTest extends TestCase {
 		$this->expectException( \InvalidArgumentException::class ); $m->retention( 2, $args, $this->capacities() );
 	}
 	public function test_hidden_backing_contract_is_mandatory_not_observed_from_modern_value() {
-		$t = new StorageProductCallerTrace( '5.4.0' ); $m = new StorageProductArgumentRetention( '5.4.0' );
+		$t = new StorageProductCallerTraceV2( '5.4.0' ); $m = new StorageProductArgumentRetentionV2( '5.4.0' );
 		$args = $this->arguments( $t->paths()[2] );
 		foreach ( array( 8, array( 'array_capacity_upper' => 8 ), array( 'array_capacity_upper' => 8, 'string_extra_upper' => -1 ),
 			array( 'array_capacity_upper' => 8, 'string_extra_upper' => '0' ) ) as $bad ) {
@@ -176,7 +178,7 @@ class StorageProductArgumentRetentionTest extends TestCase {
 		}
 	}
 	public function test_unsupported_record_root_is_rejected_before_field_access() {
-		$t = new StorageProductCallerTrace( '5.4.0' ); $m = new StorageProductArgumentRetention( '5.4.0' );
+		$t = new StorageProductCallerTraceV2( '5.4.0' ); $m = new StorageProductArgumentRetentionV2( '5.4.0' );
 		foreach ( array( new \stdClass(), 'not-a-record', null ) as $bad ) {
 			$args = $this->arguments( $t->paths()[2] ); $args['record'] = $bad;
 			try { $m->retention( 2, $args, $this->capacities() ); $this->fail( 'unsupported record root accepted' ); }
