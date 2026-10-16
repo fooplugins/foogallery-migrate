@@ -75,24 +75,29 @@ class LegacyRecordCodec {
 			$bytes += $size;
 		}
 		$this->admit( $bytes );
-		foreach ( $rows as $row ) {
-			$row = $this->validate_row( $row, $this->codec->key_hash( $state_key ) );
+		$state_hash = $this->codec->key_hash( $state_key );
+		// Index immutable encoded rows by their caller-owned positions. Validate
+		// every encoded identity/checksum before hydrating any split envelope.
+		// Neither this index nor adjacency retains decoded payloads or full rows.
+		foreach ( $rows as $position => $row ) {
+			$row = $this->validate_row( $row, $state_hash );
 			$hash = $row['node_hash'];
 			if ( isset( $nodes[ $hash ] ) ) { $this->fail( 'Duplicate node identity.' ); }
 
-			$nodes[ $hash ] = $row;
+			$nodes[ $hash ] = $position;
 			if ( null !== $row['parent_node_hash'] ) {
 				$parent = $row['parent_node_hash'];
 				$order = $row['item_order'];
 				if ( isset( $children[ $parent ][ $order ] ) ) { $this->fail( 'Duplicate sibling order.' ); }
-				$children[ $parent ][ $order ] = $hash;
+				$children[ $parent ][ $order ] = $position;
 			}
 		}
-		if ( ! isset( $nodes[ $root_hash ] ) || null !== $nodes[ $root_hash ]['parent_node_hash'] || $nodes[ $root_hash ]['depth'] !== 0 ) {
+		unset( $row );
+		if ( ! isset( $nodes[ $root_hash ] ) || null !== $rows[ $nodes[ $root_hash ] ]['parent_node_hash'] || $this->number( $rows[ $nodes[ $root_hash ] ]['depth'] ) !== 0 ) {
 			$this->fail( 'Missing or invalid root identity.' );
 		}
 		$visited = array();
-		$result = $this->rebuild_node( $root_hash, 0, $nodes, $children, $visited );
+		$result = $this->rebuild_node( $nodes[ $root_hash ], 0, $state_hash, $rows, $children, $visited );
 		if ( count( $visited ) !== count( $nodes ) ) { $this->fail( 'Orphan, cycle or unrelated root in tree.' ); }
 		return $result;
 	}
@@ -186,19 +191,20 @@ class LegacyRecordCodec {
 			$row['payload_hash'] !== hash( 'sha256', $row['payload'] ) ) { $this->fail( 'Payload integrity/byte-count mismatch.' ); }
 		$row['encoded_bytes'] = $this->encoded_bytes( $row );
 		if ( $row['encoded_bytes'] > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Row exceeds the byte budget.' ); }
-		$row['base'] = $this->codec->decode_record_payload( $row['payload'] );
-		$row['mutable'] = $this->codec->decode( $row['mutable_payload'] );
 		$row['key'] = $key;
 		return $row;
 	}
 
-	private function rebuild_node( $hash, $depth, &$nodes, &$children, &$visited ) {
+	private function rebuild_node( $position, $depth, $state_hash, &$rows, &$children, &$visited ) {
 		$this->tick();
-		if ( $depth > $this->max_depth || isset( $visited[ $hash ] ) || ! isset( $nodes[ $hash ] ) || $nodes[ $hash ]['depth'] !== $depth ) {
+		if ( $depth > $this->max_depth || isset( $visited[ $position ] ) || ! isset( $rows[ $position ] ) || $this->number( $rows[ $position ]['depth'] ) !== $depth ) {
 			$this->fail( 'Invalid tree ancestry/depth.' );
 		}
-		$visited[ $hash ] = true;
-		$row = $nodes[ $hash ]; $base = $row['base']; $mutable = $row['mutable'];
+		$visited[ $position ] = true;
+		$row = $this->validate_row( $rows[ $position ], $state_hash );
+		$hash = $row['node_hash'];
+		$base = $this->codec->decode_record_payload( $row['payload'] );
+		$mutable = $this->codec->decode( $row['mutable_payload'] );
 		$child_rows = isset( $children[ $hash ] ) ? $children[ $hash ] : array();
 		if ( ! is_array( $base ) || ! isset( $base['version'], $base['kind'] ) || self::VERSION !== $base['version'] || ! is_array( $mutable ) ) {
 			$this->fail( 'Unsupported record split envelope.' );
@@ -219,21 +225,15 @@ class LegacyRecordCodec {
 				$count = $this->number( $count );
 				if ( count( $child_rows ) !== $count ) { $this->fail( 'Missing or extra children.' ); }
 			} else if ( count( $child_rows ) ) { $this->fail( 'Unexpected children.' ); }
-			ksort( $child_rows, SORT_NUMERIC );
-			$child_values = array(); $order = 0;
-			foreach ( $child_rows as $position => $child_hash ) {
-				if ( $position !== $order++ ) { $this->fail( 'Invalid sibling order.' ); }
-				$key = $nodes[ $child_hash ]['key'];
-				if ( array_key_exists( $key, $child_values ) ) { $this->fail( 'Duplicate typed child key.' ); }
-				$child_values[ $key ] = $this->rebuild_node( $child_hash, $depth + 1, $nodes, $children, $visited );
-			}
+			// Place this node's own fields before descending. Envelope arrays must
+			// not remain live at every ancestor while the final children grow.
 			$record = array(); $used_base = 0; $used_mutable = 0; $used_children = false;
 			foreach ( $base['field_order'] as $field ) {
 				$this->codec->key_value( $field );
 				$probe = array( $field => true ); $keys = array_keys( $probe );
 				if ( $keys[0] !== $field || array_key_exists( $field, $record ) ) { $this->fail( 'Duplicate or coercible field key.' ); }
 				if ( 'children' === $field && null !== $count ) {
-					$record[ $field ] = $child_values; $used_children = true;
+					$record[ $field ] = array(); $used_children = true;
 				} else if ( in_array( $field, $this->mutable_fields(), true ) ) {
 					if ( ! array_key_exists( $field, $mutable ) ) { $this->fail( 'Missing mutable field.' ); }
 					$record[ $field ] = $mutable[ $field ]; $used_mutable++;
@@ -244,6 +244,15 @@ class LegacyRecordCodec {
 			}
 			if ( $used_base !== count( $base['values'] ) || $used_mutable !== count( $mutable ) || ( null !== $count && ! $used_children ) ) {
 				$this->fail( 'Unaccounted fields or overlapping split values.' );
+			}
+			unset( $base, $mutable, $probe, $keys );
+			ksort( $child_rows, SORT_NUMERIC );
+			$order = 0;
+			foreach ( $child_rows as $child_order => $child_position ) {
+				if ( $child_order !== $order++ ) { $this->fail( 'Invalid sibling order.' ); }
+				$key = $this->key( $rows[ $child_position ]['key_type'], $rows[ $child_position ]['key_value'] );
+				if ( array_key_exists( $key, $record['children'] ) ) { $this->fail( 'Duplicate typed child key.' ); }
+				$record['children'][ $key ] = $this->rebuild_node( $child_position, $depth + 1, $state_hash, $rows, $children, $visited );
 			}
 		} else { $this->fail( 'Unknown record kind.' ); }
 		if ( $row['logical_hash'] !== $this->codec->snapshot_digest( $record ) ) { $this->fail( 'Complete logical-record hash mismatch.' ); }
