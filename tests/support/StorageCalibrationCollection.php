@@ -112,7 +112,6 @@ class StorageCalibrationCollection {
 		$raw_hash = hash( 'sha256', $raw ); $raw_bytes = strlen( $raw );
 		self::check( 1 === $pin->query( $pin->prepare( 'INSERT INTO `' . $wpdb->prefix . "options` (option_name, option_value, autoload) VALUES (%s, %s, 'no')", array( FOOGALLERY_MIGRATE_OPTION_DATA, $raw ) ) ), 'collection_source_insert_failed' );
 		unset( $raw );
-		$start = microtime( true );
 		$result = ( new StorageConversion( $policy ) )->switch_backend( self::request( 'table' ) );
 		$refused = 0 === strpos( $case, 'refuse-' );
 		$authority = array();
@@ -148,7 +147,6 @@ class StorageCalibrationCollection {
 			'policy_domain' => 'fixed synthetic collection only; not a measured production envelope', 'experimental_policy' => $policy,
 			'raw_bytes' => $raw_bytes, 'source_sha256' => $raw_hash, 'expected_logical_sha256' => $refused ? null : $expected,
 			'public_refusals' => $refusals, 'conversion_refused' => $refused, 'conversion_error' => $refused ? $result->get_error_code() : null, 'phases' => $pin->phases, 'authority' => $authority,
-			'operation_seconds' => microtime( true ) - $start,
 			'fresh_process_peaks' => array( 'scope' => 'bootstrap-inclusive process so far, NOT reset/operation delta/terminal',
 				'php_used_bytes' => memory_get_peak_usage( false ), 'php_allocated_bytes' => memory_get_peak_usage( true ), 'terminal_allocator' => null ),
 			'cleanup' => 'owned outer harness responsibility; collector retains source/backup/table evidence',
