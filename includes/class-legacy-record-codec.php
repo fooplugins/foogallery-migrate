@@ -36,6 +36,209 @@ class LegacyRecordCodec {
 	}
 
 	/**
+	 * Preparatory facts for the CURRENT v1 representation, not memory approval.
+	 * No make_row/tag/JSON encoding, full field_order/values copy, hash or output
+	 * collection is constructed. Only O(logical depth + row depth) fixed metadata
+	 * and bounded scalar scratch are used. Input is still caller-owned/live.
+	 * The named sink describes ownership, NOT arbitrary callable behavior or SQL
+	 * driver bounds. Runtime/container/COW/native coefficients remain UNKNOWN.
+	 * Tagged metrics cover payload + mutable envelopes, not projection/hash
+	 * scratch. encoded_bytes covers the same columns as encoded_bytes(row).
+	 * Native default JSON escaping is counted; custom codec/WP encoders and
+	 * narrower injected codec limits are NOT certified by this observation.
+	 */
+	public function describe_tree( $key, $record, $ownership ) {
+		if ( 'retaining-row' !== $ownership && 'repository-sink' !== $ownership ) { $this->fail( 'Unsupported footprint ownership.' ); }
+		$this->tick();
+		$d = array( 'version' => 1, 'ownership' => $ownership, 'additional_allocation_bytes' => null,
+			'records' => 0, 'payload_bytes' => 0, 'encoded_bytes' => 0, 'max_row_bytes' => 0,
+			'tagged_arrays' => 0, 'tagged_entries' => 0, 'tagged_nodes' => 0, 'raw_string_bytes' => 0,
+			'max_row_tagged_arrays' => 0, 'max_row_tagged_nodes' => 0, 'max_row_tagged_entries' => 0,
+			'base64_bytes' => 0, 'typed_key_bytes' => 0, 'projection_bytes' => 0,
+			'max_record_fields' => 0, 'max_siblings' => 0, 'active_row_frames' => 0, 'max_ancestor_row_bytes' => 0,
+			'logical_nodes' => 0, 'logical_entries' => 0, 'logical_arrays' => 0, 'logical_string_bytes' => 0,
+			'logical_max_depth' => 0, 'logical_max_width' => 0 );
+		$this->footprint_logical( $record, 0, $d );
+		$this->footprint_tree( $key, $record, 0, 0, $d );
+		$d['retained_output_rows'] = 'retaining-row' === $ownership ? $d['records'] : 0;
+		return $d;
+	}
+
+	/**
+	 * Encoded, caller-retained rows: observe BEFORE positional index/hydration.
+	 * Checks byte columns, checksum and lexical bounds only. NOT a replacement
+	 * for validate_row, native JSON syntax/untagging, ancestry or logical hashes.
+	 * Native token counts bound syntax work, not decoded allocation coefficients.
+	 * No adjacency/index/sort, key decoding or full JSON graph is constructed.
+	 */
+	public function describe_rows( $rows, $ownership ) {
+		$this->tick();
+		if ( 'caller-rows-rebuild' !== $ownership || ! is_array( $rows ) || ! count( $rows ) || count( $rows ) > $this->max_records ) { $this->fail( 'Unsupported footprint rows/ownership.' ); }
+		$d = array( 'version' => 1, 'ownership' => $ownership, 'additional_allocation_bytes' => null,
+			'encoded_bytes' => 0, 'max_row_bytes' => 0, 'max_payload_pair_bytes' => 0, 'max_key_decode_bytes_upper_bound' => 0,
+			'node_index_entries' => count( $rows ), 'visited_entries' => count( $rows ), 'adjacency_entries' => 0,
+			'parent_buckets_upper_bound' => 0, 'sort_cow_entries_upper_bound' => 0, 'native_tokens' => 0, 'max_native_depth' => 0 );
+		foreach ( $rows as $row ) {
+			$this->tick(); $bytes = $this->footprint_encoded_bytes( $row );
+			if ( $bytes > LegacyTableReader::MAX_RECORD_BYTES || ! isset( $row['payload_hash'], $row['payload_bytes'], $row['depth'] ) ||
+				! array_key_exists( 'parent_node_hash', $row ) || ! is_string( $row['payload'] ) || ! is_string( $row['mutable_payload'] ) ||
+				! is_string( $row['key_value'] ) || $this->number( $row['depth'] ) > $this->max_depth ) { $this->fail( 'Invalid footprint row.' ); }
+			$pair = StorageScaleAdmission::checked_add( strlen( $row['payload'] ), strlen( $row['mutable_payload'] ) );
+			if ( $this->number( $row['payload_bytes'] ) !== $pair || $this->hex( $row['payload_hash'] ) !== hash( 'sha256', $row['payload'] ) ) { $this->fail( 'Payload integrity/byte-count mismatch.' ); }
+			$this->footprint_add( $d, 'encoded_bytes', $bytes );
+			if ( $d['encoded_bytes'] > $this->max_tree_bytes ) { $this->fail( 'Tree exceeds footprint byte budget.' ); }
+			$d['max_row_bytes'] = max( $d['max_row_bytes'], $bytes );
+			$d['max_payload_pair_bytes'] = max( $d['max_payload_pair_bytes'], $pair );
+			// Encoded length is a safe upper bound without allocating decoded keys.
+			$d['max_key_decode_bytes_upper_bound'] = max( $d['max_key_decode_bytes_upper_bound'], strlen( $row['key_value'] ) );
+			if ( null !== $row['parent_node_hash'] ) { $this->hex( $row['parent_node_hash'] ); ++$d['adjacency_entries']; }
+			foreach ( array( 'payload', 'mutable_payload' ) as $field ) {
+				// Match inspect_json's existing physical token ceiling. Split payload
+				// may have one extra logical edge; observe its lexical depth separately.
+				$scan = 'payload' === $field ? $this->codec->inspect_json_record_payload( $row[$field] ) : $this->codec->inspect_json( $row[$field] );
+				$this->footprint_add( $d, 'native_tokens', $scan['tokens'] );
+				$d['max_native_depth'] = max( $d['max_native_depth'], $scan['max_depth'] );
+			}
+		}
+		// Without allocating an adjacency map, each edge could own a bucket and
+		// every edge could overlap one sibling sort/COW span. Explicit upper bounds.
+		$d['parent_buckets_upper_bound'] = $d['adjacency_entries'];
+		$d['sort_cow_entries_upper_bound'] = $d['adjacency_entries'];
+		return $d;
+	}
+
+	private function footprint_encoded_bytes( $row ) {
+		if ( ! is_array( $row ) ) { $this->fail( 'Invalid footprint row.' ); }
+		$bytes = 0;
+		foreach ( array( 'payload', 'mutable_payload', 'key_value', 'source_plugin_value', 'source_id_value', 'legacy_identifier_value' ) as $field ) {
+			if ( 'legacy_identifier_value' === $field && ! isset( $row[$field] ) ) { continue; }
+			if ( ! array_key_exists( $field, $row ) || ( null !== $row[$field] && ! is_string( $row[$field] ) ) ) { $this->fail( 'Invalid footprint byte column.' ); }
+			$bytes = StorageScaleAdmission::checked_add( $bytes, null === $row[$field] ? 0 : strlen( $row[$field] ) );
+			if ( $bytes > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Row footprint exceeds byte budget.' ); }
+		}
+		return $bytes;
+	}
+
+	private function footprint_add( &$d, $field, $n ) { $d[$field] = StorageScaleAdmission::checked_add( $d[$field], $n ); }
+
+	private function footprint_logical( $v, $depth, &$d ) {
+		$this->tick(); $this->footprint_add( $d, 'logical_nodes', 1 );
+		if ( $depth > $this->max_depth || $d['logical_nodes'] > ( null === $this->scale ? 262144 : $this->scale->limit( 'max_tokens' ) ) ) { $this->fail( 'Logical footprint exceeds depth/token budget.' ); }
+		$d['logical_max_depth'] = max( $d['logical_max_depth'], $depth );
+		if ( is_array( $v ) ) {
+			$this->footprint_add( $d, 'logical_arrays', 1 ); $this->footprint_add( $d, 'logical_entries', count( $v ) );
+			$d['logical_max_width'] = max( $d['logical_max_width'], count( $v ) );
+			foreach ( $v as $k => $item ) { $this->footprint_logical( $k, $depth + 1, $d ); $this->footprint_logical( $item, $depth + 1, $d ); }
+		} else if ( is_string( $v ) ) { $this->footprint_add( $d, 'logical_string_bytes', strlen( $v ) ); }
+		else if ( ! is_null( $v ) && ! is_bool( $v ) && ! is_int( $v ) && ( ! is_float( $v ) || ! is_finite( $v ) ) ) { $this->fail( 'Unsupported footprint scalar.' ); }
+	}
+
+	private function footprint_metrics() {
+		return array( 'json_bytes' => 0, 'tagged_arrays' => 0, 'tagged_entries' => 0, 'tagged_nodes' => 0, 'raw_string_bytes' => 0, 'base64_bytes' => 0 );
+	}
+
+	private function footprint_array( $count, &$m ) {
+		$this->tick(); $this->footprint_add( $m, 'tagged_nodes', 1 );
+		$this->footprint_add( $m, 'tagged_arrays', StorageScaleAdmission::checked_add( 2, $count ) );
+		$this->footprint_add( $m, 'tagged_entries', $count );
+		$this->footprint_add( $m, 'json_bytes', StorageScaleAdmission::checked_add( 12, 0 === $count ? 0 : StorageScaleAdmission::checked_multiply( 4, $count ) - 1 ) );
+	}
+
+	private function footprint_value( $v, &$m ) {
+		$this->tick();
+		if ( is_array( $v ) ) {
+			$this->footprint_array( count( $v ), $m );
+			foreach ( $v as $k => $item ) { $this->footprint_value( $k, $m ); $this->footprint_value( $item, $m ); }
+			return;
+		}
+		$this->footprint_add( $m, 'tagged_nodes', 1 ); $this->footprint_add( $m, 'tagged_arrays', 1 );
+		if ( null === $v ) { $bytes = 8; }
+		else if ( is_bool( $v ) ) { $bytes = $v ? 16 : 17; }
+		else if ( is_int( $v ) ) { $bytes = 14 + strlen( (string) $v ); }
+		else if ( is_string( $v ) || ( is_float( $v ) && is_finite( $v ) ) ) {
+			$is_string = is_string( $v );
+			// Only eight-byte float scratch, matching the codec's canonical endian.
+			$raw = $is_string ? $v : pack( 'd', $v );
+			if ( ! $is_string && pack( 'S', 1 ) === "\x01\x00" ) { $raw = strrev( $raw ); }
+			$length = strlen( $raw ); $encoded = 0; $slashes = 0;
+			for ( $i = 0; $i < $length; $i += min( 3, $length - $i ) ) {
+				if ( 0 === $i % 4095 ) { $this->tick(); }
+				$chunk = base64_encode( substr( $raw, $i, 3 ) );
+				$encoded = StorageScaleAdmission::checked_add( $encoded, strlen( $chunk ) );
+				$slashes = StorageScaleAdmission::checked_add( $slashes, substr_count( $chunk, '/' ) );
+			}
+			$this->footprint_add( $m, 'base64_bytes', $encoded );
+			if ( $is_string ) { $this->footprint_add( $m, 'raw_string_bytes', $length ); }
+			$bytes = StorageScaleAdmission::checked_add( $is_string ? 13 : 12, StorageScaleAdmission::checked_add( $encoded, $slashes ) );
+		} else { $this->fail( 'Unsupported footprint scalar.' ); }
+		$this->footprint_add( $m, 'json_bytes', $bytes );
+	}
+
+	private function footprint_tree( $key, $record, $depth, $ancestor_bytes, &$d ) {
+		$this->tick();
+		if ( $d['records'] >= $this->max_records || $depth > $this->max_depth || ( ! is_int( $key ) && ! is_string( $key ) ) ) { $this->fail( 'Record footprint exceeds budget or key domain.' ); }
+		$probe = array( $key => true ); foreach ( $probe as $actual => $unused ) { if ( $actual !== $key ) { $this->fail( 'Coercible footprint key.' ); } }
+		$m = $this->footprint_metrics(); $mutable_count = 0; $values_count = 0; $child_count = null;
+		if ( is_array( $record ) ) {
+			foreach ( $record as $field => $value ) {
+				if ( 'children' === $field && is_array( $value ) ) { $child_count = count( $value ); }
+				else if ( in_array( $field, $this->mutable_fields(), true ) ) { ++$mutable_count; }
+				else { ++$values_count; }
+			}
+			$this->footprint_array( 5, $m );
+			$this->footprint_value( 'version', $m ); $this->footprint_value( self::VERSION, $m );
+			$this->footprint_value( 'kind', $m ); $this->footprint_value( 'array', $m );
+			$this->footprint_value( 'field_order', $m ); $this->footprint_array( count( $record ), $m );
+			$i = 0; foreach ( $record as $field => $unused ) { $this->footprint_value( $i++, $m ); $this->footprint_value( $field, $m ); }
+			$this->footprint_value( 'child_count', $m ); $this->footprint_value( $child_count, $m );
+			$this->footprint_value( 'values', $m ); $this->footprint_array( $values_count, $m );
+			foreach ( $record as $field => $value ) {
+				if ( ( 'children' === $field && null !== $child_count ) || in_array( $field, $this->mutable_fields(), true ) ) { continue; }
+				$this->footprint_value( $field, $m ); $this->footprint_value( $value, $m );
+			}
+			$d['max_record_fields'] = max( $d['max_record_fields'], count( $record ) );
+		} else {
+			$this->footprint_array( 3, $m );
+			foreach ( array( 'version' => self::VERSION, 'kind' => 'value', 'value' => $record ) as $field => $value ) { $this->footprint_value( $field, $m ); $this->footprint_value( $value, $m ); }
+		}
+		$payload = StorageScaleAdmission::checked_add( 22, $m['json_bytes'] );
+		$this->footprint_array( $mutable_count, $m );
+		if ( is_array( $record ) ) { foreach ( $record as $field => $value ) {
+			if ( in_array( $field, $this->mutable_fields(), true ) ) { $this->footprint_value( $field, $m ); $this->footprint_value( $value, $m ); }
+		} }
+		$pair = StorageScaleAdmission::checked_add( 44, $m['json_bytes'] );
+		if ( $payload > 1048576 || $pair - $payload > 1048576 ) { $this->fail( 'Record footprint exceeds encoded codec budget.' ); }
+		// Exact raw base64 key length without constructing the full string.
+		$key_metrics = $this->footprint_metrics(); $this->footprint_value( (string) $key, $key_metrics );
+		$key_bytes = $key_metrics['base64_bytes']; $projection_bytes = 0;
+		if ( is_array( $record ) ) {
+			foreach ( array( 'plugin_name', 'ID' ) as $field ) {
+				if ( ! isset( $record[$field] ) && ! array_key_exists( $field, $record ) ) { continue; }
+				$v = $record[$field];
+				if ( 'plugin_name' === $field && null === $v ) { continue; }
+				if ( 'plugin_name' === $field ? ! is_string( $v ) : ( ! is_scalar( $v ) && null !== $v ) ) { $this->fail( 'Unsupported projection footprint.' ); }
+				$pm = $this->footprint_metrics(); $this->footprint_value( (string) $v, $pm );
+				$projection_bytes = StorageScaleAdmission::checked_add( $projection_bytes, StorageScaleAdmission::checked_add( 22, $pm['json_bytes'] ) );
+			}
+		}
+		$bytes = StorageScaleAdmission::checked_add( $pair, StorageScaleAdmission::checked_add( $key_bytes, $projection_bytes ) );
+		if ( $bytes > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Row footprint exceeds byte budget.' ); }
+		$this->footprint_add( $d, 'records', 1 ); $this->footprint_add( $d, 'payload_bytes', $pair );
+		$this->footprint_add( $d, 'encoded_bytes', $bytes ); $this->footprint_add( $d, 'typed_key_bytes', $key_bytes ); $this->footprint_add( $d, 'projection_bytes', $projection_bytes );
+		foreach ( array( 'tagged_arrays', 'tagged_entries', 'tagged_nodes', 'raw_string_bytes', 'base64_bytes' ) as $field ) { $this->footprint_add( $d, $field, $m[$field] ); }
+		foreach ( array( 'tagged_arrays', 'tagged_entries', 'tagged_nodes' ) as $field ) { $d['max_row_' . $field] = max( $d['max_row_' . $field], $m[$field] ); }
+		if ( $d['encoded_bytes'] > $this->max_tree_bytes ) { $this->fail( 'Tree footprint exceeds byte budget.' ); }
+		$ancestor_bytes = StorageScaleAdmission::checked_add( $ancestor_bytes, $bytes );
+		$d['max_row_bytes'] = max( $d['max_row_bytes'], $bytes );
+		$d['active_row_frames'] = max( $d['active_row_frames'], $depth + 1 );
+		$d['max_ancestor_row_bytes'] = max( $d['max_ancestor_row_bytes'], $ancestor_bytes );
+		if ( null !== $child_count ) {
+			$d['max_siblings'] = max( $d['max_siblings'], $child_count );
+			foreach ( $record['children'] as $k => $child ) { $this->footprint_tree( $k, $child, $depth + 1, $ancestor_bytes, $d ); }
+		}
+	}
+
+	/**
 	 * Emit rows individually in preorder; never allocate a second complete row
 	 * collection. The consumer MUST stage/rollback partial output on any failure.
 	 * Hashes are hex for prepared fixed UNHEX() SQL, not raw binary transport.

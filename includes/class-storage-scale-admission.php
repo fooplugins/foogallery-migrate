@@ -17,6 +17,7 @@ final class StorageScaleAdmission {
 	private $clock;
 	private $memory;
 	private $work = 0;
+	private $additional_bytes = 0;
 	private $initialized = false;
 	private $snapshots = array();
 	private $snapshot_rows = 0;
@@ -133,6 +134,44 @@ final class StorageScaleAdmission {
 			if ( is_wp_error( StoragePreflight::decode_budget( $bytes, $limit, $sample[1], $policy ) ) ) { self::fail(); }
 		}
 		return true;
+	}
+
+	/**
+	 * Low-level arithmetic ONLY, not approval of a phase/runtime coefficient.
+	 * Caller supplies a justified prospective delta, never retained input bytes.
+	 * Accepted deltas remain pending for this operation: no phase reset/release
+	 * or sample-based credit. This deliberately overcounts already-realized deltas
+	 * rather than allowing nested, not-yet-sampled allocations to reuse headroom.
+	 * No production record/snapshot/raw-decoder gate is replaced by this seam.
+	 */
+	public function admit_additional( $bytes ) {
+		$this->tick();
+		$total = self::checked_add( $this->additional_bytes, $bytes );
+		$sample = null === $this->memory ? array( ini_get( 'memory_limit' ), memory_get_usage( true ) ) : call_user_func( $this->memory );
+		if ( ! is_array( $sample ) || array_keys( $sample ) !== array( 0, 1 ) ) { self::fail(); }
+		$policy = array( 'max_raw_bytes' => PHP_INT_MAX, 'amplification' => 1, 'reserve_bytes' => $this->policy['reserve_bytes'] );
+		foreach ( array( $sample[0], (string) $this->limit( 'memory_ceiling_bytes' ) ) as $limit ) {
+			if ( is_wp_error( StoragePreflight::decode_budget( $total, $limit, $sample[1], $policy ) ) ) { self::fail(); }
+		}
+		$this->additional_bytes = $total;
+		return true;
+	}
+
+	/** PHP 5 compatible: validate BEFORE an overflowing intermediate exists. */
+	public static function checked_add( $a, $b ) {
+		if ( ! is_int( $a ) || ! is_int( $b ) || $a < 0 || $b < 0 || $b > PHP_INT_MAX - $a ) { self::fail(); }
+		return $a + $b;
+	}
+
+	public static function checked_multiply( $a, $b ) {
+		self::checked_add( $a, 0 ); self::checked_add( $b, 0 );
+		$result = 0;
+		while ( $b > 0 ) {
+			if ( $b & 1 ) { $result = self::checked_add( $result, $a ); }
+			$b = $b >> 1;
+			if ( $b > 0 ) { $a = self::checked_add( $a, $a ); }
+		}
+		return $result;
 	}
 
 	private function now() {

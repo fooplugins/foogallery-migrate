@@ -107,6 +107,11 @@ class LegacyStateCodec {
 	 */
 	public function inspect_json( $json ) { return $this->inspect_json_at_depth( $json, 0 ); }
 
+	/** Observation only: the same lexical domain as decode_record_payload(). */
+	public function inspect_json_record_payload( $json ) {
+		return $this->inspect_json_at_depth( $json, null === $this->scale ? 0 : -1 );
+	}
+
 	private function inspect_json_at_depth( $json, $logical_start ) {
 		if ( ! is_string( $json ) || strlen( $json ) > $this->max_bytes || strlen( $json ) > 2147483646 ) {
 			$this->fail( 'Record exceeds the encoded byte budget.' );
