@@ -16,6 +16,9 @@ class StorageOperations {
 
 	/** Strict semantic request: exactly the coordinator's five existing fields. */
 	public function dispatch( $operation, $request ) {
+		// Schema DDL is a separate explicit operation: no state decode, capacity
+		// profile, conversion or authority selection is involved.
+		if ( 'provision' === $operation ) { return StorageProvisioning::provision( $request ); }
 		$memory = null === $this->incoming_memory ? new StorageMemoryBaseline() : $this->incoming_memory;
 		$this->incoming_memory = null; $memory->sample();
 		if ( ! in_array( $operation, array( 'preflight', 'switch', 'recover', 'replace' ), true ) ||

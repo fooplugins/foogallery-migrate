@@ -15,6 +15,47 @@ class StorageProvisioning {
 	private $lock_name;
 	private $owner;
 
+	/** Public schema-only operation. Never creates or updates backend authority. */
+	public static function provision( $request ) {
+		$authorized = self::authorize_request( $request );
+		if ( is_wp_error( $authorized ) ) { return $authorized; }
+		$gate = StorageMaintenanceGate::current(); $owns = false;
+		try {
+			$result = $gate->acquire_maintenance();
+			if ( is_wp_error( $result ) ) { return $result; }
+			$owns = true;
+			if ( true !== $gate->maintenance_ready( array( 'FooPlugins\\FooGalleryMigrate\\MigratorEngine', 'storage_maintenance_is_quiescent' ) ) ) { throw new \RuntimeException( 'Storage is busy.' ); }
+			$control = new StorageControl( $gate->connection(), get_current_blog_id() );
+			$raw = $control->read( StorageAuthority::CONTROL_OPTION );
+			if ( null === $raw ) {
+				if ( is_wp_error( StorageAuthority::option_mode_error( $gate, true ) ) ) { throw new \RuntimeException( 'Storage authority needs attention.' ); }
+			} else {
+				$r = StorageControl::decode( $raw, get_current_blog_id() );
+				if ( 'option' !== $r['backend'] || ! StorageControl::runtime_ready( $r, $control->read( StorageAuthority::AUTHORITY_OPTION ) ) ) { throw new \RuntimeException( 'Stable option authority required.' ); }
+			}
+			( new self( $gate, microtime( true ) + 20 ) )->ensure();
+			$result = array( 'blog_id' => get_current_blog_id(), 'schema' => 'verified', 'backend' => 'option', 'message' => __( 'Shared schema provisioned. This site still uses options; switching requires a separately authorized operation.', 'foogallery-migrate' ) );
+		} catch ( \Exception $error ) { $result = self::error( 'provision_failed' ); }
+		catch ( \Throwable $error ) { $result = self::error( 'provision_failed' ); }
+		if ( $owns && true !== $gate->release_maintenance() ) { return self::error( 'provision_failed' ); }
+		return $result;
+	}
+
+	/** Exact purpose and installation scope; all denials precede storage SQL. */
+	public static function authorize_request( $r ) {
+		if ( ! current_user_can( 'manage_options' ) || ( is_multisite() && ! current_user_can( 'manage_network_options' ) ) ) { return self::error( 'forbidden' ); }
+		$blog = get_current_blog_id();
+		if ( ! is_array( $r ) || 5 !== count( $r ) || ! isset( $r['blog_id'], $r['scope'], $r['target'], $r['confirmation'], $r['nonce'] ) ||
+			( $r['blog_id'] !== $blog && $r['blog_id'] !== (string) $blog ) || 'installation' !== $r['scope'] || 'table' !== $r['target'] ||
+			'provision-shared-schema' !== $r['confirmation'] || ! is_string( $r['nonce'] ) ) { return self::error( 'invalid_request' ); }
+		if ( ! wp_verify_nonce( $r['nonce'], 'foogallery_migrate_storage_provision_schema_' . $blog ) ) { return self::error( 'invalid_nonce' ); }
+		return true;
+	}
+
+	private static function error( $code ) {
+		return new \WP_Error( 'foogallery_migrate_storage_' . $code, __( 'Schema provisioning refused. Check permission, confirmation, schema ownership and storage health; no backend switch was requested.', 'foogallery-migrate' ) );
+	}
+
 	/** Caller already owns the current site's quiescent maintenance gate. */
 	public function __construct( $gate, $deadline ) {
 		global $wpdb;
@@ -29,6 +70,7 @@ class StorageProvisioning {
 	public function ensure() {
 		$this->context();
 		if ( is_multisite() ) {
+			if ( ! current_user_can( 'manage_network_options' ) ) { $this->fail(); }
 			if ( ! function_exists( 'is_plugin_active_for_network' ) ) { require_once ABSPATH . 'wp-admin/includes/plugin.php'; }
 			if ( ! is_plugin_active_for_network( plugin_basename( FOOGM_FILE ) ) ) { $this->fail(); }
 		}
@@ -39,9 +81,19 @@ class StorageProvisioning {
 		$this->lock_name = 'foogm-schema-' . substr( hash( 'sha256', $database . ':' . $this->options ), 0, 48 );
 		if ( '1' !== (string) $this->pin->get_var( $this->pin->prepare( 'SELECT GET_LOCK(%s, 0)', $this->lock_name ) ) || $this->pin->last_error ) { $this->fail(); }
 		try {
-			$this->claim();
 			$version = $this->read_option( LegacyStorageSchema::VERSION_OPTION );
 			if ( null !== $version && (string) LegacyStorageSchema::VERSION !== $version ) { $this->fail(); }
+			// Exact names/shape alone are not ownership. Check every existing
+			// table before adding anything, including partial-schema repairs.
+			foreach ( array_keys( $schema->definitions() ) as $table ) {
+				$found = $this->pin->get_var( $this->pin->prepare( 'SHOW TABLES LIKE %s', $this->pin->esc_like( $table ) ) );
+				if ( $this->pin->last_error || ( null !== $found && $table !== $found ) ) { $this->fail(); }
+				if ( null !== $found ) {
+					if ( null === $version ) { $this->fail(); }
+					( new LegacyStorageSchema( $this->pin ) )->verify( $table );
+				}
+			}
+			$this->claim();
 			if ( ! function_exists( 'dbDelta' ) ) { require_once ABSPATH . 'wp-admin/includes/upgrade.php'; }
 			foreach ( array_keys( $schema->definitions() ) as $index => $table ) {
 				$this->owned();

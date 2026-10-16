@@ -20,6 +20,22 @@ class StorageOperationsTest extends TestCase {
 		$_POST = array();
 	}
 	private function request() { return array( 'blog_id' => 1, 'scope' => 'site', 'target' => 'table', 'confirmation' => 'switch-to-table', 'nonce' => 'valid' ); }
+	public function test_schema_provisioning_requires_its_own_authorization_before_any_sql(): void {
+		$receiver = new StorageOperations();
+		$r = array( 'blog_id' => '1', 'scope' => 'installation', 'target' => 'table', 'confirmation' => 'provision-shared-schema', 'nonce' => 'valid' );
+		$this->error( 'invalid_nonce', $receiver->dispatch( 'provision', $r ) );
+		$GLOBALS['foogallery_migrate_test_nonce']['action'] = 'foogallery_migrate_storage_provision_schema_1';
+		foreach ( array( 'scope' => 'site', 'blog_id' => '01', 'target' => 'option', 'confirmation' => '', 'extra' => 'no' ) as $key => $value ) {
+			$invalid = $r; $invalid[$key] = $value;
+			$this->error( 'invalid_request', $receiver->dispatch( 'provision', $invalid ) );
+		}
+		$GLOBALS['foogallery_migrate_test_capabilities']['manage_options'] = false;
+		$this->error( 'forbidden', $receiver->dispatch( 'provision', $r ) );
+		$GLOBALS['foogallery_migrate_test_capabilities']['manage_options'] = true;
+		$GLOBALS['foogallery_migrate_test_is_multisite'] = true;
+		try { $this->error( 'forbidden', $receiver->dispatch( 'provision', $r ) ); }
+		finally { $GLOBALS['foogallery_migrate_test_is_multisite'] = false; }
+	}
 	private function profile() {
 		// Synthetic contract fixture, NOT an approved production calibration.
 		return array( 'version' => 1, 'status' => 'approved', 'fingerprint' => StorageCalibration::fingerprint(),

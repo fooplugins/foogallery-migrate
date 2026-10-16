@@ -106,8 +106,11 @@ class LegacyStorageSchema {
 	}
 
 	/** Read real metadata, including types, engine, uniqueness and index order. */
-	public function verify() {
-		foreach ( $this->definitions() as $table => $definition ) {
+	public function verify( $only_table = null ) {
+		$definitions = $this->definitions();
+		if ( null !== $only_table && ! isset( $definitions[$only_table] ) ) { $this->fail( 'Unknown shared table.' ); }
+		foreach ( $definitions as $table => $definition ) {
+			if ( null !== $only_table && $only_table !== $table ) { continue; }
 			$status = $this->read( $this->wpdb->prepare( 'SHOW TABLE STATUS LIKE %s', $this->wpdb->esc_like( $table ) ) );
 			if ( count( $status ) !== 1 || $status[0]['Name'] !== $table || strcasecmp( $status[0]['Engine'], 'InnoDB' ) !== 0 ) {
 				$this->fail( 'Shared tables must exist and use InnoDB.' );

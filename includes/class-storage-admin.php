@@ -28,6 +28,9 @@ class StorageAdmin {
 			$s['option_bytes'] = null === $bytes ? '0' : $bytes;
 			$schema = new LegacyStorageSchema( $wpdb );
 			try {
+				$main = is_multisite() ? get_main_site_id( get_main_network_id() ) : $blog;
+				$metadata = $wpdb->get_blog_prefix( $main ) . 'options';
+				if ( ! preg_match( '/^[A-Za-z0-9_]+$/D', $metadata ) || '1' !== (string) $wpdb->get_var( $wpdb->prepare( 'SELECT 1 FROM `' . $metadata . '` WHERE option_name=%s AND BINARY option_value=BINARY %s', LegacyStorageSchema::VERSION_OPTION, (string) LegacyStorageSchema::VERSION ) ) || $wpdb->last_error ) { throw new \RuntimeException( 'Shared schema ownership is not verified.' ); }
 				$schema->verify(); $s['schema'] = 'verified';
 				$tables = array_keys( $schema->definitions() ); $table = $tables[1];
 				$s['records'] = $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM `' . $table . '` WHERE blog_id=%d', $blog ) );
@@ -57,7 +60,7 @@ class StorageAdmin {
 		$s = is_array( $status ) ? $status : self::status();
 		$blog = get_current_blog_id();
 		echo '<div class="wrap"><h1>' . esc_html__( 'FooGallery Migration Storage', 'foogallery-migrate' ) . '</h1>';
-		echo '<p>' . esc_html__( 'Storage changes affect only this site. They do not change galleries, attachments or migration history semantics. Back up the site first. No switch or schema change runs just by opening this page.', 'foogallery-migrate' ) . '</p><dl>';
+		echo '<p>' . esc_html__( 'Backend switches affect only this site. Schema provisioning creates shared installation tables but does not switch any site. Neither operation changes galleries or attachments. Back up first. Opening this page never provisions or switches storage.', 'foogallery-migrate' ) . '</p><dl>';
 		foreach ( array( __( 'Site ID', 'foogallery-migrate' ) => $blog, __( 'Backend', 'foogallery-migrate' ) => $s['backend'], __( 'Switch phase', 'foogallery-migrate' ) => $s['phase'], __( 'Shared schema', 'foogallery-migrate' ) => $s['schema'], __( 'Option bytes', 'foogallery-migrate' ) => $s['option_bytes'], __( 'Site table records (including retained copies)', 'foogallery-migrate' ) => $s['records'] ) as $label => $value ) {
 			echo '<dt><strong>' . esc_html( $label ) . '</strong></dt><dd>' . esc_html( null === $value ? __( 'Unavailable', 'foogallery-migrate' ) : $value ) . '</dd>';
 		}
@@ -65,11 +68,16 @@ class StorageAdmin {
 		if ( '' !== $s['problem'] ) { echo '<p role="alert">' . esc_html( $s['problem'] ) . '</p>'; }
 		echo '<p>' . esc_html__( 'Table provisioning on multisite requires network activation. This does not authorize a network-wide backend switch. Recovery follows only the recorded authoritative phase. Foreign ownership, corrupt storage or insufficient capacity must be resolved before retrying.', 'foogallery-migrate' ) . '</p>';
 		if ( $s['retained'] ) { echo '<p>' . esc_html__( 'A previous table copy is retained after reversing to options. Re-import explicitly replaces that inactive copy; it never merges both backends.', 'foogallery-migrate' ) . '</p>'; }
-		foreach ( self::actions( $s ) as $a ) {
+		$actions = self::actions( $s );
+		if ( 'option' === $s['backend'] && 'stable' === $s['phase'] && 'verified' !== $s['schema'] && ( ! is_multisite() || current_user_can( 'manage_network_options' ) ) ) {
+			array_unshift( $actions, array( 'operation' => 'provision', 'scope' => 'installation', 'target' => 'table', 'confirmation' => 'provision-shared-schema', 'purpose' => 'provision_schema', 'label' => __( 'Provision shared schema only (keep options)', 'foogallery-migrate' ) ) );
+		}
+		foreach ( $actions as $a ) {
 			echo '<form class="foogm-storage-form" method="post" action="' . esc_attr( admin_url( 'admin-post.php' ) ) . '">';
-			foreach ( array( 'action' => 'foogallery_migrate_storage', 'operation' => $a['operation'], 'blog_id' => $blog, 'scope' => 'site', 'target' => $a['target'], 'confirmation' => $a['confirmation'] ) as $key => $value ) { echo '<input type="hidden" name="' . esc_attr( $key ) . '" value="' . esc_attr( $value ) . '">'; }
+			foreach ( array( 'action' => 'foogallery_migrate_storage', 'operation' => $a['operation'], 'blog_id' => $blog, 'scope' => isset( $a['scope'] ) ? $a['scope'] : 'site', 'target' => $a['target'], 'confirmation' => $a['confirmation'] ) as $key => $value ) { echo '<input type="hidden" name="' . esc_attr( $key ) . '" value="' . esc_attr( $value ) . '">'; }
 			wp_nonce_field( 'foogallery_migrate_storage_' . $a['purpose'] . '_' . $blog, 'nonce', false );
-			echo '<p><label><input type="checkbox" required> ' . esc_html__( 'I have a backup and explicitly confirm this site-local storage operation.', 'foogallery-migrate' ) . '</label></p><p><button type="submit" class="button button-secondary">' . esc_html( $a['label'] ) . '</button></p></form>';
+			$confirmation = 'provision' === $a['operation'] ? __( 'I have a backup and explicitly confirm shared installation schema provisioning only; no site will switch backends.', 'foogallery-migrate' ) : __( 'I have a backup and explicitly confirm this site-local storage operation.', 'foogallery-migrate' );
+			echo '<p><label><input type="checkbox" required> ' . esc_html( $confirmation ) . '</label></p><p><button type="submit" class="button button-secondary">' . esc_html( $a['label'] ) . '</button></p></form>';
 		}
 		echo '<p id="foogm-storage-result" role="status" aria-live="polite"></p></div>';
 		?>

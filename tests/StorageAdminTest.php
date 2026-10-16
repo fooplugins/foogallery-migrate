@@ -30,4 +30,11 @@ class StorageAdminTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_capabilities']['manage_options'] = false;
 		$this->expectException( \FooGalleryMigrateTestDie::class ); StorageAdmin::render();
 	}
+	public function test_schema_only_form_is_separate_from_conversion_and_disappears_when_ready(): void {
+		$s = array( 'backend' => 'option', 'phase' => 'stable', 'target' => 'option', 'retained' => false, 'option_bytes' => '0', 'records' => null, 'schema' => 'not ready', 'problem' => '', 'calibrated' => false );
+		ob_start(); StorageAdmin::render( $s ); $html = ob_get_clean();
+		foreach ( array( 'name="operation" value="provision"', 'name="scope" value="installation"', 'name="confirmation" value="provision-shared-schema"', 'no site will switch backends', 'name="operation" value="switch"' ) as $text ) { $this->assertStringContainsString( $text, $html ); }
+		$s['schema'] = 'verified'; ob_start(); StorageAdmin::render( $s ); $html = ob_get_clean();
+		$this->assertStringNotContainsString( 'name="operation" value="provision"', $html );
+	}
 }
