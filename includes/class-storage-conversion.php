@@ -79,6 +79,7 @@ class StorageConversion {
 				'source_digest' => $source['physical'], 'logical_digest' => $this->codec->snapshot_digest( $source['value'] ),
 				'schema' => 1, 'codec' => 1, 'created' => $now, 'updated' => $now );
 			if ( 2 === $record['version'] ) { $record['retained_digest'] = 'table' === $from ? $retirement->capture() : null; }
+			StorageScalarObserver::milestone( 'source-verified' );
 			$this->ready(); $new = json_encode( $record ); StorageControl::decode( $new, $this->blog );
 			if ( $replacement ) {
 				$owner = $this->gate->maintenance_identity();
@@ -88,6 +89,7 @@ class StorageConversion {
 					$this->require_true( MigratorEngine::storage_maintenance_is_quiescent() );
 				} );
 			} else { $this->controls->cas( StorageAuthority::CONTROL_OPTION, $raw, $new, null, $this->gate->maintenance_identity() ); }
+			StorageScalarObserver::milestone( 'control-copying' );
 			$result = $this->advance( $record, $source );
 			$this->end(); return $result;
 		} catch ( \Exception $error ) { return $this->failed( $error ); }
@@ -187,7 +189,9 @@ class StorageConversion {
 				$target = $this->table_snapshot( false );
 			} else {
 				$raw = ( new LegacyOptionDecoder( $this->policy['max_raw_bytes'] ) )->encode( $source['value'], function ( $bytes ) { $this->budget( $bytes ); } );
+				StorageScalarObserver::milestone( 'reverse-serialized' );
 				if ( ! $this->option_present( FOOGALLERY_MIGRATE_OPTION_DATA ) ) { $this->insert_option( FOOGALLERY_MIGRATE_OPTION_DATA, $raw ); }
+				StorageScalarObserver::milestone( 'reverse-written' );
 				$target = $this->option_snapshot();
 			}
 			$this->require_true( $this->codec->snapshot_digest( $target['value'] ) === $r['logical_digest'] );
@@ -202,6 +206,7 @@ class StorageConversion {
 				$backup = null === $original ? serialize( array() ) : $original;
 				if ( ! $this->option_present( StorageAuthority::STORAGE_BACKUP_OPTION ) ) { $this->insert_option( StorageAuthority::STORAGE_BACKUP_OPTION, $backup ); }
 				$this->require_true( $this->raw_option_digest( StorageAuthority::STORAGE_BACKUP_OPTION ) === hash( 'sha256', 'present:' . hash( 'sha256', $backup ) ) );
+				StorageScalarObserver::milestone( 'retained-backup' );
 				$pending = $r; ++$pending['epoch'];
 				$sentinel = json_encode( StorageControl::sentinel( $pending ) );
 				$existing = $this->controls->read( StorageAuthority::AUTHORITY_OPTION );
@@ -259,7 +264,8 @@ class StorageConversion {
 			$dependencies[] = array( 'kind' => 'sentinel', 'value' => $sentinel );
 			$guard = array( 'kind' => 'all', 'value' => $dependencies );
 		}
-		$this->ready(); $this->controls->cas( StorageAuthority::CONTROL_OPTION, $old, $new, $guard, $this->gate->maintenance_identity() ); return $r;
+		$this->ready(); $this->controls->cas( StorageAuthority::CONTROL_OPTION, $old, $new, $guard, $this->gate->maintenance_identity() );
+		StorageScalarObserver::milestone( 'control-' . $phase ); return $r;
 	}
 
 	private function snapshot_guard( $backend, $physical ) {
@@ -284,10 +290,12 @@ class StorageConversion {
 		$value = array();
 		if ( null !== $raw ) {
 			$this->budget( strlen( $raw ) );
+			StorageScalarObserver::milestone( 'source-read' );
 			// Structural proof before native hydration also protects PHP5.4, which
 			// lacks allowed_classes. This is NOT streaming conversion and does not
 			// reduce the calibrated whole-option memory requirement.
 			$value = ( new LegacyOptionDecoder( $this->policy['max_raw_bytes'] ) )->decode( $raw );
+			StorageScalarObserver::milestone( 'source-decoded' );
 		}
 		$this->require_true( count( $value ) <= 100 );
 		$this->codec->snapshot_digest( $value ); // Reject objects, depth overflow and unsupported scalars.
@@ -383,7 +391,7 @@ class StorageConversion {
 	private function write( $sql ) { $this->require_true( 1 === $this->connection->query( $sql ) && empty( $this->connection->last_error ) ); }
 	private function invalidate( $name ) { wp_cache_delete( $name, 'options' ); wp_cache_delete( 'alloptions', 'options' ); wp_cache_delete( 'notoptions', 'options' ); }
 	private function require_true( $value ) { if ( true !== $value ) { throw new \RuntimeException( 'Retain recorded authority and all conversion evidence; storage recovery is required.' ); } }
-	private function end() { $this->require_true( $this->gate->release_maintenance() ); $this->owns_gate = false; $this->gate = null; }
+	private function end() { $this->require_true( $this->gate->release_maintenance() ); $this->owns_gate = false; $this->gate = null; StorageScalarObserver::milestone( 'released' ); }
 	private function failed( $error ) {
 		// Only this object's owner may release. An uncertain phase/CAS is never
 		// rolled back by guessing which backend won; its raw evidence remains.

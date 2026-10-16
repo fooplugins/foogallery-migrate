@@ -7,7 +7,7 @@ ZIP=${2:?absolute candidate ZIP}
 OUT=${3:?absolute new evidence directory}
 EXPECTED=${4:?exact candidate commit}
 CASE=${5:-storage-preflight}
-[[ "$CASE" == storage-preflight || "$CASE" == storage-writer-gate || "$CASE" == storage-writer-adoption || "$CASE" == storage-conversion || "$CASE" == storage-operations || "$CASE" == storage-pinned-transport || "$CASE" == storage-runtime-transport || "$CASE" == storage-callback-drain || "$CASE" == storage-output-drain || "$CASE" == storage-process-death || "$CASE" == storage-native-death || "$CASE" == storage-provisioning || "$CASE" == storage-aigpl || "$CASE" == storage-aigpl-option || "$CASE" == storage-aigpl-browser ]] || exit 1
+[[ "$CASE" == storage-calibration-a7-gallery || "$CASE" == storage-preflight || "$CASE" == storage-writer-gate || "$CASE" == storage-writer-adoption || "$CASE" == storage-conversion || "$CASE" == storage-operations || "$CASE" == storage-pinned-transport || "$CASE" == storage-runtime-transport || "$CASE" == storage-callback-drain || "$CASE" == storage-output-drain || "$CASE" == storage-process-death || "$CASE" == storage-native-death || "$CASE" == storage-provisioning || "$CASE" == storage-aigpl || "$CASE" == storage-aigpl-option || "$CASE" == storage-aigpl-browser ]] || exit 1
 COVE=/opt/homebrew/bin/cove
 [[ "$SOURCE" == /* && "$ZIP" == /* && "$OUT" == /* ]] || exit 1
 [[ "$SOURCE$ZIP$OUT" != *"'"* ]] || exit 1
@@ -25,6 +25,10 @@ diff -qr "$OUT/source/includes" "$OUT/package/includes" > "$OUT/includes-parity.
 for file in migrate.php uninstall.php readme.txt LICENSE; do cmp "$OUT/source/$file" "$OUT/package/$file"; done
 printf '%s\n' "$EXPECTED" > "$OUT/candidate.txt"
 shasum -a 256 "$ZIP" > "$OUT/package-sha256.txt"
+if [[ "$CASE" == storage-calibration-a7-gallery ]]; then
+  php "$OUT/source/tests/integration/storage-a7-fixtures.php" "$OUT/fixtures" > "$OUT/fixture-manifest.json"
+  cmp "$OUT/source/tests/integration/storage-a7-manifest.json" "$OUT/fixture-manifest.json"
+fi
 "$COVE" list --json > "$OUT/sites-before.json"
 "$COVE" status > "$OUT/services-before.txt"
 printf 'case\tresult\texit\tdb_equal\n' > "$OUT/ledger.tsv"
@@ -54,10 +58,19 @@ cleanup() {
 finish() {
   rc=$?
   trap - EXIT
-  cleanup || rc=1
+  if [[ -e "$OUT/incomplete-closure.json" ]]; then
+    # An incomplete owned worker closure forbids SQL/root deletion and any next cell.
+    printf '%s\t%s\tretained-incomplete-worker-closure\n' "$site" "$database" >> "$OUT/cleanup.tsv"
+    rc=1
+  else
+    cleanup || rc=1
+  fi
   rm -f -- "$setup" "$before" "$after"
   "$COVE" status > "$OUT/services-after.txt" || rc=1
   git -C "$SOURCE" status --porcelain > "$OUT/source-status-after.txt"
+  if [[ "$CASE" == storage-calibration-a7-gallery ]]; then
+    python3 -B "$OUT/source/tests/integration/storage-a7-runner.py" --finalize "$OUT" "$rc" || rc=1
+  fi
   exit "$rc"
 }
 trap finish EXIT
@@ -132,8 +145,16 @@ for topology in single multi; do
         code="define('FOOGM_BROWSER_MODULE', '$FOOGM_BROWSER_MODULE'); define('FOOGM_BROWSER_EVIDENCE', '$OUT/raw/$id'); $code"
       fi
       rc=0
-      "$COVE" wp "$site" --url="$url" "${skips[@]}" --user=1 eval "$code" > "$OUT/raw/$id.stdout" 2> "$OUT/raw/$id.stderr" || rc=$?
-      if [[ "$rc" == 0 ]]; then
+      if [[ "$CASE" == storage-calibration-a7-gallery ]]; then
+        python3 -B "$OUT/source/tests/integration/storage-a7-runner.py" --source "$OUT/source" --plugin "$plugin" \
+          --fixtures "$OUT/fixtures" --out "$OUT/raw/$id" -- "$COVE" wp "$site" --url="$url" "${skips[@]}" --user=1 \
+          > "$OUT/raw/$id.stdout" 2> "$OUT/raw/$id.stderr" || rc=$?
+        # Do not issue another SQL command (even a dump) after incomplete closure.
+        [[ ! -e "$OUT/incomplete-closure.json" ]] || exit 1
+      else
+        "$COVE" wp "$site" --url="$url" "${skips[@]}" --user=1 eval "$code" > "$OUT/raw/$id.stdout" 2> "$OUT/raw/$id.stderr" || rc=$?
+      fi
+      if [[ "$rc" == 0 && "$CASE" != storage-calibration-a7-gallery ]]; then
         php "$OUT/source/tests/integration/validate-storage-preflight.php" "$OUT/raw/$id.stdout" "$id" > "$OUT/raw/$id.validated.txt" 2>&1 || rc=1
       fi
       dump --skip-comments --skip-dump-date --skip-extended-insert --no-create-info --compact "$database" > "$after"

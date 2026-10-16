@@ -13,6 +13,26 @@ namespace FooPlugins\FooGalleryMigrate;
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 class StorageScalarObserver {
+	// Separate, finite full-conversion milestones. Privileged test reflection only;
+	// no callback, SQL/payload retention, request activation, or approval semantics.
+	private static $milestones_enabled = false;
+	private static $milestones_valid = true;
+	private static $milestones = array();
+
+	public static function milestone( $name ) {
+		if ( ! self::$milestones_enabled || ! self::$milestones_valid ) { return; }
+		$allowed = array( 'receiver-entry', 'authorized', 'policy', 'source-read', 'source-decoded',
+			'source-verified', 'snapshot-preflight', 'snapshot-staged', 'snapshot-readback', 'snapshot-committed',
+			'reverse-serialized', 'reverse-written', 'retained-backup', 'control-copying', 'control-verified',
+			'control-flipped', 'control-stable', 'released', 'response' );
+		$now = microtime( true ); $count = count( self::$milestones );
+		if ( ! in_array( $name, $allowed, true ) || $count >= 128 || ! is_finite( $now ) ||
+			( $count && $now < self::$milestones[$count - 1]['time'] ) ) { self::$milestones_valid = false; return; }
+		self::$milestones[] = array( 'name' => $name, 'time' => $now, 'live' => memory_get_usage( false ),
+			'allocated' => memory_get_usage( true ), 'peak_live_cumulative' => memory_get_peak_usage( false ),
+			'peak_allocated_cumulative' => memory_get_peak_usage( true ) );
+	}
+
 	private static $enabled = false;
 	private static $valid = true;
 	private static $records = array();

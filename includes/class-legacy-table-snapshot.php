@@ -64,6 +64,7 @@ class LegacyTableSnapshot {
 	public function replace_many( $changes, $guards = array() ) {
 		$this->admit();
 		$prepared = $this->preflight( $changes );
+		StorageScalarObserver::milestone( 'snapshot-preflight' );
 		if ( ! is_array( $guards ) || count( $guards ) > 100 ) { $this->fail( 'Invalid snapshot read dependencies.' ); }
 		$dependencies = array();
 		foreach ( $guards as $entry ) {
@@ -103,6 +104,7 @@ class LegacyTableSnapshot {
 				$this->admit_memory( $change['encoded_bytes'] );
 				$staged[ $hash ] = $this->stage( $change );
 			}
+			StorageScalarObserver::milestone( 'snapshot-staged' );
 			foreach ( $staged as $hash => $stage ) {
 				$change = $prepared[ $hash ];
 				$value = $this->read_generation( $change['key'], $stage['id'], $stage['generation'], $change['root_payload'], $change['stats'] );
@@ -110,6 +112,7 @@ class LegacyTableSnapshot {
 				if ( $this->codec->snapshot_digest( $value ) !== $change['digest'] ) { $this->fail( 'Staged logical snapshot does not match its source.' ); }
 				unset( $value );
 			}
+			StorageScalarObserver::milestone( 'snapshot-readback' );
 			$result = array();
 			foreach ( $staged as $hash => $stage ) {
 				$this->admit_memory( 0 );
@@ -147,6 +150,7 @@ class LegacyTableSnapshot {
 			$this->fail( 'Commit outcome is uncertain. Reconcile heads/digests on a fresh connection before retrying.' );
 		}
 		$this->busy = false;
+		StorageScalarObserver::milestone( 'snapshot-committed' );
 		return $result;
 	}
 
