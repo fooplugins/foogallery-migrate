@@ -17,14 +17,20 @@ class LegacyRecordCodec {
 	private $codec;
 	private $max_records;
 	private $max_tree_bytes;
+	private $scale;
+	private $max_depth;
 
 	/** Budgets bound one affected root tree, not all stored state. */
-	public function __construct( $codec = null, $max_records = 10000, $max_tree_bytes = 16777216 ) {
+	public function __construct( $codec = null, $max_records = 10000, $max_tree_bytes = 16777216, $scale = null ) {
+		if ( null !== $scale && ( ! $scale instanceof StorageScaleAdmission || $max_records > $scale->limit( 'max_rows' ) || $max_tree_bytes > $scale->limit( 'max_bytes' ) ) ) { $this->fail( 'Invalid finite scale.' ); }
+		$this->scale = $scale;
+		$this->max_depth = null === $scale ? 64 : $scale->limit( 'max_depth' );
 		if ( ( null !== $codec && ! $codec instanceof LegacyStateCodec ) ||
 			! is_int( $max_records ) || $max_records < 1 || ! is_int( $max_tree_bytes ) || $max_tree_bytes < 1 ) {
 			$this->fail( 'Invalid tree codec or budget.' );
 		}
-		$this->codec = null === $codec ? new LegacyStateCodec() : $codec;
+		if ( null !== $scale && null !== $codec && ! $codec->uses_storage_scale( $scale ) ) { $this->fail( 'Codec does not share the finite operation budget.' ); }
+		$this->codec = null === $codec ? new LegacyStateCodec( 1048576, 64, 10000, $scale ) : $codec;
 		$this->max_records = $max_records;
 		$this->max_tree_bytes = $max_tree_bytes;
 	}
@@ -39,7 +45,9 @@ class LegacyRecordCodec {
 		$item_order = $this->number( $item_order );
 		$stats = array( 'record_count' => 0, 'payload_bytes' => 0, 'encoded_bytes' => 0 );
 		$preflight = $stats;
+		$this->admit( 0 );
 		$this->preflight_tree( $this->codec->key_hash( $state_key ), null, $key, $record, $item_order, 0, $preflight );
+		$this->admit( $preflight['encoded_bytes'] );
 		$this->flatten_node( $this->codec->key_hash( $state_key ), null, $key, $record, $item_order, 0, $emit, $stats );
 		return $stats;
 	}
@@ -62,6 +70,7 @@ class LegacyRecordCodec {
 			if ( $size > LegacyTableReader::MAX_RECORD_BYTES || $size > $this->max_tree_bytes - $bytes ) { $this->fail( 'Tree exceeds the encoded byte budget.' ); }
 			$bytes += $size;
 		}
+		$this->admit( $bytes );
 		foreach ( $rows as $row ) {
 			$row = $this->validate_row( $row, $this->codec->key_hash( $state_key ) );
 			$hash = $row['node_hash'];
@@ -90,6 +99,8 @@ class LegacyRecordCodec {
 	}
 
 	private function make_row( $state_hash, $parent, $key, $record, $order, $depth ) {
+		$this->tick();
+		$this->admit( LegacyTableReader::MAX_RECORD_BYTES );
 		$this->codec->key_value( $key );
 		$probe = array( $key => true ); $keys = array_keys( $probe );
 		if ( $keys[0] !== $key ) { $this->fail( 'Invalid or coercible typed key.' ); }
@@ -117,7 +128,8 @@ class LegacyRecordCodec {
 	}
 
 	private function preflight_tree( $state_hash, $parent, $key, $record, $order, $depth, &$stats ) {
-		if ( $depth > 64 || $stats['record_count'] >= $this->max_records ) { $this->fail( 'Tree exceeds the depth/record budget.' ); }
+		$this->tick();
+		if ( $depth > $this->max_depth || $stats['record_count'] >= $this->max_records ) { $this->fail( 'Tree exceeds the depth/record budget.' ); }
 		$row = $this->make_row( $state_hash, $parent, $key, $record, $order, $depth );
 		$bytes = $this->encoded_bytes( $row );
 		if ( $bytes > LegacyTableReader::MAX_RECORD_BYTES || $bytes > $this->max_tree_bytes - $stats['encoded_bytes'] ) {
@@ -151,13 +163,14 @@ class LegacyRecordCodec {
 	}
 
 	private function validate_row( $row, $state_hash ) {
+		$this->tick();
 		$required = array( 'row_kind', 'node_hash', 'parent_node_hash', 'key_type', 'key_value', 'item_order', 'depth',
 			'payload', 'mutable_payload', 'payload_hash', 'logical_hash', 'payload_bytes' );
 		if ( ! is_array( $row ) || array_diff( $required, array_keys( $row ) ) ) { $this->fail( 'Incomplete record row.' ); }
 		foreach ( array( 'node_hash', 'payload_hash', 'logical_hash' ) as $field ) { $row[ $field ] = $this->hex( $row[ $field ] ); }
 		if ( null !== $row['parent_node_hash'] ) { $row['parent_node_hash'] = $this->hex( $row['parent_node_hash'] ); }
 		foreach ( array( 'item_order', 'depth', 'payload_bytes' ) as $field ) { $row[ $field ] = $this->number( $row[ $field ] ); }
-		if ( $row['depth'] > 64 || $row['row_kind'] !== ( null === $row['parent_node_hash'] ? 'root' : 'child' ) ) {
+		if ( $row['depth'] > $this->max_depth || $row['row_kind'] !== ( null === $row['parent_node_hash'] ? 'root' : 'child' ) ) {
 			$this->fail( 'Invalid depth or row kind.' );
 		}
 		$key = $this->key( $row['key_type'], $row['key_value'] );
@@ -176,7 +189,8 @@ class LegacyRecordCodec {
 	}
 
 	private function rebuild_node( $hash, $depth, &$nodes, &$children, &$visited ) {
-		if ( $depth > 64 || isset( $visited[ $hash ] ) || ! isset( $nodes[ $hash ] ) || $nodes[ $hash ]['depth'] !== $depth ) {
+		$this->tick();
+		if ( $depth > $this->max_depth || isset( $visited[ $hash ] ) || ! isset( $nodes[ $hash ] ) || $nodes[ $hash ]['depth'] !== $depth ) {
 			$this->fail( 'Invalid tree ancestry/depth.' );
 		}
 		$visited[ $hash ] = true;
@@ -284,6 +298,7 @@ class LegacyRecordCodec {
 	}
 
 	private function encoded_bytes( $row ) {
+		$this->tick();
 		if ( ! is_array( $row ) ) { $this->fail( 'Missing encoded record.' ); }
 		$bytes = 0;
 		foreach ( array( 'payload', 'mutable_payload', 'key_value', 'source_plugin_value', 'source_id_value' ) as $field ) {
@@ -322,6 +337,9 @@ class LegacyRecordCodec {
 		if ( ! is_string( $value ) || ! preg_match( '/^[a-fA-F0-9]{64}$/D', $value ) ) { $this->fail( 'Malformed hash.' ); }
 		return strtolower( $value );
 	}
+
+	private function tick() { if ( null !== $this->scale ) { $this->scale->tick(); } }
+	private function admit( $bytes ) { if ( null !== $this->scale ) { $this->scale->admit_memory( $bytes ); } }
 
 	private function fail( $message ) {
 		throw new \RuntimeException( 'Legacy storage record codec: ' . $message );

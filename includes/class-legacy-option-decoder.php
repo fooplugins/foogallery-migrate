@@ -15,27 +15,37 @@ class LegacyOptionDecoder {
 	private $max_bytes;
 	private $max_depth;
 	private $max_nodes;
+	private $scale;
+	private $max_heads;
 
-	public function __construct( $max_bytes = 16777216, $max_depth = 64, $max_nodes = 30000 ) {
+	public function __construct( $max_bytes = 16777216, $max_depth = 64, $max_nodes = 30000, $scale = null ) {
 		foreach ( array( $max_bytes, $max_depth, $max_nodes ) as $limit ) {
 			if ( ! is_int( $limit ) || $limit < 1 ) { $this->fail(); }
 		}
-		if ( $max_depth > 64 || $max_nodes > 30000 ) { $this->fail(); }
+		if ( null !== $scale && ! $scale instanceof StorageScaleAdmission ) { $this->fail(); }
+		if ( $max_depth > 64 || ( null === $scale && $max_nodes > 30000 ) ||
+			( null !== $scale && ( $max_nodes > $scale->limit( 'max_tokens' ) || $max_depth > $scale->limit( 'max_depth' ) || $max_bytes > $scale->raw_bytes() ) ) ) { $this->fail(); }
+		$this->scale = $scale;
+		$this->max_heads = null === $scale ? 100 : $scale->limit( 'max_heads' );
 		$this->max_bytes = $max_bytes;
 		$this->max_depth = $max_depth;
 		$this->max_nodes = $max_nodes;
 	}
 
 	public function decode( $raw ) {
+		$this->tick();
 		if ( ! is_string( $raw ) || strlen( $raw ) > $this->max_bytes || 'a:' !== substr( $raw, 0, 2 ) ) { $this->fail(); }
 		$offset = 0; $nodes = 0;
 		$this->scan( $raw, $offset, 0, $nodes, false );
 		if ( $offset !== strlen( $raw ) ) { $this->fail(); }
+		if ( null !== $this->scale ) { $this->scale->admit_memory( strlen( $raw ) ); }
 		// ALL tokens have now been proven scalar/array, including keys. No object,
 		// custom serialization, enum or reference token can reach native decoding.
 		// PHP5.4 lacks allowed_classes; on modern PHP keep it as defense in depth.
 		$value = PHP_VERSION_ID >= 70000 ? @unserialize( $raw, array( 'allowed_classes' => false ) ) : @unserialize( $raw );
+		if ( null !== $this->scale ) { $this->scale->admit_memory( strlen( $raw ) ); }
 		if ( ! is_array( $value ) || serialize( $value ) !== $raw ) { $this->fail(); }
+		$this->tick();
 		return $value;
 	}
 
@@ -46,11 +56,14 @@ class LegacyOptionDecoder {
 	 * its configured serialize_precision workspace must be covered by calibration.
 	 */
 	public function encode( $value, $admit ) {
+		if ( null !== $this->scale ) { $this->scale->admit_memory( 0 ); }
 		if ( ! is_array( $value ) || ! is_callable( $admit ) ) { $this->fail(); }
 		$nodes = 0; $bytes = 0;
 		$this->measure( $value, 0, $nodes, $bytes );
 		call_user_func( $admit, $bytes );
+		if ( null !== $this->scale ) { $this->scale->admit_memory( $bytes ); }
 		$raw = serialize( $value );
+		$this->tick();
 		if ( ! is_string( $raw ) || strlen( $raw ) !== $bytes ) { $this->fail(); }
 		// Aliased references can serialize differently from the measured logical
 		// tree. Refuse those tokens without hydrating a second full graph.
@@ -61,10 +74,11 @@ class LegacyOptionDecoder {
 	}
 
 	private function measure( $value, $depth, &$nodes, &$bytes ) {
+		$this->tick();
 		if ( $depth > $this->max_depth || ++$nodes > $this->max_nodes ) { $this->fail(); }
 		if ( is_array( $value ) ) {
 			$count = count( $value );
-			if ( ( 0 === $depth && $count > 100 ) || $count > ( $this->max_nodes - $nodes ) / 2 ) { $this->fail(); }
+			if ( ( 0 === $depth && $count > $this->max_heads ) || $count > ( $this->max_nodes - $nodes ) / 2 ) { $this->fail(); }
 			$this->add_bytes( 5 + strlen( (string) $count ), $bytes ); // a:<count>:{...}
 			foreach ( $value as $key => $item ) {
 				$this->measure( $key, $depth + 1, $nodes, $bytes );
@@ -91,6 +105,7 @@ class LegacyOptionDecoder {
 	}
 
 	private function scan( $raw, &$offset, $depth, &$nodes, $key ) {
+		$this->tick();
 		if ( $depth > $this->max_depth || ++$nodes > $this->max_nodes || $offset >= strlen( $raw ) ) { $this->fail(); }
 		$type = $raw[$offset];
 		if ( $key && 'i' !== $type && 's' !== $type ) { $this->fail(); }
@@ -121,7 +136,7 @@ class LegacyOptionDecoder {
 				$count = $this->unsigned( $raw, $offset, ':' );
 				// Each entry requires a key and value node. Check before the loop,
 				// even when a malicious count has no actual serialized entries.
-				if ( ( 0 === $depth && $count > 100 ) || $count > ( $this->max_nodes - $nodes ) / 2 ) { $this->fail(); }
+				if ( ( 0 === $depth && $count > $this->max_heads ) || $count > ( $this->max_nodes - $nodes ) / 2 ) { $this->fail(); }
 				$this->literal( $raw, $offset, '{' );
 				for ( $i = 0; $i < $count; ++$i ) {
 					$this->scan( $raw, $offset, $depth + 1, $nodes, true );
@@ -155,6 +170,8 @@ class LegacyOptionDecoder {
 		if ( substr( $raw, $offset, strlen( $literal ) ) !== $literal ) { $this->fail(); }
 		$offset += strlen( $literal );
 	}
+
+	private function tick() { if ( null !== $this->scale ) { $this->scale->tick(); } }
 
 	private function fail() {
 		throw new \RuntimeException( 'Unsupported or unbounded serialized option. Retain recorded authority and all storage evidence.' );

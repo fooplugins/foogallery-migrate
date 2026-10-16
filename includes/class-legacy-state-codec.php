@@ -17,9 +17,12 @@ class LegacyStateCodec {
 	private $max_bytes;
 	private $max_depth;
 	private $max_nodes;
+	private $scale;
 
 	/** Limits apply to one record, not an entire collection or migration. */
-	public function __construct( $max_bytes = 1048576, $max_depth = 64, $max_nodes = 10000 ) {
+	public function __construct( $max_bytes = 1048576, $max_depth = 64, $max_nodes = 10000, $scale = null ) {
+		if ( null !== $scale && ! $scale instanceof StorageScaleAdmission ) { $this->fail( 'Invalid storage scale.' ); }
+		$this->scale = $scale;
 		foreach ( array( $max_bytes, $max_depth, $max_nodes ) as $limit ) {
 			if ( ! is_int( $limit ) || $limit < 1 ) {
 				$this->fail( 'Invalid codec budget.' );
@@ -32,6 +35,9 @@ class LegacyStateCodec {
 		$this->max_depth = $max_depth;
 		$this->max_nodes = $max_nodes;
 	}
+
+	/** An explicit scale consumer cannot silently inject an unbudgeted codec. */
+	public function uses_storage_scale( $scale ) { return $this->scale === $scale; }
 
 	public function encode( $value ) {
 		$nodes = 0;
@@ -129,6 +135,7 @@ class LegacyStateCodec {
 	}
 
 	private function digest_value( $context, $value, $depth ) {
+		if ( null !== $this->scale ) { $this->scale->tick(); }
 		if ( $depth > $this->max_depth ) {
 			$this->fail( 'Snapshot exceeds the depth budget.' );
 		}
@@ -272,6 +279,7 @@ class LegacyStateCodec {
 	}
 
 	private function budget( $depth, &$nodes ) {
+		if ( null !== $this->scale ) { $this->scale->tick(); }
 		$nodes++;
 		if ( $depth > $this->max_depth || $nodes > $this->max_nodes ) {
 			$this->fail( 'Record exceeds the depth/node budget.' );
