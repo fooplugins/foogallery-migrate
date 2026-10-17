@@ -45,8 +45,8 @@ class StorageRefusalDiagnosticTest extends TestCase {
 	}
 	private function request() { return array( 'blog_id' => 7, 'scope' => 'site', 'target' => 'table', 'confirmation' => 'recover-storage', 'nonce' => 'valid' ); }
 	private function recover( $scaled = false ) {
-		// Exactly the existing raw length; no policy/profile/scale approval inflation.
-		$policy = array( 'max_raw_bytes' => strlen( $this->db->raw ), 'amplification' => 1, 'reserve_bytes' => 1 );
+		// Genuine raw read violation, independent of the corrected derived domain.
+		$policy = array( 'max_raw_bytes' => strlen( $this->db->raw ) - 1, 'amplification' => 1, 'reserve_bytes' => 1 );
 		$scale = $scaled ? new StorageScaleAdmission( StorageScaleAdmissionTest::policy(), $policy, microtime( true ) + 10.0 ) : null;
 		return ( new StorageConversion( $policy, null, $scale ) )->recover( $this->request() );
 	}
@@ -54,7 +54,7 @@ class StorageRefusalDiagnosticTest extends TestCase {
 	private function refusal() { return ( new \ReflectionProperty( StorageScalarObserver::class, 'refusal' ) )->getValue(); }
 	private function authorize() { $this->assertTrue( StorageConversion::authorize_request( $this->request(), true ) ); }
 	/** @dataProvider domains */
-	public function test_encoded_above_unchanged_raw_cap_refuses_with_fixed_origin_before_masking( $scaled ): void {
+	public function test_raw_above_unchanged_raw_cap_refuses_with_fixed_origin_before_masking( $scaled ): void {
 		( new \ReflectionProperty( StorageScalarObserver::class, 'milestones_enabled' ) )->setValue( null, true );
 		$source = $this->db->raw; $control = $this->db->control;
 		$this->assertGreaterThan( strlen( $source ), $this->db->encoded_bytes );
@@ -63,11 +63,11 @@ class StorageRefusalDiagnosticTest extends TestCase {
 		$this->assertSame( 'Migration storage conversion was refused. Retain the recorded authority and all storage evidence; no fallback or expired-owner takeover was attempted.', $result->get_error_message() );
 		$this->assertSame( $source, $this->db->raw ); $this->assertSame( $control, $this->db->control );
 		$this->assertSame( 0, $this->db->writes ); $this->assertTrue( $this->gate->released );
-		$this->assertContains( 'source-decoded', array_column( ( new \ReflectionProperty( StorageScalarObserver::class, 'milestones' ) )->getValue(), 'name' ) );
+		$this->assertNotContains( 'source-decoded', array_column( ( new \ReflectionProperty( StorageScalarObserver::class, 'milestones' ) )->getValue(), 'name' ) );
 		$names = array_column( ( new \ReflectionProperty( StorageScalarObserver::class, 'milestones' ) )->getValue(), 'name' );
 		foreach ( array( 'snapshot-preflight', 'snapshot-staged', 'control-flipped', 'retained-backup' ) as $name ) { $this->assertNotContains( $name, $names ); }
 		$this->assertNotContains( 'START TRANSACTION', $this->db->queries );
-		// RED first on the retained candidate; this exact guard was previously masked.
+		// Real raw reads remain denied before payload fetch/decoding.
 		$this->assertSame( array( 'reason' => 'raw-budget', 'phase' => 'conversion-budget' ),
 			( new \ReflectionProperty( StorageScalarObserver::class, 'refusal' ) )->getValue() );
 	}

@@ -174,7 +174,7 @@ class StorageConversion {
 			$this->require_true( ( new LegacyStorageSchema( $this->connection ) )->verify() );
 		}
 		$this->snapshot = new LegacyTableSnapshot( $this->connection, $this->blog, $this->limit( 'max_rows', 10000 ), $this->limit( 'max_bytes', 16777216 ), $this->deadline,
-			function ( $bytes ) { $this->budget( $bytes ); return true; }, $this->scale );
+			function ( $bytes ) { $this->table_budget( $bytes ); return true; }, $this->scale );
 	}
 
 	private function advance( $r, $source ) {
@@ -330,9 +330,20 @@ class StorageConversion {
 		return null === $this->scale ? new LegacyOptionDecoder( $this->policy['max_raw_bytes'] ) : $this->scale->decoder( $this->policy['max_raw_bytes'] );
 	}
 
-	private function budget( $bytes ) {
+	/** Serialized option reads/decoding/reverse encoding keep the exact raw cap. */
+	private function budget( $bytes ) { $this->memory_budget( $bytes, $this->policy ); }
+
+	/** Derived envelopes use the existing finite table cap, not the raw source cap. */
+	private function table_budget( $bytes ) {
+		$policy = $this->policy;
+		$policy['max_raw_bytes'] = $this->limit( 'max_bytes', 16777216 );
+		$this->memory_budget( $bytes, $policy );
+	}
+
+	/** Same amplification/reserve, co-live sample and operation-owned scale checks. */
+	private function memory_budget( $bytes, $policy ) {
 		if ( null !== $this->scale ) { $this->scale->admit_memory( $bytes ); }
-		$result = StoragePreflight::decode_budget( $bytes, ini_get( 'memory_limit' ), $this->memory->sample(), $this->policy, 'conversion-budget' );
+		$result = StoragePreflight::decode_budget( $bytes, ini_get( 'memory_limit' ), $this->memory->sample(), $policy, 'conversion-budget' );
 		$this->require_true( ! is_wp_error( $result ) && true === $result['decode_admitted'] );
 	}
 
@@ -371,7 +382,7 @@ class StorageConversion {
 		// metadata pass before the coordinator's operation-owned admission.
 		$encoded_bytes = 0;
 		foreach ( $heads as $head ) { $encoded_bytes += (int) $head['payload_bytes']; }
-		$this->budget( $encoded_bytes );
+		$this->table_budget( $encoded_bytes );
 		if ( $verify_dirty ) {
 			foreach ( $heads as $head ) {
 				if ( 'dirty' === $head['digest_status'] ) {
@@ -383,7 +394,7 @@ class StorageConversion {
 		$before = hash( 'sha256', json_encode( $heads ) );
 		$encoded_bytes = 0;
 		foreach ( $heads as $head ) { $encoded_bytes += (int) $head['payload_bytes']; }
-		$this->budget( $encoded_bytes );
+		$this->table_budget( $encoded_bytes );
 		foreach ( $heads as $head ) {
 			$this->ready(); $key = $this->codec->decode( $head['key_value'] );
 			$this->require_true( ( is_int( $key ) || is_string( $key ) ) && ! array_key_exists( $key, $value ) );
