@@ -19,6 +19,26 @@ class StorageScalarObserver {
 	private static $milestones_valid = true;
 	private static $milestones = array();
 
+	// Reuse the existing privileged opt-in. One first-origin pair only; no public
+	// getter, persistence, callback, exception text, payload or inferred cause.
+	private static $refusal_authorized = false;
+	private static $refusal = null;
+
+	/** Receiver entry revokes stale scope; only completed authorization opens it. */
+	public static function refusal_scope( $authorized = false ) {
+		self::$refusal_authorized = self::$milestones_enabled && true === $authorized;
+		self::$refusal = null;
+	}
+
+	public static function refusal( $reason, $phase ) {
+		if ( ! self::$milestones_enabled || ! self::$refusal_authorized || null !== self::$refusal ) { return; }
+		$allowed = array( 'raw-budget' => 'conversion-budget', 'decode-memory' => 'conversion-budget',
+			'scale-work' => 'scale-tick', 'scale-deadline' => 'scale-tick',
+			'scale-memory' => 'scale-memory', 'physical-census' => 'retained-census' );
+		if ( ! is_string( $reason ) || ! is_string( $phase ) || ! isset( $allowed[$reason] ) || $allowed[$reason] !== $phase ) { return; }
+		self::$refusal = array( 'reason' => $reason, 'phase' => $phase );
+	}
+
 	public static function milestone( $name ) {
 		if ( ! self::$milestones_enabled || ! self::$milestones_valid ) { return; }
 		$allowed = array( 'receiver-entry', 'authorized', 'policy', 'source-read', 'source-decoded',

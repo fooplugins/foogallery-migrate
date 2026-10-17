@@ -86,12 +86,14 @@ class StoragePreflight {
 	}
 
 	/**
-	 * Pure bounded admission arithmetic, also usable by a future authenticated CLI.
+	 * Bounded admission arithmetic, also usable by a future authenticated CLI.
+	 * Optional phase only labels an already-authorized private scalar diagnostic;
+	 * it cannot arm observation or alter the returned admission decision.
 	 * Unlimited PHP memory still obeys the calibrated hard raw-byte ceiling.
 	 * reserve_bytes covers retained data, staging, validation and response work;
 	 * the factor must include the raw string AND decoded graph peak allocation.
 	 */
-	public static function decode_budget( $raw_bytes, $memory_limit, $memory_used, $policy ) {
+	public static function decode_budget( $raw_bytes, $memory_limit, $memory_used, $policy, $diagnostic_phase = null ) {
 		if ( ! is_array( $policy ) || 3 !== count( $policy ) ) {
 			return self::policy_error();
 		}
@@ -105,14 +107,18 @@ class StoragePreflight {
 			return self::error( 'memory_unknown', 'The effective migration storage decode budget could not be determined.' );
 		}
 		$ceiling = -1 === $limit ? PHP_INT_MAX : $limit;
-		if ( $raw_bytes > $policy['max_raw_bytes'] || $policy['reserve_bytes'] > $ceiling ||
-			$memory_used > $ceiling - $policy['reserve_bytes'] ) {
+		if ( $raw_bytes > $policy['max_raw_bytes'] ) {
+			StorageScalarObserver::refusal( 'raw-budget', $diagnostic_phase );
+			return self::refused_error();
+		}
+		if ( $policy['reserve_bytes'] > $ceiling || $memory_used > $ceiling - $policy['reserve_bytes'] ) {
+			StorageScalarObserver::refusal( 'decode-memory', $diagnostic_phase );
 			return self::refused_error();
 		}
 		$available = $ceiling - $policy['reserve_bytes'] - $memory_used;
 		// Overflow becomes a float on PHP; reject it rather than converting back.
 		$estimate = $raw_bytes * $policy['amplification'];
-		if ( ! is_int( $estimate ) || $estimate > $available ) { return self::refused_error(); }
+		if ( ! is_int( $estimate ) || $estimate > $available ) { StorageScalarObserver::refusal( 'decode-memory', $diagnostic_phase ); return self::refused_error(); }
 		return array( 'decode_admitted' => true, 'raw_bytes' => $raw_bytes, 'memory_limit_bytes' => $limit,
 			'memory_used_bytes' => $memory_used, 'reserve_bytes' => $policy['reserve_bytes'],
 			'amplification' => $policy['amplification'], 'max_raw_bytes' => $policy['max_raw_bytes'],

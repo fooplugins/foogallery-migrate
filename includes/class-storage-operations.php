@@ -16,6 +16,7 @@ class StorageOperations {
 
 	/** Strict semantic request: exactly the coordinator's five existing fields. */
 	public function dispatch( $operation, $request ) {
+		StorageScalarObserver::refusal_scope();
 		// Schema DDL is a separate explicit operation: no state decode, capacity
 		// profile, conversion or authority selection is involved.
 		if ( 'provision' === $operation ) { return StorageProvisioning::provision( $request ); }
@@ -60,6 +61,7 @@ class StorageOperations {
 		// Sample BEFORE capability/unslash/auth/calibration work. Carry the sample
 		// forward, but do not claim it bounds allocations made by that work.
 		$receiver = new self(); $receiver->incoming_memory = new StorageMemoryBaseline();
+		StorageScalarObserver::refusal_scope();
 		if ( ! current_user_can( 'manage_options' ) ) {
 			$result = new \WP_Error( 'foogallery_migrate_storage_forbidden', __( 'You are not authorized to manage migration storage.', 'foogallery-migrate' ) );
 		} else if ( ! isset( $_SERVER['REQUEST_METHOD'] ) || 'POST' !== $_SERVER['REQUEST_METHOD'] ||

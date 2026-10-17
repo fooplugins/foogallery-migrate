@@ -125,6 +125,7 @@ class StorageConversion {
 
 	/** Shared receiver authorization; never reads or writes storage. */
 	public static function authorize_request( $r, $recovery = false, $blog = null, $replacement = false ) {
+		StorageScalarObserver::refusal_scope();
 		if ( ! current_user_can( 'manage_options' ) ) { return self::error( 'forbidden' ); }
 		$blog = null === $blog ? get_current_blog_id() : $blog;
 		if ( ! is_array( $r ) || count( $r ) !== 5 || ! isset( $r['blog_id'], $r['scope'], $r['target'], $r['confirmation'], $r['nonce'] ) ||
@@ -136,6 +137,7 @@ class StorageConversion {
 		$purpose = $replacement ? 'option_reimport' : ( $recovery ? 'recover' : ( 'table' === $r['target'] ? 'option_import' : 'table_export' ) );
 		$nonce = wp_verify_nonce( $r['nonce'], 'foogallery_migrate_storage_' . $purpose . '_' . $blog );
 		if ( 1 !== $nonce && 2 !== $nonce ) { return self::error( 'invalid_nonce' ); }
+		StorageScalarObserver::refusal_scope( true );
 		return true;
 	}
 
@@ -330,7 +332,7 @@ class StorageConversion {
 
 	private function budget( $bytes ) {
 		if ( null !== $this->scale ) { $this->scale->admit_memory( $bytes ); }
-		$result = StoragePreflight::decode_budget( $bytes, ini_get( 'memory_limit' ), $this->memory->sample(), $this->policy );
+		$result = StoragePreflight::decode_budget( $bytes, ini_get( 'memory_limit' ), $this->memory->sample(), $this->policy, 'conversion-budget' );
 		$this->require_true( ! is_wp_error( $result ) && true === $result['decode_admitted'] );
 	}
 

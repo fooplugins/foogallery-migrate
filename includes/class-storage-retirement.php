@@ -63,7 +63,7 @@ class StorageRetirement {
 			$n = $this->number( $count[0]['n'] );
 			$physical_rows = StorageScaleAdmission::checked_add( $physical_rows, $n );
 			if ( $n > $this->limit( 'max_physical_rows_per_table', 10000 ) ||
-				( null !== $this->scale && $physical_rows > $this->scale->limit( 'max_physical_rows' ) ) ) { $this->fail(); }
+				( null !== $this->scale && $physical_rows > $this->scale->limit( 'max_physical_rows' ) ) ) { StorageScalarObserver::refusal( 'physical-census', 'retained-census' ); $this->fail(); }
 			$limit = $n + 1;
 			$manifest_bytes = StorageScaleAdmission::checked_multiply( $limit, 256 );
 			if ( null !== $this->scale ) { $this->scale->admit_memory( $manifest_bytes ); }
@@ -76,12 +76,12 @@ class StorageRetirement {
 				if ( ! isset( $row['bytes'], $row['digest'] ) || ! preg_match( '/^[a-f0-9]{64}$/D', $row['digest'] ) ) { $this->fail(); }
 				$this->time();
 				$total = StorageScaleAdmission::checked_add( $total, $this->number( $row['bytes'] ) );
-				if ( $total > $this->limit( 'max_physical_bytes', 16777216 ) ) { $this->fail(); }
+				if ( $total > $this->limit( 'max_physical_bytes', 16777216 ) ) { StorageScalarObserver::refusal( 'physical-census', 'retained-census' ); $this->fail(); }
 			}
 			$manifest[] = $rows;
 		}
 		$backup = $this->option_identity( StorageAuthority::STORAGE_BACKUP_OPTION, $lock );
-		if ( null !== $this->scale && count( $backup ) && StorageScaleAdmission::checked_add( $total, $this->number( $backup[0]['bytes'] ) ) > $this->scale->limit( 'max_physical_bytes' ) ) { $this->fail(); }
+		if ( null !== $this->scale && count( $backup ) && StorageScaleAdmission::checked_add( $total, $this->number( $backup[0]['bytes'] ) ) > $this->scale->limit( 'max_physical_bytes' ) ) { StorageScalarObserver::refusal( 'physical-census', 'retained-census' ); $this->fail(); }
 		$manifest[] = $backup;
 		return hash( 'sha256', json_encode( $manifest ) );
 	}
