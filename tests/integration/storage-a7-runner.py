@@ -191,7 +191,7 @@ def validate_positive(p, cell, stage, owner, manifest):
     require(p['product_pins_before'] == p['product_pins_after'] and bool(p['product_pins_before']), 'product-mutated')
     required = ['StorageOperations', 'StorageConversion', 'LegacyStateCodec', 'LegacyTableSnapshot', 'StorageControl']
     for name in required:
-        entry = p['product_classes']['FooPlugins\\FooGalleryMigrate\\' + name]
+        entry = p['product_classes'][chr(92).join(('FooPlugins', 'FooGalleryMigrate', name))]
         relative = str(Path(entry['file']).relative_to(p['product_root']))
         require(p['product_pins_after'][relative] == entry['sha256'], 'product-class-pin')
     if stage == 'seed' or stage == 'reverse':

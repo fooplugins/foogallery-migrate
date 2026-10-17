@@ -72,6 +72,10 @@ try {
 		$check( $schema->verify(), 'Exact shared schema mismatch' );
 		$fixture_raw = file_get_contents( FOOGM_A7_FIXTURES . '/' . FOOGM_A7_CELL . '.serialized' );
 		$check( strlen( $fixture_raw ) === $expected['raw_bytes'] && hash( 'sha256', $fixture_raw ) === $expected['sha256'], 'Frozen fixture byte mismatch' );
+		if ( $positive ) {
+			$receipt['pcre_before'] = ini_get( 'pcre.backtrack_limit' );
+			$check( false !== ini_set( 'pcre.backtrack_limit', '16777216' ), 'Cannot set bounded worker-local PCRE budget' );
+		}
 		$check( 1 === $wpdb->query( $wpdb->prepare( 'INSERT INTO `' . $wpdb->options . '` (option_name,option_value,autoload) VALUES (%s,%s,%s)', FOOGALLERY_MIGRATE_OPTION_DATA, $fixture_raw, 'no' ) ), 'Fixture raw insert failed' );
 		$check( $raw( FOOGALLERY_MIGRATE_OPTION_DATA ) === $fixture_raw, 'Fixture SQL readback mismatch' );
 		$receipt['observations']['seed'] = $physical();
