@@ -51,6 +51,8 @@ class RetainingRoundtripBoundaryTest extends TestCase {
 		// This is residual rebuild diagnostic evidence, NOT a passing original gate.
 		if ( 0 === $status ) {
 			$this->assertSame( 'complete', $r['stage'] );
+			$this->assertArrayHasKey( 'after_rebuild', $r['phases'] );
+			$this->assertArrayHasKey( 'after_parity', $r['phases'] );
 		} else {
 			$this->assertSame( 1, $status );
 			$this->assertSame( 'rebuild', $r['stage'] );

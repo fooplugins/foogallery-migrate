@@ -331,7 +331,7 @@ class LegacyRecordCodec {
 			$plan = GenericRetainingModel::rebuild_plan( $rows, $d, $this->codec, $this->scale );
 			$this->scale->close_retaining_phase( $phase, $this );
 			$phase = $this->scale->open_retaining_phase( $this, 0 );
-			$this->scale->plan_retaining_phase( $phase, $this, $plan['future'], $plan['private'], 0, $plan['events'] );
+			$this->scale->plan_retaining_phase( $phase, $this, $plan['future'], $plan['index_stage'], 0, $plan['events'], $plan['parts']['index_growth'], $plan['after_indexes'] );
 		} else { $this->admit( $bytes ); }
 		$state_hash = $this->codec->key_hash( $state_key );
 		// Index immutable encoded rows by their caller-owned positions. Validate
@@ -372,10 +372,29 @@ class LegacyRecordCodec {
 		if ( ! isset( $nodes[ $root_hash ] ) || null !== $rows[ $nodes[ $root_hash ] ]['parent_node_hash'] || $this->number( $rows[ $nodes[ $root_hash ] ]['depth'] ) !== 0 ) {
 			$this->fail( 'Missing or invalid root identity.' );
 		}
-		$visited = array();
-		$result = $this->rebuild_node( $nodes[ $root_hash ], 0, $state_hash, $rows, $children, $visited, $phase, $sequence );
-		if ( count( $visited ) !== count( $nodes ) ) { $this->fail( 'Orphan, cycle or unrelated root in tree.' ); }
-		unset( $nodes, $children, $visited );
+		$root_position = $nodes[ $root_hash ];
+		// Sort producer-owned buckets ONCE, before any recursive reader aliases
+		// them. No ancestor retains a sorted COW copy during hydration. The index
+		// stage covers this single sort overlap as well as construction growth.
+		foreach ( $children as &$bucket ) {
+			$this->tick(); $order = 0; $ordered = true;
+			foreach ( $bucket as $child_order => $unused ) {
+				$this->tick(); if ( $child_order !== $order++ ) { $ordered = false; break; }
+			}
+			// Native ksort converts even an ordered packed bucket to mixed.
+			// Preserve its layout when it already has the required order.
+			if ( ! $ordered ) { ksort( $bucket, SORT_NUMERIC ); }
+		}
+		unset( $bucket );
+		// Reuse the completed node map as the visited set: null means visited;
+		// caller row positions are int/string, never null. Only existing slots are
+		// overwritten, with no new index allocation or producer array exports.
+		if ( null !== $phase ) { $this->scale->complete_retaining_indexes( $phase, $this ); }
+		$result = $this->rebuild_node( $root_position, 0, $state_hash, $rows, $children, $nodes, $phase, $sequence );
+		foreach ( $nodes as $unvisited ) {
+			$this->tick(); if ( null !== $unvisited ) { $this->fail( 'Orphan, cycle or unrelated root in tree.' ); }
+		}
+		unset( $children, $nodes );
 		if ( null !== $phase ) { $this->scale->close_retaining_phase( $phase, $this ); }
 		return $result;
 	}
@@ -478,12 +497,13 @@ class LegacyRecordCodec {
 
 	private function rebuild_node( $position, $depth, $state_hash, &$rows, &$children, &$visited, $phase = null, &$sequence = 0 ) {
 		$this->tick();
-		if ( $depth > $this->max_depth || isset( $visited[ $position ] ) || ! isset( $rows[ $position ] ) || $this->number( $rows[ $position ]['depth'] ) !== $depth ) {
+		if ( $depth > $this->max_depth || ! isset( $rows[ $position ] ) || $this->number( $rows[ $position ]['depth'] ) !== $depth ) {
 			$this->fail( 'Invalid tree ancestry/depth.' );
 		}
-		$visited[ $position ] = true;
 		$row = $this->validate_row( $rows[ $position ], $state_hash );
 		$hash = $row['node_hash'];
+		if ( ! isset( $visited[ $hash ] ) ) { $this->fail( 'Invalid tree ancestry/depth.' ); }
+		$visited[ $hash ] = null;
 		$base = $this->codec->decode_record_payload( $row['payload'] );
 		$mutable = $this->codec->decode( $row['mutable_payload'] );
 		$child_rows = isset( $children[ $hash ] ) ? $children[ $hash ] : array();
@@ -529,7 +549,6 @@ class LegacyRecordCodec {
 			}
 			unset( $base, $mutable, $probe, $keys );
 			if ( null !== $phase ) { $this->scale->realize_retaining_event( $phase, $this, $sequence++, GenericRetainingModel::own_record_bytes( $record, null !== $count, strlen( $row['key_value'] ) ) ); }
-			ksort( $child_rows, SORT_NUMERIC );
 			$order = 0;
 			foreach ( $child_rows as $child_order => $child_position ) {
 				if ( $child_order !== $order++ ) { $this->fail( 'Invalid sibling order.' ); }

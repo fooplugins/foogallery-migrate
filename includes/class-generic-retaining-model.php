@@ -4,7 +4,7 @@ namespace FooPlugins\FooGalleryMigrate;
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 final class GenericRetainingModel {
- const PROFILE = 'php-8.5.11-darwin-arm64-retaining-v1';
+ const PROFILE = 'php-8.5.11-darwin-arm64-retaining-v2';
  const BINARY_SHA256 = '6ff616b1441ba498839c8ff3b51db9d6e2f037c175e30ebe81652a76e439c749';
 
  public static function supports( $producer, $codec, $scale ) {
@@ -61,11 +61,27 @@ final class GenericRetainingModel {
  /** Prospective own-field allocation, not source bytes or a sharing credit. */
  private static function value_bytes( $v, $depth ) {
   if ( $depth > 64 ) { self::fail(); }
-  if ( is_string( $v ) ) { return self::add( 64, self::mul( 2, strlen( $v ) ) ); }
+  if ( is_string( $v ) ) { return self::string_bytes( strlen( $v ) ); }
   if ( ! is_array( $v ) ) { return 0; }
   $n = self::container( count( $v ) );
   foreach ( $v as $k => $item ) { $n = self::add( $n, self::add( self::value_bytes( $k, $depth + 1 ), self::value_bytes( $item, $depth + 1 ) ) ); }
   return $n;
+ }
+ /**
+  * Complete finite short-string allocation domain on the pinned host. Each
+  * measured NATIVE CODEC size class (including base64 decoder capacity, not
+  * substring capacity) has 8 bytes slack; empty/one-byte strings cost at least
+  * 40. No interning or sharing credit.
+  * Larger strings retain the previous 64+2n forecast, NOT an extrapolation.
+  */
+ public static function string_bytes( $n ) {
+  self::add( $n, 0 );
+  foreach ( array( 3 => 40, 9 => 48, 15 => 56, 21 => 64, 27 => 72,
+   39 => 88, 51 => 104, 63 => 120, 75 => 136, 99 => 168,
+   123 => 200, 147 => 232, 171 => 264, 219 => 328, 231 => 392 ) as $end => $bytes ) {
+   if ( $n <= $end ) { return $bytes; }
+  }
+  return self::add( 64, self::mul( 2, $n ) );
  }
  /** Children storage/growth is phase-private, never prematurely realized. */
  public static function own_record_bytes( $record, $has_children, $key_bytes ) {
@@ -80,7 +96,14 @@ final class GenericRetainingModel {
  }
  public static function rebuild_descriptor_bytes( $d ) {
   // Native json_decode arrays/slots/string scratch plus untagging coexist.
-  return self::add( self::descriptor_bytes(), self::add( self::mul( 768, $d['max_row_native_tokens'] ), self::mul( 8, $d['max_row_bytes'] ) ) );
+  // The lexical descriptor has unwound. JSON returns before untagging; the
+  // payload/mutable codecs and own-field walk also run sequentially. One
+  // 65-frame stack (4096/frame) plus 2MiB allocator rounding, NOT the
+  // descriptor's two walks + 4MiB arena. Tokens/bytes still cover concurrently
+  // retained native JSON, untagged base/mutable and scalar/hash scratch. Finite
+  // host calibration only; workspace overlaps index construction as well.
+  $frames_arena = self::add( 2097152, self::mul( 65, 4096 ) );
+  return self::add( $frames_arena, self::add( self::mul( 768, $d['max_row_native_tokens'] ), self::mul( 8, $d['max_row_bytes'] ) ) );
  }
  /**
   * One row at a time under the already admitted descriptor-private workspace.
@@ -115,11 +138,21 @@ final class GenericRetainingModel {
    unset( $record, $base, $mutable );
   }
   $index = self::add( self::container( count( $rows ) ), self::add( self::container( $parents ), $siblings ) );
+  // These are newly built private indexes, not caller arrays: one container
+  // grows per assignment. Final capacities PLUS the largest resize overlap
+  // cover every live bucket and old/new allocation, without charging every
+  // independent bucket's resize simultaneously. Workspace still overlaps.
+  $index_resize = max( self::container( count( $rows ) ), self::container( $parents ), $max_siblings );
   $parts = array( 'row_workspace' => self::rebuild_descriptor_bytes( $d ),
-   'index_growth' => self::mul( 2, $index ), 'visited_growth' => self::mul( 2, self::container( count( $rows ) ) ),
-   'output_children_growth' => self::mul( 2, $siblings ), 'sibling_sort_cow' => $max_siblings );
+   'index_growth' => self::add( $index, $index_resize ), 'visited_growth' => 0,
+   // All ancestor output capacities remain pending; one append can resize
+   // one container at a time. No retained ancestor or child_rows credit.
+   'output_children_growth' => self::add( $siblings, $max_siblings ), 'sibling_sort_cow' => 0 );
   $private = 0; foreach ( $parts as $n ) { $private = self::add( $private, $n ); }
-  return array( 'future' => $future, 'private' => $private, 'external' => 0, 'events' => count( $rows ), 'parts' => $parts );
+  $index_stage = self::add( $parts['row_workspace'], $parts['index_growth'] );
+  $after_indexes = self::add( self::add( $parts['visited_growth'], $parts['output_children_growth'] ), $parts['sibling_sort_cow'] );
+  return array( 'future' => $future, 'private' => $private, 'index_stage' => $index_stage, 'after_indexes' => $after_indexes,
+   'external' => 0, 'events' => count( $rows ), 'parts' => $parts );
  }
  private static function fail() { throw new \RuntimeException( 'Finite retaining model: unsupported row descriptor.' ); }
 }

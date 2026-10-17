@@ -201,7 +201,7 @@ final class StorageScaleAdmission {
 		$token = new \stdClass();
 		$id = spl_object_hash( $token );
 		$this->retaining_phases[$id] = array( 'token' => $token, 'producer' => $producer, 'planned' => false,
-			'future' => 0, 'private' => $descriptor_private, 'external' => 0, 'events' => 0, 'next' => 0 );
+			'future' => 0, 'private' => $descriptor_private, 'external' => 0, 'events' => 0, 'next' => 0, 'indexes' => 0, 'after_indexes' => 0 );
 		++$this->retaining_serial; $this->retaining_pending = $pending;
 		$this->admit_memory( 0 ); // Include the constructed ledger metadata before returning.
 		return $token;
@@ -217,14 +217,35 @@ final class StorageScaleAdmission {
 	}
 
 	/** Called only after the descriptor's row-private construction has unwound. */
-	public function plan_retaining_phase( $token, $producer, $future, $private, $external, $events ) {
+	public function plan_retaining_phase( $token, $producer, $future, $private, $external, $events, $index_growth = 0, $after_indexes = 0 ) {
 		$id = $this->retaining_id( $token, $producer ); $s = $this->retaining_phases[$id];
 		if ( $s['planned'] || ! is_int( $events ) || $events < 0 || $events > $this->limit( 'max_rows' ) ||
 			( 0 === $events && 0 !== $future ) ) { self::fail(); }
+		self::checked_add( $index_growth, $after_indexes );
+		if ( $index_growth > $private || ( 0 === $index_growth && 0 !== $after_indexes ) ) { self::fail(); }
 		$own = self::checked_add( self::checked_add( $future, $private ), $external );
 		$pending = self::checked_add( $this->retaining_pending - $s['private'], $own );
 		$this->check_pending( $pending );
 		$s['planned'] = true; $s['future'] = $future; $s['private'] = $private; $s['external'] = $external; $s['events'] = $events;
+		$s['indexes'] = $index_growth; $s['after_indexes'] = $after_indexes;
+		$this->retaining_phases[$id] = $s; $this->retaining_pending = $pending;
+		$this->admit_memory( 0 );
+	}
+
+	/**
+	 * Bound producer calls once AFTER both immutable indexes are complete, before
+	 * any hydration. This is a producer event, not a usage/sample-delta credit.
+	 * Workspace remains pending; live indexes remain in actual usage. Deferred
+	 * visited/output/sort growth is admitted at the new sample BEFORE allocation.
+	 * Like row events, this arithmetic API is not independent producer approval.
+	 */
+	public function complete_retaining_indexes( $token, $producer ) {
+		$id = $this->retaining_id( $token, $producer ); $s = $this->retaining_phases[$id];
+		if ( ! $s['planned'] || 0 === $s['indexes'] || 0 !== $s['next'] ) { self::fail(); }
+		$pending = self::checked_add( $this->retaining_pending - $s['indexes'], $s['after_indexes'] );
+		$this->check_pending( $pending );
+		$s['private'] = self::checked_add( $s['private'] - $s['indexes'], $s['after_indexes'] );
+		$s['indexes'] = 0; $s['after_indexes'] = 0;
 		$this->retaining_phases[$id] = $s; $this->retaining_pending = $pending;
 		$this->admit_memory( 0 );
 	}
@@ -233,7 +254,7 @@ final class StorageScaleAdmission {
 	public function realize_retaining_event( $token, $producer, $sequence, $forecast ) {
 		$id = $this->retaining_id( $token, $producer ); $s = $this->retaining_phases[$id];
 		self::checked_add( $forecast, 0 );
-		if ( ! $s['planned'] || ! is_int( $sequence ) || $sequence !== $s['next'] || $sequence >= $s['events'] ||
+		if ( ! $s['planned'] || 0 !== $s['indexes'] || ! is_int( $sequence ) || $sequence !== $s['next'] || $sequence >= $s['events'] ||
 			$forecast > $s['future'] || ( $sequence + 1 === $s['events'] && $forecast !== $s['future'] ) ) { self::fail(); }
 		$s['future'] -= $forecast; ++$s['next'];
 		$this->retaining_phases[$id] = $s; $this->retaining_pending -= $forecast;
@@ -243,7 +264,7 @@ final class StorageScaleAdmission {
 	/** Producer has unwound private frames. External list/COW liability persists. */
 	public function close_retaining_phase( $token, $producer ) {
 		$id = $this->retaining_id( $token, $producer ); $s = $this->retaining_phases[$id];
-		if ( ! $s['planned'] || 0 !== $s['future'] || $s['next'] !== $s['events'] ) { self::fail(); }
+		if ( ! $s['planned'] || 0 !== $s['indexes'] || 0 !== $s['future'] || $s['next'] !== $s['events'] ) { self::fail(); }
 		$additional = self::checked_add( $this->additional_bytes, $s['external'] );
 		$this->retaining_pending -= self::checked_add( $s['private'], $s['external'] );
 		$this->additional_bytes = $additional;
