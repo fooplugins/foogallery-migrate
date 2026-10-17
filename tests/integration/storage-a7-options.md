@@ -1,10 +1,9 @@
-# Separate A7 representable options proposal — host preparation only
+# Separate A7 WordPress-storage-representable positive lane
 
-Status: measurement_only; contract decision PENDING; no method/profile approval.
-No native worker/command route is enabled by this addition. This is not permission
-to run the adapter against a retained or new site. The original unchanged-byte
-native-success gate remains OPEN/BLOCKED by normal utf8mb4 incompatibility. It is
-not passed, replaced, waived, deleted or made equivalent by this proposal.
+Status: measurement_only. Native test wiring is authorized; no calibration or
+method/profile approval is implied. The original unchanged-byte native-success
+gate remains OPEN/BLOCKED by normal utf8mb4 incompatibility. This lane neither
+passes nor replaces nor waives that gate. Frozen metadata remains unchanged.
 
 ## Frozen distinct identities
 
@@ -18,61 +17,61 @@ Separate a7-options-utf8mb4-20k-v1:
 - SHA256 60392c9d095f334fed1475ccd5cd1e3db5ed1142922627980f5d0bff64072297
 - logical 0b77be8fa38731750a46d6ba9afb96fd6d656738025b02a193acb44aa180ee6c
 
-The separate factory derives the original graph and changes ONLY its 208 injected
-ff octets to ASCII x (78), in 208 string leaves. NUL is not replaced. These are
-real string-semantic changes, NOT equivalent semantics. The verifier rejects
-identity drift and never repairs expected hashes. The original factory, manifest,
-parser/codec/malformed/refusal tests and native gate expectations are unchanged.
+The separate factory changes ONLY 208 injected ff octets to ASCII x (78), in
+208 string leaves. NUL is not replaced. These are real string-semantic changes,
+not equivalent semantics. Host regressions compare typed keys/order/non-target
+scalars, including negative zero, and all 208 byte differences. No identity is
+repaired. Neither frozen manifest nor factory is modified by native wiring.
 
-Host regression compares every typed key in order and serializes every non-target
-scalar, including negative zero; it also checks all 208 raw differences. Unicode,
-NUL, unknown fields, nested boundary nodes, string IDs and URLs are preserved.
 This is one gallery with 20000 immediate images plus 207 nested boundary images:
-20208 object records, 204995 tokens, 20834 arrays, depth 8 from root zero.
-It is NOT a 20000-top-level workload, actual AIGPL discovery, a settings workload,
-or complete original scaling coverage. Both default 20K decoders still refuse.
-No cap, admission, calibration, provider or production runtime code changes.
+20208 object records, 204995 tokens, 20834 arrays, depth 8 from root zero. It is
+not a top-level 20K workload, AIGPL discovery, settings, or original scale coverage.
 
-## Preparation and dependency seam
+## Existing owned native route
 
-Offline fixture freeze (NEW owned directory under TMPDIR only):
+    bash tests/integration/run-storage-preflight-cove.sh SOURCE ACTUAL_ZIP NEW_EVIDENCE_DIR EXPECTED_CLEAN_SHA storage-a7-native-positive
 
-    php tests/integration/storage-a7-options-fixtures.php "$TMPDIR/NEW-OWNED-DIR"
+The existing shell -> Python runner -> storage-operations.php -> worker route
+selects this separately named lane. The original storage-a7 route is unchanged.
+The default executes SOURCE then actual extracted ZIP. A final optional source
+or package argument isolates one kind for independent failure reproduction; it
+does not bypass worker, fixture, provenance, response or cleanup guards. No
+source fallback is permitted for production classes loaded from the ZIP.
 
-The producer checks the frozen manifest and both positive identities before any
-output; existing directories/symlinks are refused. No SQL or WP bootstrap occurs.
+Each run uses one owned disposable private normal Cove site. It refuses existing
+product options/tables, validates administrator/endpoint/schema, binds an exact
+32-hex owner and blog, closes/reaps bounded workers and both output pipes, then
+performs exact-owned cleanup and unrelated database row/schema comparison.
 
-storage-a7-options-harness.php is a test-only callable seam, not a native worker.
-A future owned worker must first seed via the normal logical product/options write,
-verify its exact scoped owner and successful seed outcome, and record a bound
-'a7-options-seed-v1' receipt (owner, blog, corpus, fixture, outcome SUCCESS,
-first_failure null, persisted_sql bytes/hash, wp_logical_sha256). SQL/process success
-alone is insufficient. No receipt author or seed writer is supplied in this slice.
+The seed writes the representable logical value through update_option and binds
+native exact SQL OCTET_LENGTH/SHA2 plus fresh cache-evicted WP logical/serialized
+parity to a7-options-seed-v1 outcome SUCCESS. The existing options seam gates each
+operation with this receipt and fresh SQL/WP readers. Forward dispatches the real
+StorageOperations switch request and requires stable table epoch1 plus the exact
+retained backup. The backup stage reads that retained backup under stable epoch1.
+Reverse dispatches the real request, requiring stable option epoch2, exact native
+and WP parity, and retained table equality. Cleanup is allowed after failure only
+when all prior workers are closed; other downstream stages stop immediately.
 
-For each forward/backup/reverse callback, run() rejects a missing/failed/mismatched
-receipt BEFORE reads, then requires fresh exact SQL binary length/SHA256 and a full
-WP logical readback BEFORE invoking downstream. Reverse reads the retained backup;
-forward and backup read the active option. No positive result is accepted from an
-empty conversion; bounded stable response fields or exact backup bytes/hash are
-required. The WP adapter queries OCTET_LENGTH and SHA2(CAST(... AS BINARY),256),
-checks SQL errors and evicts positive/alloptions/notoptions caches before get_option.
-These reads do not supply a continuously held storage lock or a TOCTOU proof.
-A future native integration must retain existing owned isolation, locks, runtime
-floors, worker/deadline/output/data bounds and perform destination parity checks.
-The seam is not sufficient native acceptance or authority to run native work.
+Receipts bind selected-root class paths/hashes and before/after product bytes.
+Native worker-local PCRE backtracking is capped at 16777216 for WordPress's SQL
+parser on this known 3MB request; no global/host setting is changed. Calibration
+remains the original declared experimental policy, measurement_only and NOT
+approved. No caps, guards, production runtime or calibration data are changed.
 
-Host tests call the real seam and real codec with inert reader/operation callbacks;
-the WP adapter is exercised with the existing bootstrap get_option and an inert DB
-object with no connection method. These are not SQL, native WP, calibration,
-provider, measured-profile or arbitrary-hook acceptance. Synthetic SUCCESS receipts
-are explicitly test input only. The original runner is not routed to this proposal.
+## Failure and evidence boundary
 
-## Open contract and evidence boundaries
+Wiring is not a positive persistence PASS. Native SOURCE currently seeds exact
+bytes and WP value successfully, then the real forward request returns
+foogallery_migrate_storage_recovery_required before source-decoded. The product
+still constructs the default 30000-token decoder and unscaled snapshot path;
+the finite scale domain is not connected through this operation. Raising caps,
+inventing calibration, or bypassing refusal is not a valid fix in test wiring.
+Backup/reverse must remain unexecuted after that refusal. Retain failed receipts.
 
-Explicit Brad disposition of the separate positive lane remains pending. Original
-A1-A8, realistic multi-root/history/content/top-level/AIGPL/settings/scaling,
-public calibration/UI/CLI/recovery/cleanup, literal floors, deadline/output/data/
-isolation, final exact source/package acceptance and distinct final review remain
-OPEN; this slice cannot satisfy them. The 15 October deadline was MISSED.
-Retained fg-a7-native20k-fa0f3424bd and wrong-byte/EMPTY evidence are untouched;
-no cleanup or native acceptance is claimed. No push/merge/release/production action.
+Host consumer tests are synthetic, explicitly not native evidence. Original
+A1-A8, actual large AIGPL/history/content/settings/scaling, public provisioning,
+calibration, recovery/cleanup, literal floors, exact source/package acceptance
+and distinct final review remain OPEN. Only partial A1/A4/A5 evidence is in scope.
+The historical 15 October deadline remains MISSED. No push/merge/release/deploy
+or retained-site cleanup is authorized or performed by this lane.

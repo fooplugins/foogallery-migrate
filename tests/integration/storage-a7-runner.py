@@ -188,6 +188,9 @@ def validate_positive(p, cell, stage, owner, manifest):
     else:
         validate_common(p, cell, stage, owner, manifest)
         require(p['before'] == p['after'] and p['result'] == exact, 'backup-mutated-or-inexact')
+        control = p['backup_authority']
+        require((control['backend'], control['epoch'], control['phase'], control['blog_id'], control['logical_digest']) ==
+                ('table', 1, 'stable', p['blog_id'], fixture['logical_sha256']), 'backup-authority')
     require(p['product_pins_before'] == p['product_pins_after'] and bool(p['product_pins_before']), 'product-mutated')
     required = ['StorageOperations', 'StorageConversion', 'LegacyStateCodec', 'LegacyTableSnapshot', 'StorageControl']
     for name in required:

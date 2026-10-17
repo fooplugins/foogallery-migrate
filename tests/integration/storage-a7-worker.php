@@ -62,6 +62,10 @@ $start = microtime( true );
 $pins_before = $positive ? foogm_a7_product_pins( $root ) : null;
 try {
 	$check( current_user_can( 'manage_options' ), 'Authorized administrator required' );
+	if ( $positive ) {
+		$receipt['pcre_before'] = ini_get( 'pcre.backtrack_limit' );
+		$check( false !== ini_set( 'pcre.backtrack_limit', '16777216' ), 'Cannot set bounded worker-local PCRE budget' );
+	}
 	if ( 'seed' === FOOGM_A7_STAGE ) {
 		foreach ( $names as $name ) { $check( null === $raw( $name ), 'Refuse existing option evidence' ); }
 		foreach ( $tables as $table ) {
@@ -72,10 +76,6 @@ try {
 		$check( $schema->verify(), 'Exact shared schema mismatch' );
 		$fixture_raw = file_get_contents( FOOGM_A7_FIXTURES . '/' . FOOGM_A7_CELL . '.serialized' );
 		$check( strlen( $fixture_raw ) === $expected['raw_bytes'] && hash( 'sha256', $fixture_raw ) === $expected['sha256'], 'Frozen fixture byte mismatch' );
-		if ( $positive ) {
-			$receipt['pcre_before'] = ini_get( 'pcre.backtrack_limit' );
-			$check( false !== ini_set( 'pcre.backtrack_limit', '16777216' ), 'Cannot set bounded worker-local PCRE budget' );
-		}
 		$check( 1 === $wpdb->query( $wpdb->prepare( 'INSERT INTO `' . $wpdb->options . '` (option_name,option_value,autoload) VALUES (%s,%s,%s)', FOOGALLERY_MIGRATE_OPTION_DATA, $fixture_raw, 'no' ) ), 'Fixture raw insert failed' );
 		$check( $raw( FOOGALLERY_MIGRATE_OPTION_DATA ) === $fixture_raw, 'Fixture SQL readback mismatch' );
 		$receipt['observations']['seed'] = $physical();
@@ -92,6 +92,10 @@ try {
 			$check( count( array_filter( $after['tables'], function ( $v ) { return null !== $v; } ) ) === 0, 'Owned table cleanup incomplete' );
 			$receipt['observations']['cleanup_completed'] = true; $receipt['after'] = $after;
 		} elseif ( $positive && 'backup' === FOOGM_A7_STAGE ) {
+			$control = StorageControl::decode( $raw( StorageAuthority::CONTROL_OPTION ), $blog );
+			$check( StorageControl::runtime_ready( $control, $raw( StorageAuthority::AUTHORITY_OPTION ) ), 'Backup authority inconsistent' );
+			$check( 'table' === $control['backend'] && 1 === $control['epoch'] && 'stable' === $control['phase'], 'Backup authority not stable table epoch1' );
+			$receipt['backup_authority'] = $control;
 			$receipt['result'] = foogm_a7_positive_run( $wpdb, $blog, function () use ( $wpdb ) {
 				list( $sql ) = \FooPlugins\FooGalleryMigrate\Tests\StorageA7OptionsHarness::wordpress_readers( $wpdb );
 				return $sql( StorageAuthority::STORAGE_BACKUP_OPTION );

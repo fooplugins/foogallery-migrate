@@ -7,6 +7,8 @@ ZIP=${2:?absolute candidate ZIP}
 OUT=${3:?absolute new evidence directory}
 EXPECTED=${4:?exact candidate commit}
 CASE=${5:-storage-preflight}
+KINDS=${6:-both}
+[[ "$KINDS" == both || ( "$CASE" == storage-a7-native-positive && ( "$KINDS" == source || "$KINDS" == package ) ) ]] || exit 1
 [[ "$CASE" == storage-a7-native-positive || "$CASE" == storage-calibration-a7-gallery || "$CASE" == storage-preflight || "$CASE" == storage-writer-gate || "$CASE" == storage-writer-adoption || "$CASE" == storage-conversion || "$CASE" == storage-operations || "$CASE" == storage-pinned-transport || "$CASE" == storage-runtime-transport || "$CASE" == storage-callback-drain || "$CASE" == storage-output-drain || "$CASE" == storage-process-death || "$CASE" == storage-native-death || "$CASE" == storage-provisioning || "$CASE" == storage-aigpl || "$CASE" == storage-aigpl-option || "$CASE" == storage-aigpl-browser ]] || exit 1
 COVE=/opt/homebrew/bin/cove
 [[ "$SOURCE" == /* && "$ZIP" == /* && "$OUT" == /* ]] || exit 1
@@ -129,7 +131,9 @@ for topology in "${topologies[@]}"; do
     [[ -n "${FOOGM_BROWSER_MODULE:-}" && -d "$FOOGM_BROWSER_MODULE" ]] || exit 1
     "$COVE" reload > "$OUT/raw/$topology-caddy.txt" 2>&1
   fi
-  for kind in source package; do
+  kinds=(source package)
+  [[ "$KINDS" == both ]] || kinds=("$KINDS")
+  for kind in "${kinds[@]}"; do
     plugin="$root/public/wp-content/plugins/foogallery-migrate-$kind"
     [[ ! -e "$plugin" && ! -L "$plugin" ]] || exit 1
     mkdir "$plugin"
