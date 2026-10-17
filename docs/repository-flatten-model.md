@@ -1,124 +1,103 @@
-Repository-sink flatten phase model (prospective, not integrated)
+Repository-sink flatten phase admission (experimental native profile only)
 
-Boundary
-  RepositoryFlattenModel is an inert, executable host experiment, not an
-  approved production admission profile. No existing call site uses it.
-  It plans describe_tree, preflight_tree/make_row and flatten_node with an
-  empty non-retaining sink. A sink retains no earlier callback rows; recursive
-  ancestors still retain their encoded rows. SQL/wpdb, arbitrary callbacks,
-  WordPress encoders/hooks, retained-row output, rebuild, decoder, snapshot,
-  driver allocations, source mutation/aliases and external native allocations
-  are NOT certified. Inputs must be unchanged, compact, reference-free trees
-  already admitted to the existing logical domain. The descriptor is trusted
-  internal metadata, NOT a request/policy/validation boundary.
+Scope and ownership
+  LegacyRecordCodec recognizes ONLY the final RepositoryFlattenModel object as
+  a non-retaining digest sink. No callback, interface, ownership string or user
+  flag confers that capability. Its actual __invoke hashes each scalar column
+  incrementally and retains only a hash context, count, one fixed plan and four
+  phase samples. It does not write SQL, persist a migration, or retain rows.
+  A row-limit argument may only reduce its finite24576 capacity. Refusal leaves
+  partial staged digest/count evidence; callers must not interpret that as a
+  committed conversion. A fresh sink cannot release the shared domain's pending.
 
-Runtime and observations
-  Only PHP CLI 8.5.11, Darwin arm64, 64-bit NTS non-debug, Zend allocator,
-  CLI opcache off, exact binary SHA256 and extension/version fingerprint in
-  the class are recognized. The constructor rejects all supplied codecs,
-  unknown profiles and any wp_json_encode (including the PHPUnit shim).
-  Real WordPress and literal PHP floors remain unverified/unsupported here.
-  Construct/load the model before the operation's memory baseline sample.
-  Runtime identification is not calibration approval. No coefficient override
-  or 'approved' flag exists. Source/package receipts bind the exact producers
-  and loaded classes; changing the codec requires a new observation/review.
+  Arbitrary callbacks, including callbacks claiming not to retain, use the old
+  aggregate estimate. Original retaining roundtrip remains RED/OPEN at128M.
+  No WP/SQL caller is activated. Native JSON cannot satisfy the wp_json_encode
+  product gate. This is one original-scope phase experiment, not final approval.
 
-  The C producer tests/tools/repository-flatten-sizes.c compiles against the
-  installed headers. It observes zval16, Bucket32, zend_array56, string header24,
-  execute_data80, mixed table8=320/table32=1280, page4096/chunk2097152 bytes.
-  Installed zend_types.h uses capacity powers of two, >=8; each mixed slot is
-  Bucket32 plus TWO 4-byte hash positions, i.e.40, not36. zend_alloc_sizes.h
-  supplies the actual bin/run sizes. These are runtime representation facts,
-  not measurements of PHP5 or an arbitrary allocator/extension.
+Qualification
+  Only PHP CLI8.5.11 Darwin arm64,64-bit NTS/non-debug, Zend allocator, CLI
+  opcache off, exact binary SHA256 and extension/version fingerprint in the
+  class qualify. Runtime checks repeat at entry, including rejection of a WP
+  encoder installed after construction. Unknown profile/custom model codec,
+  subclassed or altered LegacyStateCodec, memory/clock hooks, widened finite
+  ceiling, reserve below32MiB, or a different domain on the same sink refuse.
+  The exact built-in LegacyStateCodec with constructor-default configuration
+  sharing the same domain is accepted (including an equivalent explicit
+  built-in instance); arbitrary custom/subclass code never runs under the model.
+  No coefficient overrides, runtime-approval flag, clone or constructor reset.
 
-  A(n) = 768 + 160*n reserves an array including old/new growth overlap:
-  mixed old+new capacities <3n imply <120n data bytes; >=205 entries the
-  two page-rounding tails <=8192 fit the remaining40n. At smaller power-of-two
-  capacity transitions the concrete bins/table sizes fit the 768 intercept.
-  Packed fixed tag/pair arrays are smaller; using the same bound is deliberate.
-  Newly generated tag integer strings have <=20 digits; header24 + NUL and
-  the observed bins fit64 bytes/node. The source string/key zvals themselves
-  are shared by field_order/values/mutable, not recursively copied.
+  Actual runtime origin, binary/source/package/fixture hashes and measurement
+  receipts are frozen by the delivery evidence. This is NOT a production
+  calibration approval, arbitrary-hook contract, or universal never-OOM proof.
+  Literal PHP floors and WordPress/native persistence remain separate OPEN gates.
 
-  Descriptor scratch reserves 4096 bytes/frame for two depth spans plus eight
-  fixed callees. The frozen opcode producer checks the relevant codec/domain
-  methods' CV+temporary slots fit251: 80+16*251=4096. No custom memory/clock
-  callback allocation is certified (arithmetic tests use seams separately).
-  Four MiB is a heap/run slack allowance, not a fitted multiplier: 30 bins,
-  <=7 pages/run leave <861KiB of partial new runs; a chunk rounding tail is
-  <2MiB, leaving >1MiB for chunk headers, fixed metadata and VM-stack rounding
-  in this finite operation. Existing heap pages are already in the sample.
-  Held-out measured true AND live peaks test this allowance; it is not a
-  universal fragmentation/RSS/never-OOM theorem.
+Shared pending and operation ordering
+  1. Code, source and sink are live BEFORE the measured baseline. Source graph,
+     raw strings and retained caller values are already in usage(true). Never
+     subtract/credit them or charge a second input amplification to the model.
+  2. Qualify the internal sink and same default codec/domain. BEFORE descriptor
+     traversal, reserve descriptor_bytes(64) via domain.admit_additional.
+  3. describe_tree observes the actual compact-v1 representation without row
+     encoding. project(descriptor,state_key) gives a conservative additional
+     phase delta. Reserve after_descriptor_bytes on the SAME domain BEFORE
+     preflight/encoding/digest/emission. Descriptor reservation remains pending.
+  4. Actual preflight bounds row count, row/tree encoded bytes and row depth;
+     actual streaming snapshot_digest checks logical depth/tokens. Both run
+     before emission. Their deadline/work checks are unchanged. The native
+     encoder, base/mutable encodes, typed-key/node hashes, projections and every
+     per-record logical digest all run in the integrated measured path.
+  5. ONLY the qualified flatten aggregate total-output*8 estimate is replaced
+     by that pre-reserved phase delta. The final admit_memory(0) still checks
+     current sampled usage + ALL pending + reserve against BOTH effective PHP
+     and finite<=128MiB ceilings. Per-row MAX_RECORD_BYTES*8, raw/decoder,
+     rebuild/snapshot estimates and every other legacy check remain in force.
+     All admit_memory checks now add pending, including nested later checks.
+  6. Pending monotonically increases for the operation. No credits, releases,
+     phase resets, sample-based deductions or replacement domain. Failed
+     reservation leaves the previous pending total intact. Repeated successful
+     flatten calls consume further deltas and eventually refuse conservatively.
 
-  Native JSON/output ownership uses 8*max_row_bytes + 4*4096: up to four
-  overlapping encoded/string buffers, with twofold allocation-capacity slack
-  and page tails, covering native JSON old/new buffers, retained payload and
-  mutation, projection output, typed-key/hash concatenation at their distinct
-  high-water phases. Base64 tag bodies <= JSON bytes and have a separate
-  2*row-byte term, plus per-node64 headers. Final/ancestor encoded strings
-  are additionally charged at2*max_ancestor_row_bytes plus three20-entry
-  row shells per active frame (including array_merge/current-row overlap).
-  Maxima need not occur on the same row: summing them over-reserves.
-  The streaming logical digest retains no whole-tree encoded string, but
-  re-encodes each scalar/key. Six scalar buffers, each <=8/3 input bytes
-  after base64 and slash escaping, give16*max_scalar_bytes + four pages.
-  logical_max_string_bytes includes logical keys AND mutable/deep values;
-  state_key length is an additional explicit input. The floor32 covers
-  integer/float/boolean/null textual scratch. Aggregate logical_string_bytes
-  would needlessly charge all sampled source strings again.
+Structural coefficients (unchanged native representation model)
+  A(n)=768+160*n includes old+new array capacity/bucket/hash/rounding overlap.
+  Installed headers and tests/tools/repository-flatten-sizes.c observe zval16,
+  Bucket32, zend_array56, string header24, execute_data80, page4096/chunk2097152.
+  Mixed slots include TWO4-byte hash positions; old+new capacities<3n use<120n
+  bytes. For>=205 entries, two page tails<=8192 fit40n; smaller transitions fit
+  the768 intercept. Source strings/zvals are shared, not recursively copied.
 
-  Native buffer capacity/growth and slack are supported by actual per-process
-  peak observations of this exact native encoder/representation, including
-  binary size and capacity transitions, NOT by a WordPress allocator contract.
-  This is a conservative finite host phase model, NOT synthetic-approved
-  calibration or proof over every combination within the logical ceilings.
-  Held-out corpus sizes are fixed before the frozen/package measurement run;
-  the coefficients are structural ownership bounds, not fitted peak ratios.
+  Descriptor reserves4MiB heap/run/VM slack plus4096 per frame for two recursive
+  depth spans+eight callees. Four MiB covers observed bin-run partial pages,
+  <2MiB chunk tail and fixed metadata/VM rounding in this finite native profile.
+  This is structural finite-host accounting, not a fitted peak ratio or RSS
+  theorem. Held-out integrated true/live peaks must fit the prospective bound.
 
-Executable boundary and future integration (separate authorization/review)
-  1. Sample memory_get_usage(true) AFTER loading code and obtaining the source.
-     It already includes caller-owned input, decoded source, and any raw strings
-     still live. source_charge_bytes is exactly0. Never subtract that source
-     from the sample, and never add a second sampled-input amplification term.
-  2. Before describe_tree, domain->admit_additional(model->descriptor_bytes(64)).
-     Keep raw/reserve/depth/row/token/deadline/floor guards unchanged. The
-     descriptor uses the SAME operation/deadline and no fresh domain/reset.
-  3. plan = model->project(descriptor,state_key). Before preflight_tree/make_row,
-     admit_additional(plan.after_descriptor_bytes), NOT the full plan again:
-     descriptor scratch remains pending. Use this reservation ONCE per tree,
-     not once per row/pass. Both passes' overlapping ownership is included.
-  4. Every later legacy prospective/raw-memory gate must ALSO account pending
-     deltas. reserve_legacy is an executable bridge experiment: first keep the
-     original admit_memory(raw), then admit_additional(checked(raw*the exact
-     unchanged trusted policy amplification)). The amplification argument is
-     internal policy, NEVER a request value or a new calibration. Do not use
-     this bridge as a substitute for decoder raw-byte caps. Existing production
-     admit_memory is intentionally pending-blind; tests make that gap explicit.
-     No integration is permitted until all relevant call sites share this rule.
-     Increases in sampled memory do not release pending bytes. No credits/reset
-     are invented; conservative double charging of realized NEW allocations can
-     over-refuse. A refused bridge spends no new delta, though existing tick/work
-     and deadline checks still run. Repeated raw checks may also over-refuse.
-  5. Neither modeled admission nor a projection below128M bypasses current raw
-     admission. Original20K conversion remains RED. No codec/SQL/VM/native
-     activation or claim of original-product completion follows this experiment.
+  Row phases reserve field_order/values/mutable shells; tagged containers;
+ 64-byte generated-string/node overhead and2*max_row_bytes base64/tag bodies;
+ 8*max_row_bytes+four pages for native JSON old/new buffers, payload/mutation,
+  projections and typed-key/hash concatenation;2*max_ancestor_row_bytes plus
+  three20-entry row shells per active frame. Maxima may be from different rows;
+  summing over-reserves. Digest reserves16*max(largest logical string/key,
+  state-key length,32)+four pages for six overlapping scalar encoding/domain
+  buffers, each<=8/3 input bytes. It never builds a whole-tree encoded digest.
+  Fixed sink hash/scalar/observation scratch fits descriptor slack; it does not
+  concatenate a second whole row. Source mutation, allocating hooks, SQL/driver
+  lifetimes, external native allocation and retaining callbacks are not modeled.
 
-Reproduction
-  php -d memory_limit=128M tests/tools/repository-flatten-model.php "$PWD" regression
-  php -d memory_limit=128M tests/tools/repository-flatten-model.php "$PWD" allocator
-  php -d memory_limit=128M tests/tools/repository-flatten-model.php "$PWD" original20k 20000
-  Other modes: tiny, wide, deep, logical-deep, binary, mutable plus finite size.
-  The standalone producer deliberately loads exact product includes without
-  the WP shim. Its only WP stand-ins are error/translation arithmetic helpers;
-  no fake encoder or fake memory is used for phase measurements. Preflight uses
-  Reflection to invoke the ACTUAL private method; flatten uses the public path
-  with an empty sink. Neither changes guards or measures a hand-written clone.
-  Original20K runs descriptor/model only, under actual128M with its live sample.
-  See the author evidence manifest for commands, frozen source/ZIP hashes,
-  held-out cells, failure logs and parent-matched inherited RED tests.
+Reproduction and evidence
+  php -d opcache.enable_cli=0 -d memory_limit=128M \
+    tests/tools/repository-flatten-phase-probe.php "$PWD" \
+    "$PWD/tests/support/StorageA7Fixture.php"
+  The unchanged original20K factory is exercised through ACTUAL public flatten,
+  including descriptor/preflight/digest/emission. Phase/current/incremental/live
+  and true peaks, exact loaded origins and sink checksum are reported. Binary,
+  wide, deep, encoded-ancestor overlap, repeated calls, real traversal expiry,
+  low finite/effective headroom, custom codecs/encoders, and staged sink refusal
+  are exercised. PHPUnit additionally tests exact/+1 ceilings, pending last
+  headroom, nested legacy checks and integer overflow with arithmetic-only seams.
+  The old model tools remain historical experiments, not admission authority.
 
 Open gates
-  A1-A8/final/native OPEN; original20K128M RED; native unchanged-byte
-  BLOCKED_NOT_WAIVED; positive persistence corpus pending; 15 October MISSED.
-  Host observations are not persistence, final acceptance or literal-floor proof.
+  A1-A8/UI/CLI/large-state/AIGPL/literal floors/recovery/cleanup/calibration/native/
+  final gates OPEN. Native unchanged-byte BLOCKED_NOT_WAIVED; positive persistence
+  corpus PENDING;15October MISSED. Distinct exact-candidate review required.

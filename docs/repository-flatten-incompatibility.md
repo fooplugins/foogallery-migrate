@@ -1,43 +1,45 @@
-Original20K128M repository-sink flatten: integration incompatibility
+Original20K128M aggregate refusal and qualified phase reconciliation
 
-Scoped result
-  No production gate is changed. The prospective finite-host model cannot make
-  this acceptance phase green while retaining the original aggregate policy.
-  This is a blocker witness, not an integrated pending-aware implementation.
+Historical witness (still true for callbacks/retaining output)
+  The unchanged original factory produces20208 records/15070354 encoded bytes.
+  The legacy aggregate estimate requires15070354*8+33554432=154117264 bytes,
+  greater than134217728 even before sampled usage or pending. The witness is
+  implementation-estimator incompatibility, NOT proof that the original
+  functional/safety contract is impossible. The original proposal did not
+  require encoded-output*8 at every ownership phase.
 
-Exact conflict
-  LegacyRecordCodec::flatten_tree finishes preflight and logical digest, then
-  calls admit(preflight.encoded_bytes), before flatten_node or any consumer.
-  The original fixture produces 20208 records and 15070354 encoded bytes.
-  StorageScaleAdmission::admit_memory preserves amplification8/reserve33554432:
-    15070354 * 8 + 33554432 = 154117264 > 134217728
-  This fails even with ZERO sampled usage and ZERO pending. Real usage and
-  pending deltas can only increase the requirement. Replacing that aggregate
-  check with the smaller phase plan, lowering its input or amplification, using
-  max(old, model) instead of both obligations, crediting retained source, or
-  increasing the ceiling would not preserve the original admission policy.
-  Reserving descriptor and after-descriptor deltas on the SAME domain reaches
-  the unchanged refusal too. It does not fix the existing pending-blind legacy
-  gates; the planned mode is deliberately NOT a pending-safety proposal.
+Receiving decision and bounded correction
+  Routine justified phase accounting is original-scope. LegacyRecordCodec now
+  admits ONLY its final internal native-profile digest sink using the measured
+  RepositoryFlattenModel. Reserve BEFORE descriptor, then reserve the projected
+  remaining phases on one immutable monotonic domain. Only qualified aggregate
+  output amplification changes. Arbitrary/retaining callbacks still execute
+  the original aggregate gate; generic decoder/rebuild/per-row estimates remain.
+  All remaining legacy memory checks include pending. All actual raw/token/
+  depth/row/physical limits, work/deadlines, overflow checks, reserve32MiB and
+  both effective PHP and finite<=128MiB ceilings are preserved. No cap increase,
+  source-memory credit, pending reset, guard deletion or reserve reduction.
 
-Reproduction (run from the immutable source root)
-  php -d opcache.enable_cli=0 -d memory_limit=128M \
-    tests/tools/repository-flatten-incompatibility.php \
-    "$PWD" "$PWD/tests/support/StorageA7Fixture.php" original
-  Repeat with planned instead of original. Both commands intentionally exit1
-  with bounded JSON evidence and zero emitted rows. Characterization PHPUnit
-  tests PASS by asserting that refusal, NOT by redefining original acceptance.
-  The original tests/fixture are unmodified. The probe takes a separate fixture
-  path so the same immutable factory can exercise actual gulp package classes.
+Reproduction
+  Qualified integrated path (native experiment, not conversion approval):
+    php -d opcache.enable_cli=0 -d memory_limit=128M \
+      tests/tools/repository-flatten-phase-probe.php "$PWD" \
+      "$PWD/tests/support/StorageA7Fixture.php"
+  Unchanged legacy callback witness, intentionally exit1/zero emitted:
+    php -d opcache.enable_cli=0 -d memory_limit=128M \
+      tests/tools/repository-flatten-incompatibility.php "$PWD" \
+      "$PWD/tests/support/StorageA7Fixture.php" original
+  planned mode remains conservative pending plus generic estimates, not a
+  qualified sink. Existing original tests/fixtures are preserved byte-identical.
+  The original retaining roundtrip remains RED/OPEN and is NOT skipped or
+  substituted by the new native sink PASS. A distinct reviewer must receive
+  exact source+actual package+runtime bindings and replay these separate gates.
 
-Applicability and next boundary
-  Exact RepositoryFlattenModel native CLI host profile only, including binary
-  and extension identity; no wp_json_encode, including no PHPUnit JSON shim.
-  The absint/error/translation helpers are offline scaffolding, not WordPress
-  or native unchanged-byte integration support. No SQL/DB/hooks/persistence,
-  retained-output rows, literal floors, recovery or conversion is exercised.
-  Pending-aware integration would still have to preserve EVERY relevant gate,
-  not only the final aggregate check. No new model or integration is introduced.
-  A distinct reviewer must validate this minimal policy/acceptance conflict;
-  Default then needs an explicit policy/acceptance reconciliation decision
-  before any further integration authoring. Nothing here authorizes a waiver.
+Non-claims
+  Digest output is not SQL/persistence or WordPress/native fixture acceptance.
+  wp_json_encode, driver/caller ownership, snapshot/decoder/rebuild scaling,
+  literal floors, recovery and product calibration need their own evidence.
+  No native-profile result authorizes those profiles or overall PR15 completion.
+  A1-A8/UI/CLI/large-state/AIGPL/literal floors/recovery/cleanup/calibration/native/
+  final gates OPEN; native unchanged-byte BLOCKED_NOT_WAIVED; positive persistence
+  corpus PENDING;15October MISSED. No delivery promise.

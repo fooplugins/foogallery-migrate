@@ -65,6 +65,12 @@ final class StorageScaleAdmission {
 	public function limit( $name ) { $this->valid(); if ( ! array_key_exists( $name, $this->limits ) ) { self::fail(); } return $this->limits[$name]; }
 	public function deadline() { $this->valid(); return $this->deadline; }
 	public function raw_bytes() { $this->valid(); return $this->policy['max_raw_bytes']; }
+	/** Experimental native flatten only: no allocating dependency hooks or widened ceiling. */
+	public function supports_repository_flatten() {
+		$this->valid();
+		return get_class( $this ) === __CLASS__ && null === $this->clock && null === $this->memory &&
+			$this->policy['reserve_bytes'] >= 33554432 && $this->limit( 'memory_ceiling_bytes' ) <= 134217728;
+	}
 	public function decoder( $bytes ) { return new LegacyOptionDecoder( $bytes, $this->limit( 'max_depth' ), $this->limit( 'max_tokens' ), $this ); }
 
 	public function bind_snapshot_blog( $blog_id ) {
@@ -130,8 +136,11 @@ final class StorageScaleAdmission {
 		if ( ! is_array( $sample ) || array_keys( $sample ) !== array( 0, 1 ) ) { self::fail(); }
 		// Both the effective PHP limit AND a finite ceiling apply, including -1.
 		$policy = $this->policy; $policy['max_raw_bytes'] = $this->limit( 'max_physical_bytes' );
+		// Pending is NEVER credited against a later sample, including nested raw,
+		// snapshot, rebuild and per-row checks. Preserve their original multiplier.
+		$used = self::checked_add( $sample[1], $this->additional_bytes );
 		foreach ( array( $sample[0], (string) $this->limit( 'memory_ceiling_bytes' ) ) as $limit ) {
-			if ( is_wp_error( StoragePreflight::decode_budget( $bytes, $limit, $sample[1], $policy ) ) ) { self::fail(); }
+			if ( is_wp_error( StoragePreflight::decode_budget( $bytes, $limit, $used, $policy ) ) ) { self::fail(); }
 		}
 		return true;
 	}
@@ -142,7 +151,8 @@ final class StorageScaleAdmission {
 	 * Accepted deltas remain pending for this operation: no phase reset/release
 	 * or sample-based credit. This deliberately overcounts already-realized deltas
 	 * rather than allowing nested, not-yet-sampled allocations to reuse headroom.
-	 * No production record/snapshot/raw-decoder gate is replaced by this seam.
+	 * Only the qualified native flatten phase supplies a measured replacement
+	 * delta; generic snapshot/raw-decoder/rebuild estimates remain unchanged.
 	 */
 	public function admit_additional( $bytes ) {
 		$this->tick();

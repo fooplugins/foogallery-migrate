@@ -1,7 +1,7 @@
 <?php
 /**
- * Prospective HOST-only repository-sink model. NOT wired into any codec/gate.
- * Native JSON only, no retained callback rows, SQL, wpdb or hook allocations.
+ * Experimental HOST-only phase model and final non-retaining digest sink.
+ * Native JSON only; not a SQL writer or WordPress calibration approval.
  * See tests/tools/repository-flatten-model.php and docs/repository-flatten-model.md.
  */
 namespace FooPlugins\FooGalleryMigrate;
@@ -10,8 +10,15 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 final class RepositoryFlattenModel {
 	const PROFILE = 'php-8.5.11-darwin-arm64-nts-native-json-v1';
 	const BINARY_SHA256 = '6ff616b1441ba498839c8ff3b51db9d6e2f037c175e30ebe81652a76e439c749';
+	private $context;
+	private $rows = 0;
+	private $row_limit;
+	private $domain;
+	private $observations = array();
+	private $plan;
 
-	public function __construct( $profile, $custom_codec = null ) {
+	public function __construct( $profile, $custom_codec = null, $row_limit = 24576 ) {
+		if ( null !== $this->context || ! is_int( $row_limit ) || $row_limit < 1 || $row_limit > 24576 ) { self::fail(); }
 		$extensions = array();
 		foreach ( get_loaded_extensions() as $name ) { $extensions[$name] = phpversion( $name ); }
 		ksort( $extensions );
@@ -20,7 +27,49 @@ final class RepositoryFlattenModel {
 			PHP_OS !== 'Darwin' || php_uname( 'm' ) !== 'arm64' || PHP_INT_SIZE !== 8 || PHP_ZTS || PHP_DEBUG ||
 			'0' === getenv( 'USE_ZEND_ALLOC' ) || ini_get( 'opcache.enable_cli' ) || function_exists( 'wp_json_encode' ) ||
 			hash_file( 'sha256', PHP_BINARY ) !== self::BINARY_SHA256 ) { self::fail(); }
+		$this->context = hash_init( 'sha256' );
+		$this->row_limit = $row_limit;
 	}
+
+	/** Capability is this FINAL implementation, never a supplied callback/ownership string. */
+	public function qualify( $codec, $scale ) {
+		// Recheck runtime even if a WP encoder was loaded AFTER construction.
+		new self( self::PROFILE );
+		if ( ! $scale instanceof StorageScaleAdmission || get_class( $scale ) !== __NAMESPACE__ . '\\StorageScaleAdmission' ||
+			! $scale->supports_repository_flatten() ||
+			get_class( $codec ) !== __NAMESPACE__ . '\\LegacyStateCodec' ||
+			$codec != new LegacyStateCodec( 1048576, 64, 10000, $scale ) ||
+			( null !== $this->domain && $this->domain !== $scale ) ) { self::fail(); }
+		$this->domain = $scale;
+	}
+
+	/** Bounded hash context and counters only; no row collection, user code or extra row encoding. */
+	public function __invoke( $row ) {
+		if ( null === $this->domain || $this->rows >= $this->row_limit ) { return false; }
+		$this->domain->admit_memory( 0 );
+		foreach ( $row as $name => $value ) {
+			$scalar = (string) $value;
+			hash_update( $this->context, $name . ':' . strlen( $scalar ) . ':' );
+			hash_update( $this->context, $scalar );
+		}
+		++$this->rows;
+		return true;
+	}
+
+	/** Four fixed phase samples, overwritten on repeat; not an unbounded event log. */
+	public function observe( $phase, $plan = null ) {
+		if ( ! in_array( $phase, array( 'descriptor', 'preflight', 'digest', 'emission' ), true ) ) { self::fail(); }
+		if ( null !== $plan ) { $this->plan = $plan; }
+		$this->observations[$phase] = array( 'true' => memory_get_usage( true ), 'live' => memory_get_usage( false ),
+			'peak_true' => memory_get_peak_usage( true ), 'peak_live' => memory_get_peak_usage( false ) );
+	}
+	public function receipt() {
+		return array( 'rows' => $this->rows, 'sha256' => hash_final( hash_copy( $this->context ) ),
+			'plan' => $this->plan, 'phases' => $this->observations );
+	}
+	public function __clone() { self::fail(); }
+	public function __sleep() { self::fail(); }
+	public function __wakeup() { self::fail(); }
 
 	private static function add( $a, $b ) { return StorageScaleAdmission::checked_add( $a, $b ); }
 	private static function mul( $a, $b ) { return StorageScaleAdmission::checked_multiply( $a, $b ); }
@@ -79,9 +128,10 @@ final class RepositoryFlattenModel {
 	}
 
 	/**
-	 * Inert bridge experiment: keep the original gate AND pending deltas.
+	 * Historical conservative bridge: original estimate AND pending deltas.
 	 * Trusted caller must supply its unchanged policy amplification. No credits.
-	 * Production calls to admit_memory do NOT yet use this bridge.
+	 * admit_memory itself now includes pending; this bridge is NOT used by the
+	 * qualified phase path (it deliberately reserves an extra legacy delta).
 	 */
 	public function reserve_legacy( $scale, $raw_bytes, $amplification ) {
 		if ( ! $scale instanceof StorageScaleAdmission || ! is_int( $amplification ) || $amplification < 1 ) { self::fail(); }

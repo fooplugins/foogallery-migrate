@@ -248,17 +248,44 @@ class LegacyRecordCodec {
 	 */
 	public function flatten_tree( $state_key, $key, $record, $item_order, $emit ) {
 		if ( ! is_callable( $emit ) ) { $this->fail( 'A staged row consumer is required.' ); }
+		// A final INTERNAL digest sink is the only measured non-retaining owner.
+		// No callable/flag supplied by a caller can assert this capability.
+		$qualified = $emit instanceof RepositoryFlattenModel;
+		if ( $qualified ) {
+			if ( get_class( $this ) !== __CLASS__ ) { $this->fail( 'Unmeasured record codec.' ); }
+			$emit->qualify( $this->codec, $this->scale );
+			$this->scale->admit_additional( $emit->descriptor_bytes( 64 ) );
+			$d = $this->describe_tree( $key, $record, 'repository-sink' );
+			if ( $d['records'] > $this->scale->limit( 'max_physical_rows_per_table' ) ||
+				$d['records'] > $this->scale->limit( 'max_physical_rows' ) ||
+				$d['encoded_bytes'] > $this->scale->limit( 'max_physical_bytes' ) ) { $this->fail( 'Physical flatten budget exceeded.' ); }
+			$plan = $emit->project( $d, $state_key );
+			$emit->observe( 'descriptor', $plan );
+			$this->scale->admit_additional( $plan['after_descriptor_bytes'] );
+		}
 		$item_order = $this->number( $item_order );
 		$stats = array( 'record_count' => 0, 'payload_bytes' => 0, 'encoded_bytes' => 0 );
 		$preflight = $stats;
 		$this->admit( 0 );
 		$this->preflight_tree( $this->codec->key_hash( $state_key ), null, $key, $record, $item_order, 0, $preflight );
+		if ( $qualified ) {
+			if ( $preflight['record_count'] !== $d['records'] || $preflight['payload_bytes'] !== $d['payload_bytes'] ||
+				$preflight['encoded_bytes'] !== $d['encoded_bytes'] ) { $this->fail( 'Descriptor/preflight mismatch.' ); }
+			$emit->observe( 'preflight' );
+		}
 		// Row ancestry is not logical depth: children contributes two edges,
 		// and ordinary/mutable fields may nest without creating any child row.
 		// Finish the shared logical admission before invoking the consumer.
 		if ( null !== $this->scale ) { $this->codec->snapshot_digest( $record ); }
-		$this->admit( $preflight['encoded_bytes'] );
+		if ( $qualified ) { $emit->observe( 'digest' ); }
+		// Only aggregate output amplification is replaced. Physical checks in
+		// preflight, per-row estimates and the pending-aware final check remain.
+		if ( $qualified ) { $this->admit( 0 ); }
+		else {
+			$this->admit( $preflight['encoded_bytes'] );
+		}
 		$this->flatten_node( $this->codec->key_hash( $state_key ), null, $key, $record, $item_order, 0, $emit, $stats );
+		if ( $qualified ) { $emit->observe( 'emission' ); }
 		return $stats;
 	}
 
