@@ -322,13 +322,14 @@ class LegacyRecordCodec {
 			if ( $size > LegacyTableReader::MAX_RECORD_BYTES || $size > $this->max_tree_bytes - $bytes ) { $this->fail( 'Tree exceeds the encoded byte budget.' ); }
 			$bytes += $size;
 		}
-		$phase = null; $sequence = 0;
+		$phase = null; $sequence = 0; $preorder = false; $cursor = null;
 		if ( null !== $this->scale && GenericRetainingModel::supports( $this, $this->codec, $this->scale ) ) {
 			$phase = $this->scale->open_retaining_phase( $this, GenericRetainingModel::descriptor_bytes() );
 			$d = $this->describe_rows( $rows, 'caller-rows-rebuild' );
 			// Lexical maximum establishes the workspace BEFORE native hydration.
-			$this->scale->plan_retaining_phase( $phase, $this, 0, GenericRetainingModel::rebuild_descriptor_bytes( $d ), 0, 0 );
-			$plan = GenericRetainingModel::rebuild_plan( $rows, $d, $this->codec, $this->scale );
+			$this->scale->plan_retaining_phase( $phase, $this, 0, StorageScaleAdmission::checked_add( GenericRetainingModel::rebuild_descriptor_bytes( $d ), GenericRetainingModel::preorder_metadata_bytes() ), 0, 0 );
+			$preorder = $this->certify_preorder( $rows, $root_hash );
+			$plan = GenericRetainingModel::rebuild_plan( $rows, $d, $this->codec, $this->scale, $preorder );
 			$this->scale->close_retaining_phase( $phase, $this );
 			$phase = $this->scale->open_retaining_phase( $this, 0 );
 			$this->scale->plan_retaining_phase( $phase, $this, $plan['future'], $plan['index_stage'], 0, $plan['events'], $plan['parts']['index_growth'], $plan['after_indexes'] );
@@ -350,7 +351,7 @@ class LegacyRecordCodec {
 				$children[ $parent ][ $order ] = $position;
 			}
 		}
-		if ( null !== $phase ) {
+		if ( null !== $phase && ! $preorder ) {
 			// The prospective adjacency bound came from declared child counts.
 			// Authenticate those bounds BEFORE allocating a child bucket, even for
 			// adversarial/reordered rows. Never trust topology metadata as credit.
@@ -390,7 +391,9 @@ class LegacyRecordCodec {
 		// caller row positions are int/string, never null. Only existing slots are
 		// overwritten, with no new index allocation or producer array exports.
 		if ( null !== $phase ) { $this->scale->complete_retaining_indexes( $phase, $this ); }
-		$result = $this->rebuild_node( $root_position, 0, $state_hash, $rows, $children, $nodes, $phase, $sequence );
+		if ( $preorder ) { $cursor = 0; }
+		$result = $this->rebuild_node( $root_position, 0, $state_hash, $rows, $children, $nodes, $phase, $sequence, $cursor );
+		if ( $preorder && $cursor !== count( $rows ) ) { $this->fail( 'Unconsumed preorder rows.' ); }
 		foreach ( $nodes as $unvisited ) {
 			$this->tick(); if ( null !== $unvisited ) { $this->fail( 'Orphan, cycle or unrelated root in tree.' ); }
 		}
@@ -495,23 +498,69 @@ class LegacyRecordCodec {
 		return $row;
 	}
 
-	private function rebuild_node( $position, $depth, $state_hash, &$rows, &$children, &$visited, $phase = null, &$sequence = 0 ) {
+	/**
+	 * Eligibility only, under admitted row workspace + fixed metadata. Never
+	 * reindex/copy rows, use/reset their internal pointer or retain decoded rows.
+	 * At most 65 three-slot frames: parent identity, remaining count, next order.
+	 * A false result selects the original indexed reader BEFORE any output.
+	 */
+	private function certify_preorder( &$rows, $root_hash ) {
+		$frames = array(); $top = -1; $next = 0;
+		foreach ( $rows as $position => $row ) {
+			$this->tick();
+			if ( $position !== $next++ || ! isset( $row['node_hash'], $row['depth'], $row['item_order'] ) || ! array_key_exists( 'parent_node_hash', $row ) ) { return false; }
+			// Normalize only local topology scalars as the indexed reader does.
+			// Full identity/key/checksum validation still builds the complete map.
+			$row['node_hash'] = $this->hex( $row['node_hash'] );
+			if ( null !== $row['parent_node_hash'] ) { $row['parent_node_hash'] = $this->hex( $row['parent_node_hash'] ); }
+			$row['depth'] = $this->number( $row['depth'] ); $row['item_order'] = $this->number( $row['item_order'] );
+			if ( $row['depth'] > $this->max_depth ) { return false; }
+			while ( $top >= 0 && 0 === $frames[$top][1] ) { unset( $frames[$top--] ); }
+			if ( 0 === $position ) {
+				if ( $row['node_hash'] !== $root_hash || null !== $row['parent_node_hash'] || 0 !== $row['depth'] ) { return false; }
+			} else {
+				if ( $top < 0 || $row['parent_node_hash'] !== $frames[$top][0] || $row['depth'] !== $top + 1 || $row['item_order'] !== $frames[$top][2] ) { return false; }
+				--$frames[$top][1]; ++$frames[$top][2];
+			}
+			$base = $this->codec->decode_record_payload( $row['payload'] );
+			if ( ! is_array( $base ) || ! isset( $base['kind'] ) ) { return false; }
+			$count = 0;
+			if ( 'array' === $base['kind'] && array_key_exists( 'child_count', $base ) ) {
+				if ( null !== $base['child_count'] ) { $count = $base['child_count']; }
+			} else if ( 'value' !== $base['kind'] ) { return false; }
+			if ( ! is_int( $count ) || $count < 0 || $count >= count( $rows ) ) { return false; }
+			unset( $base );
+			if ( $count ) {
+				if ( $top >= 64 ) { return false; }
+				$frames[++$top] = array( $row['node_hash'], $count, 0 );
+			}
+		}
+		while ( $top >= 0 && 0 === $frames[$top][1] ) { unset( $frames[$top--] ); }
+		return $top < 0;
+	}
+
+	private function rebuild_node( $position, $depth, $state_hash, &$rows, &$children, &$visited, $phase = null, &$sequence = 0, &$cursor = null ) {
 		$this->tick();
 		if ( $depth > $this->max_depth || ! isset( $rows[ $position ] ) || $this->number( $rows[ $position ]['depth'] ) !== $depth ) {
 			$this->fail( 'Invalid tree ancestry/depth.' );
 		}
 		$row = $this->validate_row( $rows[ $position ], $state_hash );
+		$preorder = null !== $cursor;
+		if ( $preorder && $position !== $cursor++ ) { $this->fail( 'Invalid preorder cursor.' ); }
 		$hash = $row['node_hash'];
 		if ( ! isset( $visited[ $hash ] ) ) { $this->fail( 'Invalid tree ancestry/depth.' ); }
 		$visited[ $hash ] = null;
 		$base = $this->codec->decode_record_payload( $row['payload'] );
 		$mutable = $this->codec->decode( $row['mutable_payload'] );
 		$child_rows = isset( $children[ $hash ] ) ? $children[ $hash ] : array();
+		// The certificate checked exact direct-child counts without an adjacency
+		// allocation. This is not permission to skip envelope/identity/digest work.
+		$child_total = $preorder && isset( $base['kind'] ) && 'array' === $base['kind'] && isset( $base['child_count'] ) ? $this->number( $base['child_count'] ) : count( $child_rows );
 		if ( ! is_array( $base ) || ! isset( $base['version'], $base['kind'] ) || self::VERSION !== $base['version'] || ! is_array( $mutable ) ) {
 			$this->fail( 'Unsupported record split envelope.' );
 		}
 		if ( 'value' === $base['kind'] ) {
-			if ( array_keys( $base ) !== array( 'version', 'kind', 'value' ) || is_array( $base['value'] ) || count( $mutable ) || count( $child_rows ) ) {
+			if ( array_keys( $base ) !== array( 'version', 'kind', 'value' ) || is_array( $base['value'] ) || count( $mutable ) || $child_total ) {
 				$this->fail( 'Invalid scalar split envelope.' );
 			}
 			$record = $base['value'];
@@ -525,8 +574,8 @@ class LegacyRecordCodec {
 			$count = $base['child_count'];
 			if ( null !== $count ) {
 				$count = $this->number( $count );
-				if ( count( $child_rows ) !== $count ) { $this->fail( 'Missing or extra children.' ); }
-			} else if ( count( $child_rows ) ) { $this->fail( 'Unexpected children.' ); }
+				if ( $child_total !== $count ) { $this->fail( 'Missing or extra children.' ); }
+			} else if ( $child_total ) { $this->fail( 'Unexpected children.' ); }
 			// Place this node's own fields before descending. Envelope arrays must
 			// not remain live at every ancestor while the final children grow.
 			$record = array(); $used_base = 0; $used_mutable = 0; $used_children = false;
@@ -550,11 +599,21 @@ class LegacyRecordCodec {
 			unset( $base, $mutable, $probe, $keys );
 			if ( null !== $phase ) { $this->scale->realize_retaining_event( $phase, $this, $sequence++, GenericRetainingModel::own_record_bytes( $record, null !== $count, strlen( $row['key_value'] ) ) ); }
 			$order = 0;
-			foreach ( $child_rows as $child_order => $child_position ) {
-				if ( $child_order !== $order++ ) { $this->fail( 'Invalid sibling order.' ); }
-				$key = $this->key( $rows[ $child_position ]['key_type'], $rows[ $child_position ]['key_value'] );
-				if ( array_key_exists( $key, $record['children'] ) ) { $this->fail( 'Duplicate typed child key.' ); }
-				$record['children'][ $key ] = $this->rebuild_node( $child_position, $depth + 1, $state_hash, $rows, $children, $visited, $phase, $sequence );
+			if ( $preorder ) {
+				for ( ; $order < $child_total; ++$order ) {
+					$child_position = $cursor;
+					if ( ! isset( $rows[$child_position] ) || $this->hex( $rows[$child_position]['parent_node_hash'] ) !== $hash || $this->number( $rows[$child_position]['item_order'] ) !== $order ) { $this->fail( 'Invalid parent or sibling order.' ); }
+					$key = $this->key( $rows[$child_position]['key_type'], $rows[$child_position]['key_value'] );
+					if ( array_key_exists( $key, $record['children'] ) ) { $this->fail( 'Duplicate typed child key.' ); }
+					$record['children'][$key] = $this->rebuild_node( $child_position, $depth + 1, $state_hash, $rows, $children, $visited, $phase, $sequence, $cursor );
+				}
+			} else {
+				foreach ( $child_rows as $child_order => $child_position ) {
+					if ( $child_order !== $order++ ) { $this->fail( 'Invalid sibling order.' ); }
+					$key = $this->key( $rows[ $child_position ]['key_type'], $rows[ $child_position ]['key_value'] );
+					if ( array_key_exists( $key, $record['children'] ) ) { $this->fail( 'Duplicate typed child key.' ); }
+					$record['children'][ $key ] = $this->rebuild_node( $child_position, $depth + 1, $state_hash, $rows, $children, $visited, $phase, $sequence );
+				}
 			}
 		} else { $this->fail( 'Unknown record kind.' ); }
 		if ( $row['logical_hash'] !== $this->codec->snapshot_digest( $record ) ) { $this->fail( 'Complete logical-record hash mismatch.' ); }

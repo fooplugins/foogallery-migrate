@@ -112,12 +112,17 @@ final class GenericRetainingModel {
   $frames_arena = self::add( 2097152, self::mul( 65, 4096 ) );
   return self::add( $frames_arena, self::add( self::mul( 768, $d['max_row_native_tokens'] ), self::mul( 8, $d['max_row_bytes'] ) ) );
  }
+ /** Fixed 65-frame certifier stack, scalar cursor/locals and resize scratch.
+  * Each three-slot frame fits the existing 4096/frame envelope; row decoding
+  * still uses the UNCHANGED row workspace in addition to this allocation. */
+ public static function preorder_metadata_bytes() { return self::add( self::mul( 65, 4096 ), 8192 ); }
  /**
   * One row at a time under the already admitted descriptor-private workspace.
   * No entire decoded tree, positional index or user output is retained here.
-  * describe_rows itself remains strictly lexical/non-hydrating.
+  * describe_rows itself remains strictly lexical/non-hydrating. The producer
+  * supplies preorder=true ONLY after certifying dense DFS positions/topology.
   */
- public static function rebuild_plan( $rows, $d, $codec, $scale ) {
+ public static function rebuild_plan( $rows, $d, $codec, $scale, $preorder = false ) {
   $future = 0; $siblings = 0; $max_siblings = 0; $parents = 0;
   foreach ( $rows as $row ) {
    $scale->tick();
@@ -150,13 +155,20 @@ final class GenericRetainingModel {
   // cover every live bucket and old/new allocation, without charging every
   // independent bucket's resize simultaneously. Workspace still overlaps.
   $index_resize = max( self::container( count( $rows ) ), self::container( $parents ), $max_siblings );
+  if ( $preorder ) {
+   // Only adjacency is absent. Keep the complete node/visited map AND its
+   // original largest-resize coefficient. Output capacities below do not fall.
+   $index = self::container( count( $rows ) ); $index_resize = $index;
+  }
   $parts = array( 'row_workspace' => self::rebuild_descriptor_bytes( $d ),
    'index_growth' => self::add( $index, $index_resize ), 'visited_growth' => 0,
    // All ancestor output capacities remain pending; one append can resize
    // one container at a time. No retained ancestor or child_rows credit.
    'output_children_growth' => self::add( $siblings, $max_siblings ), 'sibling_sort_cow' => 0 );
+  $metadata = $preorder ? self::preorder_metadata_bytes() : 0;
+  if ( $preorder ) { $parts['preorder_metadata'] = $metadata; }
   $private = 0; foreach ( $parts as $n ) { $private = self::add( $private, $n ); }
-  $index_stage = self::add( $parts['row_workspace'], $parts['index_growth'] );
+  $index_stage = self::add( $metadata, self::add( $parts['row_workspace'], $parts['index_growth'] ) );
   $after_indexes = self::add( self::add( $parts['visited_growth'], $parts['output_children_growth'] ), $parts['sibling_sort_cow'] );
   return array( 'future' => $future, 'private' => $private, 'index_stage' => $index_stage, 'after_indexes' => $after_indexes,
    'external' => 0, 'events' => count( $rows ), 'parts' => $parts );
