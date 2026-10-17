@@ -19,6 +19,8 @@ import uuid
 
 CELLS = ('1000', '2000', '10000', '20000', 'over-bound')
 STAGES = ('seed', 'preflight', 'forward', 'reverse', 'cleanup')
+POSITIVE = 'a7-options-utf8mb4-20k-v1'
+POSITIVE_STAGES = ('seed', 'forward', 'backup', 'reverse', 'cleanup')
 LIMIT = 262144
 
 
@@ -101,8 +103,8 @@ def finite_number(value):
     return type(value) in (int, float) and math.isfinite(value) and value >= 0
 
 
-def validate(receipt, cell, stage, owner, manifest):
-    """Independent strict consumer, not merely a producer 'ok' check."""
+def validate_common(receipt, cell, stage, owner, manifest):
+    """Independent identity and cumulative resources for every lane/stage."""
     require(receipt.get('format') == 'a7-worker-v1' and receipt.get('producer') == 'real-StorageOperations-WP-SQL', 'missing-producer')
     require((receipt.get('cell'), receipt.get('stage'), receipt.get('owner')) == (cell, stage, owner), 'wrong-worker-binding')
     require(receipt.get('status') == 'measurement_only' and receipt.get('method_approved') is False and receipt.get('profile_approved') is False, 'approval-confusion')
@@ -120,6 +122,10 @@ def validate(receipt, cell, stage, owner, manifest):
         require(finite_number(sample.get('rusage', {}).get('ru_maxrss')) and sample.get('rss_unit') in ('bytes', 'KiB'), 'missing-RSS')
     require(resources['peak_live_cumulative'] >= receipt['bootstrap']['peak_live_cumulative'] and resources['peak_allocated_cumulative'] >= receipt['bootstrap']['peak_allocated_cumulative'], 'bootstrap-peak-lost')
     require(finite_number(receipt.get('seconds')) and receipt['seconds'] <= 45, 'worker-elapsed')
+
+
+def validate(receipt, cell, stage, owner, manifest):
+    validate_common(receipt, cell, stage, owner, manifest)
     if stage == 'cleanup':
         require(receipt['observations'].get('cleanup_completed') is True, 'missing-cleanup')
         require(all(v is None for values in receipt['after'].values() for v in values.values()), 'cleanup-not-absent')
@@ -173,30 +179,61 @@ def validate(receipt, cell, stage, owner, manifest):
     return receipt
 
 
+def validate_positive(p, cell, stage, owner, manifest):
+    require(cell == POSITIVE and re.fullmatch('[a-f0-9]{32}', owner), 'positive-binding')
+    fixture = manifest['fixture']
+    exact = dict(bytes=fixture['raw_bytes'], sha256=fixture['sha256'])
+    if stage != 'backup':
+        validate(p, cell, stage, owner, manifest)
+    else:
+        validate_common(p, cell, stage, owner, manifest)
+        require(p['before'] == p['after'] and p['result'] == exact, 'backup-mutated-or-inexact')
+    require(p['product_pins_before'] == p['product_pins_after'] and bool(p['product_pins_before']), 'product-mutated')
+    required = ['StorageOperations', 'StorageConversion', 'LegacyStateCodec', 'LegacyTableSnapshot', 'StorageControl']
+    for name in required:
+        entry = p['product_classes']['FooPlugins\\FooGalleryMigrate\\' + name]
+        relative = str(Path(entry['file']).relative_to(p['product_root']))
+        require(p['product_pins_after'][relative] == entry['sha256'], 'product-class-pin')
+    if stage == 'seed' or stage == 'reverse':
+        seed = p['positive_seed'] if stage == 'seed' else p['reverse_readback']
+        require(seed == dict(format='a7-options-seed-v1', corpus=POSITIVE, stage='seed', owner=owner, blog_id=p['blog_id'],
+                status='measurement_only', contract_decision='pending', method_approved=False, profile_approved=False,
+                outcome='SUCCESS', first_failure=None, fixture=fixture, persisted_sql=exact, wp_logical_sha256=fixture['logical_sha256']), 'positive-seed-inexact')
+    if stage in ('forward', 'backup', 'reverse'):
+        fresh = p['fresh_read']
+        name = 'foogallery-migrate-data' if stage == 'forward' else 'foogallery-migrate-data-storage-backup'
+        require(fresh == dict(option=name, sql=exact, wp_logical_sha256=fixture['logical_sha256'], wp_serialized_sha256=fixture['sha256']), 'fresh-read-mismatch')
+    return p
+
+
 def php_string(value):
     return "'" + str(value).replace('\\', '\\\\').replace("'", "\\'") + "'"
 
 
-def command_for(base, source, plugin, fixtures, cell, stage, owner):
+def command_for(base, source, plugin, fixtures, cell, stage, owner, lane='original', seed_receipt=None):
     values = {'FOOGM_STORAGE_TEST_DISPOSABLE': True,
               'FOOGM_STORAGE_TEST_MODE': 'storage-calibration-a7-gallery',
               'FOOGM_STORAGE_TEST_ROOT': plugin, 'FOOGM_A7_FIXTURES': fixtures,
               'FOOGM_A7_CELL': cell, 'FOOGM_A7_STAGE': stage, 'FOOGM_A7_OWNER': owner}
+    if lane == 'native-positive':
+        values['FOOGM_STORAGE_TEST_MODE'] = 'storage-a7-native-positive'
+        values['FOOGM_A7_SEED_RECEIPT'] = seed_receipt
     code = ''.join('define(%s,%s);' % (php_string(key), 'true' if val is True else php_string(val)) for key, val in values.items())
     code += 'require ' + php_string(Path(source) / 'tests/integration/storage-operations.php') + ';'
     return list(base) + ['--require=' + str(Path(source) / 'tests/integration/storage-a7-bootstrap.php'), 'eval', code]
 
 
-def run_matrix(output, manifest, invoke):
+def run_matrix(output, manifest, invoke, lane='original'):
     """Stop at first failure. Only exact-owner cleanup follows a closed failure."""
     output = Path(output)
     output.mkdir(mode=0o700)  # new-only, never retry over evidence
     summary = dict(format='a7-matrix-v1', status='measurement_only', method_approved=False,
                    profile_approved=False, first_failure=None, closure_complete=True,
                    receipts=[], completed_cells=[], cleanup_complete=True)
-    for cell in CELLS:
+    cells = (POSITIVE,) if lane == 'native-positive' else CELLS
+    for cell in cells:
         owner = uuid.uuid4().hex
-        sequence = ('seed', 'refusal', 'cleanup') if cell == 'over-bound' else STAGES
+        sequence = POSITIVE_STAGES if lane == 'native-positive' else (('seed', 'refusal', 'cleanup') if cell == 'over-bound' else STAGES)
         failed, seeded = False, False
         for stage in sequence:
             if failed and stage != 'cleanup':
@@ -211,7 +248,11 @@ def run_matrix(output, manifest, invoke):
             if not error:
                 try:
                     require(not stderr, 'unexpected-stderr')
-                    producer = validate(json.loads(stdout), cell, stage, owner, manifest)
+                    producer = json.loads(stdout)
+                    if lane == 'native-positive':
+                        validate_positive(producer, cell, stage, owner, manifest)
+                    else:
+                        validate(producer, cell, stage, owner, manifest)
                 except (ValueError, KeyError, TypeError, IndexError, AttributeError) as exc:
                     error = 'receipt:' + str(exc)
             worker.update(producer=producer, validation_failure=error)
@@ -235,7 +276,7 @@ def run_matrix(output, manifest, invoke):
         if failed or not summary['closure_complete']:
             break
         summary['completed_cells'].append(cell)
-    summary['passed'] = summary['first_failure'] is None and summary['completed_cells'] == list(CELLS) and summary['closure_complete'] and summary['cleanup_complete']
+    summary['passed'] = summary['first_failure'] is None and summary['completed_cells'] == list(cells) and summary['closure_complete'] and summary['cleanup_complete']
     save(output / 'summary.json', summary)
     return summary
 
@@ -312,6 +353,7 @@ def finalize(root, exit_code):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--finalize', nargs=2, metavar=('OUT', 'EXIT'))
+    parser.add_argument('--lane', choices=('original', 'native-positive'), default='original')
     parser.add_argument('--source')
     parser.add_argument('--plugin')
     parser.add_argument('--fixtures')
@@ -321,14 +363,20 @@ def main():
     if args.finalize:
         return finalize(args.finalize[0], int(args.finalize[1]))
     manifest = json.loads((Path(args.fixtures) / 'manifest.json').read_text())
-    expected = json.loads((Path(args.source) / 'tests/integration/storage-a7-manifest.json').read_text())
+    name = 'storage-a7-options-manifest.json' if args.lane == 'native-positive' else 'storage-a7-manifest.json'
+    expected = json.loads((Path(args.source) / 'tests/integration' / name).read_text())
     require(manifest == expected, 'unfrozen-corpus-manifest')
-    for cell in CELLS:
+    cells = (POSITIVE,) if args.lane == 'native-positive' else CELLS
+    if args.lane == 'native-positive':
+        manifest = dict(manifest, cells={POSITIVE: manifest['fixture']})
+    for cell in cells:
         raw = (Path(args.fixtures) / (cell + '.serialized')).read_bytes()
         require(len(raw) == manifest['cells'][cell]['raw_bytes'] and hashlib.sha256(raw).hexdigest() == manifest['cells'][cell]['sha256'], 'frozen-corpus-bytes')
     base = args.command[1:] if args.command[:1] == ['--'] else args.command
     require(bool(base), 'missing-worker-command')
-    summary = run_matrix(args.out, manifest, lambda cell, stage, owner: bounded_worker(command_for(base, args.source, args.plugin, args.fixtures, cell, stage, owner)))
+    summary = run_matrix(args.out, manifest, lambda cell, stage, owner: bounded_worker(command_for(
+        base, args.source, args.plugin, args.fixtures, cell, stage, owner, args.lane,
+        str(Path(args.out) / (cell + '-seed.stdout')))), args.lane)
     if not summary['closure_complete']:
         save(Path(args.out).parent.parent / 'incomplete-closure.json', dict(output=args.out, first_failure=summary['first_failure'], cleanup_forbidden=True))
     return 0 if summary['passed'] else 1

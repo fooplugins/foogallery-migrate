@@ -3,7 +3,7 @@
 if ( ! defined( 'ABSPATH' ) || ! defined( 'FOOGM_STORAGE_TEST_DISPOSABLE' ) || true !== FOOGM_STORAGE_TEST_DISPOSABLE ) { throw new RuntimeException( 'Disposable WordPress fixture required.' ); }
 // A7 uses fresh workers and separate seeding, never this six-shape/reset-peak path.
 if ( defined( 'FOOGM_STORAGE_TEST_MODE' ) ) {
-	if ( 'storage-calibration-a7-gallery' !== FOOGM_STORAGE_TEST_MODE ) { throw new RuntimeException( 'Unknown measurement mode.' ); }
+	if ( ! in_array( FOOGM_STORAGE_TEST_MODE, array( 'storage-calibration-a7-gallery', 'storage-a7-native-positive' ), true ) ) { throw new RuntimeException( 'Unknown measurement mode.' ); }
 	require __DIR__ . '/storage-a7-worker.php';
 	return;
 }

@@ -7,7 +7,7 @@ ZIP=${2:?absolute candidate ZIP}
 OUT=${3:?absolute new evidence directory}
 EXPECTED=${4:?exact candidate commit}
 CASE=${5:-storage-preflight}
-[[ "$CASE" == storage-calibration-a7-gallery || "$CASE" == storage-preflight || "$CASE" == storage-writer-gate || "$CASE" == storage-writer-adoption || "$CASE" == storage-conversion || "$CASE" == storage-operations || "$CASE" == storage-pinned-transport || "$CASE" == storage-runtime-transport || "$CASE" == storage-callback-drain || "$CASE" == storage-output-drain || "$CASE" == storage-process-death || "$CASE" == storage-native-death || "$CASE" == storage-provisioning || "$CASE" == storage-aigpl || "$CASE" == storage-aigpl-option || "$CASE" == storage-aigpl-browser ]] || exit 1
+[[ "$CASE" == storage-a7-native-positive || "$CASE" == storage-calibration-a7-gallery || "$CASE" == storage-preflight || "$CASE" == storage-writer-gate || "$CASE" == storage-writer-adoption || "$CASE" == storage-conversion || "$CASE" == storage-operations || "$CASE" == storage-pinned-transport || "$CASE" == storage-runtime-transport || "$CASE" == storage-callback-drain || "$CASE" == storage-output-drain || "$CASE" == storage-process-death || "$CASE" == storage-native-death || "$CASE" == storage-provisioning || "$CASE" == storage-aigpl || "$CASE" == storage-aigpl-option || "$CASE" == storage-aigpl-browser ]] || exit 1
 COVE=/opt/homebrew/bin/cove
 [[ "$SOURCE" == /* && "$ZIP" == /* && "$OUT" == /* ]] || exit 1
 [[ "$SOURCE$ZIP$OUT" != *"'"* ]] || exit 1
@@ -28,6 +28,10 @@ shasum -a 256 "$ZIP" > "$OUT/package-sha256.txt"
 if [[ "$CASE" == storage-calibration-a7-gallery ]]; then
   php "$OUT/source/tests/integration/storage-a7-fixtures.php" "$OUT/fixtures" > "$OUT/fixture-manifest.json"
   cmp "$OUT/source/tests/integration/storage-a7-manifest.json" "$OUT/fixture-manifest.json"
+fi
+if [[ "$CASE" == storage-a7-native-positive ]]; then
+  php "$OUT/source/tests/integration/storage-a7-options-fixtures.php" "$OUT/fixtures" > "$OUT/fixture-manifest.json"
+  cmp "$OUT/source/tests/integration/storage-a7-options-manifest.json" "$OUT/fixture-manifest.json"
 fi
 "$COVE" list --json > "$OUT/sites-before.json"
 "$COVE" status > "$OUT/services-before.txt"
@@ -82,7 +86,9 @@ after=$(mktemp "${TMPDIR:?}/fgm-preflight-after.XXXXXXXX")
 server=$(db -N -e 'SELECT CONCAT(@@hostname, ":", @@port, ":", @@socket, ":", VERSION())')
 [[ -n "$server" ]] || exit 1
 printf '%s\n' "$server" > "$OUT/db-server.txt"
-for topology in single multi; do
+topologies=(single multi)
+[[ "$CASE" != storage-a7-native-positive ]] || topologies=(single)
+for topology in "${topologies[@]}"; do
   site="fgm-preflight-$(date -u +%Y%m%d%H%M%S)-$$-$(openssl rand -hex 3)-$topology"
   [[ "$site" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]] || exit 1
   root="$HOME/Cove/Sites/$site.localhost"
@@ -145,16 +151,18 @@ for topology in single multi; do
         code="define('FOOGM_BROWSER_MODULE', '$FOOGM_BROWSER_MODULE'); define('FOOGM_BROWSER_EVIDENCE', '$OUT/raw/$id'); $code"
       fi
       rc=0
-      if [[ "$CASE" == storage-calibration-a7-gallery ]]; then
+      if [[ "$CASE" == storage-calibration-a7-gallery || "$CASE" == storage-a7-native-positive ]]; then
+        lane=original
+        [[ "$CASE" != storage-a7-native-positive ]] || lane=native-positive
         python3 -B "$OUT/source/tests/integration/storage-a7-runner.py" --source "$OUT/source" --plugin "$plugin" \
-          --fixtures "$OUT/fixtures" --out "$OUT/raw/$id" -- "$COVE" wp "$site" --url="$url" "${skips[@]}" --user=1 \
+          --fixtures "$OUT/fixtures" --out "$OUT/raw/$id" --lane "$lane" -- "$COVE" wp "$site" --url="$url" "${skips[@]}" --user=1 \
           > "$OUT/raw/$id.stdout" 2> "$OUT/raw/$id.stderr" || rc=$?
         # Do not issue another SQL command (even a dump) after incomplete closure.
         [[ ! -e "$OUT/incomplete-closure.json" ]] || exit 1
       else
         "$COVE" wp "$site" --url="$url" "${skips[@]}" --user=1 eval "$code" > "$OUT/raw/$id.stdout" 2> "$OUT/raw/$id.stderr" || rc=$?
       fi
-      if [[ "$rc" == 0 && "$CASE" != storage-calibration-a7-gallery ]]; then
+      if [[ "$rc" == 0 && "$CASE" != storage-calibration-a7-gallery && "$CASE" != storage-a7-native-positive ]]; then
         php "$OUT/source/tests/integration/validate-storage-preflight.php" "$OUT/raw/$id.stdout" "$id" > "$OUT/raw/$id.validated.txt" 2>&1 || rc=1
       fi
       dump --skip-comments --skip-dump-date --skip-extended-insert --no-create-info --compact "$database" > "$after"

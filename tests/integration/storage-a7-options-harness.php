@@ -1,8 +1,7 @@
 <?php
 /**
- * Host-tested dependency seam for the DISTINCT proposed positive persistence lane.
- * No command/worker dispatch, seeding, calibration injection or native execution route.
- * Integrating this seam into a native worker needs a later explicit contract decision.
+ * Separate positive persistence lane. Native wiring is disposable test-only;
+ * the frozen corpus metadata is historical preparation, not calibration approval.
  */
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
@@ -25,7 +24,7 @@ class StorageA7OptionsHarness {
 			if ( ! array_key_exists( $key, $seed ) || $seed[$key] !== $value ) { throw new \RuntimeException( 'Seed receipt not SUCCESS/bound/exact.' ); }
 		}
 		// Reverse has no active legacy option after forward: verify its retained exact backup.
-		$name = 'reverse' === $stage ? 'foogallery-migrate-data-storage-backup' : 'foogallery-migrate-data';
+		$name = 'forward' !== $stage ? 'foogallery-migrate-data-storage-backup' : 'foogallery-migrate-data';
 		if ( call_user_func( $read_sql, $name ) !== $exact ) { throw new \RuntimeException( 'Fresh persisted SQL binary digest mismatch.' ); }
 		$value = call_user_func( $read_wp, $name );
 		try { $logical = ( new \FooPlugins\FooGalleryMigrate\LegacyStateCodec() )->snapshot_digest( $value ); }

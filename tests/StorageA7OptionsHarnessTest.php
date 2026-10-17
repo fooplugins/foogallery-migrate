@@ -27,7 +27,7 @@ class StorageA7OptionsHarnessTest extends TestCase {
 	/** @dataProvider stages */
 	public function test_success_requires_receipt_then_fresh_sql_and_wp_before_downstream( $stage ): void {
 		$seed = $this->setup_harness(); $calls = array(); $result = $this->run_stage( $stage, $seed, null, null, null, $calls );
-		$name = 'reverse' === $stage ? 'foogallery-migrate-data-storage-backup' : 'foogallery-migrate-data';
+		$name = 'forward' !== $stage ? 'foogallery-migrate-data-storage-backup' : 'foogallery-migrate-data';
 		$this->assertSame( array( 'sql:' . $name, 'wp:' . $name, 'downstream' ), $calls );
 		$this->assertNotEmpty( $result );
 	}

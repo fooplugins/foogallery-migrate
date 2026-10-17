@@ -19,6 +19,15 @@ require_once $root . '/migrate.php';
 if ( ! is_admin() ) { new \FooPlugins\FooGalleryMigrate\Init(); }
 require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 $manifest = json_decode( file_get_contents( FOOGM_A7_FIXTURES . '/manifest.json' ), true );
+
+$positive = 'storage-a7-native-positive' === FOOGM_STORAGE_TEST_MODE;
+if ( $positive ) {
+	require_once __DIR__ . '/storage-a7-native-positive.php';
+	if ( json_decode( file_get_contents( __DIR__ . '/storage-a7-options-manifest.json' ), true ) !== $manifest || FOOGM_A7_CELL !== \FooPlugins\FooGalleryMigrate\Tests\StorageA7OptionsFixture::NAME ) { throw new RuntimeException( 'Unfrozen positive corpus.' ); }
+	$original = json_decode( file_get_contents( __DIR__ . '/storage-a7-manifest.json' ), true );
+	$manifest['cells'] = array( FOOGM_A7_CELL => $manifest['fixture'] );
+	$manifest['experimental_policy'] = $original['experimental_policy'];
+}
 if ( ! isset( $manifest['cells'][FOOGM_A7_CELL] ) ) { throw new RuntimeException( 'Unfrozen cell.' ); }
 $expected = $manifest['cells'][FOOGM_A7_CELL];
 global $wpdb;
@@ -50,6 +59,7 @@ $receipt = array( 'format' => 'a7-worker-v1', 'producer' => 'real-StorageOperati
 	'bootstrap' => $GLOBALS['foogm_a7_bootstrap'], 'runtime' => StorageCalibration::identity(), 'fingerprint' => StorageCalibration::fingerprint(),
 	'fixture' => $expected, 'ok' => false, 'first_failure' => null, 'observations' => array() );
 $start = microtime( true );
+$pins_before = $positive ? foogm_a7_product_pins( $root ) : null;
 try {
 	$check( current_user_can( 'manage_options' ), 'Authorized administrator required' );
 	if ( 'seed' === FOOGM_A7_STAGE ) {
@@ -65,6 +75,7 @@ try {
 		$check( 1 === $wpdb->query( $wpdb->prepare( 'INSERT INTO `' . $wpdb->options . '` (option_name,option_value,autoload) VALUES (%s,%s,%s)', FOOGALLERY_MIGRATE_OPTION_DATA, $fixture_raw, 'no' ) ), 'Fixture raw insert failed' );
 		$check( $raw( FOOGALLERY_MIGRATE_OPTION_DATA ) === $fixture_raw, 'Fixture SQL readback mismatch' );
 		$receipt['observations']['seed'] = $physical();
+		if ( $positive ) { $receipt['positive_seed'] = foogm_a7_positive_seed( $wpdb, $blog, $expected ); }
 	} else {
 		$check( FOOGM_A7_OWNER === $raw( $owner_name ), 'Exact fixture owner mismatch; no cleanup permission' );
 		$receipt['before'] = $physical();
@@ -76,6 +87,13 @@ try {
 			$after = $physical();
 			$check( count( array_filter( $after['tables'], function ( $v ) { return null !== $v; } ) ) === 0, 'Owned table cleanup incomplete' );
 			$receipt['observations']['cleanup_completed'] = true; $receipt['after'] = $after;
+		} elseif ( $positive && 'backup' === FOOGM_A7_STAGE ) {
+			$receipt['result'] = foogm_a7_positive_run( $wpdb, $blog, function () use ( $wpdb ) {
+				list( $sql ) = \FooPlugins\FooGalleryMigrate\Tests\StorageA7OptionsHarness::wordpress_readers( $wpdb );
+				return $sql( StorageAuthority::STORAGE_BACKUP_OPTION );
+			}, $receipt );
+			$receipt['after'] = $physical();
+			$check( $receipt['before'] === $receipt['after'], 'Backup inspection mutated storage' );
 		} elseif ( in_array( FOOGM_A7_STAGE, array( 'preflight', 'forward', 'reverse', 'refusal' ), true ) ) {
 			$target = 'reverse' === FOOGM_A7_STAGE ? 'option' : 'table';
 			$purpose = 'table' === $target ? 'option_import' : 'table_export';
@@ -89,7 +107,12 @@ try {
 			add_filter( 'foogallery_migrate_storage_calibration', $filter );
 			$property( 'milestones', true, array() ); $property( 'milestones_valid', true, true ); $property( 'milestones_enabled', true, true );
 			$operation = 'preflight' === FOOGM_A7_STAGE ? 'preflight' : 'switch';
-			$result = ( new StorageOperations() )->dispatch( $operation, $request );
+			$dispatch = function () use ( $operation, $request, &$receipt ) {
+				$result = ( new StorageOperations() )->dispatch( $operation, $request );
+				if ( is_wp_error( $result ) ) { $receipt['dispatch_failure'] = array( 'code' => $result->get_error_code(), 'message' => $result->get_error_message() ); }
+				return $result;
+			};
+			$result = $positive ? foogm_a7_positive_run( $wpdb, $blog, $dispatch, $receipt ) : $dispatch();
 			$property( 'milestones_enabled', true, false ); remove_filter( 'foogallery_migrate_storage_calibration', $filter );
 			$receipt['milestones'] = $property( 'milestones' ); $receipt['milestones_valid'] = $property( 'milestones_valid' );
 			$receipt['response_bytes'] = strlen( json_encode( is_wp_error( $result ) ? array( 'code' => $result->get_error_code() ) : $result ) );
@@ -129,15 +152,24 @@ try {
 			}
 		} else { throw new RuntimeException( 'Unknown A7 stage' ); }
 	}
+	if ( $positive && 'reverse' === FOOGM_A7_STAGE ) { $receipt['reverse_readback'] = foogm_a7_positive_seed( $wpdb, $blog, $expected ); }
 	$receipt['ok'] = true;
 } catch ( Throwable $error ) {
 	$receipt['first_failure'] = $error->getMessage();
+	$receipt['sql_error'] = $wpdb->last_error;
+	$receipt['after_failure'] = $physical();
 }
 $property( 'milestones_enabled', true, false );
 if ( ! isset( $receipt['milestones'] ) ) { $receipt['milestones'] = $property( 'milestones' ); $receipt['milestones_valid'] = $property( 'milestones_valid' ); }
 $receipt['seconds'] = microtime( true ) - $start;
 $receipt['resources'] = array( 'live' => memory_get_usage( false ), 'allocated' => memory_get_usage( true ), 'peak_live_cumulative' => memory_get_peak_usage( false ),
 	'peak_allocated_cumulative' => memory_get_peak_usage( true ), 'rusage' => getrusage(), 'rss_unit' => 'Darwin' === PHP_OS ? 'bytes' : 'KiB', 'peaks_include_bootstrap' => true, 'peaks_reset_or_subtracted' => false, 'allocator_sample' => 'after product response encoding and parity checks; before evidence receipt JSON output' );
+$receipt['product_root'] = realpath( $root );
+if ( $positive ) {
+	$receipt['product_pins_before'] = $pins_before; $receipt['product_pins_after'] = foogm_a7_product_pins( $root );
+	$receipt['product_classes'] = foogm_a7_product_classes( $root );
+	if ( $receipt['product_pins_before'] !== $receipt['product_pins_after'] ) { $receipt['ok'] = false; $receipt['first_failure'] = 'Product files changed during worker'; }
+}
 $encoded = json_encode( $receipt, JSON_UNESCAPED_SLASHES );
 if ( ! is_string( $encoded ) || strlen( $encoded ) > 262144 ) { throw new RuntimeException( 'A7 producer receipt encoding/size failure' ); }
 echo $encoded . "\n";
