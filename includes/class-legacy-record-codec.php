@@ -406,11 +406,17 @@ class LegacyRecordCodec {
 			if ( ! $ordered ) { ksort( $bucket, SORT_NUMERIC ); }
 		}
 		unset( $bucket );
-		// Reuse the completed node map as the visited set: null means visited;
-		// caller row positions are int/string, never null. Only existing slots are
-		// overwritten, with no new index allocation or producer array exports.
+		if ( $preorder ) {
+			// All identities/checksums and duplicates were checked above. Dense
+			// certified topology plus the monotone cursor proves exact coverage;
+			// no node can be revisited or skipped. Drop the private identity map
+			// BEFORE admitting hydration, not as a sample/forecast credit. Keep
+			// every original index/workspace/output charge and coefficient.
+			$nodes = array(); $cursor = 0;
+		}
+		// Noncertified input still reuses the complete node map as its visited
+		// set: null means visited; caller positions are int/string, never null.
 		if ( null !== $phase ) { $this->scale->complete_retaining_indexes( $phase, $this ); }
-		if ( $preorder ) { $cursor = 0; }
 		$result = $this->rebuild_node( $root_position, 0, $state_hash, $rows, $children, $nodes, $phase, $sequence, $cursor );
 		if ( $preorder && $cursor !== count( $rows ) ) { $this->fail( 'Unconsumed preorder rows.' ); }
 		foreach ( $nodes as $unvisited ) {
@@ -597,8 +603,10 @@ class LegacyRecordCodec {
 		$preorder = null !== $cursor;
 		if ( $preorder && $position !== $cursor++ ) { $this->fail( 'Invalid preorder cursor.' ); }
 		$hash = $row['node_hash'];
-		if ( ! isset( $visited[ $hash ] ) ) { $this->fail( 'Invalid tree ancestry/depth.' ); }
-		$visited[ $hash ] = null;
+		if ( ! $preorder ) {
+			if ( ! isset( $visited[ $hash ] ) ) { $this->fail( 'Invalid tree ancestry/depth.' ); }
+			$visited[ $hash ] = null;
+		}
 		$base = $this->codec->decode_record_payload( $row['payload'] );
 		$mutable = $this->codec->decode( $row['mutable_payload'] );
 		$child_rows = isset( $children[ $hash ] ) ? $children[ $hash ] : array();
