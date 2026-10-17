@@ -43,9 +43,10 @@ product options/tables, validates administrator/endpoint/schema, binds an exact
 32-hex owner and blog, closes/reaps bounded workers and both output pipes, then
 performs exact-owned cleanup and unrelated database row/schema comparison.
 
-The seed writes the representable logical value through update_option and binds
-native exact SQL OCTET_LENGTH/SHA2 plus fresh cache-evicted WP logical/serialized
-parity to a7-options-seed-v1 outcome SUCCESS. The existing options seam gates each
+The seed writes frozen exact bytes through the existing owned raw SQL fixture
+insert (not a product writer/update_option success claim), then binds native
+OCTET_LENGTH/SHA2 plus fresh cache-evicted WP logical/serialized parity to
+a7-options-seed-v1 outcome SUCCESS. The existing options seam gates each
 operation with this receipt and fresh SQL/WP readers. Forward dispatches the real
 StorageOperations switch request and requires stable table epoch1 plus the exact
 retained backup. The backup stage reads that retained backup under stable epoch1.
@@ -56,8 +57,10 @@ when all prior workers are closed; other downstream stages stop immediately.
 Receipts bind selected-root class paths/hashes and before/after product bytes.
 Native worker-local PCRE backtracking is capped at 16777216 for WordPress's SQL
 parser on this known 3MB request; no global/host setting is changed. Calibration
-remains the original declared experimental policy, measurement_only and NOT
-approved. No caps, guards, production runtime or calibration data are changed.
+uses only the existing original-manifest declared experimental policy and its
+existing approved-SHAPED test filter to traverse admission; this is measurement_only,
+not real measured calibration or approval. No calibration evidence is fabricated.
+No caps, guards, production runtime or calibration data are changed.
 
 ## Failure and evidence boundary
 
