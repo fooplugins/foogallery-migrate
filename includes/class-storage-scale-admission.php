@@ -182,6 +182,32 @@ final class StorageScaleAdmission {
 		return null === $this->memory && $this->policy['reserve_bytes'] >= 33554432;
 	}
 
+	/** Internal discard-only workspace; this predicate does NOT approve a host. */
+	public function supports_snapshot_stats() {
+		$this->valid();
+		return $this->policy['reserve_bytes'] >= 33554432;
+	}
+
+	/**
+	 * Prospective private scratch in addition to ALL existing pending scopes.
+	 * Unlike the trusted legacy sampling seam, this internal operation always
+	 * checks actual usage/effective limit too. An observer can tighten/refuse,
+	 * never substitute a lower usage or a larger PHP limit. No ledger release
+	 * or sample-based realization occurs here. Qualification is producer-owned.
+	 */
+	public function admit_snapshot_stats_workspace( $bytes ) {
+		$this->tick();
+		$sample = null === $this->memory ? array( ini_get( 'memory_limit' ), memory_get_usage( true ) ) : call_user_func( $this->memory );
+		if ( ! is_array( $sample ) || array_keys( $sample ) !== array( 0, 1 ) ) { self::fail(); }
+		$total = self::checked_add( $bytes, self::checked_add( $this->additional_bytes, $this->retaining_pending ) );
+		self::checked_add( $sample[1], 0 );
+		$used = max( $sample[1], memory_get_usage( true ) );
+		$policy = array( 'max_raw_bytes' => PHP_INT_MAX, 'amplification' => 1, 'reserve_bytes' => $this->policy['reserve_bytes'] );
+		foreach ( array( ini_get( 'memory_limit' ), $sample[0], (string) $this->limit( 'memory_ceiling_bytes' ) ) as $limit ) {
+			if ( is_wp_error( StoragePreflight::decode_budget( $total, $limit, $used, $policy ) ) ) { self::fail(); }
+		}
+	}
+
 	private function check_pending( $pending ) {
 		$this->tick();
 		$total = self::checked_add( $this->additional_bytes, $pending );

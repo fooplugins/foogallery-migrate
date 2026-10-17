@@ -302,7 +302,7 @@ class LegacyTableSnapshot {
 				$order = 0;
 				foreach ( $value as $key => $record ) {
 				$this->tick();
-					$tree = $this->records->flatten_tree( $change['key'], $key, $record, $order++, function () {} );
+					$tree = $this->records->preflight_stats( $change['key'], $key, $record, $order++ );
 					if ( 'migrated' === $change['key'] ) { $tree['encoded_bytes'] += strlen( $this->codec->key_value( $key ) ); }
 					foreach ( $stats as $field => $amount ) { $stats[ $field ] += $tree[ $field ]; }
 					if ( $stats['record_count'] > $this->max_rows - $total_rows || $stats['encoded_bytes'] > $this->max_bytes - $total_bytes ) { $this->fail( 'Snapshot exceeds the row/byte budget.' ); }
