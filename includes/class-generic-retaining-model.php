@@ -1,0 +1,125 @@
+<?php
+/** Finite HOST retaining producer model. Not a sink, WP profile or callback theorem. */
+namespace FooPlugins\FooGalleryMigrate;
+if ( ! defined( 'ABSPATH' ) ) { exit; }
+
+final class GenericRetainingModel {
+ const PROFILE = 'php-8.5.11-darwin-arm64-retaining-v1';
+ const BINARY_SHA256 = '6ff616b1441ba498839c8ff3b51db9d6e2f037c175e30ebe81652a76e439c749';
+
+ public static function supports( $producer, $codec, $scale ) {
+  if ( ! $scale instanceof StorageScaleAdmission || ! $scale->supports_retaining_phase() ||
+   get_class( $producer ) !== __NAMESPACE__ . '\\LegacyRecordCodec' || get_class( $codec ) !== __NAMESPACE__ . '\\LegacyStateCodec' ||
+   $codec != new LegacyStateCodec( 1048576, 64, 10000, $scale ) ||
+   'cli' !== PHP_SAPI || PHP_VERSION !== '8.5.11' || PHP_OS !== 'Darwin' || php_uname( 'm' ) !== 'arm64' ||
+   PHP_INT_SIZE !== 8 || PHP_ZTS || PHP_DEBUG || '0' === getenv( 'USE_ZEND_ALLOC' ) ||
+   '128M' !== ini_get( 'memory_limit' ) || ini_get( 'opcache.enable_cli' ) || hash_file( 'sha256', PHP_BINARY ) !== self::BINARY_SHA256 ) { return false; }
+  $extensions = array(); foreach ( get_loaded_extensions() as $name ) { $extensions[$name] = phpversion( $name ); } ksort( $extensions );
+  if ( hash( 'sha256', json_encode( $extensions ) ) !== '1c30606fe6fefe1aa9a56184a8a6c35ea06743c27a52d17e8099a60e5223df1b' ) { return false; }
+  if ( ! function_exists( 'wp_json_encode' ) ) { return true; }
+  // The exact measured native forwarding shim is supported, NOT WordPress's
+  // encoder or arbitrary wrappers. No path/test-name trust or callback claims.
+  $f = new \ReflectionFunction( 'wp_json_encode' ); $file = $f->getFileName();
+  if ( ! $file || ! is_file( $file ) || filesize( $file ) > 65536 || $f->getEndLine() - $f->getStartLine() !== 2 ) { return false; }
+  $scale->admit_memory( 65536 );
+  $lines = file( $file ); $body = implode( '', array_slice( $lines, $f->getStartLine() - 1, 3 ) );
+  return hash( 'sha256', $body ) === '49d951ee7e37cdfd0db52c2bdd7df452ad1ab3560451453431e258baea6f1e28';
+ }
+ private static function add( $a, $b ) { return StorageScaleAdmission::checked_add( $a, $b ); }
+ private static function mul( $a, $b ) { return StorageScaleAdmission::checked_multiply( $a, $b ); }
+ /** Native mixed array capacity; no assumed PHP array identity or sharing. */
+ public static function container( $entries ) {
+  self::add( $entries, 0 ); if ( 0 === $entries ) { return 0; }
+  $capacity = 8; while ( $capacity < $entries ) { $capacity = self::mul( $capacity, 2 ); }
+  return self::add( 128, self::mul( 40, $capacity ) );
+ }
+ private static function arrays( $a, $e ) { return self::add( self::mul( 768, $a ), self::mul( 160, $e ) ); }
+ public static function descriptor_bytes() { return 4759552; } // 4MiB + (2*65+8)*4096, rounded up.
+ public static function row_forecast( $bytes, $large_columns = 0 ) {
+  return self::add( self::add( 2304, self::add( $bytes, self::add( $bytes, 1 ) >> 1 ) ), self::mul( 4096, $large_columns ) );
+ }
+ public static function row_large_columns( $row ) {
+  $n = 0; foreach ( array( 'payload', 'mutable_payload', 'key_value', 'source_plugin_value', 'source_id_value' ) as $field ) {
+   if ( is_string( $row[$field] ) && strlen( $row[$field] ) > 3072 ) { ++$n; }
+  } return $n;
+ }
+ public static function flatten_plan( $d, $state_key ) {
+  $parts = array();
+  $parts['descriptor_frames_arena'] = self::descriptor_bytes();
+  $parts['field_order_values_mutable'] = self::arrays( 4, self::add( 5, self::mul( 2, $d['max_record_fields'] ) ) );
+  $parts['tagged_containers'] = self::arrays( self::add( 2, $d['max_row_tagged_arrays'] ), self::add( self::mul( 2, $d['max_row_tagged_arrays'] ), $d['max_row_tagged_entries'] ) );
+  $parts['tagged_strings'] = self::add( self::mul( 64, $d['max_row_tagged_nodes'] ), self::mul( 2, $d['max_row_bytes'] ) );
+  $parts['native_json_projection_hash'] = self::add( 16384, self::mul( 8, $d['max_row_bytes'] ) );
+  $parts['encoded_ancestors'] = self::add( self::mul( 2, $d['max_ancestor_row_bytes'] ), self::arrays( self::mul( 3, $d['active_row_frames'] ), self::mul( 60, $d['active_row_frames'] ) ) );
+  $parts['digest_scalar_overlap'] = self::add( 16384, self::mul( 16, max( 32, $d['logical_max_string_bytes'], strlen( (string) $state_key ) ) ) );
+  $private = 0; foreach ( $parts as $n ) { $private = self::add( $private, $n ); }
+  $future = self::add( self::mul( 2304, $d['records'] ), self::add( $d['encoded_bytes'], self::add( $d['encoded_bytes'], $d['encoded_odd_rows'] ) >> 1 ) );
+  $future = self::add( $future, self::mul( 4096, $d['encoded_large_columns'] ) );
+  return array( 'future' => $future,
+   'private' => $private, 'external' => self::arrays( 1, $d['records'] ), 'events' => $d['records'], 'parts' => $parts );
+ }
+ /** Prospective own-field allocation, not source bytes or a sharing credit. */
+ private static function value_bytes( $v, $depth ) {
+  if ( $depth > 64 ) { self::fail(); }
+  if ( is_string( $v ) ) { return self::add( 64, self::mul( 2, strlen( $v ) ) ); }
+  if ( ! is_array( $v ) ) { return 0; }
+  $n = self::container( count( $v ) );
+  foreach ( $v as $k => $item ) { $n = self::add( $n, self::add( self::value_bytes( $k, $depth + 1 ), self::value_bytes( $item, $depth + 1 ) ) ); }
+  return $n;
+ }
+ /** Children storage/growth is phase-private, never prematurely realized. */
+ public static function own_record_bytes( $record, $has_children, $key_bytes ) {
+  $n = self::add( 64, self::mul( 2, $key_bytes ) );
+  if ( ! is_array( $record ) ) { return self::add( $n, self::value_bytes( $record, 0 ) ); }
+  $n = self::add( $n, self::container( count( $record ) ) );
+  foreach ( $record as $field => $v ) {
+   $n = self::add( $n, self::value_bytes( $field, 1 ) );
+   if ( ! $has_children || 'children' !== $field ) { $n = self::add( $n, self::value_bytes( $v, 1 ) ); }
+  }
+  return $n;
+ }
+ public static function rebuild_descriptor_bytes( $d ) {
+  // Native json_decode arrays/slots/string scratch plus untagging coexist.
+  return self::add( self::descriptor_bytes(), self::add( self::mul( 768, $d['max_row_native_tokens'] ), self::mul( 8, $d['max_row_bytes'] ) ) );
+ }
+ /**
+  * One row at a time under the already admitted descriptor-private workspace.
+  * No entire decoded tree, positional index or user output is retained here.
+  * describe_rows itself remains strictly lexical/non-hydrating.
+  */
+ public static function rebuild_plan( $rows, $d, $codec, $scale ) {
+  $future = 0; $siblings = 0; $max_siblings = 0; $parents = 0;
+  foreach ( $rows as $row ) {
+   $scale->tick();
+   $base = $codec->decode_record_payload( $row['payload'] ); $mutable = $codec->decode( $row['mutable_payload'] );
+   if ( ! is_array( $base ) || ! isset( $base['kind'] ) || ! is_array( $mutable ) ) { self::fail(); }
+   if ( 'array' === $base['kind'] ) {
+    if ( ! isset( $base['field_order'], $base['values'] ) || ! array_key_exists( 'child_count', $base ) || ! is_array( $base['field_order'] ) || ! is_array( $base['values'] ) ) { self::fail(); }
+    $record = array(); $has = null !== $base['child_count'];
+    if ( $has ) {
+     $count = $base['child_count'];
+     if ( ! is_int( $count ) || $count < 0 || $count >= count( $rows ) ) { self::fail(); }
+     if ( $count ) { ++$parents; $size = self::container( $count ); $siblings = self::add( $siblings, $size ); $max_siblings = max( $max_siblings, $size ); }
+    }
+    foreach ( $base['field_order'] as $field ) {
+     if ( ! is_int( $field ) && ! is_string( $field ) ) { self::fail(); }
+     if ( $has && 'children' === $field ) { $record[$field] = array(); }
+     else if ( array_key_exists( $field, $mutable ) ) { $record[$field] = $mutable[$field]; }
+     else if ( array_key_exists( $field, $base['values'] ) ) { $record[$field] = $base['values'][$field]; }
+     else { self::fail(); }
+    }
+   } else if ( 'value' === $base['kind'] && array_key_exists( 'value', $base ) && ! is_array( $base['value'] ) ) { $record = $base['value']; $has = false; }
+   else { self::fail(); }
+   // Encoded key length is a conservative bound, also used by the event.
+   $future = self::add( $future, self::own_record_bytes( $record, $has, strlen( $row['key_value'] ) ) );
+   unset( $record, $base, $mutable );
+  }
+  $index = self::add( self::container( count( $rows ) ), self::add( self::container( $parents ), $siblings ) );
+  $parts = array( 'row_workspace' => self::rebuild_descriptor_bytes( $d ),
+   'index_growth' => self::mul( 2, $index ), 'visited_growth' => self::mul( 2, self::container( count( $rows ) ) ),
+   'output_children_growth' => self::mul( 2, $siblings ), 'sibling_sort_cow' => $max_siblings );
+  $private = 0; foreach ( $parts as $n ) { $private = self::add( $private, $n ); }
+  return array( 'future' => $future, 'private' => $private, 'external' => 0, 'events' => count( $rows ), 'parts' => $parts );
+ }
+ private static function fail() { throw new \RuntimeException( 'Finite retaining model: unsupported row descriptor.' ); }
+}

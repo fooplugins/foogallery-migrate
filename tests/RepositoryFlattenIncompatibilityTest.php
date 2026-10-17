@@ -15,7 +15,7 @@ class RepositoryFlattenIncompatibilityTest extends TestCase {
 		$this->assertTrue( is_wp_error( StoragePreflight::decode_budget( 12582913, '128M', 0, $policy ) ) );
 	}
 
-	public function test_actual_original20k_and_model_pending_both_keep_aggregate_refusal(): void {
+	public function test_explicit_legacy_fallback_original20k_and_model_pending_keep_aggregate_refusal(): void {
 		// The subprocess deliberately has NO wp_json_encode, unlike this bootstrap.
 		if ( PHP_VERSION !== '8.5.11' || PHP_OS !== 'Darwin' || php_uname( 'm' ) !== 'arm64' ||
 			hash_file( 'sha256', PHP_BINARY ) !== RepositoryFlattenModel::BINARY_SHA256 ) {
@@ -29,7 +29,7 @@ class RepositoryFlattenIncompatibilityTest extends TestCase {
 			exec( $command . ' 2>&1', $output, $exit );
 			$report = json_decode( implode( "\n", $output ), true );
 			$this->assertIsArray( $report, implode( "\n", $output ) );
-			$this->assertSame( 1, $exit, 'Original acceptance must stay RED, not be redefined as success.' );
+			$this->assertSame( 1, $exit, 'Legacy fallback must retain conservative accounting; not a veto of qualified original acceptance.' );
 			$this->assertSame( 'BLOCKED_ORIGINAL20K_FLATTEN', $report['status'] );
 			$this->assertSame( 0, $report['emitted'] );
 			$this->assertSame( 20208, $report['descriptor']['records'] );

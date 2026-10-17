@@ -10,7 +10,7 @@ class WP_Error { public function __construct( $c, $m ) {} }
 function is_wp_error( $v ) { return $v instanceof WP_Error; }
 function __( $v, $d ) { return $v; }
 function absint( $v ) { return abs( (int) $v ); }
-foreach ( array( 'storage-preflight', 'storage-scale-admission', 'legacy-state-codec', 'legacy-record-codec', 'legacy-table-reader', 'repository-flatten-model' ) as $file ) { require $root . '/includes/class-' . $file . '.php'; }
+foreach ( array( 'storage-preflight', 'storage-scale-admission', 'legacy-state-codec', 'legacy-record-codec', 'legacy-table-reader', 'repository-flatten-model', 'generic-retaining-model' ) as $file ) { require $root . '/includes/class-' . $file . '.php'; }
 require $fixture;
 function limits() { return array( 'version' => 1, 'max_tokens' => 262144, 'max_rows' => 24576, 'max_bytes' => 16777216, 'max_depth' => 64, 'max_heads' => 100, 'max_physical_rows_per_table' => 24576, 'max_physical_rows' => 49152, 'max_physical_bytes' => 33554432, 'memory_ceiling_bytes' => 134217728, 'max_seconds' => 10 ); }
 function budget( $seconds = 10.0, $p = null ) { return new Admission( null === $p ? limits() : $p, array( 'max_raw_bytes' => 8388608, 'amplification' => 8, 'reserve_bytes' => 33554432 ), microtime( true ) + $seconds ); }
@@ -41,8 +41,11 @@ try {
 	must( $result['original']['stats']['record_count'] === 20208 && $result['original']['stats']['encoded_bytes'] === 15070354, 'Original factory mismatch.' );
 	must( $result['original']['sink']['rows'] === 20208, 'Sink lost rows.' );
 	$retained = array();
-	$result['retaining_original_red'] = refused( function () use ( $tree, &$retained ) { ( new Records( null, 24576, 16777216, budget() ) )->flatten_tree( 'galleries', 'gallery-009', $tree, 0, function ( $row ) use ( &$retained ) { $retained[] = $row; } ); } );
-	must( count( $retained ) === 0, 'Retaining original emitted.' );
+	// Supersedes the historical generic-flatten refusal, NOT the still-open
+	// original rebuild/parity/deadline gate in StorageScaleAdmissionTest.
+	$result['retaining_original_flatten'] = ( new Records( null, 24576, 16777216, budget() ) )->flatten_tree( 'galleries', 'gallery-009', $tree, 0, function ( $row ) use ( &$retained ) { $retained[] = $row; } );
+	must( count( $retained ) === 20208 && $result['retaining_original_flatten']['encoded_bytes'] === 15070354, 'Retaining original flatten mismatch.' );
+	unset( $retained );
 	$result['corpus'] = array();
 	$cases = array( 'binary' => array( 'blob' => str_repeat( "\xff\0/", 4097 ), 'progress' => str_repeat( 'z', 8193 ) ),
 		'large-binary' => array( 'blob' => str_repeat( "\xff", 170001 ), 'progress' => str_repeat( "\xff", 170007 ) ),

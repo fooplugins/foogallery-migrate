@@ -18,6 +18,9 @@ final class StorageScaleAdmission {
 	private $memory;
 	private $work = 0;
 	private $additional_bytes = 0;
+	private $retaining_phases = array();
+	private $retaining_pending = 0;
+	private $retaining_serial = 0;
 	private $initialized = false;
 	private $snapshots = array();
 	private $snapshot_rows = 0;
@@ -138,7 +141,7 @@ final class StorageScaleAdmission {
 		$policy = $this->policy; $policy['max_raw_bytes'] = $this->limit( 'max_physical_bytes' );
 		// Pending is NEVER credited against a later sample, including nested raw,
 		// snapshot, rebuild and per-row checks. Preserve their original multiplier.
-		$used = self::checked_add( $sample[1], $this->additional_bytes );
+		$used = self::checked_add( $sample[1], self::checked_add( $this->additional_bytes, $this->retaining_pending ) );
 		foreach ( array( $sample[0], (string) $this->limit( 'memory_ceiling_bytes' ) ) as $limit ) {
 			if ( is_wp_error( StoragePreflight::decode_budget( $bytes, $limit, $used, $policy ) ) ) { self::fail(); }
 		}
@@ -160,11 +163,92 @@ final class StorageScaleAdmission {
 		$sample = null === $this->memory ? array( ini_get( 'memory_limit' ), memory_get_usage( true ) ) : call_user_func( $this->memory );
 		if ( ! is_array( $sample ) || array_keys( $sample ) !== array( 0, 1 ) ) { self::fail(); }
 		$policy = array( 'max_raw_bytes' => PHP_INT_MAX, 'amplification' => 1, 'reserve_bytes' => $this->policy['reserve_bytes'] );
+		$forecast = self::checked_add( $total, $this->retaining_pending );
 		foreach ( array( $sample[0], (string) $this->limit( 'memory_ceiling_bytes' ) ) as $limit ) {
-			if ( is_wp_error( StoragePreflight::decode_budget( $total, $limit, $sample[1], $policy ) ) ) { self::fail(); }
+			if ( is_wp_error( StoragePreflight::decode_budget( $forecast, $limit, $sample[1], $policy ) ) ) { self::fail(); }
 		}
 		$this->additional_bytes = $total;
 		return true;
+	}
+
+	/**
+	 * Low-level finite producer ledger, NOT qualification of a callback/model.
+	 * Opaque object capabilities identify scopes, never PHP arrays. Interrupted
+	 * scopes stay charged; only the bound producer's completed event can consume
+	 * its forecast. Actual constructed resources are NEVER subtracted from usage.
+	 */
+	public function supports_retaining_phase() {
+		$this->valid();
+		return null === $this->memory && $this->policy['reserve_bytes'] >= 33554432;
+	}
+
+	private function check_pending( $pending ) {
+		$this->tick();
+		$total = self::checked_add( $this->additional_bytes, $pending );
+		$sample = null === $this->memory ? array( ini_get( 'memory_limit' ), memory_get_usage( true ) ) : call_user_func( $this->memory );
+		if ( ! is_array( $sample ) || array_keys( $sample ) !== array( 0, 1 ) ) { self::fail(); }
+		$policy = array( 'max_raw_bytes' => PHP_INT_MAX, 'amplification' => 1, 'reserve_bytes' => $this->policy['reserve_bytes'] );
+		foreach ( array( $sample[0], (string) $this->limit( 'memory_ceiling_bytes' ) ) as $limit ) {
+			if ( is_wp_error( StoragePreflight::decode_budget( $total, $limit, $sample[1], $policy ) ) ) { self::fail(); }
+		}
+	}
+
+	public function open_retaining_phase( $producer, $descriptor_private ) {
+		$this->tick();
+		if ( ! is_object( $producer ) || count( $this->retaining_phases ) >= 64 || $this->retaining_serial >= 1024 ) { self::fail(); }
+		$pending = self::checked_add( $this->retaining_pending, $descriptor_private );
+		$this->check_pending( $pending );
+		$token = new \stdClass();
+		$id = spl_object_hash( $token );
+		$this->retaining_phases[$id] = array( 'token' => $token, 'producer' => $producer, 'planned' => false,
+			'future' => 0, 'private' => $descriptor_private, 'external' => 0, 'events' => 0, 'next' => 0 );
+		++$this->retaining_serial; $this->retaining_pending = $pending;
+		$this->admit_memory( 0 ); // Include the constructed ledger metadata before returning.
+		return $token;
+	}
+
+	private function retaining_id( $token, $producer ) {
+		$this->tick();
+		if ( ! is_object( $token ) ) { self::fail(); }
+		$id = spl_object_hash( $token );
+		if ( ! isset( $this->retaining_phases[$id] ) || $this->retaining_phases[$id]['token'] !== $token ||
+			$this->retaining_phases[$id]['producer'] !== $producer ) { self::fail(); }
+		return $id;
+	}
+
+	/** Called only after the descriptor's row-private construction has unwound. */
+	public function plan_retaining_phase( $token, $producer, $future, $private, $external, $events ) {
+		$id = $this->retaining_id( $token, $producer ); $s = $this->retaining_phases[$id];
+		if ( $s['planned'] || ! is_int( $events ) || $events < 0 || $events > $this->limit( 'max_rows' ) ||
+			( 0 === $events && 0 !== $future ) ) { self::fail(); }
+		$own = self::checked_add( self::checked_add( $future, $private ), $external );
+		$pending = self::checked_add( $this->retaining_pending - $s['private'], $own );
+		$this->check_pending( $pending );
+		$s['planned'] = true; $s['future'] = $future; $s['private'] = $private; $s['external'] = $external; $s['events'] = $events;
+		$this->retaining_phases[$id] = $s; $this->retaining_pending = $pending;
+		$this->admit_memory( 0 );
+	}
+
+	/** Exact completed forecast, before external code; no memory-sample credits. */
+	public function realize_retaining_event( $token, $producer, $sequence, $forecast ) {
+		$id = $this->retaining_id( $token, $producer ); $s = $this->retaining_phases[$id];
+		self::checked_add( $forecast, 0 );
+		if ( ! $s['planned'] || ! is_int( $sequence ) || $sequence !== $s['next'] || $sequence >= $s['events'] ||
+			$forecast > $s['future'] || ( $sequence + 1 === $s['events'] && $forecast !== $s['future'] ) ) { self::fail(); }
+		$s['future'] -= $forecast; ++$s['next'];
+		$this->retaining_phases[$id] = $s; $this->retaining_pending -= $forecast;
+		$this->admit_memory( 0 );
+	}
+
+	/** Producer has unwound private frames. External list/COW liability persists. */
+	public function close_retaining_phase( $token, $producer ) {
+		$id = $this->retaining_id( $token, $producer ); $s = $this->retaining_phases[$id];
+		if ( ! $s['planned'] || 0 !== $s['future'] || $s['next'] !== $s['events'] ) { self::fail(); }
+		$additional = self::checked_add( $this->additional_bytes, $s['external'] );
+		$this->retaining_pending -= self::checked_add( $s['private'], $s['external'] );
+		$this->additional_bytes = $additional;
+		unset( $this->retaining_phases[$id] );
+		$this->admit_memory( 0 );
 	}
 
 	/** PHP 5 compatible: validate BEFORE an overflowing intermediate exists. */

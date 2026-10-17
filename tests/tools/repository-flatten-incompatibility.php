@@ -21,14 +21,16 @@ function is_wp_error( $v ) { return $v instanceof WP_Error; }
 function __( $v, $domain ) { return $v; }
 // Projection helper only; NOT WordPress runtime or encoder coverage.
 function absint( $value ) { return abs( (int) $value ); }
-foreach ( array( 'storage-preflight', 'storage-scale-admission', 'legacy-state-codec', 'legacy-record-codec', 'legacy-table-reader', 'repository-flatten-model' ) as $file ) { require $root . '/includes/class-' . $file . '.php'; }
+foreach ( array( 'storage-preflight', 'storage-scale-admission', 'legacy-state-codec', 'legacy-record-codec', 'legacy-table-reader', 'repository-flatten-model', 'generic-retaining-model' ) as $file ) { require $root . '/includes/class-' . $file . '.php'; }
 require $fixture;
 $model = new Model( Model::PROFILE );
 $store = FooPlugins\FooGalleryMigrate\Tests\StorageA7Fixture::value( 20000 );
 $tree = $store['galleries']['items']['gallery-009'];
 $limits = array( 'version' => 1, 'max_tokens' => 262144, 'max_rows' => 24576, 'max_bytes' => 16777216, 'max_depth' => 64, 'max_heads' => 100, 'max_physical_rows_per_table' => 24576, 'max_physical_rows' => 49152, 'max_physical_bytes' => 33554432, 'memory_ceiling_bytes' => 134217728, 'max_seconds' => 10 );
 $policy = array( 'max_raw_bytes' => 8388608, 'amplification' => 8, 'reserve_bytes' => 33554432 );
-$budget = new Admission( $limits, $policy, microtime( true ) + 10.0 );
+// Explicit legacy conservative fallback witness. An observer sampler is NOT
+// qualified for the native retaining model; this is not original acceptance.
+$budget = new Admission( $limits, $policy, microtime( true ) + 10.0, null, function () { return array( ini_get( 'memory_limit' ), memory_get_usage( true ) ); } );
 $codec = new Records( null, 24576, 16777216, $budget );
 $sample = memory_get_usage( true );
 $budget->admit_additional( $planned ? $model->descriptor_bytes( 64 ) : 0 );

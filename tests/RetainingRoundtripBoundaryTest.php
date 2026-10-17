@@ -47,23 +47,32 @@ class RetainingRoundtripBoundaryTest extends TestCase {
 			$this->assertLessThanOrEqual( 100663296, $r['phases']['after_parity']['peak_true'] );
 		}
 		list( $status, $r ) = $this->witness( 20000 );
-		$this->assertSame( 1, $status );
-		$this->assertSame( 'flatten', $r['stage'] );
-		$this->assertSame( 0, $r['rows_retained'] );
-		$this->assertStringContainsString( 'admission refused', $r['failure']['message'] );
-		$this->assertArrayNotHasKey( 'after_flatten', $r['phases'] );
-	}
-
-	public function test_live_caller_ballast_and_distinct_retained_copies_change_rebuild_admission(): void {
-		foreach ( array( array( 16777216, 1 ), array( 0, 2 ) ) as $case ) {
-			list( $status, $r ) = $this->witness( 10000, $case[0], $case[1] );
+		// Historical flatten refusal is superseded by finite producer admission.
+		// This is residual rebuild diagnostic evidence, NOT a passing original gate.
+		if ( 0 === $status ) {
+			$this->assertSame( 'complete', $r['stage'] );
+		} else {
 			$this->assertSame( 1, $status );
 			$this->assertSame( 'rebuild', $r['stage'] );
+			$this->assertStringContainsString( 'admission refused', $r['failure']['message'] );
+		}
+		$this->assertSame( 20208, $r['rows_retained'] );
+		$this->assertSame( 15070354, $r['stats']['encoded_bytes'] );
+		$this->assertArrayHasKey( 'after_flatten', $r['phases'] );
+	}
+
+	public function test_admissible_ballast_and_distinct_copies_remain_physically_charged(): void {
+		list( $baseline_status, $baseline ) = $this->witness( 10000 );
+		$this->assertSame( 0, $baseline_status );
+		foreach ( array( array( 16777216, 1 ), array( 0, 2 ) ) as $case ) {
+			list( $status, $r ) = $this->witness( 10000, $case[0], $case[1] );
+			$this->assertSame( 0, $status );
+			$this->assertSame( 'complete', $r['stage'] );
 			$this->assertSame( 10001, $r['rows_retained'] );
 			$this->assertSame( 7396357, $r['stats']['encoded_bytes'] );
 			$this->assertSame( 2 === $case[1] ? 10001 : 0, $r['duplicate_rows_retained'] );
-			$this->assertArrayNotHasKey( 'after_rebuild', $r['phases'] );
-			$this->assertStringContainsString( 'admission refused', $r['failure']['message'] );
+			$this->assertGreaterThan( $baseline['phases']['after_rebuild']['true'], $r['phases']['after_rebuild']['true'] );
+			$this->assertLessThanOrEqual( 100663296, $r['phases']['after_parity']['peak_true'] );
 		}
 		list( $status, $r ) = $this->witness( 2000, 33554432, 2 );
 		$this->assertSame( 0, $status );

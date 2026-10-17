@@ -51,7 +51,7 @@ class LegacyRecordCodec {
 		if ( 'retaining-row' !== $ownership && 'repository-sink' !== $ownership ) { $this->fail( 'Unsupported footprint ownership.' ); }
 		$this->tick();
 		$d = array( 'version' => 1, 'ownership' => $ownership, 'additional_allocation_bytes' => null,
-			'records' => 0, 'payload_bytes' => 0, 'encoded_bytes' => 0, 'max_row_bytes' => 0,
+			'records' => 0, 'payload_bytes' => 0, 'encoded_bytes' => 0, 'encoded_odd_rows' => 0, 'encoded_large_columns' => 0, 'max_row_bytes' => 0,
 			'tagged_arrays' => 0, 'tagged_entries' => 0, 'tagged_nodes' => 0, 'raw_string_bytes' => 0,
 			'max_row_tagged_arrays' => 0, 'max_row_tagged_nodes' => 0, 'max_row_tagged_entries' => 0,
 			'base64_bytes' => 0, 'typed_key_bytes' => 0, 'projection_bytes' => 0,
@@ -77,7 +77,7 @@ class LegacyRecordCodec {
 		$d = array( 'version' => 1, 'ownership' => $ownership, 'additional_allocation_bytes' => null,
 			'encoded_bytes' => 0, 'max_row_bytes' => 0, 'max_payload_pair_bytes' => 0, 'max_key_decode_bytes_upper_bound' => 0,
 			'node_index_entries' => count( $rows ), 'visited_entries' => count( $rows ), 'adjacency_entries' => 0,
-			'parent_buckets_upper_bound' => 0, 'sort_cow_entries_upper_bound' => 0, 'native_tokens' => 0, 'max_native_depth' => 0 );
+			'parent_buckets_upper_bound' => 0, 'sort_cow_entries_upper_bound' => 0, 'native_tokens' => 0, 'max_native_depth' => 0, 'max_row_native_tokens' => 0 );
 		foreach ( $rows as $row ) {
 			$this->tick(); $bytes = $this->footprint_encoded_bytes( $row );
 			if ( $bytes > LegacyTableReader::MAX_RECORD_BYTES || ! isset( $row['payload_hash'], $row['payload_bytes'], $row['depth'] ) ||
@@ -92,13 +92,16 @@ class LegacyRecordCodec {
 			// Encoded length is a safe upper bound without allocating decoded keys.
 			$d['max_key_decode_bytes_upper_bound'] = max( $d['max_key_decode_bytes_upper_bound'], strlen( $row['key_value'] ) );
 			if ( null !== $row['parent_node_hash'] ) { $this->hex( $row['parent_node_hash'] ); ++$d['adjacency_entries']; }
+			$row_tokens = 0;
 			foreach ( array( 'payload', 'mutable_payload' ) as $field ) {
 				// Match inspect_json's existing physical token ceiling. Split payload
 				// may have one extra logical edge; observe its lexical depth separately.
 				$scan = 'payload' === $field ? $this->codec->inspect_json_record_payload( $row[$field] ) : $this->codec->inspect_json( $row[$field] );
 				$this->footprint_add( $d, 'native_tokens', $scan['tokens'] );
+				$row_tokens = StorageScaleAdmission::checked_add( $row_tokens, $scan['tokens'] );
 				$d['max_native_depth'] = max( $d['max_native_depth'], $scan['max_depth'] );
 			}
+			$d['max_row_native_tokens'] = max( $d['max_row_native_tokens'], $row_tokens );
 		}
 		// Without allocating an adjacency map, each edge could own a bucket and
 		// every edge could overlap one sibling sort/COW span. Explicit upper bounds.
@@ -214,6 +217,7 @@ class LegacyRecordCodec {
 		// Exact raw base64 key length without constructing the full string.
 		$key_metrics = $this->footprint_metrics(); $this->footprint_value( (string) $key, $key_metrics );
 		$key_bytes = $key_metrics['base64_bytes']; $projection_bytes = 0;
+		$large_columns = ( $payload > 3072 ? 1 : 0 ) + ( $pair - $payload > 3072 ? 1 : 0 ) + ( $key_bytes > 3072 ? 1 : 0 );
 		if ( is_array( $record ) ) {
 			foreach ( array( 'plugin_name', 'ID' ) as $field ) {
 				if ( ! isset( $record[$field] ) && ! array_key_exists( $field, $record ) ) { continue; }
@@ -221,11 +225,14 @@ class LegacyRecordCodec {
 				if ( 'plugin_name' === $field && null === $v ) { continue; }
 				if ( 'plugin_name' === $field ? ! is_string( $v ) : ( ! is_scalar( $v ) && null !== $v ) ) { $this->fail( 'Unsupported projection footprint.' ); }
 				$pm = $this->footprint_metrics(); $this->footprint_value( (string) $v, $pm );
-				$projection_bytes = StorageScaleAdmission::checked_add( $projection_bytes, StorageScaleAdmission::checked_add( 22, $pm['json_bytes'] ) );
+				$column_bytes = StorageScaleAdmission::checked_add( 22, $pm['json_bytes'] );
+				if ( $column_bytes > 3072 ) { ++$large_columns; }
+				$projection_bytes = StorageScaleAdmission::checked_add( $projection_bytes, $column_bytes );
 			}
 		}
 		$bytes = StorageScaleAdmission::checked_add( $pair, StorageScaleAdmission::checked_add( $key_bytes, $projection_bytes ) );
 		if ( $bytes > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Row footprint exceeds byte budget.' ); }
+		$this->footprint_add( $d, 'encoded_odd_rows', $bytes & 1 ); $this->footprint_add( $d, 'encoded_large_columns', $large_columns );
 		$this->footprint_add( $d, 'records', 1 ); $this->footprint_add( $d, 'payload_bytes', $pair );
 		$this->footprint_add( $d, 'encoded_bytes', $bytes ); $this->footprint_add( $d, 'typed_key_bytes', $key_bytes ); $this->footprint_add( $d, 'projection_bytes', $projection_bytes );
 		foreach ( array( 'tagged_arrays', 'tagged_entries', 'tagged_nodes', 'raw_string_bytes', 'base64_bytes' ) as $field ) { $this->footprint_add( $d, $field, $m[$field] ); }
@@ -263,11 +270,18 @@ class LegacyRecordCodec {
 			$emit->observe( 'descriptor', $plan );
 			$this->scale->admit_additional( $plan['after_descriptor_bytes'] );
 		}
+		$phase = null;
+		if ( ! $qualified && null !== $this->scale && GenericRetainingModel::supports( $this, $this->codec, $this->scale ) ) {
+			$phase = $this->scale->open_retaining_phase( $this, GenericRetainingModel::descriptor_bytes() );
+			$d = $this->describe_tree( $key, $record, 'retaining-row' );
+			$plan = GenericRetainingModel::flatten_plan( $d, $state_key );
+			$this->scale->plan_retaining_phase( $phase, $this, $plan['future'], $plan['private'], $plan['external'], $plan['events'] );
+		}
 		$item_order = $this->number( $item_order );
 		$stats = array( 'record_count' => 0, 'payload_bytes' => 0, 'encoded_bytes' => 0 );
 		$preflight = $stats;
 		$this->admit( 0 );
-		$this->preflight_tree( $this->codec->key_hash( $state_key ), null, $key, $record, $item_order, 0, $preflight );
+		$this->preflight_tree( $this->codec->key_hash( $state_key ), null, $key, $record, $item_order, 0, $preflight, $phase );
 		if ( $qualified ) {
 			if ( $preflight['record_count'] !== $d['records'] || $preflight['payload_bytes'] !== $d['payload_bytes'] ||
 				$preflight['encoded_bytes'] !== $d['encoded_bytes'] ) { $this->fail( 'Descriptor/preflight mismatch.' ); }
@@ -280,11 +294,12 @@ class LegacyRecordCodec {
 		if ( $qualified ) { $emit->observe( 'digest' ); }
 		// Only aggregate output amplification is replaced. Physical checks in
 		// preflight, per-row estimates and the pending-aware final check remain.
-		if ( $qualified ) { $this->admit( 0 ); }
+		if ( $qualified || null !== $phase ) { $this->admit( 0 ); }
 		else {
 			$this->admit( $preflight['encoded_bytes'] );
 		}
-		$this->flatten_node( $this->codec->key_hash( $state_key ), null, $key, $record, $item_order, 0, $emit, $stats );
+		$this->flatten_node( $this->codec->key_hash( $state_key ), null, $key, $record, $item_order, 0, $emit, $stats, $phase );
+		if ( null !== $phase ) { $this->scale->close_retaining_phase( $phase, $this ); }
 		if ( $qualified ) { $emit->observe( 'emission' ); }
 		return $stats;
 	}
@@ -307,7 +322,17 @@ class LegacyRecordCodec {
 			if ( $size > LegacyTableReader::MAX_RECORD_BYTES || $size > $this->max_tree_bytes - $bytes ) { $this->fail( 'Tree exceeds the encoded byte budget.' ); }
 			$bytes += $size;
 		}
-		$this->admit( $bytes );
+		$phase = null; $sequence = 0;
+		if ( null !== $this->scale && GenericRetainingModel::supports( $this, $this->codec, $this->scale ) ) {
+			$phase = $this->scale->open_retaining_phase( $this, GenericRetainingModel::descriptor_bytes() );
+			$d = $this->describe_rows( $rows, 'caller-rows-rebuild' );
+			// Lexical maximum establishes the workspace BEFORE native hydration.
+			$this->scale->plan_retaining_phase( $phase, $this, 0, GenericRetainingModel::rebuild_descriptor_bytes( $d ), 0, 0 );
+			$plan = GenericRetainingModel::rebuild_plan( $rows, $d, $this->codec, $this->scale );
+			$this->scale->close_retaining_phase( $phase, $this );
+			$phase = $this->scale->open_retaining_phase( $this, 0 );
+			$this->scale->plan_retaining_phase( $phase, $this, $plan['future'], $plan['private'], 0, $plan['events'] );
+		} else { $this->admit( $bytes ); }
 		$state_hash = $this->codec->key_hash( $state_key );
 		// Index immutable encoded rows by their caller-owned positions. Validate
 		// every encoded identity/checksum before hydrating any split envelope.
@@ -318,11 +343,29 @@ class LegacyRecordCodec {
 			if ( isset( $nodes[ $hash ] ) ) { $this->fail( 'Duplicate node identity.' ); }
 
 			$nodes[ $hash ] = $position;
-			if ( null !== $row['parent_node_hash'] ) {
+			if ( null === $phase && null !== $row['parent_node_hash'] ) {
 				$parent = $row['parent_node_hash'];
 				$order = $row['item_order'];
 				if ( isset( $children[ $parent ][ $order ] ) ) { $this->fail( 'Duplicate sibling order.' ); }
 				$children[ $parent ][ $order ] = $position;
+			}
+		}
+		if ( null !== $phase ) {
+			// The prospective adjacency bound came from declared child counts.
+			// Authenticate those bounds BEFORE allocating a child bucket, even for
+			// adversarial/reordered rows. Never trust topology metadata as credit.
+			foreach ( $rows as $position => $row ) {
+				$row = $this->validate_row( $row, $state_hash );
+				$parent = $row['parent_node_hash'];
+				if ( null === $parent ) { continue; }
+				if ( ! isset( $nodes[$parent] ) ) { $this->fail( 'Missing parent identity.' ); }
+				$base = $this->codec->decode_record_payload( $rows[$nodes[$parent]]['payload'] );
+				$bound = isset( $base['child_count'] ) ? $base['child_count'] : 0;
+				unset( $base );
+				if ( ! is_int( $bound ) || $bound <= 0 || ( isset( $children[$parent] ) && count( $children[$parent] ) >= $bound ) ) { $this->fail( 'Child bucket exceeds declared bound.' ); }
+				$order = $row['item_order'];
+				if ( isset( $children[$parent][$order] ) ) { $this->fail( 'Duplicate sibling order.' ); }
+				$children[$parent][$order] = $position;
 			}
 		}
 		unset( $row );
@@ -330,8 +373,10 @@ class LegacyRecordCodec {
 			$this->fail( 'Missing or invalid root identity.' );
 		}
 		$visited = array();
-		$result = $this->rebuild_node( $nodes[ $root_hash ], 0, $state_hash, $rows, $children, $visited );
+		$result = $this->rebuild_node( $nodes[ $root_hash ], 0, $state_hash, $rows, $children, $visited, $phase, $sequence );
 		if ( count( $visited ) !== count( $nodes ) ) { $this->fail( 'Orphan, cycle or unrelated root in tree.' ); }
+		unset( $nodes, $children, $visited );
+		if ( null !== $phase ) { $this->scale->close_retaining_phase( $phase, $this ); }
 		return $result;
 	}
 
@@ -340,9 +385,9 @@ class LegacyRecordCodec {
 			'migrated_id', 'migrated_title', 'children_count', 'children_errors', 'error' );
 	}
 
-	private function make_row( $state_hash, $parent, $key, $record, $order, $depth ) {
+	private function make_row( $state_hash, $parent, $key, $record, $order, $depth, $phase = null ) {
 		$this->tick();
-		$this->admit( LegacyTableReader::MAX_RECORD_BYTES );
+		$this->admit( null === $phase ? LegacyTableReader::MAX_RECORD_BYTES : 0 );
 		$this->codec->key_value( $key );
 		$probe = array( $key => true ); $keys = array_keys( $probe );
 		if ( $keys[0] !== $key ) { $this->fail( 'Invalid or coercible typed key.' ); }
@@ -369,10 +414,10 @@ class LegacyRecordCodec {
 		return $row;
 	}
 
-	private function preflight_tree( $state_hash, $parent, $key, $record, $order, $depth, &$stats ) {
+	private function preflight_tree( $state_hash, $parent, $key, $record, $order, $depth, &$stats, $phase = null ) {
 		$this->tick();
 		if ( $depth > $this->max_depth || $stats['record_count'] >= $this->max_records ) { $this->fail( 'Tree exceeds the depth/record budget.' ); }
-		$row = $this->make_row( $state_hash, $parent, $key, $record, $order, $depth );
+		$row = $this->make_row( $state_hash, $parent, $key, $record, $order, $depth, $phase );
 		$bytes = $this->encoded_bytes( $row );
 		if ( $bytes > LegacyTableReader::MAX_RECORD_BYTES || $bytes > $this->max_tree_bytes - $stats['encoded_bytes'] ) {
 			$this->fail( 'Row/tree exceeds the encoded byte budget.' );
@@ -384,22 +429,25 @@ class LegacyRecordCodec {
 			if ( count( $record['children'] ) > $this->max_records - $stats['record_count'] ) { $this->fail( 'Tree exceeds the record budget.' ); }
 			$child_order = 0;
 			foreach ( $record['children'] as $child_key => $child ) {
-				$this->preflight_tree( $state_hash, $row['node_hash'], $child_key, $child, $child_order++, $depth + 1, $stats );
+				$this->preflight_tree( $state_hash, $row['node_hash'], $child_key, $child, $child_order++, $depth + 1, $stats, $phase );
 			}
 		}
 	}
 
-	private function flatten_node( $state_hash, $parent, $key, $record, $order, $depth, $emit, &$stats ) {
-		$row = $this->make_row( $state_hash, $parent, $key, $record, $order, $depth );
+	private function flatten_node( $state_hash, $parent, $key, $record, $order, $depth, $emit, &$stats, $phase = null ) {
+		$row = $this->make_row( $state_hash, $parent, $key, $record, $order, $depth, $phase );
 		// Complete-record digest work is bounded by the preflight above, unlike
 		// snapshot_digest(), which intentionally spans an entire logical store.
 		$row['logical_hash'] = $this->codec->snapshot_digest( $record );
 		$stats['record_count']++; $stats['payload_bytes'] += $row['payload_bytes']; $stats['encoded_bytes'] += $this->encoded_bytes( $row );
+		if ( null !== $phase ) {
+			$this->scale->realize_retaining_event( $phase, $this, $stats['record_count'] - 1, GenericRetainingModel::row_forecast( $this->encoded_bytes( $row ), GenericRetainingModel::row_large_columns( $row ) ) );
+		}
 		if ( false === call_user_func( $emit, $row ) ) { $this->fail( 'Staged consumer refused the write.' ); }
 		if ( is_array( $record ) && isset( $record['children'] ) && is_array( $record['children'] ) ) {
 			$child_order = 0;
 			foreach ( $record['children'] as $child_key => $child ) {
-				$this->flatten_node( $state_hash, $row['node_hash'], $child_key, $child, $child_order++, $depth + 1, $emit, $stats );
+				$this->flatten_node( $state_hash, $row['node_hash'], $child_key, $child, $child_order++, $depth + 1, $emit, $stats, $phase );
 			}
 		}
 	}
@@ -428,7 +476,7 @@ class LegacyRecordCodec {
 		return $row;
 	}
 
-	private function rebuild_node( $position, $depth, $state_hash, &$rows, &$children, &$visited ) {
+	private function rebuild_node( $position, $depth, $state_hash, &$rows, &$children, &$visited, $phase = null, &$sequence = 0 ) {
 		$this->tick();
 		if ( $depth > $this->max_depth || isset( $visited[ $position ] ) || ! isset( $rows[ $position ] ) || $this->number( $rows[ $position ]['depth'] ) !== $depth ) {
 			$this->fail( 'Invalid tree ancestry/depth.' );
@@ -447,6 +495,7 @@ class LegacyRecordCodec {
 				$this->fail( 'Invalid scalar split envelope.' );
 			}
 			$record = $base['value'];
+			if ( null !== $phase ) { $this->scale->realize_retaining_event( $phase, $this, $sequence++, GenericRetainingModel::own_record_bytes( $record, false, strlen( $row['key_value'] ) ) ); }
 		} else if ( 'array' === $base['kind'] ) {
 			if ( array_keys( $base ) !== array( 'version', 'kind', 'field_order', 'child_count', 'values' ) ||
 				! is_array( $base['field_order'] ) || ! is_array( $base['values'] ) ||
@@ -479,13 +528,14 @@ class LegacyRecordCodec {
 				$this->fail( 'Unaccounted fields or overlapping split values.' );
 			}
 			unset( $base, $mutable, $probe, $keys );
+			if ( null !== $phase ) { $this->scale->realize_retaining_event( $phase, $this, $sequence++, GenericRetainingModel::own_record_bytes( $record, null !== $count, strlen( $row['key_value'] ) ) ); }
 			ksort( $child_rows, SORT_NUMERIC );
 			$order = 0;
 			foreach ( $child_rows as $child_order => $child_position ) {
 				if ( $child_order !== $order++ ) { $this->fail( 'Invalid sibling order.' ); }
 				$key = $this->key( $rows[ $child_position ]['key_type'], $rows[ $child_position ]['key_value'] );
 				if ( array_key_exists( $key, $record['children'] ) ) { $this->fail( 'Duplicate typed child key.' ); }
-				$record['children'][ $key ] = $this->rebuild_node( $child_position, $depth + 1, $state_hash, $rows, $children, $visited );
+				$record['children'][ $key ] = $this->rebuild_node( $child_position, $depth + 1, $state_hash, $rows, $children, $visited, $phase, $sequence );
 			}
 		} else { $this->fail( 'Unknown record kind.' ); }
 		if ( $row['logical_hash'] !== $this->codec->snapshot_digest( $record ) ) { $this->fail( 'Complete logical-record hash mismatch.' ); }

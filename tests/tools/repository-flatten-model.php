@@ -10,7 +10,7 @@ define( 'ABSPATH', $root . '/' );
 class WP_Error { public function __construct( $code, $message ) {} }
 function is_wp_error( $v ) { return $v instanceof WP_Error; }
 function __( $v, $domain ) { return $v; }
-foreach ( array( 'storage-preflight', 'storage-scale-admission', 'legacy-state-codec', 'legacy-record-codec', 'legacy-table-reader', 'repository-flatten-model' ) as $file ) {
+foreach ( array( 'storage-preflight', 'storage-scale-admission', 'legacy-state-codec', 'legacy-record-codec', 'legacy-table-reader', 'repository-flatten-model', 'generic-retaining-model' ) as $file ) {
 	require $root . '/includes/class-' . $file . '.php';
 }
 function limits( $ceiling = 134217728 ) {
