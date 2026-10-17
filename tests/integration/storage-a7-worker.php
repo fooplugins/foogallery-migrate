@@ -83,7 +83,10 @@ try {
 	} else {
 		$check( FOOGM_A7_OWNER === $raw( $owner_name ), 'Exact fixture owner mismatch; no cleanup permission' );
 		$receipt['before'] = $physical();
-		if ( 'reverse' === FOOGM_A7_STAGE ) { $receipt['retained_table_before'] = ( new StorageRetirement( new LegacyTransactionConnection( $wpdb ), $wpdb->prefix, $blog, $manifest['experimental_policy'], microtime( true ) + 10 ) )->capture(); }
+		if ( 'reverse' === FOOGM_A7_STAGE ) {
+			$evidence_scale = $positive ? foogm_a7_positive_scale( $manifest['experimental_policy'] ) : null;
+			$receipt['retained_table_before'] = ( new StorageRetirement( new LegacyTransactionConnection( $wpdb ), $wpdb->prefix, $blog, $manifest['experimental_policy'], null === $evidence_scale ? microtime( true ) + 10 : $evidence_scale->deadline(), null, $evidence_scale ) )->capture();
+		}
 		if ( 'cleanup' === FOOGM_A7_STAGE ) {
 			// Entire shared tables are owned because seed refused ALL existing tables.
 			foreach ( array_reverse( $tables ) as $table ) { $wpdb->query( 'DROP TABLE IF EXISTS `' . $table . '`' ); $sql_ok(); }
@@ -145,10 +148,12 @@ try {
 					$check( is_string( $backup ) && hash( 'sha256', $backup ) === $expected['sha256'], 'Retained backup byte mismatch' );
 					if ( 'table' === $target ) {
 						$check( null === $raw( FOOGALLERY_MIGRATE_OPTION_DATA ), 'Forward retained active option' );
-						$value = ( new LegacyTableSnapshot( new LegacyTransactionConnection( $wpdb ), $blog ) )->read_bounded( 'galleries' );
+						$evidence_scale = $positive ? foogm_a7_positive_scale( $manifest['experimental_policy'] ) : null;
+						$value = ( new LegacyTableSnapshot( new LegacyTransactionConnection( $wpdb ), $blog, null === $evidence_scale ? 10000 : $evidence_scale->limit( 'max_rows' ), 16777216, null === $evidence_scale ? null : $evidence_scale->deadline(), null, $evidence_scale ) )->read_bounded( 'galleries' );
 						$logical = ( new LegacyStateCodec() )->snapshot_digest( array( 'galleries' => $value ) );
 					} else {
-						$receipt['retained_table_after'] = ( new StorageRetirement( new LegacyTransactionConnection( $wpdb ), $wpdb->prefix, $blog, $manifest['experimental_policy'], microtime( true ) + 10 ) )->capture();
+						$evidence_scale = $positive ? foogm_a7_positive_scale( $manifest['experimental_policy'] ) : null;
+						$receipt['retained_table_after'] = ( new StorageRetirement( new LegacyTransactionConnection( $wpdb ), $wpdb->prefix, $blog, $manifest['experimental_policy'], null === $evidence_scale ? microtime( true ) + 10 : $evidence_scale->deadline(), null, $evidence_scale ) )->capture();
 						$check( $receipt['retained_table_before'] === $receipt['retained_table_after'], 'Retained table source bytes changed' );
 						$reverse_raw = $raw( FOOGALLERY_MIGRATE_OPTION_DATA );
 						$check( is_string( $reverse_raw ) && hash( 'sha256', $reverse_raw ) === $expected['sha256'], 'Reverse exact serialized bytes changed' );

@@ -37,7 +37,16 @@ class StorageOperations {
 		StorageScalarObserver::milestone( 'policy' );
 		$memory->sample();
 		if ( 'preflight' === $operation ) { return ( new StoragePreflight( null, $policy, $memory ) )->option_import( $request ); }
-		$manager = new StorageConversion( $policy, $memory );
+		// Fixed implementation bounds, NOT calibration coefficients or approval.
+		// One fresh domain per dispatch; the fingerprint binds these exact bytes.
+		try {
+			$scale = new StorageScaleAdmission( array( 'version' => 1, 'max_tokens' => 262144, 'max_rows' => 24576, 'max_bytes' => 16777216,
+				'max_depth' => 64, 'max_heads' => 100, 'max_physical_rows_per_table' => 24576,
+				'max_physical_rows' => 49152, 'max_physical_bytes' => 33554432,
+				'memory_ceiling_bytes' => 2147483647, 'max_seconds' => 10 ), $policy, microtime( true ) + 10.0, null, null, $memory );
+			$manager = new StorageConversion( $policy, $memory, $scale );
+		} catch ( \Exception $error ) { return self::refused(); }
+		catch ( \Throwable $error ) { return self::refused(); }
 		if ( 'replace' === $operation ) { $result = $manager->replace_retained( $request ); }
 		else { $result = 'recover' === $operation ? $manager->recover( $request ) : $manager->switch_backend( $request ); }
 		if ( is_wp_error( $result ) ) { return $result; }
@@ -72,6 +81,10 @@ class StorageOperations {
 			return;
 		}
 		wp_send_json_success( $result );
+	}
+
+	private static function refused() {
+		return new \WP_Error( 'foogallery_migrate_storage_recovery_required', __( 'Finite migration storage admission refused. Retain authority and all storage evidence.', 'foogallery-migrate' ) );
 	}
 
 	private static function invalid() {

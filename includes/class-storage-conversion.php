@@ -23,14 +23,18 @@ class StorageConversion {
 	private $deadline;
 	private $incoming_memory;
 	private $memory;
+	private $scale;
+	private $scale_started = false;
 
 	/** Policy must come from trusted runtime calibration, never request fields. */
-	public function __construct( $policy = null, $memory = null ) {
+	public function __construct( $policy = null, $memory = null, $scale = null ) {
 		global $wpdb;
 		$this->db = $wpdb; $this->blog = get_current_blog_id(); $this->prefix = $wpdb->prefix;
 		$this->policy = $policy; $this->controls = new StorageControl( $wpdb, $this->blog );
 		$this->incoming_memory = $memory;
-		$this->codec = new LegacyStateCodec();
+		if ( null !== $scale && ! $scale instanceof StorageScaleAdmission ) { $this->require_true( false ); }
+		$this->scale = $scale;
+		$this->codec = new LegacyStateCodec( 1048576, 64, 10000, $scale );
 	}
 
 	/** Switch only from a validated stable backend; no source/destination merge. */
@@ -60,7 +64,7 @@ class StorageConversion {
 			$from = null === $previous ? 'option' : $previous['backend'];
 			$this->require_true( $from !== $request['target'] );
 			$this->storage( 'table' === $request['target'] ); // Explicit selection only; recovery never provisions.
-			$retirement = new StorageRetirement( $this->connection, $this->prefix, $this->blog, $this->policy, $this->deadline, $this->memory );
+			$retirement = new StorageRetirement( $this->connection, $this->prefix, $this->blog, $this->policy, $this->deadline, $this->memory, $this->scale );
 			if ( $replacement ) {
 				$this->require_true( null !== $previous && 2 === $previous['version'] && 'table' === $previous['from'] && 'option' === $previous['to'] && 'option' === $from );
 			}
@@ -137,7 +141,10 @@ class StorageConversion {
 
 	private function begin() {
 		$this->memory->sample();
-		$this->deadline = microtime( true ) + 10;
+		if ( null !== $this->scale ) {
+			$this->require_true( ! $this->scale_started ); $this->scale_started = true;
+			$this->deadline = $this->scale->deadline(); $this->scale->admit_memory( 0 );
+		} else { $this->deadline = microtime( true ) + 10; }
 		$this->gate = StorageMaintenanceGate::current();
 		$this->connection = $this->gate->connection();
 		$this->controls = new StorageControl( $this->connection, $this->blog );
@@ -152,6 +159,7 @@ class StorageConversion {
 
 	private function context() {
 		global $wpdb;
+		if ( null !== $this->scale ) { $this->scale->tick(); }
 		$this->require_true( $wpdb === $this->db && $this->blog === get_current_blog_id() && $this->prefix === $wpdb->prefix && microtime( true ) <= $this->deadline );
 		if ( null !== $this->connection ) { $this->require_true( $this->connection->is_current() ); }
 	}
@@ -163,8 +171,8 @@ class StorageConversion {
 			( new StorageProvisioning( $this->gate, $this->deadline ) )->ensure();
 			$this->require_true( ( new LegacyStorageSchema( $this->connection ) )->verify() );
 		}
-		$this->snapshot = new LegacyTableSnapshot( $this->connection, $this->blog, 10000, 16777216, $this->deadline,
-			function ( $bytes ) { $this->budget( $bytes ); return true; } );
+		$this->snapshot = new LegacyTableSnapshot( $this->connection, $this->blog, $this->limit( 'max_rows', 10000 ), $this->limit( 'max_bytes', 16777216 ), $this->deadline,
+			function ( $bytes ) { $this->budget( $bytes ); return true; }, $this->scale );
 	}
 
 	private function advance( $r, $source ) {
@@ -188,7 +196,7 @@ class StorageConversion {
 				}
 				$target = $this->table_snapshot( false );
 			} else {
-				$raw = ( new LegacyOptionDecoder( $this->policy['max_raw_bytes'] ) )->encode( $source['value'], function ( $bytes ) { $this->budget( $bytes ); } );
+				$raw = $this->option_decoder()->encode( $source['value'], function ( $bytes ) { $this->budget( $bytes ); } );
 				StorageScalarObserver::milestone( 'reverse-serialized' );
 				if ( ! $this->option_present( FOOGALLERY_MIGRATE_OPTION_DATA ) ) { $this->insert_option( FOOGALLERY_MIGRATE_OPTION_DATA, $raw ); }
 				StorageScalarObserver::milestone( 'reverse-written' );
@@ -294,10 +302,10 @@ class StorageConversion {
 			// Structural proof before native hydration also protects PHP5.4, which
 			// lacks allowed_classes. This is NOT streaming conversion and does not
 			// reduce the calibrated whole-option memory requirement.
-			$value = ( new LegacyOptionDecoder( $this->policy['max_raw_bytes'] ) )->decode( $raw );
+			$value = $this->option_decoder()->decode( $raw );
 			StorageScalarObserver::milestone( 'source-decoded' );
 		}
-		$this->require_true( count( $value ) <= 100 );
+		$this->require_true( count( $value ) <= $this->limit( 'max_heads', 100 ) );
 		$this->codec->snapshot_digest( $value ); // Reject objects, depth overflow and unsupported scalars.
 		$this->require_true( $before === $this->raw_option_digest( FOOGALLERY_MIGRATE_OPTION_DATA ) );
 		return array( 'physical' => $before, 'value' => $value );
@@ -314,7 +322,14 @@ class StorageConversion {
 		return substr( $raw, 2 );
 	}
 
+	private function limit( $name, $unscaled ) { return null === $this->scale ? $unscaled : $this->scale->limit( $name ); }
+
+	private function option_decoder() {
+		return null === $this->scale ? new LegacyOptionDecoder( $this->policy['max_raw_bytes'] ) : $this->scale->decoder( $this->policy['max_raw_bytes'] );
+	}
+
 	private function budget( $bytes ) {
+		if ( null !== $this->scale ) { $this->scale->admit_memory( $bytes ); }
 		$result = StoragePreflight::decode_budget( $bytes, ini_get( 'memory_limit' ), $this->memory->sample(), $this->policy );
 		$this->require_true( ! is_wp_error( $result ) && true === $result['decode_admitted'] );
 	}
@@ -327,16 +342,23 @@ class StorageConversion {
 
 	private function heads() {
 		$table = $this->db->base_prefix . StorageAuthority::SHARED_STATE_TABLE_SUFFIX;
-		$sql = 'SELECT id, CASE WHEN LENGTH(state_key_value) <= 1024 THEN state_key_value ELSE NULL END AS key_value, state_order, state_kind, active_generation, revision, record_count, payload_bytes, digest_status FROM `' . $table . '` WHERE blog_id = %d ORDER BY state_order LIMIT 101';
+		$sql = 'SELECT id, CASE WHEN LENGTH(state_key_value) <= 1024 THEN state_key_value ELSE NULL END AS key_value, state_order, state_kind, active_generation, revision, record_count, payload_bytes, digest_status FROM `' . $table . '` WHERE blog_id = %d ORDER BY state_order LIMIT ' . ( $this->limit( 'max_heads', 100 ) + 1 );
 		$heads = $this->connection->get_results( $this->connection->prepare( $sql, array( $this->blog ) ), ARRAY_A );
-		$this->require_true( empty( $this->connection->last_error ) && is_array( $heads ) && count( $heads ) <= 100 );
+		$this->require_true( empty( $this->connection->last_error ) && is_array( $heads ) && count( $heads ) <= $this->limit( 'max_heads', 100 ) );
 		$rows = 0; $bytes = 0;
 		foreach ( $heads as $head ) {
+			$this->context();
 			$this->require_true( is_string( $head['key_value'] ) );
-			$rows += (int) $head['record_count']; $bytes += (int) $head['payload_bytes'];
-			$this->require_true( $rows <= 10000 && $bytes <= 16777216 );
+			$rows = StorageScaleAdmission::checked_add( $rows, $this->number( $head['record_count'] ) );
+			$bytes = StorageScaleAdmission::checked_add( $bytes, $this->number( $head['payload_bytes'] ) );
+			$this->require_true( $rows <= $this->limit( 'max_rows', 10000 ) && $bytes <= $this->limit( 'max_bytes', 16777216 ) );
 		}
 		return $heads;
+	}
+
+	private function number( $value ) {
+		$this->require_true( ( is_int( $value ) || is_string( $value ) ) && (string) (int) $value === (string) $value && (int) $value >= 0 );
+		return (int) $value;
 	}
 
 	private function table_physical_digest() { return hash( 'sha256', json_encode( $this->heads() ) ); }

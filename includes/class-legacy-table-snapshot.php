@@ -29,8 +29,8 @@ class LegacyTableSnapshot {
 	private $tainted = false;
 
 	/** Bounds apply to the entire affected replacement, including companion keys.
-	 * Optional scale is internal HOST TEST admission, NOT production calibration.
-	 * Public conversion callers remain on the unchanged no-scale contract.
+	 * Optional scale is operation-owned refusal admission, NOT calibration approval.
+	 * Unscaled callers retain their existing contract.
 	 */
 	public function __construct( $wpdb, $blog_id, $max_rows = 10000, $max_bytes = 16777216, $deadline = null, $memory_admission = null, $scale = null ) {
 		if ( ! ( $wpdb instanceof LegacyTransactionConnection ) ) { $this->fail( 'A pinned, non-replaying transaction connection is required.' ); }

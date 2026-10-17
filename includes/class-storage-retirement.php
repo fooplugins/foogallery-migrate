@@ -19,8 +19,9 @@ class StorageRetirement {
 	private $policy;
 	private $deadline;
 	private $memory;
+	private $scale;
 
-	public function __construct( $connection, $prefix, $blog, $policy, $deadline, $memory = null ) {
+	public function __construct( $connection, $prefix, $blog, $policy, $deadline, $memory = null, $scale = null ) {
 		if ( ! ( $connection instanceof LegacyTransactionConnection ) || ! is_int( $blog ) || $blog < 1 ||
 			! is_string( $prefix ) || ! preg_match( '/^[A-Za-z0-9_]+$/D', $prefix ) ||
 			! preg_match( '/^[A-Za-z0-9_]+$/D', $connection->base_prefix ) ) { $this->fail(); }
@@ -29,6 +30,8 @@ class StorageRetirement {
 		$this->records = $connection->base_prefix . StorageAuthority::SHARED_RECORDS_TABLE_SUFFIX;
 		$this->policy = $policy; $this->deadline = $deadline;
 		$this->memory = null === $memory ? new StorageMemoryBaseline() : $memory;
+		if ( null !== $scale && ( ! $scale instanceof StorageScaleAdmission || $deadline !== $scale->deadline() ) ) { $this->fail(); }
+		$this->scale = $scale;
 	}
 
 	/** Uncontrolled/proposed/orphan state is evidence, never a first-import target. */
@@ -43,7 +46,7 @@ class StorageRetirement {
 	 * are refusal bounds, not a claimed production calibration/scale receipt.
 	 */
 	public function capture( $lock = false ) {
-		$manifest = array(); $total = 0;
+		$manifest = array(); $total = 0; $physical_rows = 0;
 		foreach ( ( new LegacyStorageSchema( $this->db ) )->definitions() as $table => $definition ) {
 			$names = array_keys( $definition['columns'] ); $actual = array();
 			foreach ( $this->rows( 'SHOW COLUMNS FROM `' . $table . '`' ) as $column ) { $actual[] = $column['Field']; }
@@ -56,21 +59,30 @@ class StorageRetirement {
 				$lengths[] = 'IFNULL(OCTET_LENGTH(`' . $name . '`), 0)';
 			}
 			$count = $this->rows( $this->db->prepare( 'SELECT COUNT(*) AS n FROM `' . $table . '` WHERE blog_id = %d', array( $this->blog ) ) );
-			if ( 1 !== count( $count ) || (int) $count[0]['n'] > 10000 ) { $this->fail(); }
-			$limit = (int) $count[0]['n'] + 1;
-			$budget = StoragePreflight::decode_budget( $limit * 256, ini_get( 'memory_limit' ), $this->memory->sample(), $this->policy );
+			if ( 1 !== count( $count ) ) { $this->fail(); }
+			$n = $this->number( $count[0]['n'] );
+			$physical_rows = StorageScaleAdmission::checked_add( $physical_rows, $n );
+			if ( $n > $this->limit( 'max_physical_rows_per_table', 10000 ) ||
+				( null !== $this->scale && $physical_rows > $this->scale->limit( 'max_physical_rows' ) ) ) { $this->fail(); }
+			$limit = $n + 1;
+			$manifest_bytes = StorageScaleAdmission::checked_multiply( $limit, 256 );
+			if ( null !== $this->scale ) { $this->scale->admit_memory( $manifest_bytes ); }
+			$budget = StoragePreflight::decode_budget( $manifest_bytes, ini_get( 'memory_limit' ), $this->memory->sample(), $this->policy );
 			if ( is_wp_error( $budget ) ) { $this->fail(); }
 			$sql = 'SELECT id, (' . implode( ' + ', $lengths ) . ') AS bytes, SHA2(CONCAT(' . implode( ', ', $hashes ) . '), 256) AS digest FROM `' . $table . '` WHERE blog_id = %d ORDER BY id LIMIT ' . $limit;
 			$rows = $this->rows( $this->db->prepare( $sql . ( $lock ? ' FOR UPDATE' : '' ), array( $this->blog ) ) );
 			if ( count( $rows ) !== (int) $count[0]['n'] ) { $this->fail(); }
 			foreach ( $rows as $row ) {
 				if ( ! isset( $row['bytes'], $row['digest'] ) || ! preg_match( '/^[a-f0-9]{64}$/D', $row['digest'] ) ) { $this->fail(); }
-				$total += (int) $row['bytes'];
-				if ( $total > 16777216 ) { $this->fail(); }
+				$this->time();
+				$total = StorageScaleAdmission::checked_add( $total, $this->number( $row['bytes'] ) );
+				if ( $total > $this->limit( 'max_physical_bytes', 16777216 ) ) { $this->fail(); }
 			}
 			$manifest[] = $rows;
 		}
-		$manifest[] = $this->option_identity( StorageAuthority::STORAGE_BACKUP_OPTION, $lock );
+		$backup = $this->option_identity( StorageAuthority::STORAGE_BACKUP_OPTION, $lock );
+		if ( null !== $this->scale && count( $backup ) && StorageScaleAdmission::checked_add( $total, $this->number( $backup[0]['bytes'] ) ) > $this->scale->limit( 'max_physical_bytes' ) ) { $this->fail(); }
+		$manifest[] = $backup;
 		return hash( 'sha256', json_encode( $manifest ) );
 	}
 
@@ -144,7 +156,7 @@ class StorageRetirement {
 	private function option_identity( $name, $lock ) {
 		$sql = 'SELECT option_id, OCTET_LENGTH(option_value) AS bytes, SHA2(option_value, 256) AS digest, autoload FROM `' . $this->options . '` WHERE option_name = %s LIMIT 1';
 		$rows = $this->rows( $this->db->prepare( $sql . ( $lock ? ' FOR UPDATE' : '' ), array( $name ) ) );
-		if ( count( $rows ) && ( (int) $rows[0]['bytes'] > 16777216 || ! preg_match( '/^[a-f0-9]{64}$/D', $rows[0]['digest'] ) ) ) { $this->fail(); }
+		if ( count( $rows ) && ( $this->number( $rows[0]['bytes'] ) > $this->limit( 'max_bytes', 16777216 ) || ! preg_match( '/^[a-f0-9]{64}$/D', $rows[0]['digest'] ) ) ) { $this->fail(); }
 		return $rows;
 	}
 
@@ -165,6 +177,14 @@ class StorageRetirement {
 		wp_cache_delete( 'notoptions', 'options' ); wp_cache_delete( 'alloptions', 'options' );
 	}
 
-	private function time() { if ( microtime( true ) > $this->deadline ) { $this->fail(); } }
+	private function limit( $name, $unscaled ) { return null === $this->scale ? $unscaled : $this->scale->limit( $name ); }
+	private function number( $value ) {
+		if ( ( ! is_int( $value ) && ! is_string( $value ) ) || (string) (int) $value !== (string) $value || (int) $value < 0 ) { $this->fail(); }
+		return (int) $value;
+	}
+	private function time() {
+		if ( null !== $this->scale ) { $this->scale->admit_memory( 0 ); }
+		if ( microtime( true ) > $this->deadline ) { $this->fail(); }
+	}
 	private function fail() { throw new \RuntimeException( 'Retained migration storage cannot be safely replaced; retain evidence and authority.' ); }
 }

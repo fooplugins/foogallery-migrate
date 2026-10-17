@@ -16,6 +16,8 @@ final class StorageScaleAdmission {
 	private $deadline;
 	private $clock;
 	private $memory;
+	private $baseline;
+	private $native_high_water = 0;
 	private $work = 0;
 	private $additional_bytes = 0;
 	private $retaining_phases = array();
@@ -45,11 +47,13 @@ final class StorageScaleAdmission {
 	}
 
 	/** Clock/memory seams are trusted PHP dependencies, never request fields. */
-	public function __construct( $limits, $policy, $deadline, $clock = null, $memory = null ) {
+	public function __construct( $limits, $policy, $deadline, $clock = null, $memory = null, $baseline = null ) {
 		if ( $this->initialized ) { self::fail(); }
 		$this->limits = self::validate( $limits );
 		if ( is_wp_error( StoragePreflight::decode_budget( 0, '-1', 0, $policy ) ) || $policy['max_raw_bytes'] > 16777216 ||
 			( null !== $clock && ! is_callable( $clock ) ) || ( null !== $memory && ! is_callable( $memory ) ) ) { self::fail(); }
+		if ( null !== $baseline && ! $baseline instanceof StorageMemoryBaseline ) { self::fail(); }
+		$this->baseline = $baseline;
 		$this->policy = array();
 		foreach ( $policy as $key => $value ) { $this->policy[$key] = $value; }
 		$this->clock = $clock; $this->memory = $memory;
@@ -129,13 +133,14 @@ final class StorageScaleAdmission {
 	/** Fixed finite repeated-pass work cap, never reset by phases or pages. */
 	public function tick() {
 		$this->valid();
-		if ( ++$this->work > 16777216 || $this->now() > $this->deadline ) { self::fail(); }
+		if ( ++$this->work > 16777216 ) { StorageScalarObserver::milestone( 'scale-work-refused' ); self::fail(); }
+		if ( $this->now() > $this->deadline ) { StorageScalarObserver::milestone( 'scale-deadline-refused' ); self::fail(); }
 	}
 
 	public function admit_memory( $bytes ) {
 		$this->tick();
 		if ( ! is_int( $bytes ) || $bytes < 0 || $bytes > $this->limit( 'max_physical_bytes' ) ) { self::fail(); }
-		$sample = null === $this->memory ? array( ini_get( 'memory_limit' ), memory_get_usage( true ) ) : call_user_func( $this->memory );
+		$sample = $this->memory_sample();
 		if ( ! is_array( $sample ) || array_keys( $sample ) !== array( 0, 1 ) ) { self::fail(); }
 		// Both the effective PHP limit AND a finite ceiling apply, including -1.
 		$policy = $this->policy; $policy['max_raw_bytes'] = $this->limit( 'max_physical_bytes' );
@@ -143,7 +148,7 @@ final class StorageScaleAdmission {
 		// snapshot, rebuild and per-row checks. Preserve their original multiplier.
 		$used = self::checked_add( $sample[1], self::checked_add( $this->additional_bytes, $this->retaining_pending ) );
 		foreach ( array( $sample[0], (string) $this->limit( 'memory_ceiling_bytes' ) ) as $limit ) {
-			if ( is_wp_error( StoragePreflight::decode_budget( $bytes, $limit, $used, $policy ) ) ) { self::fail(); }
+			if ( is_wp_error( StoragePreflight::decode_budget( $bytes, $limit, $used, $policy ) ) ) { StorageScalarObserver::milestone( 'scale-memory-refused' ); self::fail(); }
 		}
 		return true;
 	}
@@ -160,12 +165,12 @@ final class StorageScaleAdmission {
 	public function admit_additional( $bytes ) {
 		$this->tick();
 		$total = self::checked_add( $this->additional_bytes, $bytes );
-		$sample = null === $this->memory ? array( ini_get( 'memory_limit' ), memory_get_usage( true ) ) : call_user_func( $this->memory );
+		$sample = $this->memory_sample();
 		if ( ! is_array( $sample ) || array_keys( $sample ) !== array( 0, 1 ) ) { self::fail(); }
 		$policy = array( 'max_raw_bytes' => PHP_INT_MAX, 'amplification' => 1, 'reserve_bytes' => $this->policy['reserve_bytes'] );
 		$forecast = self::checked_add( $total, $this->retaining_pending );
 		foreach ( array( $sample[0], (string) $this->limit( 'memory_ceiling_bytes' ) ) as $limit ) {
-			if ( is_wp_error( StoragePreflight::decode_budget( $forecast, $limit, $sample[1], $policy ) ) ) { self::fail(); }
+			if ( is_wp_error( StoragePreflight::decode_budget( $forecast, $limit, $sample[1], $policy ) ) ) { StorageScalarObserver::milestone( 'scale-memory-refused' ); self::fail(); }
 		}
 		$this->additional_bytes = $total;
 		return true;
@@ -197,25 +202,25 @@ final class StorageScaleAdmission {
 	 */
 	public function admit_snapshot_stats_workspace( $bytes ) {
 		$this->tick();
-		$sample = null === $this->memory ? array( ini_get( 'memory_limit' ), memory_get_usage( true ) ) : call_user_func( $this->memory );
+		$sample = $this->memory_sample();
 		if ( ! is_array( $sample ) || array_keys( $sample ) !== array( 0, 1 ) ) { self::fail(); }
 		$total = self::checked_add( $bytes, self::checked_add( $this->additional_bytes, $this->retaining_pending ) );
 		self::checked_add( $sample[1], 0 );
 		$used = max( $sample[1], memory_get_usage( true ) );
 		$policy = array( 'max_raw_bytes' => PHP_INT_MAX, 'amplification' => 1, 'reserve_bytes' => $this->policy['reserve_bytes'] );
 		foreach ( array( ini_get( 'memory_limit' ), $sample[0], (string) $this->limit( 'memory_ceiling_bytes' ) ) as $limit ) {
-			if ( is_wp_error( StoragePreflight::decode_budget( $total, $limit, $used, $policy ) ) ) { self::fail(); }
+			if ( is_wp_error( StoragePreflight::decode_budget( $total, $limit, $used, $policy ) ) ) { StorageScalarObserver::milestone( 'scale-memory-refused' ); self::fail(); }
 		}
 	}
 
 	private function check_pending( $pending ) {
 		$this->tick();
 		$total = self::checked_add( $this->additional_bytes, $pending );
-		$sample = null === $this->memory ? array( ini_get( 'memory_limit' ), memory_get_usage( true ) ) : call_user_func( $this->memory );
+		$sample = $this->memory_sample();
 		if ( ! is_array( $sample ) || array_keys( $sample ) !== array( 0, 1 ) ) { self::fail(); }
 		$policy = array( 'max_raw_bytes' => PHP_INT_MAX, 'amplification' => 1, 'reserve_bytes' => $this->policy['reserve_bytes'] );
 		foreach ( array( $sample[0], (string) $this->limit( 'memory_ceiling_bytes' ) ) as $limit ) {
-			if ( is_wp_error( StoragePreflight::decode_budget( $total, $limit, $sample[1], $policy ) ) ) { self::fail(); }
+			if ( is_wp_error( StoragePreflight::decode_budget( $total, $limit, $sample[1], $policy ) ) ) { StorageScalarObserver::milestone( 'scale-memory-refused' ); self::fail(); }
 		}
 	}
 
@@ -313,6 +318,13 @@ final class StorageScaleAdmission {
 			if ( $b > 0 ) { $a = self::checked_add( $a, $a ); }
 		}
 		return $result;
+	}
+
+	/** Native path retains sampled real backing; trusted test seams stay separate. */
+	private function memory_sample() {
+		if ( null !== $this->memory ) { return call_user_func( $this->memory ); }
+		$this->native_high_water = max( $this->native_high_water, memory_get_usage( true ), null === $this->baseline ? 0 : $this->baseline->sample() );
+		return array( ini_get( 'memory_limit' ), $this->native_high_water );
 	}
 
 	private function now() {

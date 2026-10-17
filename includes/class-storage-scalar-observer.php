@@ -24,7 +24,7 @@ class StorageScalarObserver {
 		$allowed = array( 'receiver-entry', 'authorized', 'policy', 'source-read', 'source-decoded',
 			'source-verified', 'snapshot-preflight', 'snapshot-staged', 'snapshot-readback', 'snapshot-committed',
 			'reverse-serialized', 'reverse-written', 'retained-backup', 'control-copying', 'control-verified',
-			'control-flipped', 'control-stable', 'released', 'response' );
+			'control-flipped', 'control-stable', 'released', 'response', 'scale-work-refused', 'scale-deadline-refused', 'scale-memory-refused' );
 		$now = microtime( true ); $count = count( self::$milestones );
 		if ( ! in_array( $name, $allowed, true ) || $count >= 128 || ! is_finite( $now ) ||
 			( $count && $now < self::$milestones[$count - 1]['time'] ) ) { self::$milestones_valid = false; return; }

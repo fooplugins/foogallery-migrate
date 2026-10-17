@@ -29,6 +29,14 @@ function foogm_a7_positive_run( $wpdb, $blog, $downstream, &$receipt ) {
 	return \FooPlugins\FooGalleryMigrate\Tests\StorageA7OptionsHarness::run( FOOGM_A7_STAGE, $seed, FOOGM_A7_OWNER, $blog, $read_sql, $read_wp, $downstream );
 }
 
+/** Separate bounded read-only evidence operation; never a product approval. */
+function foogm_a7_positive_scale( $policy ) {
+	return new \FooPlugins\FooGalleryMigrate\StorageScaleAdmission( array( 'version' => 1, 'max_tokens' => 262144,
+		'max_rows' => 24576, 'max_bytes' => 16777216, 'max_depth' => 64, 'max_heads' => 100,
+		'max_physical_rows_per_table' => 24576, 'max_physical_rows' => 49152, 'max_physical_bytes' => 33554432,
+		'memory_ceiling_bytes' => 2147483647, 'max_seconds' => 10 ), $policy, microtime( true ) + 10.0 );
+}
+
 function foogm_a7_product_pins( $root ) {
 	$root = realpath( $root ); $pins = array();
 	$iterator = new RecursiveIteratorIterator( new RecursiveDirectoryIterator( $root, FilesystemIterator::SKIP_DOTS ) );
