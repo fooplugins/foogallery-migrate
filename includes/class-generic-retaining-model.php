@@ -72,7 +72,11 @@ final class GenericRetainingModel {
   * measured NATIVE CODEC size class (including base64 decoder capacity, not
   * substring capacity) has 8 bytes slack; empty/one-byte strings cost at least
   * 40. No interning or sharing credit.
-  * Larger strings retain the previous 64+2n forecast, NOT an extrapolation.
+  * Above 231, native base64 decoding can retain capacity for the ENCODED
+  * input length, not merely n decoded bytes. Round that request (plus 32
+  * bytes for header/NUL/alignment) up to a power of two: an upper allocator
+  * class on the supported Zend MM runtime. Keep the old 64+2n bound as a
+  * floor; neither raw-string charging nor the short calibration is reduced.
   */
  public static function string_bytes( $n ) {
   self::add( $n, 0 );
@@ -81,7 +85,10 @@ final class GenericRetainingModel {
    123 => 200, 147 => 232, 171 => 264, 219 => 328, 231 => 392 ) as $end => $bytes ) {
    if ( $n <= $end ) { return $bytes; }
   }
-  return self::add( 64, self::mul( 2, $n ) );
+  $floor = self::add( 64, self::mul( 2, $n ) );
+  $request = self::add( 32, self::mul( 4, (int) ceil( $n / 3 ) ) );
+  $class = 512; while ( $class < $request ) { $class = self::mul( $class, 2 ); }
+  return max( $floor, $class );
  }
  /** Children storage/growth is phase-private, never prematurely realized. */
  public static function own_record_bytes( $record, $has_children, $key_bytes ) {
