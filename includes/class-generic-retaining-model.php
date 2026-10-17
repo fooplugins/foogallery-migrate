@@ -58,6 +58,16 @@ final class GenericRetainingModel {
   return array( 'future' => $future,
    'private' => $private, 'external' => self::arrays( 1, $d['records'] ), 'events' => $d['records'], 'parts' => $parts );
  }
+ /** Private slot shell is realized once; row/hash scratch and consumer stay pending. */
+ public static function staged_flatten_plan( $d, $state_key ) {
+  $plan = self::flatten_plan( $d, $state_key );
+  $next_row = self::row_forecast( $d['max_row_bytes'], 5 );
+  $plan['future'] = self::container( $d['records'] );
+  $plan['private'] = self::add( $plan['private'], $next_row );
+  $plan['parts']['next_row'] = $next_row;
+  $plan['events'] = 1;
+  return $plan;
+ }
  /** Prospective own-field allocation, not source bytes or a sharing credit. */
  private static function value_bytes( $v, $depth ) {
   if ( $depth > 64 ) { self::fail(); }

@@ -270,22 +270,25 @@ class LegacyRecordCodec {
 			$emit->observe( 'descriptor', $plan );
 			$this->scale->admit_additional( $plan['after_descriptor_bytes'] );
 		}
-		$phase = null;
+		$phase = null; $slots = null;
 		if ( ! $qualified && null !== $this->scale && GenericRetainingModel::supports( $this, $this->codec, $this->scale ) ) {
 			$phase = $this->scale->open_retaining_phase( $this, GenericRetainingModel::descriptor_bytes() );
 			$d = $this->describe_tree( $key, $record, 'retaining-row' );
-			$plan = GenericRetainingModel::flatten_plan( $d, $state_key );
+			$plan = GenericRetainingModel::staged_flatten_plan( $d, $state_key );
 			$this->scale->plan_retaining_phase( $phase, $this, $plan['future'], $plan['private'], $plan['external'], $plan['events'] );
+			// Floor-compatible packed preallocation: no append, resize or export.
+			$slots = array_fill( 0, $d['records'], null );
+			$this->scale->realize_retaining_event( $phase, $this, 0, $plan['future'] );
 		}
 		$item_order = $this->number( $item_order );
 		$stats = array( 'record_count' => 0, 'payload_bytes' => 0, 'encoded_bytes' => 0 );
 		$preflight = $stats;
 		$this->admit( 0 );
-		$this->preflight_tree( $this->codec->key_hash( $state_key ), null, $key, $record, $item_order, 0, $preflight, $phase );
-		if ( $qualified ) {
+		$this->preflight_tree( $this->codec->key_hash( $state_key ), null, $key, $record, $item_order, 0, $preflight, $phase, $slots );
+		if ( $qualified || null !== $phase ) {
 			if ( $preflight['record_count'] !== $d['records'] || $preflight['payload_bytes'] !== $d['payload_bytes'] ||
 				$preflight['encoded_bytes'] !== $d['encoded_bytes'] ) { $this->fail( 'Descriptor/preflight mismatch.' ); }
-			$emit->observe( 'preflight' );
+			if ( $qualified ) { $emit->observe( 'preflight' ); }
 		}
 		// Row ancestry is not logical depth: children contributes two edges,
 		// and ordinary/mutable fields may nest without creating any child row.
@@ -298,8 +301,24 @@ class LegacyRecordCodec {
 		else {
 			$this->admit( $preflight['encoded_bytes'] );
 		}
-		$this->flatten_node( $this->codec->key_hash( $state_key ), null, $key, $record, $item_order, 0, $emit, $stats, $phase );
-		if ( null !== $phase ) { $this->scale->close_retaining_phase( $phase, $this ); }
+		if ( null !== $phase ) {
+			// Whole-tree digest above runs with hashes only, never the full row graph.
+			$this->stage_retaining_node( $this->codec->key_hash( $state_key ), null, $key, $record, $item_order, 0, $stats, $phase, $slots );
+			if ( $stats !== $preflight || count( $slots ) !== $d['records'] ) { $this->fail( 'Incomplete retaining staging.' ); }
+			// All recursive row locals have unwound. Own only the suffix at callback.
+			for ( $i = 0; $i < $d['records']; ++$i ) {
+				$this->tick(); $this->admit( 0 );
+				if ( ! isset( $slots[$i] ) || ! is_array( $slots[$i] ) ) { $this->fail( 'Invalid staged row slot.' ); }
+				$row = $slots[$i]; unset( $slots[$i] );
+				if ( false === call_user_func( $emit, $row ) ) { $this->fail( 'Staged consumer refused the write.' ); }
+				unset( $row );
+			}
+			unset( $slots, $row, $d, $plan, $preflight );
+			// Never finally-close: an interrupted producer still owns its liability.
+			$this->scale->close_retaining_phase( $phase, $this );
+		} else {
+			$this->flatten_node( $this->codec->key_hash( $state_key ), null, $key, $record, $item_order, 0, $emit, $stats );
+		}
 		if ( $qualified ) { $emit->observe( 'emission' ); }
 		return $stats;
 	}
@@ -436,7 +455,7 @@ class LegacyRecordCodec {
 		return $row;
 	}
 
-	private function preflight_tree( $state_hash, $parent, $key, $record, $order, $depth, &$stats, $phase = null ) {
+	private function preflight_tree( $state_hash, $parent, $key, $record, $order, $depth, &$stats, $phase = null, &$slots = null ) {
 		$this->tick();
 		if ( $depth > $this->max_depth || $stats['record_count'] >= $this->max_records ) { $this->fail( 'Tree exceeds the depth/record budget.' ); }
 		$row = $this->make_row( $state_hash, $parent, $key, $record, $order, $depth, $phase );
@@ -447,11 +466,41 @@ class LegacyRecordCodec {
 		$stats['record_count']++;
 		$stats['payload_bytes'] += $row['payload_bytes'];
 		$stats['encoded_bytes'] += $bytes;
+		if ( null !== $slots ) {
+			$index = $stats['record_count'] - 1;
+			if ( ! array_key_exists( $index, $slots ) || null !== $slots[$index] ) { $this->fail( 'Invalid empty hash slot.' ); }
+			$this->admit( 0 );
+			$slots[$index] = $this->codec->snapshot_digest( $record );
+		}
 		if ( is_array( $record ) && isset( $record['children'] ) && is_array( $record['children'] ) ) {
 			if ( count( $record['children'] ) > $this->max_records - $stats['record_count'] ) { $this->fail( 'Tree exceeds the record budget.' ); }
 			$child_order = 0;
 			foreach ( $record['children'] as $child_key => $child ) {
-				$this->preflight_tree( $state_hash, $row['node_hash'], $child_key, $child, $child_order++, $depth + 1, $stats, $phase );
+				$this->preflight_tree( $state_hash, $row['node_hash'], $child_key, $child, $child_order++, $depth + 1, $stats, $phase, $slots );
+			}
+		}
+	}
+
+	/** Exact qualified producer only: replace cached hashes, never emit recursively. */
+	private function stage_retaining_node( $state_hash, $parent, $key, $record, $order, $depth, &$stats, $phase, &$slots ) {
+		$this->tick(); $this->admit( 0 );
+		$index = $stats['record_count'];
+		if ( $depth > $this->max_depth || $index >= $this->max_records ||
+			! isset( $slots[$index] ) || ! is_string( $slots[$index] ) ||
+			! preg_match( '/^[a-f0-9]{64}$/D', $slots[$index] ) ) { $this->fail( 'Invalid cached logical hash slot.' ); }
+		$row = $this->make_row( $state_hash, $parent, $key, $record, $order, $depth, $phase );
+		$row['logical_hash'] = $slots[$index];
+		$bytes = $this->encoded_bytes( $row );
+		if ( $bytes > LegacyTableReader::MAX_RECORD_BYTES || $bytes > $this->max_tree_bytes - $stats['encoded_bytes'] ) {
+			$this->fail( 'Row/tree exceeds the encoded byte budget.' );
+		}
+		$stats['record_count']++; $stats['payload_bytes'] += $row['payload_bytes']; $stats['encoded_bytes'] += $bytes;
+		$node_hash = $row['node_hash'];
+		$slots[$index] = $row; unset( $row );
+		if ( is_array( $record ) && isset( $record['children'] ) && is_array( $record['children'] ) ) {
+			$child_order = 0;
+			foreach ( $record['children'] as $child_key => $child ) {
+				$this->stage_retaining_node( $state_hash, $node_hash, $child_key, $child, $child_order++, $depth + 1, $stats, $phase, $slots );
 			}
 		}
 	}
