@@ -305,57 +305,6 @@ class LegacyRecordCodec {
 	}
 
 	/**
-	 * @internal Snapshot preflight ONLY. No callable, output owner assertion or
-	 * retained rows. Unsupported codec/owner/runtime keeps aggregate admission.
-	 * This is not snapshot stage/readback admission and grants no such authority.
-	 */
-	public function preflight_stats( $state_key, $key, $record, $item_order ) {
-		$phase = null;
-		if ( null !== $this->scale && SnapshotStatsModel::supports( $this, $this->codec, $this->scale ) ) {
-			$this->scale->admit_snapshot_stats_workspace( GenericRetainingModel::descriptor_bytes() );
-			$phase = $this->scale->open_retaining_phase( $this, GenericRetainingModel::descriptor_bytes() );
-			$d = $this->describe_tree( $key, $record, 'repository-sink' );
-			$workspace = SnapshotStatsModel::workspace( $d, $state_key );
-			// Keep the old descriptor reservation while admitting its replacement;
-			// no sample or a completed row can release this private workspace.
-			$this->scale->admit_snapshot_stats_workspace( $workspace );
-			$this->scale->plan_retaining_phase( $phase, $this, 0, $workspace, 0, 0 );
-		}
-		$item_order = $this->number( $item_order );
-		$stats = array( 'record_count' => 0, 'payload_bytes' => 0, 'encoded_bytes' => 0 );
-		$preflight = $stats;
-		$this->admit( 0 );
-		$state_hash = $this->codec->key_hash( $state_key );
-		$this->preflight_tree( $state_hash, null, $key, $record, $item_order, 0, $preflight, $phase );
-		if ( null !== $phase && ( $preflight['record_count'] !== $d['records'] || $preflight['payload_bytes'] !== $d['payload_bytes'] ||
-			$preflight['encoded_bytes'] !== $d['encoded_bytes'] ) ) { $this->fail( 'Descriptor/preflight mismatch.' ); }
-		if ( null !== $this->scale ) { $this->codec->snapshot_digest( $record ); }
-		$this->admit( null === $phase ? $preflight['encoded_bytes'] : 0 );
-		$this->discard_stats_node( $state_hash, null, $key, $record, $item_order, 0, $stats, $phase );
-		if ( $stats !== $preflight ) { $this->fail( 'Stats/preflight mismatch.' ); }
-		// All row/ancestor/codec/digest frames have unwound before release. On
-		// interruption the existing owner-bound ledger remains pending instead.
-		if ( null !== $phase ) { $this->scale->close_retaining_phase( $phase, $this ); }
-		return $stats;
-	}
-
-	private function discard_stats_node( $state_hash, $parent, $key, $record, $order, $depth, &$stats, $phase ) {
-		if ( null !== $phase ) { $this->scale->admit_snapshot_stats_workspace( 0 ); }
-		$row = $this->make_row( $state_hash, $parent, $key, $record, $order, $depth, $phase );
-		// Match flatten's complete-record digest validation, including no-scale
-		// depth/domain refusal. Digests are checked, never exported or retained.
-		$this->codec->snapshot_digest( $record );
-		$stats['record_count']++; $stats['payload_bytes'] += $row['payload_bytes']; $stats['encoded_bytes'] += $this->encoded_bytes( $row );
-		$hash = $row['node_hash']; unset( $row );
-		if ( is_array( $record ) && isset( $record['children'] ) && is_array( $record['children'] ) ) {
-			$order = 0;
-			foreach ( $record['children'] as $child_key => $child ) {
-				$this->discard_stats_node( $state_hash, $hash, $child_key, $child, $order++, $depth + 1, $stats, $phase );
-			}
-		}
-	}
-
-	/**
 	 * Rebuild precisely ONE complete affected root from scoped, size-preflighted
 	 * rows. The reader/repository remains responsible for blog/state/generation,
 	 * revision and missing-head checks. Extra physical columns never enter hashes.
@@ -709,5 +658,56 @@ class LegacyRecordCodec {
 
 	private function fail( $message ) {
 		throw new \RuntimeException( 'Legacy storage record codec: ' . $message );
+	}
+
+	/**
+	 * @internal Snapshot preflight ONLY. No callable, output owner assertion or
+	 * retained rows. Unsupported codec/owner/runtime keeps aggregate admission.
+	 * This is not snapshot stage/readback admission and grants no such authority.
+	 */
+	public function preflight_stats( $state_key, $key, $record, $item_order ) {
+		$phase = null;
+		if ( null !== $this->scale && SnapshotStatsModel::supports( $this, $this->codec, $this->scale ) ) {
+			$this->scale->admit_snapshot_stats_workspace( GenericRetainingModel::descriptor_bytes() );
+			$phase = $this->scale->open_retaining_phase( $this, GenericRetainingModel::descriptor_bytes() );
+			$d = $this->describe_tree( $key, $record, 'repository-sink' );
+			$workspace = SnapshotStatsModel::workspace( $d, $state_key );
+			// Keep the old descriptor reservation while admitting its replacement;
+			// no sample or a completed row can release this private workspace.
+			$this->scale->admit_snapshot_stats_workspace( $workspace );
+			$this->scale->plan_retaining_phase( $phase, $this, 0, $workspace, 0, 0 );
+		}
+		$item_order = $this->number( $item_order );
+		$stats = array( 'record_count' => 0, 'payload_bytes' => 0, 'encoded_bytes' => 0 );
+		$preflight = $stats;
+		$this->admit( 0 );
+		$state_hash = $this->codec->key_hash( $state_key );
+		$this->preflight_tree( $state_hash, null, $key, $record, $item_order, 0, $preflight, $phase );
+		if ( null !== $phase && ( $preflight['record_count'] !== $d['records'] || $preflight['payload_bytes'] !== $d['payload_bytes'] ||
+			$preflight['encoded_bytes'] !== $d['encoded_bytes'] ) ) { $this->fail( 'Descriptor/preflight mismatch.' ); }
+		if ( null !== $this->scale ) { $this->codec->snapshot_digest( $record ); }
+		$this->admit( null === $phase ? $preflight['encoded_bytes'] : 0 );
+		$this->discard_stats_node( $state_hash, null, $key, $record, $item_order, 0, $stats, $phase );
+		if ( $stats !== $preflight ) { $this->fail( 'Stats/preflight mismatch.' ); }
+		// All row/ancestor/codec/digest frames have unwound before release. On
+		// interruption the existing owner-bound ledger remains pending instead.
+		if ( null !== $phase ) { $this->scale->close_retaining_phase( $phase, $this ); }
+		return $stats;
+	}
+
+	private function discard_stats_node( $state_hash, $parent, $key, $record, $order, $depth, &$stats, $phase ) {
+		if ( null !== $phase ) { $this->scale->admit_snapshot_stats_workspace( 0 ); }
+		$row = $this->make_row( $state_hash, $parent, $key, $record, $order, $depth, $phase );
+		// Match flatten's complete-record digest validation, including no-scale
+		// depth/domain refusal. Digests are checked, never exported or retained.
+		$this->codec->snapshot_digest( $record );
+		$stats['record_count']++; $stats['payload_bytes'] += $row['payload_bytes']; $stats['encoded_bytes'] += $this->encoded_bytes( $row );
+		$hash = $row['node_hash']; unset( $row );
+		if ( is_array( $record ) && isset( $record['children'] ) && is_array( $record['children'] ) ) {
+			$order = 0;
+			foreach ( $record['children'] as $child_key => $child ) {
+				$this->discard_stats_node( $state_hash, $hash, $child_key, $child, $order++, $depth + 1, $stats, $phase );
+			}
+		}
 	}
 }
