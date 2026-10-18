@@ -91,7 +91,8 @@ $convert = function ( $target, $replace ) use ( $policy, $check ) {
         'nonce' => wp_create_nonce( 'foogallery_migrate_storage_' . $purpose . '_' . $blog ) );
     $conversion = new StorageConversion( $policy );
     $result = $replace ? $conversion->replace_retained( $request ) : $conversion->switch_backend( $request );
-    $check( ! is_wp_error( $result ), 'actual conversion to ' . $target . ( is_wp_error( $result ) ? ': ' . $result->get_error_code() . ': ' . $result->get_error_message() : '' ) );
+    $record = StorageControl::decode( get_option( \FooPlugins\FooGalleryMigrate\StorageAuthority::CONTROL_OPTION ), $blog );
+    $check( ! is_wp_error( $result ), 'actual conversion to ' . $target . ( is_wp_error( $result ) ? ': ' . $result->get_error_code() . ' phase=' . $record['phase'] . ' backend=' . $record['backend'] . ': ' . $result->get_error_message() : '' ) );
 };
 $convert( 'option', false );
 $engine = new MigratorEngine(); $GLOBALS['foogallery_migrate_engine_instance'] = $engine;
