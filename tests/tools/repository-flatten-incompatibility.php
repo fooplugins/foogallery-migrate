@@ -21,7 +21,7 @@ function is_wp_error( $v ) { return $v instanceof WP_Error; }
 function __( $v, $domain ) { return $v; }
 // Projection helper only; NOT WordPress runtime or encoder coverage.
 function absint( $value ) { return abs( (int) $value ); }
-foreach ( array( 'storage-preflight', 'storage-scale-admission', 'legacy-state-codec', 'legacy-record-codec', 'legacy-table-reader', 'repository-flatten-model', 'generic-retaining-model' ) as $file ) { require $root . '/includes/class-' . $file . '.php'; }
+foreach ( array( 'storage-scalar-observer', 'storage-preflight', 'storage-scale-admission', 'legacy-state-codec', 'legacy-record-codec', 'legacy-table-reader', 'repository-flatten-model', 'generic-retaining-model' ) as $file ) { require $root . '/includes/class-' . $file . '.php'; }
 require $fixture;
 $model = new Model( Model::PROFILE );
 $store = FooPlugins\FooGalleryMigrate\Tests\StorageA7Fixture::value( 20000 );
