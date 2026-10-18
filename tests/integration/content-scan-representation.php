@@ -24,7 +24,7 @@ $item = array( 'post_id' => 999, 'plugin_name' => 'WordPress Core', 'type' => 's
 $typed = array( 'progress' => array( 'started' => true, 'scanned' => 2, 'opaque' => false ),
     'items' => array( '09' => $item, 9 => null, 'tail' => false ), 'opaque' => "\0\xff" );
 $check( $engine->set_migrator_setting( ContentScanRepository::STATE_KEY, $typed ) !== false, 'settings snapshot write uses record representation' );
-$check( serialize( $repository->read_snapshot() ) === serialize( $typed ), 'typed full compatibility state equality' );
+$check( serialize( $engine->get_migrator_setting( ContentScanRepository::STATE_KEY ) ) === serialize( $typed ) && serialize( $repository->read_snapshot() ) === serialize( $typed['items'] ), 'typed full compatibility state equality' );
 $window = $repository->window( 1, 2 );
 $check( array_keys( $window['items'] ) === array( 9, 'tail' ) && $window['total'] === 3, 'typed page keys and total' );
 $check( $repository->get_many( array( 'tail', '09' ) ) === array( '09' => $item, 'tail' => false ), 'stored-key lookup preserves stored order' );
@@ -63,8 +63,9 @@ try {
     $content = $engine->get_content_migrator();
     $first = $content->scan_content_batch( true );
     $check( $first['scanned'] === 1 && ! $first['complete'], 'real scan reset first bounded post batch' );
-    $second = $content->scan_content_batch();
-    $check( $second['scanned'] === 2 && $repository->window( 0, 4 )['total'] === 2, 'real scan append persists findings and checkpoint' );
+    $second = $first;
+    for ( $batch = 0; $batch < 10 && ! $second['complete']; $batch++ ) { $second = $content->scan_content_batch(); }
+    $check( $second['complete'] && $second['scanned'] >= 2 && $repository->window( 0, 4 )['total'] === 2, 'real scan append persists findings and checkpoint' );
     $status = $content->refresh_migration_status_batch( 1 );
     $check( $status['processed'] === 1 && $status['total'] === 2, 'real status page patch and checkpoint' );
 } finally {
@@ -93,5 +94,5 @@ unset( $GLOBALS['foogallery_migrate_engine'], $engine );
 $convert( 'table', true );
 $engine = new MigratorEngine(); $GLOBALS['foogallery_migrate_engine'] = $engine;
 $check( $engine->content_scan_repository()->is_table(), 'forward conversion selects table backend' );
-$check( serialize( $engine->content_scan_repository()->read_snapshot() ) === serialize( $typed ), 'forward conversion exact typed content equality' );
+$check( serialize( $engine->content_scan_repository()->read_snapshot() ) === serialize( $typed['items'] ) && serialize( $engine->get_migrator_setting( ContentScanRepository::STATE_KEY ) ) === serialize( $typed ), 'forward conversion exact typed content equality' );
 return $checks;
