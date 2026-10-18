@@ -164,10 +164,49 @@ class RetainingStagingAccountingTest extends TestCase {
   $this->assertGreaterThanOrEqual( 4194304, $grown - $sample );
   $this->refused( function() use ( $b ) { $b->admit_memory( 0 ); } );
   $this->assertSame( $ledger, $this->ledger( $b ) );
-  unset( $more ); $this->assertTrue( $b->admit_memory( 0 ) );
+  $high_water = $this->property( $b, 'native_high_water' );
+  $this->assertGreaterThanOrEqual( $grown, $high_water );
+  unset( $more ); $released = memory_get_usage( true );
+  $this->assertLessThan( $grown, $released, 'The real allocation was freed, not merely left live.' );
+  // The operation-owned native high-water survives a lower current sample.
+  // Freeing backing cannot restore forecast credit or erase any liability.
+  $this->refused( function() use ( $b ) { $b->admit_memory( 0 ); } );
+  $this->assertGreaterThanOrEqual( $high_water, $this->property( $b, 'native_high_water' ) );
+  $this->assertSame( $ledger, $this->ledger( $b ) );
   $this->assertCount( 4097, $slots );
   $this->record( __FUNCTION__, $start, $b, array( 'ballast_bytes' => strlen( $ballast ), 'extra_ballast_bytes' => 4194304,
-   'sample_before' => $sample, 'sample_with_extra_ballast' => $grown, 'K' => $K ) );
+   'sample_before' => $sample, 'sample_with_extra_ballast' => $grown, 'sample_after_release' => $released,
+   'native_high_water' => $this->property( $b, 'native_high_water' ), 'K' => $K ) );
+ }
+
+ public function test_native_high_water_allows_positive_headroom_after_ballast_release(): void {
+  $start = microtime( true ); $ballast = str_repeat( 'b', 8388608 );
+  $b = StorageScaleAdmissionTest::admission(); $this->qualified( $b ); $owner = new \stdClass();
+  $token = $b->open_retaining_phase( $owner, 1 ); $K = Model::container( 4097 );
+  $b->plan_retaining_phase( $token, $owner, $K, 32768, 4096, 1 );
+  $slots = array_fill( 0, 4097, null ); $b->realize_retaining_event( $token, $owner, 0, $K );
+  $pending = $this->ledger( $b )['pending']; $sample = memory_get_usage( true );
+  $limit = \FooPlugins\FooGalleryMigrate\StoragePreflight::memory_bytes( ini_get( 'memory_limit' ) );
+  // Unlike the pressure case, this operation leaves room for the sampled peak.
+  $b->admit_additional( $limit - 33554432 - $sample - $pending - 8388608 );
+  $ledger = $this->ledger( $b ); $more = str_repeat( 'x', 4194304 ); $grown = memory_get_usage( true );
+  $this->assertGreaterThanOrEqual( 4194304, $grown - $sample );
+  $this->assertTrue( $b->admit_memory( 0 ) );
+  unset( $more ); $released = memory_get_usage( true );
+  $this->assertLessThan( $grown, $released );
+  $headroom = $limit - 33554432 - $grown - $ledger['pending'] - $ledger['additional'];
+  $bytes = intdiv( $headroom, 8 ); $this->assertGreaterThan( 0, $bytes );
+  // Preserve a real post-free positive allocation, at the unchanged factor-8
+  // boundary; one more raw byte must refuse, without spending or resetting it.
+  $this->assertTrue( $b->admit_memory( $bytes ) );
+  $this->refused( function() use ( $b, $bytes ) { $b->admit_memory( $bytes + 1 ); } );
+  $this->assertTrue( $b->admit_memory( $bytes ) );
+  $this->assertSame( $grown, $this->property( $b, 'native_high_water' ) );
+  $this->assertSame( $ledger, $this->ledger( $b ) ); $this->assertCount( 4097, $slots );
+  $this->record( __FUNCTION__, $start, $b, array( 'ballast_bytes' => strlen( $ballast ), 'extra_ballast_bytes' => 4194304,
+   'sample_before' => $sample, 'sample_with_extra_ballast' => $grown, 'sample_after_release' => $released,
+   'native_high_water' => $this->property( $b, 'native_high_water' ), 'positive_raw_bytes' => $bytes,
+   'high_water_headroom' => $headroom, 'K' => $K ) );
  }
 
  public function test_stage_interruption_preserves_W_F_E_foreign_and_legacy(): void {
