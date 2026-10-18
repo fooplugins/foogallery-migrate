@@ -349,7 +349,10 @@ class LegacyTableRepository {
 						array( $this->blog, $head['id'], $head['active_generation'], $limit, $offset ) ) );
 					foreach ( $rows as $row ) { $tree = $this->tree_hash( $entry['key'], $head, $this->hex( $row['node_hash'] ) ); if ( false === $tree ) { $this->fail( 'Content tree disappeared.' ); } $items[$tree['key']] = $tree['value']; }
 				} else {
-					foreach ( $keys as $key ) { $tree = $this->tree( $entry['key'], $head, $key ); if ( false !== $tree ) { $items[$key] = $tree['value']; } }
+					$selected = array();
+					foreach ( $keys as $key ) { $tree = $this->tree( $entry['key'], $head, $key ); if ( false !== $tree ) { $selected[] = $tree; } }
+					usort( $selected, function ( $a, $b ) { return $a['order'] === $b['order'] ? 0 : ( $a['order'] < $b['order'] ? -1 : 1 ); } );
+					foreach ( $selected as $tree ) { $items[$tree['key']] = $tree['value']; }
 				}
 			}
 			if ( $this->reader->head( $entry['key'] ) !== $head ) { $this->fail( 'Content changed during window read.' ); }
