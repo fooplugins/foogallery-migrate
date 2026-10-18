@@ -49,7 +49,14 @@ def archive(commit, target, out):
     (out / (target.name + '.tar')).write_bytes(data)
     target.mkdir()
     with tarfile.open(fileobj=io.BytesIO(data)) as tar:
-        tar.extractall(target, filter='data')
+        # The host's python3 can predate tarfile's filter keyword. Git archive
+        # has regular files/directories here; refuse every link/special member
+        # rather than falling back to unfiltered arbitrary extraction.
+        for member in tar.getmembers():
+            name = Path(member.name)
+            if name.is_absolute() or '..' in name.parts or not (member.isfile() or member.isdir()):
+                raise RuntimeError('Unsupported/unsafe source archive member: ' + member.name)
+        tar.extractall(target)
 
 
 def main():
@@ -154,6 +161,7 @@ def main():
         run('phpunit-version', test_args[:5] + ['vendor/bin/phpunit', '--version'], ROOT)
         run('node-version', ['node', '--version'], ROOT)
         run('npm-version', ['npm', '--version'], ROOT)
+        run('python-version', ['python3', '--version'], ROOT)
         runtime = run('php-runtime', php_args + ['-r', 'echo json_encode(array("version"=>PHP_VERSION,"memory_limit"=>ini_get("memory_limit"),"opcache.enable_cli"=>ini_get("opcache.enable_cli"),"auto_prepend_file"=>ini_get("auto_prepend_file"),"auto_append_file"=>ini_get("auto_append_file"),"zend.exception_ignore_args"=>ini_get("zend.exception_ignore_args")));'], ROOT)
         report['runtime'] = json.loads(runtime)
         if report['runtime']['auto_prepend_file'] or report['runtime']['auto_append_file']:
