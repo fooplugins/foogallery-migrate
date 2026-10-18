@@ -365,6 +365,17 @@ class LegacyTableRepository {
 	/** Preserve missing in the full compatibility facade; not used by UI paging. */
 	public function read_content_state() {
 		$head = $this->reader->head( ContentScanRepository::STATE_KEY );
+		// Logical false is readable without interpreting any old scalar array as
+		// a bounded collection. content_context() intentionally still refuses it.
+		if ( false !== $head && 'scalar' === $head['state_kind'] ) {
+			$this->start_budget(); $root = $this->root_metadata( $head );
+			if ( array_keys( $root ) !== array( 'version', 'kind', 'value' ) || false !== $root['value'] || 0 !== $head['record_count'] ) {
+				$this->fail( 'Legacy scalar content state requires explicit reset or conversion before access.' );
+			}
+			$this->verify_scalar( $head, false );
+			$this->unchanged( ContentScanRepository::STATE_KEY, $head );
+			return array( 'found' => true, 'value' => false );
+		}
 		return array( 'found' => false !== $head, 'value' => false === $head ? null : $this->content_scan_state() );
 	}
 

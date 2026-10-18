@@ -60,7 +60,7 @@ class LegacyRecordCodec {
 	 * Native default JSON escaping is counted; custom codec/WP encoders and
 	 * narrower injected codec limits are NOT certified by this observation.
 	 */
-	public function describe_tree( $key, $record, $ownership ) {
+	public function describe_tree( $key, $record, $ownership, $state_key = null ) {
 		if ( 'retaining-row' !== $ownership && 'repository-sink' !== $ownership ) { $this->fail( 'Unsupported footprint ownership.' ); }
 		$this->tick();
 		$d = array( 'version' => 1, 'ownership' => $ownership, 'additional_allocation_bytes' => null,
@@ -72,7 +72,7 @@ class LegacyRecordCodec {
 			'logical_nodes' => 0, 'logical_entries' => 0, 'logical_arrays' => 0, 'logical_string_bytes' => 0,
 			'logical_max_depth' => 0, 'logical_max_width' => 0, 'logical_max_string_bytes' => 0 );
 		$this->footprint_logical( $record, 0, $d );
-		$this->footprint_tree( $key, $record, 0, 0, $d );
+		$this->footprint_tree( $key, $record, 0, 0, $d, $state_key );
 		$d['retained_output_rows'] = 'retaining-row' === $ownership ? $d['records'] : 0;
 		return $d;
 	}
@@ -193,7 +193,7 @@ class LegacyRecordCodec {
 		$this->footprint_add( $m, 'json_bytes', $bytes );
 	}
 
-	private function footprint_tree( $key, $record, $depth, $ancestor_bytes, &$d ) {
+	private function footprint_tree( $key, $record, $depth, $ancestor_bytes, &$d, $state_key ) {
 		$this->tick();
 		if ( $d['records'] >= $this->max_records || $depth > $this->max_depth || ( ! is_int( $key ) && ! is_string( $key ) ) ) { $this->fail( 'Record footprint exceeds budget or key domain.' ); }
 		$probe = array( $key => true ); foreach ( $probe as $actual => $unused ) { if ( $actual !== $key ) { $this->fail( 'Coercible footprint key.' ); } }
@@ -243,6 +243,14 @@ class LegacyRecordCodec {
 				$projection_bytes = StorageScaleAdmission::checked_add( $projection_bytes, $column_bytes );
 			}
 		}
+		if ( $this->has_content_projection( $state_key, 0 === $depth ) ) {
+			// md5 occurrence keys are always 32 ASCII bytes. Observe the exact
+			// typed column before allocating the occurrence/hash or any row.
+			$pm = $this->footprint_metrics(); $this->footprint_value( str_repeat( '0', 32 ), $pm );
+			$column_bytes = StorageScaleAdmission::checked_add( 22, $pm['json_bytes'] );
+			if ( $column_bytes > 3072 ) { ++$large_columns; }
+			$projection_bytes = StorageScaleAdmission::checked_add( $projection_bytes, $column_bytes );
+		}
 		$bytes = StorageScaleAdmission::checked_add( $pair, StorageScaleAdmission::checked_add( $key_bytes, $projection_bytes ) );
 		if ( $bytes > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Row footprint exceeds byte budget.' ); }
 		$this->footprint_add( $d, 'encoded_odd_rows', $bytes & 1 ); $this->footprint_add( $d, 'encoded_large_columns', $large_columns );
@@ -257,7 +265,7 @@ class LegacyRecordCodec {
 		$d['max_ancestor_row_bytes'] = max( $d['max_ancestor_row_bytes'], $ancestor_bytes );
 		if ( null !== $child_count ) {
 			$d['max_siblings'] = max( $d['max_siblings'], $child_count );
-			foreach ( $record['children'] as $k => $child ) { $this->footprint_tree( $k, $child, $depth + 1, $ancestor_bytes, $d ); }
+			foreach ( $record['children'] as $k => $child ) { $this->footprint_tree( $k, $child, $depth + 1, $ancestor_bytes, $d, $state_key ); }
 		}
 	}
 
@@ -275,7 +283,7 @@ class LegacyRecordCodec {
 			if ( get_class( $this ) !== __CLASS__ ) { $this->fail( 'Unmeasured record codec.' ); }
 			$emit->qualify( $this->codec, $this->scale );
 			$this->scale->admit_additional( $emit->descriptor_bytes( 64 ) );
-			$d = $this->describe_tree( $key, $record, 'repository-sink' );
+			$d = $this->describe_tree( $key, $record, 'repository-sink', $state_key );
 			if ( $d['records'] > $this->scale->limit( 'max_physical_rows_per_table' ) ||
 				$d['records'] > $this->scale->limit( 'max_physical_rows' ) ||
 				$d['encoded_bytes'] > $this->scale->limit( 'max_physical_bytes' ) ) { $this->fail( 'Physical flatten budget exceeded.' ); }
@@ -286,7 +294,7 @@ class LegacyRecordCodec {
 		$phase = null; $slots = null;
 		if ( ! $qualified && null !== $this->scale && GenericRetainingModel::supports( $this, $this->codec, $this->scale ) ) {
 			$phase = $this->scale->open_retaining_phase( $this, GenericRetainingModel::descriptor_bytes() );
-			$d = $this->describe_tree( $key, $record, 'retaining-row' );
+			$d = $this->describe_tree( $key, $record, 'retaining-row', $state_key );
 			$plan = GenericRetainingModel::staged_flatten_plan( $d, $state_key );
 			$this->scale->plan_retaining_phase( $phase, $this, $plan['future'], $plan['private'], $plan['external'], $plan['events'] );
 			// Floor-compatible packed preallocation: no append, resize or export.
@@ -445,6 +453,10 @@ class LegacyRecordCodec {
 			'migrated_id', 'migrated_title', 'children_count', 'children_errors', 'error' );
 	}
 
+	private function has_content_projection( $state_key, $root ) {
+		return $root && self::CONTENT_STATE_KEY === $state_key;
+	}
+
 	private function make_row( $state_hash, $parent, $key, $record, $order, $depth, $phase = null ) {
 		$this->tick();
 		$this->admit( null === $phase ? LegacyTableReader::MAX_RECORD_BYTES : 0 );
@@ -471,7 +483,7 @@ class LegacyRecordCodec {
 			'payload_hash' => hash( 'sha256', $payload ),
 			'payload_bytes' => strlen( $payload ) + strlen( $mutation ) );
 		$row = array_merge( $row, $this->projections( $record ) );
-		if ( null === $parent && $state_hash === $this->codec->key_hash( self::CONTENT_STATE_KEY ) ) {
+		if ( $this->has_content_projection( $state_hash === $this->codec->key_hash( self::CONTENT_STATE_KEY ) ? self::CONTENT_STATE_KEY : null, null === $parent ) ) {
 			$occurrence = self::content_occurrence_key( $record );
 			$row['legacy_identifier_value'] = $this->codec->key_value( $occurrence );
 			$row['legacy_identifier_hash'] = $this->codec->key_hash( $occurrence );
@@ -810,7 +822,7 @@ class LegacyRecordCodec {
 		if ( null !== $this->scale && SnapshotStatsModel::supports( $this, $this->codec, $this->scale ) ) {
 			$this->scale->admit_snapshot_stats_workspace( GenericRetainingModel::descriptor_bytes() );
 			$phase = $this->scale->open_retaining_phase( $this, GenericRetainingModel::descriptor_bytes() );
-			$d = $this->describe_tree( $key, $record, 'repository-sink' );
+			$d = $this->describe_tree( $key, $record, 'repository-sink', $state_key );
 			$workspace = SnapshotStatsModel::workspace( $d, $state_key );
 			// Keep the old descriptor reservation while admitting its replacement;
 			// no sample or a completed row can release this private workspace.

@@ -191,7 +191,9 @@ class StorageConversion {
 						// even when their logical value is an array. Keep conversion
 						// compatible with their readers and atomic companion writes.
 						$checkpoint = in_array( $key, array( MigratorSettings::KEY_GALLERIES . '-state', MigratorSettings::KEY_ALBUMS . '-state', ImageTagQueueRepository::STATE_KEY ), true );
-						$kind = ContentScanRepository::STATE_KEY === $key ? 'map' : ( $checkpoint || ! is_array( $value ) ? 'scalar' : ( $value === array_values( $value ) ? 'list' : 'map' ) );
+						// Preserve the false invalidation sentinel as scalar for exact roundtrip.
+						// Scalar table heads still require explicit reset before bounded access.
+						$kind = ContentScanRepository::STATE_KEY === $key && is_array( $value ) ? 'map' : ( $checkpoint || ! is_array( $value ) ? 'scalar' : ( $value === array_values( $value ) ? 'list' : 'map' ) );
 						$changes[] = array( 'key' => $key, 'order' => $order++, 'kind' => $kind, 'value' => $value, 'expected_revision' => null );
 					}
 					$this->snapshot->replace_many( $changes );

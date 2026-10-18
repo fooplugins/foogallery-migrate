@@ -6,7 +6,7 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 class ContentScanRepository extends ScalarStateRepository {
 	const STATE_KEY = 'block-shortcode_scan_state';
 	private function state( $data ) {
-		if ( array_key_exists( self::STATE_KEY, $data ) ) {
+		if ( array_key_exists( self::STATE_KEY, $data ) && false !== $data[self::STATE_KEY] ) {
 			$state = $data[self::STATE_KEY];
 			if ( ! is_array( $state ) || ! isset( $state['items'], $state['progress'] ) || ! is_array( $state['items'] ) || ! is_array( $state['progress'] ) ) {
 				throw new \RuntimeException( 'Invalid content scan state. No legacy fallback.' );
@@ -22,8 +22,8 @@ class ContentScanRepository extends ScalarStateRepository {
 		return $this->state( $this->backend->read_all() );
 	}
 	public function is_table() { return $this->backend instanceof LegacyTableBackend; }
-	public function window( $offset, $limit ) {
-		if ( $this->is_table() ) { return $this->backend->content_window( $offset, $limit ); }
+	public function window( $offset, $limit, $keys = null ) {
+		if ( $this->is_table() ) { return $this->backend->content_window( $offset, $limit, $keys ); }
 		$state = $this->option_state();
 		return array( 'items' => array_slice( $state['items'], $offset, $limit, true ), 'progress' => $state['progress'], 'total' => count( $state['items'] ), 'revision' => null );
 	}

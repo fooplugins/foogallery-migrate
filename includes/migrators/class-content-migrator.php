@@ -264,7 +264,12 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			$lookup = $this->build_migrated_object_lookup();
 			$plugins = $this->get_plugins_by_name();
 
-			if ( null !== $repository ) { $state = $this->scan_window( $start, $batch_size ); $content_items = $state['items']; }
+			if ( null !== $repository ) {
+				$revision = $state['revision'];
+				$state = $this->scan_window( $start, $batch_size );
+				if ( $revision !== $state['revision'] ) { throw new \RuntimeException( 'Content changed between status windows; retry the refresh.' ); }
+				$content_items = $state['items'];
+			}
 			$batch = null === $repository ? array_slice( $content_items, $start, $end - $start, true ) : $content_items;
 			foreach ( $batch as $counter => $value ) {
 				if ( ! isset( $content_items[ $counter ] ) || ! is_array( $content_items[ $counter ] ) ) {
@@ -308,8 +313,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			$progress['status_refresh'] = array_merge( $this->default_status_refresh_progress(), is_array( $progress['status_refresh'] ) ? $progress['status_refresh'] : array() );
 			return $progress;
 		}
-		private function scan_window( $offset, $limit ) {
-			$state = $this->scoped_content_repository()->window( $offset, $limit );
+		private function scan_window( $offset, $limit, $keys = null ) {
+			$state = $this->scoped_content_repository()->window( $offset, $limit, $keys );
 			$state['progress'] = $this->normalize_progress( $state['progress'] ); return $state;
 		}
 		private function persist_scan_batch( $repository, $reset, $items, $progress, $revision ) {
@@ -1626,6 +1631,15 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				}
 			}
 
+			// Admit and persist invalidation before touching posts. This is not a
+			// transaction across scan storage, posts, or third-party post hooks.
+			$repository = $this->scoped_content_repository();
+			if ( null !== $repository ) {
+				if ( false === $repository->clear() ) { throw new \RuntimeException( 'Unable to invalidate content scan.' ); }
+			} else if ( false === $this->set_setting( $this->type, false ) || false === $this->set_setting( $this->type . '_scan_state', false ) ) {
+				throw new \RuntimeException( 'Unable to invalidate content scan.' );
+			}
+
 			foreach ( $posts_to_update as $post_id => $post_data ) {
 				$updated_content = $post_data['content'];
 				usort( $post_data['replacements'], array( $this, 'sort_replacements_descending' ) );
@@ -1679,8 +1693,6 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				}
 			}
 
-			$this->set_setting( $this->type, false );
-			$this->set_setting( $this->type . '_scan_state', false );
 
 			return array(
 				'success' => $replaced_count,
@@ -1868,11 +1880,17 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			if ( $page < 1 ) {
 				$page = 1;
 			}
-			$url = add_query_arg( 'content_paged', $page, $url ) . '#shortcodes';
 			$repository = $this->scoped_content_repository();
 			$page_size = $this->migrator_engine->get_page_size();
 			if ( null !== $repository ) { $page_size = $page_size > 0 ? min( 100, $page_size ) : 100; }
-			$state = null === $repository ? $this->get_scan_state() : $this->scan_window( ( $page - 1 ) * $page_size, $page_size );
+			if ( null === $repository ) { $state = $this->get_scan_state(); }
+			else {
+				$header = $this->scan_window( 0, 1, array() );
+				$page = min( $page, max( 1, (int) ceil( $header['total'] / $page_size ) ) );
+				$state = $this->scan_window( ( $page - 1 ) * $page_size, $page_size );
+				if ( $header['revision'] !== $state['revision'] ) { throw new \RuntimeException( 'Content changed during page selection; reload the page.' ); }
+			}
+			$url = add_query_arg( 'content_paged', $page, $url ) . '#shortcodes';
 			$content_items = $state['items'];
 			$progress = $state['progress'];
 			$has_scanned_content = ! empty( $progress['started'] );
