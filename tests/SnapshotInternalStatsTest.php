@@ -102,7 +102,16 @@ class SnapshotInternalStatsTest extends TestCase {
    }
   }
  }
+ /**
+  * @runInSeparateProcess
+  * @preserveGlobalState disabled
+  */
  public function test_shared_deadline_interruption_keeps_workspace_pending(): void {
+  // Pending private workspace exists only in the qualified actual128M path.
+  // Keep the suite budget unchanged while exercising that exact contract.
+  $this->assertNotFalse(ini_set('memory_limit', '128M'));
+  $this->assertSame('128M', ini_get('memory_limit'));
+  $this->assertSame('0', ini_get('opcache.enable_cli'));
   $calls = 0; $clock = function () use (&$calls) { return ++$calls > 40 ? 111.0 : 100.0; };
   $b = StorageScaleAdmissionTest::admission(null, $clock); $c = new LegacyRecordCodec(null, 24576, 16777216, $b);
   $this->refusal(function () use ($c) { $c->preflight_stats('galleries', 'k', array('children' => array_fill(0, 100, 'x')), 0); });
