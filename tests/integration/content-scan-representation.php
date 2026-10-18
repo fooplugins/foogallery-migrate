@@ -16,7 +16,7 @@ $check = function ( $ok, $label ) use ( &$checks ) {
     $checks[] = $label;
 };
 $engine = new MigratorEngine();
-$GLOBALS['foogallery_migrate_engine'] = $engine;
+$GLOBALS['foogallery_migrate_engine_instance'] = $engine;
 $repository = $engine->content_scan_repository();
 $check( $repository->is_table(), 'existing selected table authority' );
 $item = array( 'post_id' => 999, 'plugin_name' => 'WordPress Core', 'type' => 'shortcode',
@@ -81,23 +81,25 @@ try {
 // Exercise the actual coordinator in both directions on a small typed state.
 $engine->set_migrator_setting( ContentScanRepository::STATE_KEY, $typed );
 StorageMaintenanceGate::current()->end_writer();
-unset( $GLOBALS['foogallery_migrate_engine'], $repository, $engine );
+unset( $GLOBALS['foogallery_migrate_engine_instance'], $repository, $engine );
 $policy = array( 'max_raw_bytes' => 1048576, 'amplification' => 64, 'reserve_bytes' => 33554432 );
 $convert = function ( $target, $replace ) use ( $policy, $check ) {
-    $control = ( new StorageControl() )->read();
-    $request = array( 'target' => $target, 'authority' => $control['authority'], 'confirmed' => true,
-        'replace_retained' => $replace, 'keep_retained' => true, 'purpose' => 'switch',
-        '_wpnonce' => wp_create_nonce( 'foogallery_migrate_storage_switch' ) );
-    $result = ( new StorageConversion( $policy ) )->switch_backend( $request );
-    $check( ! is_wp_error( $result ), 'actual conversion to ' . $target . ( is_wp_error( $result ) ? ': ' . $result->get_error_message() : '' ) );
+    $blog = get_current_blog_id();
+    $purpose = $replace ? 'option_reimport' : ( 'table' === $target ? 'option_import' : 'table_export' );
+    $request = array( 'blog_id' => $blog, 'scope' => 'site', 'target' => $target,
+        'confirmation' => $replace ? 'replace-retained-with-table' : 'switch-to-' . $target,
+        'nonce' => wp_create_nonce( 'foogallery_migrate_storage_' . $purpose . '_' . $blog ) );
+    $conversion = new StorageConversion( $policy );
+    $result = $replace ? $conversion->replace_retained( $request ) : $conversion->switch_backend( $request );
+    $check( ! is_wp_error( $result ), 'actual conversion to ' . $target . ( is_wp_error( $result ) ? ': ' . $result->get_error_code() . ': ' . $result->get_error_message() : '' ) );
 };
 $convert( 'option', false );
-$engine = new MigratorEngine(); $GLOBALS['foogallery_migrate_engine'] = $engine;
+$engine = new MigratorEngine(); $GLOBALS['foogallery_migrate_engine_instance'] = $engine;
 $check( ! $engine->content_scan_repository()->is_table(), 'reverse conversion selects option backend' );
 $check( serialize( $engine->get_migrator_setting( ContentScanRepository::STATE_KEY ) ) === serialize( $typed ), 'reverse conversion exact typed content equality' );
-unset( $GLOBALS['foogallery_migrate_engine'], $engine );
+unset( $GLOBALS['foogallery_migrate_engine_instance'], $engine );
 $convert( 'table', true );
-$engine = new MigratorEngine(); $GLOBALS['foogallery_migrate_engine'] = $engine;
+$engine = new MigratorEngine(); $GLOBALS['foogallery_migrate_engine_instance'] = $engine;
 $check( $engine->content_scan_repository()->is_table(), 'forward conversion selects table backend' );
 $check( serialize( $engine->content_scan_repository()->read_snapshot() ) === serialize( $typed['items'] ) && serialize( $engine->get_migrator_setting( ContentScanRepository::STATE_KEY ) ) === serialize( $typed ), 'forward conversion exact typed content equality' );
 return $checks;
