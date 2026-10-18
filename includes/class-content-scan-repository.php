@@ -15,7 +15,7 @@ class ContentScanRepository extends ScalarStateRepository {
 		}
 		$items = isset( $data['block-shortcode'] ) && is_array( $data['block-shortcode'] ) ? $data['block-shortcode'] : array();
 		$progress = isset( $data['block-shortcode_scan_progress'] ) && is_array( $data['block-shortcode_scan_progress'] ) ? $data['block-shortcode_scan_progress'] : array();
-		return array( 'items' => $items, 'progress' => $progress );
+		return $state;
 	}
 	private function option_state() {
 		if ( $this->backend instanceof LegacyTableBackend ) { return $this->backend->content_scan_state(); }
