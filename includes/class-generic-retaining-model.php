@@ -7,13 +7,15 @@ final class GenericRetainingModel {
  const PROFILE = 'php-8.5.11-darwin-arm64-retaining-v2';
  const BINARY_SHA256 = '6ff616b1441ba498839c8ff3b51db9d6e2f037c175e30ebe81652a76e439c749';
 
+ // Finite measured budgets only; actual headroom is still checked by $scale.
  public static function supports( $producer, $codec, $scale ) {
   if ( ! $scale instanceof StorageScaleAdmission || ! $scale->supports_retaining_phase() ||
    get_class( $producer ) !== __NAMESPACE__ . '\\LegacyRecordCodec' || get_class( $codec ) !== __NAMESPACE__ . '\\LegacyStateCodec' ||
    $codec != new LegacyStateCodec( 1048576, 64, 10000, $scale ) ||
    'cli' !== PHP_SAPI || PHP_VERSION !== '8.5.11' || PHP_OS !== 'Darwin' || php_uname( 'm' ) !== 'arm64' ||
    PHP_INT_SIZE !== 8 || PHP_ZTS || PHP_DEBUG || '0' === getenv( 'USE_ZEND_ALLOC' ) ||
-   '128M' !== ini_get( 'memory_limit' ) || ini_get( 'opcache.enable_cli' ) || hash_file( 'sha256', PHP_BINARY ) !== self::BINARY_SHA256 ) { return false; }
+   ! in_array( StoragePreflight::memory_bytes( ini_get( 'memory_limit' ) ), array( 134217728, 268435456 ), true ) ||
+   ini_get( 'opcache.enable_cli' ) || hash_file( 'sha256', PHP_BINARY ) !== self::BINARY_SHA256 ) { return false; }
   $extensions = array(); foreach ( get_loaded_extensions() as $name ) { $extensions[$name] = phpversion( $name ); } ksort( $extensions );
   if ( hash( 'sha256', json_encode( $extensions ) ) !== '1c30606fe6fefe1aa9a56184a8a6c35ea06743c27a52d17e8099a60e5223df1b' ) { return false; }
   if ( ! function_exists( 'wp_json_encode' ) ) { return true; }

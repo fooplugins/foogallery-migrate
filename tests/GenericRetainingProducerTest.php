@@ -15,13 +15,13 @@ class GenericRetainingProducerTest extends TestCase {
 
  private function witness( $shape, $size, $ballast = 0, $copies = 1 ) {
   $root = getenv( 'FOOGM_AUDIT_RUNTIME_ROOT' ) ?: dirname( __DIR__ );
-  $args = array( PHP_BINARY, '-d', 'memory_limit=128M', '-d', 'opcache.enable_cli=0',
+  $args = array( PHP_BINARY, '-d', 'memory_limit=' . ini_get( 'memory_limit' ), '-d', 'opcache.enable_cli=0',
    __DIR__ . '/tools/generic-retaining-phase-probe.php', $root, $shape, (string) $size, (string) $ballast, (string) $copies );
   exec( implode( ' ', array_map( 'escapeshellarg', $args ) ) . ' 2>&1', $lines, $status );
   $r = json_decode( implode( "\n", $lines ), true );
   $this->assertIsArray( $r, implode( "\n", $lines ) );
   $this->assertTrue( $r['supported'] );
-  $this->assertSame( '128M', $r['limit'] );
+  $this->assertSame( ini_get( 'memory_limit' ), $r['limit'] );
   $this->assertSame( 33554432, $r['reserve'] );
   // Standalone probes must load refusal-path dependencies even on happy paths.
   $this->assertArrayHasKey( 'FooPlugins\\FooGalleryMigrate\\StorageScalarObserver', $r['loaded'] );
@@ -52,7 +52,7 @@ class GenericRetainingProducerTest extends TestCase {
    $this->assertLessThanOrEqual( $r['rebuild_plan']['parts']['row_workspace'],
     $r['rebuild_descriptor_after']['peak_' . $kind] - $r['rebuild_descriptor_before'][$kind] );
   }
-  $this->assertLessThanOrEqual( 134217728, $r['parity_after']['peak_true'] + $r['reserve'] );
+  $this->assertLessThanOrEqual( $this->limit_bytes(), $r['parity_after']['peak_true'] + $r['reserve'] );
  }
 
  public function test_distinct_copy_has_independent_pending_and_live_retention(): void {
@@ -61,7 +61,7 @@ class GenericRetainingProducerTest extends TestCase {
   $this->assertSame( 1001, $r['distinct_rows'] );
   $this->assertGreaterThan( 0, $r['external_distinct_copy_pending'] );
   $this->assertSame( 'complete', $r['stage'] );
-  list( $status, $r ) = $this->witness( 'rows', 10000, 33554432, 2 );
+  list( $status, $r ) = $this->witness( 'rows', 10000, $this->pressure_ballast(), 2 );
   $this->assertSame( 1, $status );
   $this->assertSame( 'flatten', $r['stage'] );
   $this->assertSame( 0, $r['retained_rows'] );
@@ -69,10 +69,18 @@ class GenericRetainingProducerTest extends TestCase {
  }
 
  public function test_live_ballast_is_never_a_source_credit(): void {
-  list( $status, $r ) = $this->witness( 'original', 20000, 33554432 );
+  list( $status, $r ) = $this->witness( 'original', 20000, $this->pressure_ballast() );
   $this->assertSame( 1, $status );
   $this->assertSame( 'flatten', $r['stage'] );
   $this->assertSame( 0, $r['retained_rows'] );
-  $this->assertSame( 33554432, $r['ballast_bytes'] );
+  $this->assertSame( $this->pressure_ballast(), $r['ballast_bytes'] );
+ }
+
+ private function limit_bytes() {
+  return \FooPlugins\FooGalleryMigrate\StoragePreflight::memory_bytes( ini_get( 'memory_limit' ) );
+ }
+ private function pressure_ballast() {
+  // Preserve the original 128M negative's headroom, not its absolute allocation.
+  return 33554432 + $this->limit_bytes() - 134217728;
  }
 }

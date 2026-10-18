@@ -23,8 +23,9 @@ function sample() {
 $mode = $argv[2]; $n = (int) $argv[3];
 $ballast_bytes = isset( $argv[4] ) ? (int) $argv[4] : 0;
 $copies = isset( $argv[5] ) ? (int) $argv[5] : 1;
-if ( '128M' !== ini_get( 'memory_limit' ) || ini_get( 'opcache.enable_cli' ) || ! in_array( $copies, array( 1, 2 ), true ) ||
- $ballast_bytes < 0 || $ballast_bytes > 33554432 || $n < 0 || $n > 1048576 ) { throw new RuntimeException( 'Unsupported probe arguments.' ); }
+$limit_bytes = FooPlugins\FooGalleryMigrate\StoragePreflight::memory_bytes( ini_get( 'memory_limit' ) );
+if ( ! in_array( $limit_bytes, array( 134217728, 268435456 ), true ) || ini_get( 'opcache.enable_cli' ) || ! in_array( $copies, array( 1, 2 ), true ) ||
+ $ballast_bytes < 0 || $ballast_bytes > 33554432 + $limit_bytes - 134217728 || $n < 0 || $n > 1048576 ) { throw new RuntimeException( 'Unsupported probe arguments.' ); }
 if ( 'original' === $mode ) {
  require dirname( __DIR__ ) . '/support/StorageA7Fixture.php';
  $store = FooPlugins\FooGalleryMigrate\Tests\StorageA7Fixture::value( $n ); $v = $store['galleries']['items']['gallery-009'];
@@ -37,7 +38,7 @@ else { throw new RuntimeException( 'Unknown shape.' ); }
 $ballast = $ballast_bytes ? str_repeat( 'B', $ballast_bytes ) : '';
 $limits = array( 'version' => 1, 'max_tokens' => 262144, 'max_rows' => 24576, 'max_bytes' => 16777216,
  'max_depth' => 64, 'max_heads' => 100, 'max_physical_rows_per_table' => 24576, 'max_physical_rows' => 49152,
- 'max_physical_bytes' => 33554432, 'memory_ceiling_bytes' => 134217728, 'max_seconds' => 10 );
+ 'max_physical_bytes' => 33554432, 'memory_ceiling_bytes' => $limit_bytes, 'max_seconds' => 10 );
 $budget = new Admission( $limits, array( 'max_raw_bytes' => 8388608, 'amplification' => 8, 'reserve_bytes' => 33554432 ), microtime( true ) + 10.0 );
 $c = new Records( null, 24576, 16777216, $budget ); $state = new Codec( 1048576, 64, 10000, $budget );
 $report = array( 'profile' => Model::PROFILE, 'supported' => Model::supports( $c, $state, $budget ),

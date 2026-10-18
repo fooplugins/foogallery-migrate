@@ -2,12 +2,29 @@ Generic retaining producer checkpoint (not conversion approval)
 
 The finite profile in GenericRetainingModel supports only the pinned PHP 8.5.11,
 Darwin arm64 NTS binary, loaded extension name/version fingerprint, Zend allocator,
-128M effective PHP limit, opcache CLI off, native memory sampler, exact built-in
+finite 128MiB or 256MiB effective PHP limit (normalized PHP quantities), opcache
+CLI off, native memory sampler, exact built-in
 record/value codecs, and native JSON. A separately measured exact three-line
 native-forwarding test shim is recognized by its source-body hash, not its path.
 Real WordPress's encoder, arbitrary wrappers, codec subclasses/altered limits,
 injected memory samplers and unknown runtimes use the old conservative admission.
 This qualification is not trust in callbacks or a never-OOM theorem.
+
+The two budgets qualify only on that same pinned host. Admission still reads the
+actual runtime limit and native high-water on every check, with the unchanged
+32MiB reserve, coefficients and deadlines. Unlimited and other budgets do not
+qualify. Increasing a budget is not permission to ignore retained usage or fall
+back silently in retaining-path tests. Producer children inherit the tested
+budget; negative ballast follows the same near-limit headroom at both budgets.
+
+128M is a bounded test configuration, not a WordPress requirement. The original
+scale test in 32b03a1 includes a 128M memory fixture; 3465ec6 introduced the exact
+128M retaining-profile guard alongside host measurements. That guard restricted
+where the model could be used; it was not the memory-accounting formula. The
+formula forecasts current native usage plus pending work plus reserve against
+the actual PHP ceiling, refusing before allocation/emission rather than risking
+an OOM or timeout halfway through migration. Host layout/codec qualifications
+and budget/headroom admission remain separate controls.
 
 Coefficient derivation and observations
 

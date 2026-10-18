@@ -125,7 +125,8 @@ class StoragePreflight {
 			'estimated_decode_bytes' => $estimate, 'available_decode_bytes' => $available );
 	}
 
-	private static function memory_bytes( $value ) {
+	/** Normalize a trusted PHP memory quantity; false is unknown, -1 unlimited. */
+	public static function memory_bytes( $value ) {
 		if ( ! is_string( $value ) ) { return false; }
 		$value = trim( $value );
 		if ( '-1' === $value ) { return -1; }

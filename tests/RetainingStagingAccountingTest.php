@@ -157,7 +157,8 @@ class RetainingStagingAccountingTest extends TestCase {
   $slots = array_fill( 0, 4097, null ); $b->realize_retaining_event( $token, $owner, 0, $K );
   $pending = $this->ledger( $b )['pending']; $sample = memory_get_usage( true );
   // Leave 1MiB finite headroom using the ACTUAL native sample, not a low sampler.
-  $b->admit_additional( 134217728 - 33554432 - $sample - $pending - 1048576 );
+  $limit = \FooPlugins\FooGalleryMigrate\StoragePreflight::memory_bytes( ini_get( 'memory_limit' ) );
+  $b->admit_additional( $limit - 33554432 - $sample - $pending - 1048576 );
   $this->assertTrue( $b->admit_memory( 0 ) ); $ledger = $this->ledger( $b );
   $more = str_repeat( 'x', 4194304 ); $grown = memory_get_usage( true );
   $this->assertGreaterThanOrEqual( 4194304, $grown - $sample );
