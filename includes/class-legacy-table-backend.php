@@ -30,8 +30,7 @@ class LegacyTableBackend {
 	/** Small/scalar heads only; collections MUST use bounded root/page APIs. */
 	public function read( $key ) {
 		if ( LegacyRecordCodec::CONTENT_STATE_KEY === $key ) {
-			$meta = $this->repository()->metadata_many( array( $key ) );
-			return array( 'found' => $meta[0]['found'], 'value' => $meta[0]['found'] ? $this->repository()->content_scan_state() : null );
+			return $this->repository()->read_content_state();
 		}
 		return $this->repository()->read_scalar( $key );
 	}
