@@ -69,10 +69,12 @@ try {
     $second = $first;
     for ( $batch = 0; $batch < 10 && ! $second['complete']; $batch++ ) { $second = $content->scan_content_batch(); }
     $check( $second['complete'] && $second['scanned'] >= 2 && $repository->window( 0, 4 )['total'] === 2, 'real scan append persists findings and checkpoint' );
-    $status = $content->refresh_migration_status_batch( 1 );
-    $check( $status['processed'] === 1 && $status['total'] === 2, 'real status page patch and checkpoint' );
+    add_filter( 'foogallery_migrate_content_status_batch_size', $limit );
+    $status = $content->refresh_migration_status_batch( true );
+    $check( $status['cursor'] === 1 && $status['total'] === 2 && ! $status['complete'], 'real status page patch and checkpoint' );
 } finally {
     remove_filter( 'foogallery_migrate_content_scan_batch_size', $limit );
+    remove_filter( 'foogallery_migrate_content_status_batch_size', $limit );
     foreach ( $posts as $id ) { wp_delete_post( $id, true ); $check( get_post( $id ) === null, 'owned scan post removed' ); }
 }
 
