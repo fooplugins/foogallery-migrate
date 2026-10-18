@@ -58,10 +58,12 @@ final class GenericRetainingModel {
   return array( 'future' => $future,
    'private' => $private, 'external' => self::arrays( 1, $d['records'] ), 'events' => $d['records'], 'parts' => $parts );
  }
- /** Private slot shell is realized once; row/hash scratch and consumer stay pending. */
+ /** Separate slot and complete row futures; workspace and consumer stay pending. */
  public static function staged_flatten_plan( $d, $state_key ) {
   $plan = self::flatten_plan( $d, $state_key );
   $next_row = self::row_forecast( $d['max_row_bytes'], 5 );
+  $plan['rows_future'] = $plan['future'];
+  $plan['rows_events'] = $plan['events'];
   $plan['future'] = self::container( $d['records'] );
   $plan['private'] = self::add( $plan['private'], $next_row );
   $plan['parts']['next_row'] = $next_row;

@@ -10,7 +10,8 @@ class WP_Error { public function __construct( $c, $m ) {} }
 function is_wp_error( $v ) { return $v instanceof WP_Error; }
 function __( $v, $d ) { return $v; }
 function absint( $v ) { return abs( (int) $v ); }
-foreach ( array( 'storage-preflight', 'storage-scale-admission', 'legacy-state-codec', 'legacy-record-codec', 'legacy-table-reader', 'repository-flatten-model', 'generic-retaining-model' ) as $file ) { require $root . '/includes/class-' . $file . '.php'; }
+// Standalone probes need the production refusal-path diagnostic dependency.
+foreach ( array( 'storage-scalar-observer', 'storage-preflight', 'storage-scale-admission', 'legacy-state-codec', 'legacy-record-codec', 'legacy-table-reader', 'repository-flatten-model', 'generic-retaining-model' ) as $file ) { require $root . '/includes/class-' . $file . '.php'; }
 require $fixture;
 function limits() { return array( 'version' => 1, 'max_tokens' => 262144, 'max_rows' => 24576, 'max_bytes' => 16777216, 'max_depth' => 64, 'max_heads' => 100, 'max_physical_rows_per_table' => 24576, 'max_physical_rows' => 49152, 'max_physical_bytes' => 33554432, 'memory_ceiling_bytes' => 134217728, 'max_seconds' => 10 ); }
 function budget( $seconds = 10.0, $p = null ) { return new Admission( null === $p ? limits() : $p, array( 'max_raw_bytes' => 8388608, 'amplification' => 8, 'reserve_bytes' => 33554432 ), microtime( true ) + $seconds ); }
@@ -112,7 +113,7 @@ try {
 	$result['status'] = 'PASS';
 } catch ( Throwable $e ) { $result['failure'] = array( 'class' => get_class( $e ), 'message' => $e->getMessage(), 'file' => $e->getFile(), 'line' => $e->getLine() ); }
 $result['loaded'] = array();
-foreach ( array( Admission::class, Model::class, Records::class, Values::class, 'FooPlugins\\FooGalleryMigrate\\StoragePreflight', 'FooPlugins\\FooGalleryMigrate\\LegacyTableReader' ) as $class ) { $file = ( new ReflectionClass( $class ) )->getFileName(); $result['loaded'][$class] = array( 'path' => realpath( $file ), 'sha256' => hash_file( 'sha256', $file ) ); }
+foreach ( array( Admission::class, Model::class, Records::class, Values::class, 'FooPlugins\\FooGalleryMigrate\\StoragePreflight', 'FooPlugins\\FooGalleryMigrate\\StorageScalarObserver', 'FooPlugins\\FooGalleryMigrate\\LegacyTableReader' ) as $class ) { $file = ( new ReflectionClass( $class ) )->getFileName(); $result['loaded'][$class] = array( 'path' => realpath( $file ), 'sha256' => hash_file( 'sha256', $file ) ); }
 $result['runtime'] = array( 'version' => PHP_VERSION, 'binary' => PHP_BINARY, 'binary_sha256' => hash_file( 'sha256', PHP_BINARY ), 'memory_limit' => ini_get( 'memory_limit' ), 'opcache_cli' => ini_get( 'opcache.enable_cli' ), 'profile' => Model::PROFILE );
 $result['fixture'] = array( 'path' => $fixture, 'sha256' => hash_file( 'sha256', $fixture ), 'raw_sha256' => isset( $raw_hash ) ? $raw_hash : null );
 echo json_encode( $result, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES ) . "\n";

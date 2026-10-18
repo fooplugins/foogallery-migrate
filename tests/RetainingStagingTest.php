@@ -43,6 +43,8 @@ class RetainingStagingTest extends TestCase {
   $old = Model::flatten_plan( $d, 'galleries' ); $new = Model::staged_flatten_plan( $d, 'galleries' );
   $this->assertSame( Model::container( $d['records'] ), $new['future'] );
   $this->assertSame( 1, $new['events'] );
+  $this->assertSame( $old['future'], $new['rows_future'] );
+  $this->assertSame( $d['records'], $new['rows_events'] );
   $this->assertSame( $old['external'], $new['external'] );
   $this->assertSame( $old['private'] + Model::row_forecast( $d['max_row_bytes'], 5 ), $new['private'] );
   foreach ( $old['parts'] as $key => $value ) { $this->assertSame( $value, $new['parts'][$key] ); }

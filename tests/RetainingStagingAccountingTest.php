@@ -188,8 +188,119 @@ class RetainingStagingAccountingTest extends TestCase {
    $c->flatten_tree( 'galleries', 'root', $tree, 0, function() use ( &$emitted ) { ++$emitted; } );
   }, 'M2 stage interrupted.' );
   $armed = false; $this->assertTrue( $reached ); $this->assertSame( 0, $emitted );
-  $this->assert_staged_pending( $b, $c, $plan, $foreign, 0 );
+  // The root row completed; its child has not started. The independent row
+  // scope must survive interruption alongside the original slot liabilities.
+  $ledger = $this->ledger( $b );
+  $own = array_values( array_filter( $ledger['phases'], function( $s ) use ( $c ) { return $s['producer'] === $c; } ) );
+  $this->assertCount( 2, $own );
+  $this->assertSame( 0, $own[0]['future'] ); $this->assertSame( 1, $own[0]['next'] );
+  $this->assertSame( $plan['private'], $own[0]['private'] ); $this->assertSame( $plan['external'], $own[0]['external'] );
+  $this->assertSame( $plan['rows_events'], $own[1]['events'] ); $this->assertSame( 1, $own[1]['next'] );
+  $this->assertGreaterThan( 0, $own[1]['future'] ); $this->assertLessThan( $plan['rows_future'], $own[1]['future'] );
+  $this->assertSame( $foreign['pending'] + $plan['private'] + $plan['external'] + $own[1]['future'], $ledger['pending'] );
+  $this->assertSame( $foreign['additional'], $ledger['additional'] );
+  foreach ( $foreign['phases'] as $id => $s ) { $this->assertSame( $s, $ledger['phases'][$id] ); }
+  $before = $this->ledger( $b );
+  $this->refused( function() use ( $b, $c, $own ) { $b->close_retaining_phase( $own[1]['token'], $c ); } );
+  $this->assertSame( $before, $this->ledger( $b ) );
   $this->record( __FUNCTION__, $start, $b, array( 'ballast_bytes' => strlen( $ballast ), 'private_W_plus_F' => $plan['private'], 'E' => $plan['external'] ) );
+ }
+
+ public function test_each_row_is_installed_before_exact_realization_and_closed_only_after_unwind(): void {
+  $armed = false; $seen = array(); $closed = false; $prepared = false; $b = null; $c = null; $plan = null; $foreign = null;
+  $clock = function() use ( &$armed, &$seen, &$closed, &$prepared, &$b, &$c, &$plan, &$foreign ) {
+   if ( $armed ) {
+    $trace = debug_backtrace(); $functions = array_column( $trace, 'function' );
+    $ledger = $this->ledger( $b );
+    $own = array_values( array_filter( $ledger['phases'], function( $s ) use ( $c ) { return $s['producer'] === $c; } ) );
+    if ( ! $prepared && in_array( 'preflight_tree', $functions, true ) ) {
+     $this->assertCount( 2, $own ); $this->assertSame( $plan['rows_future'], $own[1]['future'] );
+     $this->assertSame( $plan['rows_events'], $own[1]['events'] ); $prepared = true;
+    }
+    foreach ( $trace as $frame ) {
+     if ( 'realize_retaining_event' !== $frame['function'] || ! in_array( 'retaining_id', $functions, true ) ) { continue; }
+     $args = $frame['args'];
+     if ( count( $own ) !== 2 || $args[0] !== $own[1]['token'] ) { continue; }
+     $sequence = $args[2]; $stage = $trace[array_search( 'stage_retaining_node', $functions, true )];
+     $slots = $stage['args'][8];
+     $this->assertIsArray( $slots[$sequence], 'Completed row must already be installed in its own slot.' );
+     $bytes = 0;
+     foreach ( array( 'payload', 'mutable_payload', 'key_value', 'source_plugin_value', 'source_id_value' ) as $field ) {
+      if ( is_string( $slots[$sequence][$field] ) ) { $bytes += strlen( $slots[$sequence][$field] ); }
+     }
+     $forecast = Model::row_forecast( $bytes, Model::row_large_columns( $slots[$sequence] ) );
+     $this->assertSame( $forecast, $args[3] ); $this->assertSame( count( $seen ), $sequence );
+     $this->assertSame( $plan['rows_future'] - array_sum( $seen ), $own[1]['future'] );
+     $this->assertSame( $foreign['pending'] + $plan['private'] + $plan['external'] + $own[1]['future'], $ledger['pending'] );
+     $this->assertSame( $foreign['additional'], $ledger['additional'] );
+     foreach ( $foreign['phases'] as $id => $s ) { $this->assertSame( $s, $ledger['phases'][$id] ); }
+     $seen[] = $forecast;
+    }
+    if ( in_array( 'close_retaining_phase', $functions, true ) && in_array( 'retaining_id', $functions, true ) && count( $own ) === 2 ) {
+     $this->assertNotContains( 'stage_retaining_node', $functions );
+     $this->assertSame( $plan['rows_events'], $own[1]['next'] ); $this->assertSame( 0, $own[1]['future'] );
+     $this->assertSame( $plan['rows_future'], array_sum( $seen ) ); $closed = true;
+    }
+   }
+   return microtime( true );
+  };
+  $b = StorageScaleAdmissionTest::admission( null, $clock ); $c = $this->qualified( $b );
+  $b->admit_additional( 8192 ); $foreign = $this->foreign( $b );
+  $tree = $this->tree( 2, 4097 ); $tree['children']['small'] = null;
+  $plan = Model::staged_flatten_plan( $c->describe_tree( 'root', $tree, 'retaining-row' ), 'galleries' );
+  $emitted = 0; $armed = true;
+  $c->flatten_tree( 'galleries', 'root', $tree, 0, function() use ( &$emitted, &$closed, $b, $c, $plan, $foreign ) {
+   $this->assertTrue( $closed ); $this->assert_staged_pending( $b, $c, $plan, $foreign, 0 ); ++$emitted;
+  } );
+  $armed = false;
+  $this->assertTrue( $prepared ); $this->assertTrue( $closed ); $this->assertSame( $plan['rows_events'], $emitted );
+  $this->assertSame( $foreign['phases'], $this->ledger( $b )['phases'] );
+  $this->assertSame( $foreign['pending'], $this->ledger( $b )['pending'] );
+  $this->assertSame( $foreign['additional'] + $plan['external'], $this->ledger( $b )['additional'] );
+ }
+
+ public function test_aborted_row_event_wrong_owner_sequence_forecast_and_domain_preserve_pending(): void {
+  $armed = false; $b = null; $c = null; $token = null; $next = null; $forecast = null;
+  $clock = function() use ( &$armed, &$b, &$c, &$token, &$next, &$forecast ) {
+   if ( $armed ) {
+    $trace = debug_backtrace(); $functions = array_column( $trace, 'function' );
+    if ( in_array( 'retaining_id', $functions, true ) ) {
+     foreach ( $trace as $frame ) {
+      if ( 'realize_retaining_event' !== $frame['function'] || 1 !== $frame['args'][2] ) { continue; }
+      $token = $frame['args'][0]; $next = $frame['args'][2]; $forecast = $frame['args'][3];
+      throw new \RuntimeException( 'Row realization interrupted.' );
+     }
+    }
+   }
+   return microtime( true );
+  };
+  $b = StorageScaleAdmissionTest::admission( null, $clock ); $c = $this->qualified( $b );
+  $b->admit_additional( 8192 ); $foreign = $this->foreign( $b ); $tree = $this->tree( 1, 4097 );
+  $plan = Model::staged_flatten_plan( $c->describe_tree( 'root', $tree, 'retaining-row' ), 'galleries' );
+  $emitted = 0; $armed = true;
+  $this->refused( function() use ( $c, $tree, &$emitted ) {
+   $c->flatten_tree( 'galleries', 'root', $tree, 0, function() use ( &$emitted ) { ++$emitted; } );
+  }, 'Row realization interrupted.' );
+  $armed = false; $before = $this->ledger( $b );
+  $this->assertSame( 0, $emitted ); $this->assertNotNull( $token );
+  $s = $before['phases'][spl_object_hash( $token )];
+  $this->assertSame( $c, $s['producer'] ); $this->assertSame( $next, $s['next'] );
+  $this->assertSame( $forecast, $s['future'] ); $this->assertSame( $plan['rows_events'], $s['events'] );
+  $this->assertSame( $foreign['pending'] + $plan['private'] + $plan['external'] + $forecast, $before['pending'] );
+  $other = StorageScaleAdmissionTest::admission();
+  foreach ( array( array( $token, new \stdClass(), $next, $forecast ), array( new \stdClass(), $c, $next, $forecast ),
+   array( $token, $c, 0, $forecast ), array( $token, $c, 2, $forecast ),
+   array( $token, $c, $next, $forecast - 1 ), array( $token, $c, $next, $forecast + 1 ) ) as $args ) {
+   $this->refused( function() use ( $b, $args ) { $b->realize_retaining_event( $args[0], $args[1], $args[2], $args[3] ); } );
+   $this->assertSame( $before, $this->ledger( $b ) );
+  }
+  $this->refused( function() use ( $b, $token, $c ) { $b->close_retaining_phase( $token, $c ); } );
+  $this->refused( function() use ( $other, $token, $c, $next, $forecast ) { $other->realize_retaining_event( $token, $c, $next, $forecast ); } );
+  $this->assertSame( $before, $this->ledger( $b ) );
+  foreach ( $foreign['phases'] as $id => $s ) { $this->assertSame( $s, $before['phases'][$id] ); }
+  $this->assertSame( $foreign['additional'], $before['additional'] );
+  // Do not manually finish the interrupted producer: discarded slots are not
+  // proof of a live completed graph. Its row scope deliberately remains open.
  }
 
  private function transfer( $mode ) {
