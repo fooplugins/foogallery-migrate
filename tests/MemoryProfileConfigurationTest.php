@@ -19,10 +19,15 @@ class MemoryProfileConfigurationTest extends TestCase {
    array( '256M', true ), array( '256m', true ), array( '262144K', true ), array( '268435456', true ),
    array( '64M', false ), array( '192M', false ), array( '512M', false ), array( '-1', false ) );
  }
- /** @dataProvider limits */
+ /**
+  * @dataProvider limits
+  * @runInSeparateProcess
+  * @preserveGlobalState disabled
+  */
  public function test_effective_finite_budget_qualification( $limit, $supported ): void {
-  // Construct under the runner's supported budget, before testing lower limits.
-  // Full discovery may already need more than 64M minus the unchanged reserve.
+  // A fresh process must actually install every limit, including unsupported
+  // 64M: the full suite can already retain more than that before this test.
+  // Do not inherit its globals or lower the real qualification/reserve checks.
   $b = StorageScaleAdmissionTest::admission(); $previous = ini_get( 'memory_limit' );
   try {
    $this->assertNotFalse( ini_set( 'memory_limit', $limit ) );
