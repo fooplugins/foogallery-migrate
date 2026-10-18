@@ -175,7 +175,16 @@ class SnapshotInternalStatsTest extends TestCase {
   $this->assertTrue($r['supported']); $this->assertSame(1, $status); $this->assertSame('refused', $r['stage']);
   $this->assertSame(88080384, $r['ballast_bytes']);
  }
+ /**
+  * @runInSeparateProcess
+  * @preserveGlobalState disabled
+  */
  public function test_unqualified_codec_and_owner_use_unchanged_safe_aggregate_fallback(): void {
+  // Aggregate fallback refuses this workload at actual128M, not at256M.
+  // Keep full discovery and the suite budget; pin only this finite boundary.
+  $this->assertNotFalse(ini_set('memory_limit', '128M'));
+  $this->assertSame('128M', ini_get('memory_limit'));
+  $this->assertSame('0', ini_get('opcache.enable_cli'));
   $value = StorageA7Fixture::value(20000); $tree = $value['galleries']['items']['gallery-009'];
   // Even a truthful observer does not optimize an arbitrary discard callback.
   $b = StorageScaleAdmissionTest::admission(null, null, function () { return array(ini_get('memory_limit'), memory_get_usage(true)); });
