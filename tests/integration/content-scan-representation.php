@@ -54,8 +54,11 @@ $posts = array();
 $limit = function () { return 1; };
 add_filter( 'foogallery_migrate_content_scan_batch_size', $limit );
 try {
+    $attachment = wp_insert_attachment( array( 'post_title' => 'Owned representation image', 'post_mime_type' => 'image/jpeg', 'post_status' => 'inherit' ), '', 0, true );
+    if ( is_wp_error( $attachment ) ) { throw new RuntimeException( $attachment->get_error_message() ); }
+    $posts[] = $attachment;
     for ( $i = 0; $i < 2; $i++ ) {
-        $id = wp_insert_post( array( 'post_title' => 'Owned representation scan', 'post_content' => '[gallery ids="1,2"]',
+        $id = wp_insert_post( array( 'post_title' => 'Owned representation scan', 'post_content' => '[gallery ids="' . $attachment . '"]',
             'post_status' => 'publish', 'post_type' => 'post' ), true );
         if ( is_wp_error( $id ) ) { throw new RuntimeException( $id->get_error_message() ); }
         $posts[] = $id;
