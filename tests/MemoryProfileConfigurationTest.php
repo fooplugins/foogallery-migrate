@@ -21,11 +21,13 @@ class MemoryProfileConfigurationTest extends TestCase {
  }
  /** @dataProvider limits */
  public function test_effective_finite_budget_qualification( $limit, $supported ): void {
-  $previous = ini_get( 'memory_limit' );
+  // Construct under the runner's supported budget, before testing lower limits.
+  // Full discovery may already need more than 64M minus the unchanged reserve.
+  $b = StorageScaleAdmissionTest::admission(); $previous = ini_get( 'memory_limit' );
   try {
    $this->assertNotFalse( ini_set( 'memory_limit', $limit ) );
    $this->assertSame( $limit, ini_get( 'memory_limit' ) );
-   $this->assertSame( $supported, $this->supports( StorageScaleAdmissionTest::admission() ) );
+   $this->assertSame( $supported, $this->supports( $b ) );
   } finally { ini_set( 'memory_limit', $previous ); }
  }
  public function test_small_roundtrip_uses_staged_ledger_not_aggregate_fallback(): void {
