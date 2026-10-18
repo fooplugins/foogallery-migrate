@@ -131,7 +131,13 @@ class StorageSnapshotScaleTest extends TestCase {
 	private function snapshot( $db, $budget ) {
 		return new LegacyTableSnapshot( $db, 7, $budget->limit( 'max_rows' ), $budget->limit( 'max_bytes' ), null, null, $budget );
 	}
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState enabled
+	 */
 	public function test_original20k_shared_deadline_expires_mid_stage_and_rolls_back(): void {
+		// Unrelated suite allocator backing must not preempt this finite deadline scenario.
+		// Preserve parent globals/INI (including its finite budget), not allocator backing.
 		$value = StorageA7Fixture::value( 20000 ); $db = new SnapshotScaleConnection(); $now = 100.0;
 		$budget = StorageScaleAdmissionTest::admission( null, function () use ( &$now ) { return $now; } );
 		$db->after_event = function ( $event, $db ) use ( &$now ) { if ( 'record-insert' === $event && 100 === $db->emitted ) { $now = 111.0; } };
