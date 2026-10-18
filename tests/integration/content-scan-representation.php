@@ -92,6 +92,21 @@ $convert = function ( $target, $replace ) use ( $policy, $check ) {
     $conversion = new StorageConversion( $policy );
     $result = $replace ? $conversion->replace_retained( $request ) : $conversion->switch_backend( $request );
     $record = StorageControl::decode( get_option( \FooPlugins\FooGalleryMigrate\StorageAuthority::CONTROL_OPTION ), $blog );
+    if ( is_wp_error( $result ) && 'stable' === $record['phase'] && 'table' === $record['backend'] ) {
+        // Diagnose only this owned fixture after the real authorized API refused.
+        // Do not change any gate, policy or authority decision.
+        $probe = new StorageConversion( $policy ); $stage = 'start_memory';
+        try {
+            foreach ( array( 'start_memory', 'begin', 'storage', 'table_snapshot' ) as $stage ) {
+                $method = new \ReflectionMethod( $probe, $stage ); $method->setAccessible( true );
+                $method->invokeArgs( $probe, 'table_snapshot' === $stage ? array( true ) : array() );
+            }
+        } catch ( \Exception $error ) {
+            throw new RuntimeException( 'owned conversion diagnostic ' . $stage . ': ' . $error->getMessage() );
+        } finally {
+            $method = new \ReflectionMethod( $probe, 'end' ); $method->setAccessible( true ); $method->invoke( $probe );
+        }
+    }
     $check( ! is_wp_error( $result ), 'actual conversion to ' . $target . ( is_wp_error( $result ) ? ': ' . $result->get_error_code() . ' phase=' . $record['phase'] . ' backend=' . $record['backend'] . ': ' . $result->get_error_message() : '' ) );
 };
 $convert( 'option', false );
