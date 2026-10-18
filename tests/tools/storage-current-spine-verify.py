@@ -103,7 +103,7 @@ def main():
         ids = []
         for test in values:
             name = re.sub(r' with data set #([0-9]+)$', r'#\1', test.attrib['name'])
-            name = re.sub(r' with data set "(.*)"$', r'@\1', name)
+            name = re.sub(r' with data set "(.*)"$', r'"\1"', name)
             ids.append(test.attrib['class'] + '::' + name)
         return ids, {'tests': len(values), 'assertions': sum(int(t.get('assertions', '0')) for t in values), **stats}
 
