@@ -190,8 +190,8 @@ class StorageConversion {
 						// Existing runtime checkpoints/queues are bounded scalar heads,
 						// even when their logical value is an array. Keep conversion
 						// compatible with their readers and atomic companion writes.
-						$checkpoint = in_array( $key, array( MigratorSettings::KEY_GALLERIES . '-state', MigratorSettings::KEY_ALBUMS . '-state', ContentScanRepository::STATE_KEY, ImageTagQueueRepository::STATE_KEY ), true );
-						$kind = $checkpoint || ! is_array( $value ) ? 'scalar' : ( $value === array_values( $value ) ? 'list' : 'map' );
+						$checkpoint = in_array( $key, array( MigratorSettings::KEY_GALLERIES . '-state', MigratorSettings::KEY_ALBUMS . '-state', ImageTagQueueRepository::STATE_KEY ), true );
+						$kind = ContentScanRepository::STATE_KEY === $key ? 'map' : ( $checkpoint || ! is_array( $value ) ? 'scalar' : ( $value === array_values( $value ) ? 'list' : 'map' ) );
 						$changes[] = array( 'key' => $key, 'order' => $order++, 'kind' => $kind, 'value' => $value, 'expected_revision' => null );
 					}
 					$this->snapshot->replace_many( $changes );

@@ -92,6 +92,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 */
 		function scan_content_batch( $reset = false ) {
 			$this->migrator_engine->assert_storage_writer();
+			$repository = $this->scoped_content_repository();
 			if ( $reset ) {
 				$progress = $this->default_scan_progress();
 				$progress['migrated_revision'] = $this->get_migrated_revision();
@@ -100,9 +101,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 					'progress' => $progress,
 				);
 			} else {
-				$state = $this->get_scan_state();
+				$state = null === $repository ? $this->get_scan_state() : $this->scan_window( 0, 1 );
 			}
-			$content_items = $state['items'];
+			$content_items = null === $repository ? $state['items'] : array();
 			$progress = $state['progress'];
 
 			if ( ! $reset && $progress['complete'] ) {
@@ -113,7 +114,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			if ( empty( $plugins ) ) {
 				$progress['started'] = true;
 				$progress['complete'] = true;
-				$this->persist_scan_state( $content_items, $progress );
+				$this->persist_scan_batch( $repository, $reset, $content_items, $progress, isset( $state['revision'] ) ? $state['revision'] : null );
 				return $progress;
 			}
 
@@ -180,7 +181,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			$progress['started'] = true;
 			$progress['complete'] = ! $has_more_posts && $processed === count( $posts );
 
-			$this->persist_scan_state( $content_items, $progress );
+			$this->persist_scan_batch( $repository, $reset, $content_items, $progress, isset( $state['revision'] ) ? $state['revision'] : null );
 
 			return $progress;
 		}
@@ -191,6 +192,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * @return array
 		 */
 		function get_scan_progress() {
+			$repository = $this->scoped_content_repository();
+			if ( null !== $repository ) { return $this->normalize_progress( $repository->checkpoint() ); }
 			$state = $this->get_scan_state();
 			return $state['progress'];
 		}
@@ -201,7 +204,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * @return bool
 		 */
 		function is_migration_status_stale() {
-			$state = $this->get_scan_state();
+			$state = null === $this->scoped_content_repository() ? $this->get_scan_state() : $this->scan_window( 0, 1 );
 			if ( empty( $state['items'] ) || empty( $state['progress']['started'] ) ) {
 				return false;
 			}
@@ -215,8 +218,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * @return array
 		 */
 		function get_status_refresh_progress() {
-			$state = $this->get_scan_state();
-			return $state['progress']['status_refresh'];
+			$progress = $this->get_scan_progress();
+			return $progress['status_refresh'];
 		}
 
 		/**
@@ -231,8 +234,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 */
 		function refresh_migration_status_batch( $reset = false ) {
 			$this->migrator_engine->assert_storage_writer();
-			$state = $this->get_scan_state();
+			$repository = $this->scoped_content_repository();
+			$state = null === $repository ? $this->get_scan_state() : $this->scan_window( 0, 1 );
 			$content_items = $state['items'];
+			$total = null === $repository ? count( $content_items ) : $state['total'];
 			$progress = $state['progress'];
 			$current_revision = $this->get_migrated_revision();
 			$status_progress = $progress['status_refresh'];
@@ -246,20 +251,22 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				$status_progress = array(
 					'started' => true,
 					'cursor' => 0,
-					'total' => count( $content_items ),
+					'total' => $total,
 					'target_revision' => $current_revision,
 					'complete' => false,
 				);
 			}
 
 			$batch_size = (int) apply_filters( 'foogallery_migrate_content_status_batch_size', 100 );
-			$batch_size = max( 1, min( 500, $batch_size ) );
-			$start = min( absint( $status_progress['cursor'] ), count( $content_items ) );
-			$end = min( $start + $batch_size, count( $content_items ) );
+			$batch_size = max( 1, min( null === $repository ? 500 : 100, $batch_size ) );
+			$start = min( absint( $status_progress['cursor'] ), $total );
+			$end = min( $start + $batch_size, $total );
 			$lookup = $this->build_migrated_object_lookup();
 			$plugins = $this->get_plugins_by_name();
 
-			for ( $counter = $start; $counter < $end; $counter++ ) {
+			if ( null !== $repository ) { $state = $this->scan_window( $start, $batch_size ); $content_items = $state['items']; }
+			$batch = null === $repository ? array_slice( $content_items, $start, $end - $start, true ) : $content_items;
+			foreach ( $batch as $counter => $value ) {
 				if ( ! isset( $content_items[ $counter ] ) || ! is_array( $content_items[ $counter ] ) ) {
 					continue;
 				}
@@ -273,13 +280,14 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			}
 
 			$status_progress['cursor'] = $end;
-			$status_progress['total'] = count( $content_items );
-			$status_progress['complete'] = $end >= count( $content_items );
+			$status_progress['total'] = $total;
+			$status_progress['complete'] = $end >= $total;
 			if ( $status_progress['complete'] ) {
 				$progress['migrated_revision'] = $current_revision;
 			}
 			$progress['status_refresh'] = $status_progress;
-			$this->persist_scan_state( $content_items, $progress );
+			if ( null === $repository ) { $this->persist_scan_state( $content_items, $progress ); }
+			else if ( false === $repository->patch_batch( $content_items, $progress, $state['revision'] ) ) { throw new \RuntimeException( 'Unable to persist content status checkpoint.' ); }
 
 			return $status_progress;
 		}
@@ -289,6 +297,27 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 *
 		 * @return array
 		 */
+		/** Reuse the explicitly selected backend; do not choose authority here. */
+		private function scoped_content_repository() {
+			if ( ! method_exists( $this->migrator_engine, 'content_scan_repository' ) ) { return null; }
+			$repository = $this->migrator_engine->content_scan_repository();
+			return $repository->is_table() ? $repository : null;
+		}
+		private function normalize_progress( $progress ) {
+			$progress = array_merge( $this->default_scan_progress(), $progress );
+			$progress['status_refresh'] = array_merge( $this->default_status_refresh_progress(), is_array( $progress['status_refresh'] ) ? $progress['status_refresh'] : array() );
+			return $progress;
+		}
+		private function scan_window( $offset, $limit ) {
+			$state = $this->scoped_content_repository()->window( $offset, $limit );
+			$state['progress'] = $this->normalize_progress( $state['progress'] ); return $state;
+		}
+		private function persist_scan_batch( $repository, $reset, $items, $progress, $revision ) {
+			if ( null === $repository ) { $this->persist_scan_state( $items, $progress ); return; }
+			$ok = $reset ? $repository->update_with_scan_state( $items, $progress ) : $repository->append_batch( $items, $progress, $revision );
+			if ( false === $ok ) { throw new \RuntimeException( 'Unable to persist content scan batch.' ); }
+		}
+
 		private function get_scan_state() {
 			$state = $this->get_setting( $this->type . '_scan_state', false );
 			if ( is_array( $state ) && isset( $state['items'], $state['progress'] ) && is_array( $state['items'] ) && is_array( $state['progress'] ) ) {
@@ -338,6 +367,11 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * @return void
 		 */
 		private function persist_content_items( $content_items ) {
+			$repository = $this->scoped_content_repository();
+			if ( null !== $repository ) {
+				$state = $repository->window( 0, 1 );
+				if ( false === $repository->patch_batch( $content_items, $state['progress'], $state['revision'] ) ) { throw new \RuntimeException( 'Unable to persist selected content findings.' ); } return;
+			}
 			$state = $this->get_scan_state();
 			$this->persist_scan_state( $content_items, $state['progress'] );
 		}
@@ -1510,7 +1544,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 */
 		function replace_content( $selected_items, $expected_post_contents = array() ) {
 			$this->migrator_engine->assert_storage_writer();
-			$content_items = $this->get_content_items();
+			$repository = $this->scoped_content_repository();
+			$content_items = null === $repository ? $this->get_content_items() : $repository->get_many( $selected_items );
 			$replaced_count = 0;
 			$errors = array();
 			$status_lookup = null;
@@ -1677,7 +1712,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * @return array
 		 */
 		function migrate_and_replace_content( $selected_items ) {
-			$content_items = $this->get_content_items();
+			$repository = $this->scoped_content_repository();
+			$content_items = null === $repository ? $this->get_content_items() : $repository->get_many( array_unique( array_map( 'absint', (array) $selected_items ) ) );
 			if ( ! is_array( $content_items ) ) {
 				$content_items = array();
 			}
@@ -1808,7 +1844,35 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * @return void
 		 */
 		function render_content_form() {
-			$state = $this->get_scan_state();
+			$url = foogallery_migrate_admin_url( 'content' );
+			$page = 1;
+			if ( defined( 'DOING_AJAX' ) ) {
+				if ( array_key_exists( 'foogallery_content_migrate_paged', $_POST ) ) {
+					$url = esc_url_raw( wp_unslash( $_POST['foogallery_content_migrate_url'] ) );
+					$page = absint( wp_unslash( $_POST['foogallery_content_migrate_paged'] ) );
+				} else {
+					$url = wp_get_referer();
+					if ( $url ) {
+						$parts = parse_url( $url );
+						if ( isset( $parts['query'] ) ) {
+							parse_str( $parts['query'], $query );
+							if ( isset( $query['content_paged'] ) ) {
+								$page = absint( $query['content_paged'] );
+							}
+						}
+					}
+				}
+			} elseif ( array_key_exists( 'content_paged', $_GET ) ) {
+				$page = absint( wp_unslash( $_GET['content_paged'] ) );
+			}
+			if ( $page < 1 ) {
+				$page = 1;
+			}
+			$url = add_query_arg( 'content_paged', $page, $url ) . '#shortcodes';
+			$repository = $this->scoped_content_repository();
+			$page_size = $this->migrator_engine->get_page_size();
+			if ( null !== $repository ) { $page_size = $page_size > 0 ? min( 100, $page_size ) : 100; }
+			$state = null === $repository ? $this->get_scan_state() : $this->scan_window( ( $page - 1 ) * $page_size, $page_size );
 			$content_items = $state['items'];
 			$progress = $state['progress'];
 			$has_scanned_content = ! empty( $progress['started'] );
@@ -1865,38 +1929,13 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				}
 				echo '<p><small>' . esc_html__( 'Scan published posts and pages for gallery shortcodes and blocks.', 'foogallery-migrate' ) . '</small></p>';
 			} else {
-					$url = foogallery_migrate_admin_url( 'content' );
-					$page = 1;
-					if ( defined( 'DOING_AJAX' ) ) {
-						if ( array_key_exists( 'foogallery_content_migrate_paged', $_POST ) ) {
-							$url = esc_url_raw( wp_unslash( $_POST['foogallery_content_migrate_url'] ) );
-							$page = absint( wp_unslash( $_POST['foogallery_content_migrate_paged'] ) );
-						} else {
-							$url = wp_get_referer();
-							if ( $url ) {
-								$parts = parse_url( $url );
-								if ( isset( $parts['query'] ) ) {
-									parse_str( $parts['query'], $query );
-									if ( isset( $query['content_paged'] ) ) {
-										$page = absint( $query['content_paged'] );
-									}
-								}
-							}
-						}
-					} elseif ( array_key_exists( 'content_paged', $_GET ) ) {
-						$page = absint( wp_unslash( $_GET['content_paged'] ) );
-					}
-					if ( $page < 1 ) {
-						$page = 1;
-					}
-					$url = add_query_arg( 'content_paged', $page, $url ) . '#shortcodes';
 
-					$content_items_count = count( $content_items );
+
+					$content_items_count = null === $repository ? count( $content_items ) : $state['total'];
 					printf(
 						'<p><strong>%s</strong></p>',
 						esc_html( sprintf( _n( '%d gallery occurrence found.', '%d gallery occurrences found.', $content_items_count, 'foogallery-migrate' ), $content_items_count ) )
 					);
-					$page_size = $this->migrator_engine->get_page_size();
 					$show_pagination = $page_size > 0;
 
 					if ( $show_pagination ) {
@@ -1920,14 +1959,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				$status_lookup = $this->build_migrated_object_lookup();
 				$status_plugins = $this->get_plugins_by_name();
 
-				for ( $counter = $start; $counter <= $end; $counter++ ) {
-					if ( $counter >= $content_items_count ) {
-						break;
-					}
-					if ( ! isset( $content_items[ $counter ] ) ) {
-						continue;
-					}
-					$item = $content_items[ $counter ];
+				$visible_items = null === $repository ? array_slice( $content_items, $start, max( 0, $end - $start + 1 ), true ) : $content_items;
+				foreach ( $visible_items as $counter => $item ) {
 					if ( ! is_array( $item ) || ! isset( $item['post_id'] ) ) {
 						continue;
 					}
@@ -1985,7 +2018,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 						$is_direct_replacement = isset( $item['replacement_content'] ) && is_string( $item['replacement_content'] ) && '' !== trim( $item['replacement_content'] );
 						$is_actionable = $this->is_content_item_replaceable( $item ) || $is_core;
 						?>
-						<tr class="<?php echo esc_attr( ($key % 2 === 0) ? 'alternate' : '' ); ?>">
+						<tr class="<?php echo esc_attr( ((int) $key % 2 === 0) ? 'alternate' : '' ); ?>">
 							<th scope="row" class="check-column">
 								<?php if ( $is_actionable ) { ?>
 									<input name="content-item[]" type="checkbox" checked="checked" value="<?php echo esc_attr( $key ); ?>">

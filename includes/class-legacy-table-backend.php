@@ -28,12 +28,21 @@ class LegacyTableBackend {
 	}
 
 	/** Small/scalar heads only; collections MUST use bounded root/page APIs. */
-	public function read( $key ) { return $this->repository()->read_scalar( $key ); }
+	public function read( $key ) {
+		if ( LegacyRecordCodec::CONTENT_STATE_KEY === $key ) {
+			$meta = $this->repository()->metadata_many( array( $key ) );
+			return array( 'found' => $meta[0]['found'], 'value' => $meta[0]['found'] ? $this->repository()->content_scan_state() : null );
+		}
+		return $this->repository()->read_scalar( $key );
+	}
 	public function metadata_many( $keys ) { return $this->repository()->metadata_many( $keys ); }
 	public function history_read( $operation, $request = array() ) { return $this->repository()->history_read( $operation, $request ); }
 	public function history_mutate( $operation, $request, $companions = array() ) { return $this->repository( true )->history_mutate( $operation, $request, $companions ); }
 	public function mutate_scalars( $values ) { return $this->repository( true )->mutate_scalars( $values ); }
 	public function delete_scalar( $key ) { return $this->repository( true )->delete_scalar( $key ); }
+	public function content_window( $offset, $limit, $keys = null ) { return $this->repository()->content_window( $offset, $limit, $keys ); }
+	public function replace_content_state( $value ) { return $this->repository( true )->replace_content_state( $value ); }
+	public function content_batch( $items, $progress, $append, $revision = null ) { return $this->repository( true )->content_batch( $items, $progress, $append, $revision ); }
 	public function content_scan_state() { return $this->repository()->content_scan_state(); }
 	public function change_content_scan( $change ) { return $this->repository( true )->change_content_scan( $change ); }
 	public function change_image_tag_queue( $change ) { return $this->repository( true )->change_image_tag_queue( $change ); }

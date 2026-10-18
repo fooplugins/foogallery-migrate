@@ -1086,6 +1086,8 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         }
 
         /** Inform existing content callers about explicit injection, never select authority. */
+        public function content_scan_repository() { return $this->settings()->content_scan_repository(); }
+
         public function uses_scoped_history() {
             return $this->migrated_store instanceof MigratedHistoryRepository
                 && $this->migrated_store->state_backend() instanceof LegacyTableBackend;

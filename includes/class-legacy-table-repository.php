@@ -319,19 +319,110 @@ class LegacyTableRepository {
 		$this->busy = false; return true;
 	}
 
-	/** Minimal existing content/image-tag compatibility, not a large queue API.
+	/** Independently indexed findings and bounded checkpoint, on the existing head. */
+	private function content_context() {
+		$key = ContentScanRepository::STATE_KEY; $head = $this->reader->head( $key ); $this->tick();
+		if ( false === $head ) {
+			foreach ( array( 'block-shortcode', 'block-shortcode_scan_progress' ) as $legacy ) {
+				if ( false !== $this->reader->head( $legacy ) ) { $this->fail( 'Legacy content state requires explicit reset or conversion before bounded access.' ); }
+			}
+			$split = ( new LegacyCollectionEnvelope() )->split( $key, 'map', array( 'items' => array(), 'progress' => array() ) );
+			return array( 'key' => $key, 'head' => false, 'root' => $split['root'] );
+		}
+		if ( 'map' !== $head['state_kind'] ) { $this->fail( 'Legacy scalar content state requires explicit reset or conversion before bounded access.' ); }
+		$root = $this->collection( $head );
+		if ( ! isset( $root['wrapper']['content'] ) ) { $this->fail( 'Indexed content envelope required.' ); }
+		return array( 'key' => $key, 'head' => $head, 'root' => $root );
+	}
+
+	/** SQL offset selects only small root selectors; only requested trees decode. */
+	public function content_window( $offset, $limit, $keys = null ) {
+		if ( ! is_int( $offset ) || $offset < 0 || ! is_int( $limit ) || $limit < 1 || $limit > 100 ||
+			( null !== $keys && ( ! is_array( $keys ) || count( $keys ) > 100 ) ) || $this->history_read_active ) { $this->fail( 'Invalid content window.' ); }
+		if ( null !== $keys ) { foreach ( $keys as $key ) { $this->typed_key( $key ); } }
+		$this->start_budget(); $this->history_read_active = true;
+		try {
+			$entry = $this->content_context(); $items = array(); $head = $entry['head'];
+			if ( false !== $head ) {
+				if ( null === $keys ) {
+					$rows = $this->read( $this->db->prepare( 'SELECT HEX(node_hash) AS node_hash FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL ORDER BY item_order ASC, id ASC LIMIT %d OFFSET %d',
+						array( $this->blog, $head['id'], $head['active_generation'], $limit, $offset ) ) );
+					foreach ( $rows as $row ) { $tree = $this->tree_hash( $entry['key'], $head, $this->hex( $row['node_hash'] ) ); if ( false === $tree ) { $this->fail( 'Content tree disappeared.' ); } $items[$tree['key']] = $tree['value']; }
+				} else {
+					foreach ( $keys as $key ) { $tree = $this->tree( $entry['key'], $head, $key ); if ( false !== $tree ) { $items[$key] = $tree['value']; } }
+				}
+			}
+			if ( $this->reader->head( $entry['key'] ) !== $head ) { $this->fail( 'Content changed during window read.' ); }
+			return $this->finish_history_read( array( 'items' => $items, 'progress' => $entry['root']['wrapper']['values']['progress'], 'total' => $entry['root']['root_count'], 'revision' => false === $head ? null : $head['revision'] ) );
+		} catch ( \Exception $error ) { $this->history_read_active = false; throw $error; }
+		catch ( \Throwable $error ) { $this->history_read_active = false; throw $error; }
+	}
+
+	/** A replacement is an explicit operation; never import/repair during reads. */
+	public function replace_content_state( $value, $expected_revision = null ) {
+		$this->start_budget(); $key = ContentScanRepository::STATE_KEY;
+		( new LegacyCollectionEnvelope() )->split( $key, 'map', $value );
+		$head = $this->reader->head( $key );
+		if ( null !== $expected_revision && ( false === $head || $head['revision'] !== $expected_revision ) ) { $this->fail( 'Stale content snapshot.' ); }
+		$this->replace_bounded( array( array( 'key' => $key, 'kind' => 'map', 'order' => false === $head ? $this->next_state_order() : $head['state_order'], 'value' => $value, 'expected_revision' => false === $head ? null : $head['revision'] ) ), array( array( 'key' => $key, 'head' => $head ) ) );
+		return true;
+	}
+
+	/** One affected batch and checkpoint CAS; occurrence retries retain selectors. */
+	public function content_batch( $items, $progress, $append, $expected_revision = null ) {
+		if ( ! is_array( $items ) || count( $items ) > $this->max_rows || ! is_array( $progress ) || ! is_bool( $append ) || $this->history_read_active ) { $this->fail( 'Invalid content batch.' ); }
+		$this->start_budget(); $this->history_read_active = true;
+		try {
+			$entry = $this->content_context(); $head = $entry['head'];
+			if ( null !== $expected_revision && ( false === $head || $expected_revision !== $head['revision'] ) ) { $this->fail( 'Stale content checkpoint.' ); }
+			if ( false === $head ) {
+				$value = array( 'items' => $items, 'progress' => $progress );
+				$this->replace_content_state( $value ); return $this->finish_history_read( true );
+			}
+			$patches = array(); $seen = array(); $next = $entry['root']['wrapper']['next_key'];
+			foreach ( $items as $key => $item ) {
+				if ( $append ) {
+					$occurrence = ContentScanRepository::occurrence_key( $item );
+					if ( isset( $seen[$occurrence] ) ) { continue; } $seen[$occurrence] = true;
+					$rows = $this->read( $this->db->prepare( 'SELECT HEX(node_hash) AS node_hash FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL AND legacy_identifier_hash = UNHEX(%s) ORDER BY item_order ASC, id ASC LIMIT 1',
+						array( $this->blog, $head['id'], $head['active_generation'], $this->codec->key_hash( $occurrence ) ) ) );
+					if ( count( $rows ) ) {
+						$tree = $this->tree_hash( $entry['key'], $head, $this->hex( $rows[0]['node_hash'] ) );
+						if ( false === $tree || ContentScanRepository::occurrence_key( $tree['value'] ) !== $occurrence ) { $this->fail( 'Occurrence index collision.' ); } continue;
+					}
+					if ( $next >= PHP_INT_MAX ) { $this->fail( 'Content selector exhausted.' ); } $key = $next++;
+				} else { $this->typed_key( $key ); if ( false === $this->tree( $entry['key'], $head, $key ) ) { $this->fail( 'Missing selected finding.' ); } }
+				$patches[] = array( 'key' => $key, 'value' => $item );
+			}
+			$change = array( 'key' => $entry['key'], 'expected_revision' => $head['revision'], 'patches' => $patches, 'content_progress' => $progress );
+			$this->patch( array( $change ), false, array( array( 'key' => $entry['key'], 'head' => $head ) ) );
+			return $this->finish_history_read( true );
+		} catch ( \Exception $error ) { $this->history_read_active = false; throw $error; }
+		catch ( \Throwable $error ) { $this->history_read_active = false; throw $error; }
+	}
+
+	/** Full snapshot compatibility remains bounded, never used by the table UI.
 	 * These established states remain scalars; only this bounded bucket is read.
 	 */
 	public function content_scan_state() {
 		if ( $this->history_read_active ) { $this->fail( 'Reentrant content scan read.' ); }
 		$this->start_budget(); $this->history_read_active = true;
 		try {
+			if ( false !== $this->reader->head( ContentScanRepository::STATE_KEY ) && 'map' === $this->reader->head( ContentScanRepository::STATE_KEY )['state_kind'] ) {
+				$entry = $this->metadata_many( array( ContentScanRepository::STATE_KEY ) )[0];
+				return $this->finish_history_read( $this->collection_value( ContentScanRepository::STATE_KEY, $entry ) );
+			}
 			$context = $this->partial_state_context( ContentScanRepository::STATE_KEY, true );
 			$this->verify_partial_dependencies( $context['guards'] ); return $this->finish_history_read( $context['value'] );
 		} catch ( \Exception $error ) { $this->history_read_active = false; throw $error; }
 		catch ( \Throwable $error ) { $this->history_read_active = false; throw $error; }
 	}
-	public function change_content_scan( $change ) { return $this->change_partial_state( ContentScanRepository::STATE_KEY, $change, true ); }
+	public function change_content_scan( $change ) {
+		if ( ! is_callable( $change ) ) { $this->fail( 'Invalid content mutation.' ); }
+		$head = $this->reader->head( ContentScanRepository::STATE_KEY );
+		$value = call_user_func( $change, $this->content_scan_state() );
+		return false === $value ? false : $this->replace_content_state( $value, false === $head ? null : $head['revision'] );
+	}
 	public function change_image_tag_queue( $change ) { return $this->change_partial_state( ImageTagQueueRepository::STATE_KEY, $change, false ); }
 
 	private function partial_state_context( $key, $content ) {
@@ -940,6 +1031,10 @@ class LegacyTableRepository {
 				} else {
 					if ( ( $lists ? 'list' : 'map' ) !== $head['state_kind'] ) { $this->fail( 'Patch collection kind mismatch.' ); }
 					$root = $this->collection( $head );
+					if ( array_key_exists( 'content_progress', $change ) ) {
+						if ( ! isset( $root['wrapper']['content'] ) ) { $this->fail( 'Content envelope required.' ); }
+						$root['wrapper']['values']['progress'] = $change['content_progress'];
+					}
 					$envelope = new LegacyCollectionEnvelope();
 					foreach ( $change['patches'] as $patch ) {
 						if ( array_key_exists( 'value', $patch ) ) {
@@ -963,6 +1058,7 @@ class LegacyTableRepository {
 							$repo = $this;
 							$stats = $this->records->flatten_tree( $change['key'], $patch['key'], $patch['value'], $order, function ( $row ) use ( $repo, $head ) { $repo->insert_record( $head, $row ); } );
 							$count = $this->add( $count, $stats['record_count'] ); $bytes = $this->add( $bytes, $stats['payload_bytes'] ); $root['root_count']++;
+							if ( isset( $root['wrapper']['content'] ) && is_int( $patch['key'] ) && $patch['key'] >= $root['wrapper']['next_key'] ) { $root['wrapper']['next_key'] = $this->add( $patch['key'], 1 ); }
 							// Verify canonical logical/projection parity before any head CAS.
 							$new = $this->tree( $change['key'], $head, $patch['key'], false );
 							if ( false === $new || $this->codec->snapshot_digest( $new['value'] ) !== $this->codec->snapshot_digest( $patch['value'] ) ) { $this->fail( 'Affected-tree read-back parity failed.' ); }
@@ -1002,9 +1098,10 @@ class LegacyTableRepository {
 		if ( ! is_array( $changes ) || ! count( $changes ) || count( $changes ) > 100 ) { $this->fail( 'Need 1 to 100 changes.' ); }
 		$result = array();
 		foreach ( $changes as $change ) {
-			if ( ! is_array( $change ) || ! isset( $change['key'], $change['expected_revision'] ) || count( $change ) !== 3 ||
+			if ( ! is_array( $change ) || ! isset( $change['key'], $change['expected_revision'] ) || count( $change ) !== ( array_key_exists( 'content_progress', $change ) ? 4 : 3 ) ||
 				! is_int( $change['expected_revision'] ) || $change['expected_revision'] < 1 || $change['expected_revision'] >= PHP_INT_MAX ) { $this->fail( 'Invalid change or revision.' ); }
 			$this->typed_key( $change['key'] ); $hash = $this->codec->key_hash( $change['key'] );
+			if ( array_key_exists( 'content_progress', $change ) && ( ContentScanRepository::STATE_KEY !== $change['key'] || ! is_array( $change['content_progress'] ) || array_key_exists( 'value', $change ) ) ) { $this->fail( 'Invalid content checkpoint patch.' ); }
 			if ( isset( $result[$hash] ) ) { $this->fail( 'Duplicate state change.' ); }
 			$this->consume( 0, strlen( $this->codec->key_value( $change['key'] ) ) );
 			if ( array_key_exists( 'value', $change ) ) {
@@ -1012,7 +1109,7 @@ class LegacyTableRepository {
 				if ( strlen( $encoded ) > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Scalar row byte budget exceeded.' ); }
 				$this->consume( 0, strlen( $encoded ) );
 			} else {
-				if ( ! isset( $change['patches'] ) || ! is_array( $change['patches'] ) || ! count( $change['patches'] ) || count( $change['patches'] ) > $this->max_rows ) { $this->fail( 'Invalid affected patches.' ); }
+				if ( ! isset( $change['patches'] ) || ! is_array( $change['patches'] ) || ( ! count( $change['patches'] ) && ! array_key_exists( 'content_progress', $change ) ) || count( $change['patches'] ) > $this->max_rows ) { $this->fail( 'Invalid affected patches.' ); }
 				$seen = array();
 				foreach ( $change['patches'] as $patch ) {
 					if ( ! is_array( $patch ) || ! isset( $patch['key'] ) || count( $patch ) !== 2 ||

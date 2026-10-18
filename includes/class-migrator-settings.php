@@ -46,6 +46,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 			$this->writer_admission = $writer_admission;
 			$this->state_backend = null === $backend ? new LegacyOptionBackend() : $backend;
 		}
+		public function content_scan_repository() { return new ContentScanRepository( $this->state_backend, $this ); }
 		public function can_clear_migrator_state() { return $this->state_backend instanceof LegacyOptionBackend; }
 
 		/**
@@ -92,6 +93,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 				return false;
 			}
 			if ( $this->state_backend instanceof LegacyTableBackend ) {
+				if ( array_key_exists( ContentScanRepository::STATE_KEY, $values ) ) {
+					if ( count( $values ) !== 1 ) { throw new \RuntimeException( 'Content snapshot cannot accompany unrelated settings.' ); }
+					return $this->state_backend->replace_content_state( $values[ContentScanRepository::STATE_KEY] );
+				}
 				$collections = array_intersect( array_keys( $values ), array( self::KEY_PLUGINS, self::KEY_GALLERIES, self::KEY_ALBUMS ) );
 				if ( count( $collections ) ) {
 					if ( count( $collections ) !== 1 ) { throw new \RuntimeException( 'Cross-collection replacement is not admitted. No partial write.' ); }

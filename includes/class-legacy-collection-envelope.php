@@ -23,6 +23,12 @@ class LegacyCollectionEnvelope {
 			$items = $value['items']; $headers = $value; unset( $headers['items'] );
 			$root['wrapper'] = array( 'field_order' => array_keys( $value ), 'values' => $headers );
 		}
+		if ( LegacyRecordCodec::CONTENT_STATE_KEY === $key ) {
+			if ( 'map' !== $kind || ! isset( $value['items'], $value['progress'] ) || ! is_array( $value['items'] ) || ! is_array( $value['progress'] ) ) { $this->fail( 'Invalid content scan envelope.' ); }
+			$items = $value['items']; $headers = $value; unset( $headers['items'] );
+			$next = 0; foreach ( $items as $item_key => $item ) { if ( is_int( $item_key ) && $item_key >= $next ) { if ( PHP_INT_MAX === $item_key ) { $this->fail( 'Content selector exhausted.' ); } $next = $item_key + 1; } }
+			$root['wrapper'] = array( 'field_order' => array_keys( $value ), 'values' => $headers, 'content' => 1, 'next_key' => $next );
+		}
 		$root['root_count'] = count( $items );
 		$this->validate( $root, $key );
 		if ( 'list' === $kind && count( $items ) && array_keys( $items ) !== range( 0, count( $items ) - 1 ) ) { $this->fail( 'List keys are not a canonical ordered list.' ); }
@@ -37,7 +43,8 @@ class LegacyCollectionEnvelope {
 		}
 		if ( ! array_key_exists( 'wrapper', $root ) ) { return; }
 		$wrapper = $root['wrapper'];
-		if ( ! is_array( $wrapper ) || array_keys( $wrapper ) !== array( 'field_order', 'values' ) ||
+		$content = is_array( $wrapper ) && array_key_exists( 'content', $wrapper );
+		if ( ! is_array( $wrapper ) || array_keys( $wrapper ) !== ( $content ? array( 'field_order', 'values', 'content', 'next_key' ) : array( 'field_order', 'values' ) ) ||
 			! is_array( $wrapper['field_order'] ) || ! count( $wrapper['field_order'] ) ||
 			array_keys( $wrapper['field_order'] ) !== range( 0, count( $wrapper['field_order'] ) - 1 ) || ! is_array( $wrapper['values'] ) ) { $this->fail( 'Malformed wrapper metadata.' ); }
 		$seen = array(); $headers = array();
@@ -48,6 +55,12 @@ class LegacyCollectionEnvelope {
 			if ( 'items' !== $field ) { $headers[] = $field; }
 		}
 		$values = $wrapper['values'];
+		if ( $content ) {
+			if ( 1 !== $wrapper['content'] || ! is_int( $wrapper['next_key'] ) || $wrapper['next_key'] < 0 || 'map' !== $root['kind'] || ( null !== $key && LegacyRecordCodec::CONTENT_STATE_KEY !== $key ) ||
+				! isset( $seen['items'], $seen['progress'], $values['progress'] ) || ! is_array( $values['progress'] ) || array_keys( $values ) !== $headers ) { $this->fail( 'Malformed content checkpoint metadata.' ); }
+			return;
+		}
+		if ( LegacyRecordCodec::CONTENT_STATE_KEY === $key ) { $this->fail( 'Content record envelope required; recover legacy scalar through explicit conversion.' ); }
 		if ( ! isset( $seen['items'] ) || array_keys( $values ) !== $headers || ! isset( $values[MigratorSettings::COMPACT_MARKER], $values['type'] ) ||
 			1 !== $values[MigratorSettings::COMPACT_MARKER] || ! in_array( $values['type'], array( 'migratable', 'plugins' ), true ) ) { $this->fail( 'Incomplete or unsupported wrapper metadata.' ); }
 		if ( null !== $key && ( ! in_array( $key, array( MigratorSettings::KEY_PLUGINS, MigratorSettings::KEY_GALLERIES,

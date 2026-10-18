@@ -14,6 +14,19 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 class LegacyRecordCodec {
 	const VERSION = 1;
+	const CONTENT_STATE_KEY = 'block-shortcode_scan_state';
+	/** Existing scan occurrence identity; shared with the record-root index. */
+	public static function content_occurrence_key( $item ) {
+		return md5( implode( '|', array(
+			isset( $item['post_id'] ) ? (int) $item['post_id'] : 0,
+			isset( $item['plugin_name'] ) ? $item['plugin_name'] : '',
+			isset( $item['type'] ) ? $item['type'] : '',
+			isset( $item['original_content'] ) ? $item['original_content'] : '',
+			isset( $item['match_offset'] ) ? (int) $item['match_offset'] : 0,
+			isset( $item['scan_occurrence'] ) ? (int) $item['scan_occurrence'] : 0,
+		) ) );
+	}
+
 	private $codec;
 	private $max_records;
 	private $max_tree_bytes;
@@ -458,6 +471,11 @@ class LegacyRecordCodec {
 			'payload_hash' => hash( 'sha256', $payload ),
 			'payload_bytes' => strlen( $payload ) + strlen( $mutation ) );
 		$row = array_merge( $row, $this->projections( $record ) );
+		if ( null === $parent && $state_hash === $this->codec->key_hash( self::CONTENT_STATE_KEY ) ) {
+			$occurrence = self::content_occurrence_key( $record );
+			$row['legacy_identifier_value'] = $this->codec->key_value( $occurrence );
+			$row['legacy_identifier_hash'] = $this->codec->key_hash( $occurrence );
+		}
 		return $row;
 	}
 
@@ -674,7 +692,13 @@ class LegacyRecordCodec {
 			}
 		} else { $this->fail( 'Unknown record kind.' ); }
 		if ( $row['logical_hash'] !== $this->codec->snapshot_digest( $record ) ) { $this->fail( 'Complete logical-record hash mismatch.' ); }
-		foreach ( $this->projections( $record ) as $field => $expected ) {
+		$projections = $this->projections( $record );
+		if ( 0 === $depth && $state_hash === $this->codec->key_hash( self::CONTENT_STATE_KEY ) ) {
+			$occurrence = self::content_occurrence_key( $record );
+			$projections['legacy_identifier_value'] = $this->codec->key_value( $occurrence );
+			$projections['legacy_identifier_hash'] = $this->codec->key_hash( $occurrence );
+		}
+		foreach ( $projections as $field => $expected ) {
 			if ( ! array_key_exists( $field, $row ) ) { $this->fail( 'Missing derived projection: ' . $field ); }
 			$actual = $row[ $field ];
 			if ( is_int( $expected ) ) { $actual = $this->number( $actual ); }

@@ -21,7 +21,36 @@ class ContentScanRepository extends ScalarStateRepository {
 		if ( $this->backend instanceof LegacyTableBackend ) { return $this->backend->content_scan_state(); }
 		return $this->state( $this->backend->read_all() );
 	}
-	public function metadata() { return $this->option_state()['progress']; }
+	public function is_table() { return $this->backend instanceof LegacyTableBackend; }
+	public function window( $offset, $limit ) {
+		if ( $this->is_table() ) { return $this->backend->content_window( $offset, $limit ); }
+		$state = $this->option_state();
+		return array( 'items' => array_slice( $state['items'], $offset, $limit, true ), 'progress' => $state['progress'], 'total' => count( $state['items'] ), 'revision' => null );
+	}
+	public function get_many( $keys ) {
+		self::exact_keys( $keys );
+		if ( $this->is_table() ) { return $this->backend->content_window( 0, 1, $keys )['items']; }
+		$state = $this->option_state(); $items = array();
+		foreach ( $keys as $key ) { if ( array_key_exists( $key, $state['items'] ) ) { $items[$key] = $state['items'][$key]; } } return $items;
+	}
+	public function metadata() { return $this->is_table() ? $this->backend->content_window( 0, 1, array() )['progress'] : $this->option_state()['progress']; }
+	public function checkpoint() { return $this->metadata(); }
+	public function append_batch( $items, $progress, $revision = null ) {
+		if ( $this->is_table() ) { return $this->backend->content_batch( $items, $progress, true, $revision ); }
+		return $this->change( function ( $state ) use ( $items, $progress ) {
+			$seen = array(); foreach ( $state['items'] as $item ) { $seen[self::occurrence_key( $item )] = true; }
+			foreach ( $items as $item ) { $key = self::occurrence_key( $item ); if ( ! isset( $seen[$key] ) ) { $state['items'][] = $item; $seen[$key] = true; } }
+			$state['progress'] = $progress; return $state;
+		} );
+	}
+	public function patch_batch( $items, $progress, $revision = null ) {
+		if ( $this->is_table() ) { return $this->backend->content_batch( $items, $progress, false, $revision ); }
+		return $this->change( function ( $state ) use ( $items, $progress ) {
+			foreach ( $items as $key => $item ) { if ( ! array_key_exists( $key, $state['items'] ) ) { return false; } $state['items'][$key] = $item; }
+			$state['progress'] = $progress; return $state;
+		} );
+	}
+	public static function occurrence_key( $item ) { return LegacyRecordCodec::content_occurrence_key( $item ); }
 	public function read_snapshot() { return $this->option_state()['items']; }
 	private function change( $change ) {
 		if ( $this->backend instanceof LegacyTableBackend ) { return $this->backend->change_content_scan( $change ); }
@@ -37,6 +66,7 @@ class ContentScanRepository extends ScalarStateRepository {
 	}
 	public function update_with_scan_state( $items, $progress ) {
 		if ( ! is_array( $items ) || ! is_array( $progress ) ) { return false; }
+		if ( $this->is_table() ) { return $this->backend->replace_content_state( array( 'items' => $items, 'progress' => $progress ) ); }
 		return $this->change( function ( $state ) use ( $items, $progress ) { $state['items'] = $items; $state['progress'] = $progress; return $state; } );
 	}
 	public function replace_post_matches( $post_id, $matches, $progress ) {
@@ -64,6 +94,11 @@ class ContentScanRepository extends ScalarStateRepository {
 	}
 	public function update_match( $key, $item ) {
 		self::exact_keys( array( $key ) );
+		if ( $this->is_table() ) {
+			$state = $this->backend->content_window( 0, 1, array( $key ) );
+			if ( ! array_key_exists( $key, $state['items'] ) ) { return false; }
+			return $this->patch_batch( array( $key => $item ), $state['progress'], $state['revision'] );
+		}
 		return $this->change( function ( $state ) use ( $key, $item ) {
 			if ( ! array_key_exists( $key, $state['items'] ) ) { return false; }
 			$state['items'][$key] = $item; return $state;

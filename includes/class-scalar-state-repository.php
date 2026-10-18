@@ -67,6 +67,10 @@ class ScalarStateRepository {
 	}
 	protected function write_values( $values ) {
 		if ( $this->backend instanceof LegacyTableBackend ) {
+			if ( array_key_exists( ContentScanRepository::STATE_KEY, $values ) ) {
+				if ( count( $values ) !== 1 ) { throw new \RuntimeException( 'Content snapshot cannot accompany unrelated scalar settings.' ); }
+				return $this->backend->replace_content_state( $values[ContentScanRepository::STATE_KEY] );
+			}
 			$encoded = array(); foreach ( $values as $key => $value ) { $encoded[$key] = $this->encode( $key, $value ); }
 			return $this->backend->mutate_scalars( $encoded );
 		}
