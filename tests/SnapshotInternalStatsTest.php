@@ -5,7 +5,16 @@ use PHPUnit\Framework\TestCase;
 require_once __DIR__ . '/StorageScaleAdmissionTest.php';
 
 class SnapshotInternalStatsTest extends TestCase {
+ /**
+  * @runInSeparateProcess
+  * @preserveGlobalState disabled
+  */
  public function test_callback_free_original20k_stats_do_not_admit_retained_output(): void {
+  // Full discovery retains unrelated allocator backing. Exercise the original
+  // finite workload in a fresh process, never by raising its actual PHP limit.
+  $this->assertNotFalse(ini_set('memory_limit', '128M'));
+  $this->assertSame('128M', ini_get('memory_limit'));
+  $this->assertSame('0', ini_get('opcache.enable_cli'));
   $value = StorageA7Fixture::value(20000);
   $b = StorageScaleAdmissionTest::admission(null, null, function () { return array(ini_get('memory_limit'), memory_get_usage(true)); });
   $c = new LegacyRecordCodec(null, 24576, 16777216, $b);
