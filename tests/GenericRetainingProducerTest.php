@@ -23,6 +23,8 @@ class GenericRetainingProducerTest extends TestCase {
   $this->assertTrue( $r['supported'] );
   $this->assertSame( '128M', $r['limit'] );
   $this->assertSame( 33554432, $r['reserve'] );
+  // Standalone probes must load refusal-path dependencies even on happy paths.
+  $this->assertArrayHasKey( 'FooPlugins\\FooGalleryMigrate\\StorageScalarObserver', $r['loaded'] );
   foreach ( $r['loaded'] as $binding ) {
    $this->assertSame( realpath( $root ) . '/includes', dirname( $binding['path'] ) );
    $this->assertSame( hash_file( 'sha256', $binding['path'] ), $binding['sha256'] );
