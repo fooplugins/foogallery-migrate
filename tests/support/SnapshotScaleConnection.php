@@ -5,6 +5,7 @@ namespace FooPlugins\FooGalleryMigrate\Tests;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 
 require_once dirname( __DIR__ ) . '/LegacyTableSnapshotTest.php';
+require_once __DIR__ . '/SnapshotScaleRow.php';
 
 class SnapshotScaleConnection extends SnapshotTestWpdb {
 	public $heads = array();
@@ -20,6 +21,7 @@ class SnapshotScaleConnection extends SnapshotTestWpdb {
 	private $serial = 0;
 	private $saved;
 	private $next_id = 1;
+	private $record_layouts = array();
 
 	public function prepare( $sql, $args ) {
 		$handle = 'host-prepared-' . ++$this->serial;
@@ -48,6 +50,20 @@ class SnapshotScaleConnection extends SnapshotTestWpdb {
 		}
 		if ( 'COMMIT' === $sql ) { $this->saved = null; $this->event( 'commit' ); return 0; }
 		if ( preg_match( '/^INSERT INTO `([^`]+)` \(([^)]+)\) VALUES \((.*)\)$/D', $sql, $m ) ) {
+			if ( 'wp_foogallery_migrate_legacy_records' === $m[1] ) {
+				// Cache only SQL shape, never arguments, rows or fixture/source graphs.
+				if ( ! isset( $this->record_layouts[$sql] ) ) {
+					$columns = explode( ',', str_replace( '`', '', $m[2] ) );
+					$layout = array_flip( array_keys( array_fill_keys( array_merge( $columns, array( 'id' ) ), true ) ) );
+					$this->record_layouts[$sql] = array( $layout, $columns, explode( ',', $m[3] ) );
+				}
+				list( $layout, $columns, $expressions ) = $this->record_layouts[$sql];
+				$values = array_fill( 0, count( $layout ), null ); $i = 0;
+				foreach ( $columns as $n => $column ) { $values[$layout[$column]] = 'NULL' === $expressions[$n] ? null : $a[$i++]; }
+				$values[$layout['id']] = $this->insert_id = $this->next_id++;
+				$this->records[] = new SnapshotScaleRow( $layout, $values );
+				++$this->emitted; $this->event( 'record-insert' ); return 1;
+			}
 			$columns = explode( ',', str_replace( '`', '', $m[2] ) );
 			$expressions = explode( ',', $m[3] ); $row = array(); $i = 0;
 			foreach ( $columns as $n => $column ) { $row[$column] = 'NULL' === $expressions[$n] ? null : $a[$i++]; }
@@ -55,8 +71,6 @@ class SnapshotScaleConnection extends SnapshotTestWpdb {
 			if ( 'wp_foogallery_migrate_legacy_state' === $m[1] ) {
 				foreach ( $this->heads as $head ) { if ( $head['blog_id'] === $row['blog_id'] && $head['state_key_hash'] === $row['state_key_hash'] ) { throw new \LogicException( 'Duplicate host head.' ); } }
 				$this->heads[$row['id']] = $row; $this->event( 'head-insert' );
-			} elseif ( 'wp_foogallery_migrate_legacy_records' === $m[1] ) {
-				$this->records[] = $row; ++$this->emitted; $this->event( 'record-insert' );
 			} else { throw new \LogicException( 'Unexpected host table.' ); }
 			return 1;
 		}
