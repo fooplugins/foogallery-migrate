@@ -118,9 +118,17 @@ class StorageByteDomainAccountingTest extends TestCase {
 	public static function derivedBoundaries(): array {
 		$out = array(); foreach ( array( 'max_rows', 'max_bytes', 'max_heads', 'max_physical_rows_per_table', 'max_physical_rows', 'max_physical_bytes' ) as $field ) { foreach ( array( false, true ) as $plus_one ) { $out[] = array( $field, $plus_one ); } } return $out;
 	}
-	/** @dataProvider modes */
+	/**
+	 * @dataProvider modes
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
 	public function test_insufficient_derived_memory_keeps_source_control_and_owned_gate( $scaled ): void {
-		$this->fixture( false ); $this->arm(); ini_set( 'memory_limit', '128M' );
+		// Full-suite discovery and prior workloads belong to the runner, not this
+		// accounting fixture's real 128M process. Do not inherit their residency.
+		$this->assertNotFalse( ini_set( 'memory_limit', '128M' ) );
+		$this->assertSame( '128M', ini_get( 'memory_limit' ) );
+		$this->fixture( false ); $this->arm();
 		$memory = new ByteDomainMemory(); $memory->used = 134217728 - strlen( $this->db->raw ) - 1;
 		$this->recover( $this->manager( $scaled, null, null, $memory ) );
 		$this->assertContains( 'source-decoded', $this->names() ); $this->assertFalse( $this->db->post_preflight_stop );
@@ -183,9 +191,16 @@ class StorageByteDomainAccountingTest extends TestCase {
 		catch ( \RuntimeException $error ) { $this->invoke( $manager, 'failed', $error ); }
 		$this->retained( $source, $control );
 	}
-	/** @dataProvider modes */
+	/**
+	 * @dataProvider modes
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
 	public function test_table_memory_refusal_before_read_or_after_maintenance( $after_maintenance ): void {
-		$this->fixture( false ); $source = $this->db->raw; $control = $this->db->control; ini_set( 'memory_limit', '128M' );
+		// Same fresh-process budget boundary as the forward accounting refusal.
+		$this->assertNotFalse( ini_set( 'memory_limit', '128M' ) );
+		$this->assertSame( '128M', ini_get( 'memory_limit' ) );
+		$this->fixture( false ); $source = $this->db->raw; $control = $this->db->control;
 		$memory = new ByteDomainMemory(); $manager = $this->manager( false, null, null, $memory );
 		$this->invoke( $manager, 'start_memory' ); $this->invoke( $manager, 'begin' );
 		$codec = new LegacyStateCodec();
