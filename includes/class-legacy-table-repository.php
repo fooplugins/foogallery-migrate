@@ -359,6 +359,12 @@ class LegacyTableRepository {
 	}
 
 	/** A replacement is an explicit operation; never import/repair during reads. */
+	/** Preserve missing in the full compatibility facade; not used by UI paging. */
+	public function read_content_state() {
+		$head = $this->reader->head( ContentScanRepository::STATE_KEY );
+		return array( 'found' => false !== $head, 'value' => false === $head ? null : $this->content_scan_state() );
+	}
+
 	public function replace_content_state( $value, $expected_revision = null ) {
 		$this->start_budget(); $key = ContentScanRepository::STATE_KEY;
 		( new LegacyCollectionEnvelope() )->split( $key, 'map', $value );
