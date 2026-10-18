@@ -316,9 +316,10 @@ class LegacyRecordCodec {
 		// Finish the shared logical admission before invoking the consumer.
 		if ( null !== $this->scale ) { $this->codec->snapshot_digest( $record ); }
 		if ( $qualified ) { $emit->observe( 'digest' ); }
-		// Only aggregate output amplification is replaced. Physical checks in
-		// preflight, per-row estimates and the pending-aware final check remain.
-		if ( $qualified || null !== $phase ) { $this->admit( 0 ); }
+		// Only the qualified non-retaining sink replaces aggregate amplification.
+		// Generic consumers must admit aggregate bytes plus all pending liabilities
+		// before staging/emission, including when a retaining phase is open.
+		if ( $qualified ) { $this->admit( 0 ); }
 		else {
 			$this->admit( $preflight['encoded_bytes'] );
 		}
