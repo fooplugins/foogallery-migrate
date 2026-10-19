@@ -24,10 +24,24 @@ final class SnapshotReadProfile {
 		if ( true !== $cell['observer']['independent'] || self::number( $cell['observer']['bounded_bytes'] ) < 1 ) { self::fail( 'observer binding' ); }
 		$p = $cell['plan'];
 		foreach ( array( 'own', 'full', 'parts', 'features', 'version' ) as $k ) { if ( ! isset( $p[$k] ) ) { self::fail( 'missing overlap' ); } }
-		$required = array( 'legacy_private_floor', 'witness_construction_lifetime_lookup', 'whole_logical_digest_frames', 'whole_logical_scalar_hash_scratch', 'whole_children_wrapper_cow', 'retained_two_outputs_cow' );
-		if ( array_keys( $p['parts'] ) !== $required || $p['version'] !== SnapshotReadPlan::VERSION || $p['parts']['legacy_private_floor'] < $p['own']['private'] || $p['parts']['witness_construction_lifetime_lookup'] < SnapshotPageWitness::workspace( $p['own']['records'] ) ) { self::fail( 'overlap floors' ); }
+		// Reconstruct the compiler's exact component algebra, not merely its sum.
+		// Even larger/redistributed parts cannot support the actual compiled plan:
+		// supports() deliberately requires exact producer-plan identity.
+		$f = $p['features'];
+		foreach ( array( 'logical_depth', 'max_string', 'max_scalar_encoding', 'containers', 'max_resize' ) as $k ) { if ( ! isset( $f[$k] ) ) { self::fail( 'overlap floors' ); } self::number( $f[$k] ); }
+		$expected = array(
+			'legacy_private_floor' => self::number( $p['own']['private'] ),
+			'witness_construction_lifetime_lookup' => SnapshotPageWitness::workspace( self::number( $p['own']['records'] ) ),
+			'whole_logical_digest_frames' => StorageScaleAdmission::checked_multiply( 4096, self::add( $f['logical_depth'], 1 ) ),
+			'whole_logical_scalar_hash_scratch' => StorageScaleAdmission::checked_multiply( 16, max( $f['max_string'], $f['max_scalar_encoding'] ) ),
+			'whole_children_wrapper_cow' => self::add( $f['containers'], $f['max_resize'] ),
+			'retained_two_outputs_cow' => StorageScaleAdmission::checked_multiply( 2, $f['containers'] ),
+		);
+		if ( $p['version'] !== SnapshotReadPlan::VERSION || $p['parts'] !== $expected ) { self::fail( 'overlap floors' ); }
 		$private = 0; foreach ( $p['parts'] as $n ) { $private = self::add( $private, $n ); }
 		if ( $private !== $p['full']['private'] ) { self::fail( 'private sum' ); }
+		$full = $p['own']; $full['private'] = $private;
+		if ( $p['full'] !== $full ) { self::fail( 'overlap floors' ); }
 		$pids = array(); $max_residual = 0; $residuals = array(); $quantum = 0; $samples = array();
 		foreach ( $raw_traces as $i => $raw ) {
 			if ( ! is_string( $raw ) || strlen( $raw ) > 16777216 || hash( 'sha256', $raw ) !== $cell['trace_sha256'][$i] ) { self::fail( 'raw trace hash/bound' ); }

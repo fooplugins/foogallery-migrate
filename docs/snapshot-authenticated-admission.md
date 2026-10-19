@@ -48,8 +48,16 @@ unwind samples grant no credit and may bracket that event or follow it. All row
 attachments/unwinds must finish before envelope/digest/exit, with zero own debt
 but unchanged private liability. This does not reconstruct per-row byte costs,
 prove arbitrary-hook ordering, or authenticate declared variants/measurements.
-Synthetic lifecycle/arithmetic controls are NOT measured qualification. The
-separate R2 zero whole-logical component-floor finding remains OPEN.
+Qualification also reconstructs SnapshotReadPlan's exact component algebra from
+the supplied features: 4096*(depth+1) digest frames, 16*max(string,scalar encoding)
+scratch, containers+max_resize whole COW, and 2*containers retained-output COW,
+plus exact legacy-private and witness workspace. The full descriptor must equal
+own with only its private total replaced. Zero/understated, inflated or same-sum
+redistributed components are refused: none equals the producer plan required by
+supports(). This is structural consistency of declared features, not independent
+authentication of a graph, observer or measurement. The bounded R2 mismatch is
+covered by synthetic API and real repository CLI regressions with valid controls.
+Synthetic lifecycle/arithmetic controls are NOT measured qualification.
 tests/tools/qualify-snapshot-read-cell.php emits a finite host receipt,
 not an installation, production enablement or native/literal-floor approval.
 
