@@ -67,6 +67,160 @@ class LegacyTableSnapshot {
 		$this->record_table = $tables[1];
 	}
 
+	/** Conversion-only transaction: rows, head and scalar cursor commit together.
+	 * Ordinary replace_many remains unchanged and all-or-nothing. */
+	private $copy_created_gmt;
+	public function conversion_batch( $r, $value, $controls, $owner, $discard = false ) {
+		$this->admit();
+		$this->copy_created_gmt = gmdate( 'Y-m-d H:i:s', $r['created'] );
+		if ( null === $this->scale || null === $this->scale->capacity() || 4 !== $r['version'] || 'copying' !== $r['phase'] || 'option' !== $r['from'] || 'table' !== $r['to'] || ! is_array( $value ) ) { $this->fail( 'Invalid conversion batch domain.' ); }
+		$c = StorageCopyCursor::validate( $r['copy_cursor'], $r ); $capacity = $this->scale->capacity();
+		if ( count( $value ) > $capacity->limit( 'max_heads' ) || $c['state_order'] > count( $value ) ) { $this->fail( 'Copy cursor exceeds source heads.' ); }
+		( new LegacyStorageSchema( $this->wpdb ) )->verify();
+		$mode = $this->read( 'SELECT @@SESSION.autocommit AS autocommit' );
+		if ( count( $mode ) !== 1 || 1 !== $this->number( $mode[0]['autocommit'] ) ) { $this->fail( 'Copy requires idle autocommit connection.' ); }
+		$this->write( 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ' ); $this->busy = true;
+		try { $this->write( 'START TRANSACTION' ); }
+		catch ( \Exception $error ) { $this->busy = false; $this->tainted = true; throw $error; }
+		try {
+			$options = $this->wpdb->prefix . 'options';
+			$this->read( $this->wpdb->prepare( 'SELECT option_name FROM `' . $options . '` WHERE option_name IN (%s,%s,%s) ORDER BY option_name FOR UPDATE', array( StorageAuthority::CONTROL_OPTION, StorageAuthority::MAINTENANCE_OPTION, FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
+			$old = json_encode( $r );
+			if ( $controls->read( StorageAuthority::CONTROL_OPTION ) !== $old ) { $this->fail( 'Copy control changed.' ); }
+			$raw_hash = $this->wpdb->get_var( $this->wpdb->prepare( 'SELECT SHA2(option_value,256) FROM `' . $options . '` WHERE option_name=%s LIMIT 1', array( FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
+			if ( ! empty( $this->wpdb->last_error ) || hash( 'sha256', null === $raw_hash ? 'absent' : 'present:' . $raw_hash ) !== $r['source_digest'] ) { $this->fail( 'Copy source changed.' ); }
+			$heads = $this->copy_heads(); $expected_heads = $c['state_order'] + ( $c['state_id'] > 0 ? 1 : 0 );
+			if ( count( $heads ) !== $expected_heads ) { $this->fail( 'Foreign or missing conversion head.' ); }
+			$totals = array( 'rows' => 0, 'bytes' => 0, 'tokens' => 0 ); $digest = hash( 'sha256', "conversion-heads-v1\0" ); $ordinal = 0;
+			foreach ( $value as $key => $state ) {
+				if ( $ordinal > $c['state_order'] ) { break; }
+				if ( $ordinal < $c['state_order'] || $c['state_id'] > 0 ) {
+					$head = $heads[$ordinal];
+					$this->copy_prove_head( $head, $key, $state, $ordinal, $ordinal < $c['state_order'], $c, $totals );
+					if ( $ordinal < $c['state_order'] ) { $digest = hash( 'sha256', $digest . json_encode( $head ) ); }
+				}
+				++$ordinal;
+			}
+			$scope = $this->read( $this->wpdb->prepare( 'SELECT COUNT(*) AS n FROM `' . $this->record_table . '` WHERE blog_id=%d', array( $this->blog_id ) ) );
+			if ( $this->number( $scope[0]['n'] ) !== $c['committed_rows'] || $totals['rows'] !== $c['committed_rows'] || $totals['bytes'] !== $c['committed_bytes'] || $totals['tokens'] !== $c['committed_tokens'] || $digest !== $c['completed_heads_digest'] ) { $this->fail( 'Committed prefix counters/digest changed; no replay.' ); }
+			if ( $discard ) {
+				if ( null !== $controls->read( StorageAuthority::AUTHORITY_OPTION ) ) { $this->fail( 'Discard cannot remove selected table authority.' ); }
+				foreach ( $heads as $head ) {
+					$this->write( $this->wpdb->prepare( 'DELETE FROM `' . $this->record_table . '` WHERE blog_id=%d AND state_id=%d AND generation=1', array( $this->blog_id, $head['id'] ) ) );
+					if ( 1 !== $this->write( $this->wpdb->prepare( 'DELETE FROM `' . $this->state_table . '` WHERE blog_id=%d AND id=%d AND revision=%d AND active_generation=%d', array( $this->blog_id, $head['id'], $head['revision'], $head['active_generation'] ) ) ) ) { $this->fail( 'Discard head CAS failed.' ); }
+				}
+				$controls->cas( StorageAuthority::CONTROL_OPTION, $old, null, null, $owner, $this->deadline );
+				$commit = $this->wpdb->query( 'COMMIT' ); $this->busy = false;
+				if ( false === $commit || ! empty( $this->wpdb->last_error ) ) { $this->tainted = true; $this->fail( 'Discard COMMIT uncertain; reconcile on a fresh pin, no replay.' ); }
+				return array( 'record' => null, 'complete' => true );
+			}
+			if ( $c['state_order'] === count( $value ) ) {
+				$this->write( 'ROLLBACK' ); $this->busy = false; return array( 'record' => $r, 'complete' => true );
+			}
+			$ordinal = 0; $key = null; $state = null;
+			foreach ( $value as $candidate_key => $candidate ) { if ( $ordinal++ === $c['state_order'] ) { $key = $candidate_key; $state = $candidate; break; } }
+			$kind = is_array( $state ) ? ( $this->is_list( $state ) ? 'list' : 'map' ) : 'scalar';
+			$split = ( new LegacyCollectionEnvelope() )->split( $key, $kind, $state );
+			$root = $this->codec->encode_collection_root( $split['root'] );
+			if ( strlen( $root ) > $capacity->limit( 'max_row_bytes' ) ) { $this->fail( 'Copy root metadata exceeds row cap.' ); }
+			if ( 0 === $c['state_id'] ) {
+				$c['state_id'] = $this->insert( $this->state_table, array( 'blog_id' => $this->blog_id, 'state_key_hash' => $this->codec->key_hash( $key ),
+					'state_key_value' => $this->codec->key_value( $key ), 'state_order' => $c['state_order'], 'state_kind' => 'staging',
+					'active_generation' => 0, 'revision' => 0, 'codec_version' => LegacyStateCodec::VERSION, 'digest_status' => 'dirty', 'root_payload' => $root, 'created_gmt' => $this->copy_created_gmt, 'updated_gmt' => $this->copy_created_gmt ) );
+			}
+			$root_ordinal = 0; $batch_rows = 0; $batch_bytes = 0; $finished = true; $start = $c;
+			foreach ( $split['items'] as $item_key => $item ) {
+				$node = 0; $repo = $this; $current_root = $root_ordinal;
+				$finished = $this->records->walk_conversion_tree( $key, $item_key, $item, $root_ordinal, function ( $row, $tokens, $encoded_bytes ) use ( $repo, $key, $current_root, &$node, &$c, &$batch_rows, &$batch_bytes, $capacity, $start ) {
+					$at = $node++;
+					if ( $current_root < $start['next_root_ordinal'] || ( $current_root === $start['next_root_ordinal'] && $at < $start['next_node_ordinal'] ) ) { return true; }
+					$bytes = $encoded_bytes;
+					if ( $batch_rows >= $capacity->limit( 'copy_batch_rows' ) || $bytes > $capacity->limit( 'copy_batch_bytes' ) - $batch_bytes ) {
+						if ( 0 === $batch_rows ) { $repo->fail( 'One row exceeds copy byte batch; cannot yield without progress.' ); } return false;
+					}
+					$row['created_gmt'] = $repo->copy_created_gmt; $row['updated_gmt'] = $repo->copy_created_gmt;
+					$repo->insert_record( $c['state_id'], 1, $row, $key ); $repo->copy_prove_row( $c['state_id'], $row, $key );
+					++$batch_rows; $batch_bytes += $bytes;
+					$c['committed_rows'] = StorageCapacityBudget::add( $c['committed_rows'], 1 );
+					$c['committed_bytes'] = StorageCapacityBudget::add( $c['committed_bytes'], $bytes );
+					$c['committed_tokens'] = StorageCapacityBudget::add( $c['committed_tokens'], $tokens );
+					if ( $c['committed_rows'] > $capacity->limit( 'max_rows' ) || $c['committed_bytes'] > $capacity->limit( 'max_bytes' ) || $c['committed_tokens'] > $capacity->limit( 'max_tokens' ) ) { $repo->fail( 'Copy counters exceed operation bounds.' ); }
+					$c['next_root_ordinal'] = $current_root; $c['next_node_ordinal'] = $at + 1; return true;
+				} );
+				if ( ! $finished ) { break; }
+				++$root_ordinal; if ( $current_root >= $start['next_root_ordinal'] ) { $c['next_root_ordinal'] = $root_ordinal; $c['next_node_ordinal'] = 0; }
+			}
+			if ( $finished ) {
+				$stats = $this->generation_stats( $c['state_id'], 1 ); $logical = $this->codec->snapshot_digest( $state );
+				$sql = 'UPDATE `' . $this->state_table . '` SET active_generation=1, revision=1, state_kind=%s, record_count=%d, payload_bytes=%d, snapshot_digest=UNHEX(%s), digest_revision=1, digest_status=\'current\', updated_gmt=%s WHERE blog_id=%d AND id=%d AND state_kind=\'staging\' AND revision=0 AND active_generation=0';
+				if ( 1 !== $this->write( $this->wpdb->prepare( $sql, array( $kind, $stats['record_count'], $stats['payload_bytes'] + strlen( $root ), $logical, gmdate( 'Y-m-d H:i:s' ), $this->blog_id, $c['state_id'] ) ) ) ) { $this->fail( 'Copy head CAS failed.' ); }
+				$after = $this->copy_heads(); $head = $after[$c['state_order']];
+				$c['completed_heads_digest'] = hash( 'sha256', $c['completed_heads_digest'] . json_encode( $head ) );
+				++$c['state_order']; $c['state_id'] = 0; $c['next_root_ordinal'] = 0; $c['next_node_ordinal'] = 0;
+			}
+			$r['copy_cursor'] = StorageCopyCursor::validate( $c, $r ); $r['updated'] = max( $r['updated'], time() ); $new = json_encode( $r ); StorageControl::decode( $new, $this->blog_id );
+			$controls->cas( StorageAuthority::CONTROL_OPTION, $old, $new, array( 'kind' => 'option', 'value' => $raw_hash ), $owner, $this->deadline );
+			$commit = $this->wpdb->query( 'COMMIT' ); $this->busy = false;
+			if ( false === $commit || ! empty( $this->wpdb->last_error ) ) { $this->tainted = true; $this->fail( 'Copy COMMIT uncertain; fresh pinned exact-prefix reconciliation required. No replay.' ); }
+			$this->tick(); return array( 'record' => $r, 'complete' => $c['state_order'] === count( $value ) );
+		} catch ( \Exception $error ) { if ( $this->busy ) { $this->rollback( $error ); } throw $error; }
+		catch ( \Throwable $error ) { if ( $this->busy ) { $this->rollback( $error ); } throw $error; }
+	}
+
+	private function copy_heads() {
+		$sql = 'SELECT id, state_order, state_kind, active_generation, revision, codec_version, record_count, payload_bytes, digest_revision, digest_status, HEX(state_key_hash) AS key_hash, SHA2(state_key_value,256) AS key_digest, SHA2(root_payload,256) AS root_digest, HEX(snapshot_digest) AS logical_digest FROM `' . $this->state_table . '` WHERE blog_id=%d ORDER BY state_order LIMIT ' . ( $this->scale->limit( 'max_heads' ) + 1 ) . ' FOR UPDATE';
+		$heads = $this->read( $this->wpdb->prepare( $sql, array( $this->blog_id ) ) );
+		if ( count( $heads ) > $this->scale->limit( 'max_heads' ) ) { $this->fail( 'Excess conversion heads.' ); }
+		foreach ( $heads as &$head ) {
+			foreach ( array( 'id', 'state_order', 'active_generation', 'revision', 'codec_version', 'record_count', 'payload_bytes', 'digest_revision' ) as $field ) { $head[$field] = $this->number( $head[$field] ); }
+			$head['key_hash'] = strtolower( $head['key_hash'] ); $head['logical_digest'] = null === $head['logical_digest'] ? null : strtolower( $head['logical_digest'] );
+		} unset( $head ); return $heads;
+	}
+	private function copy_prove_head( $head, $key, $state, $ordinal, $complete, $cursor, &$totals ) {
+		$kind = is_array( $state ) ? ( $this->is_list( $state ) ? 'list' : 'map' ) : 'scalar';
+		$split = ( new LegacyCollectionEnvelope() )->split( $key, $kind, $state ); $root = $this->codec->encode_collection_root( $split['root'] );
+		if ( $head['id'] < 1 || $head['state_order'] !== $ordinal || $head['key_hash'] !== $this->codec->key_hash( $key ) ||
+			$head['key_digest'] !== hash( 'sha256', $this->codec->key_value( $key ) ) || $head['root_digest'] !== hash( 'sha256', $root ) ||
+			$head['codec_version'] !== LegacyStateCodec::VERSION || $head['active_generation'] !== ( $complete ? 1 : 0 ) || $head['revision'] !== ( $complete ? 1 : 0 ) ||
+			$head['state_kind'] !== ( $complete ? $kind : 'staging' ) || $head['digest_status'] !== ( $complete ? 'current' : 'dirty' ) ||
+			( ! $complete && ( $head['id'] !== $cursor['state_id'] || $head['record_count'] !== 0 || $head['payload_bytes'] !== 0 || $head['digest_revision'] !== 0 || null !== $head['logical_digest'] ) ) ) { $this->fail( 'Committed conversion head changed.' ); }
+		$rows = 0; $payload = 0; $bytes = 0; $root_order = 0; $position_seen = $complete || ( $cursor['next_root_ordinal'] === count( $split['items'] ) && 0 === $cursor['next_node_ordinal'] );
+		foreach ( $split['items'] as $item_key => $item ) {
+			$node = 0; $repo = $this; $order = $root_order;
+			$this->records->walk_conversion_tree( $key, $item_key, $item, $root_order++, function ( $row, $tokens, $encoded_bytes ) use ( $repo, $key, $head, $complete, $cursor, $order, &$node, &$rows, &$payload, &$bytes, &$totals, &$position_seen ) {
+				$at = $node++;
+				if ( ! $complete && $order === $cursor['next_root_ordinal'] && $at === $cursor['next_node_ordinal'] ) { $position_seen = true; }
+				if ( ! $complete && ( $order > $cursor['next_root_ordinal'] || ( $order === $cursor['next_root_ordinal'] && $at >= $cursor['next_node_ordinal'] ) ) ) { return false; }
+				$repo->copy_prove_row( $head['id'], $row, $key ); ++$rows; $payload += $row['payload_bytes']; $n = $encoded_bytes; $bytes += $n;
+				++$totals['rows']; $totals['bytes'] += $n; $totals['tokens'] += $tokens; return true;
+			} );
+			if ( ! $complete && $order === $cursor['next_root_ordinal'] && $node === $cursor['next_node_ordinal'] ) { $position_seen = true; }
+		}
+		$stats = $this->generation_stats( $head['id'], 1 );
+		if ( ! $position_seen || $stats !== array( 'record_count' => $rows, 'payload_bytes' => $payload, 'encoded_bytes' => $bytes ) ||
+			( $complete && ( $head['record_count'] !== $rows || $head['payload_bytes'] !== $payload + strlen( $root ) || $head['digest_revision'] !== 1 || $head['logical_digest'] !== $this->codec->snapshot_digest( $state ) ) ) ) { $this->fail( 'Exact committed prefix/head statistics mismatch.' ); }
+	}
+	private function copy_prove_row( $id, $row, $state_key ) {
+		if ( 'migrated' === $state_key && null === $row['parent_node_hash'] ) {
+			$key = 'integer' === $row['key_type'] ? (int) base64_decode( $row['key_value'], true ) : base64_decode( $row['key_value'], true );
+			$row['legacy_identifier_value'] = $this->codec->key_value( $key ); $row['legacy_identifier_hash'] = $this->codec->key_hash( $key );
+		}
+		$max = $this->scale->capacity()->limit( 'max_row_bytes' ); $this->scale->capacity()->checkpoint( $max );
+		$sql = 'SELECT * FROM `' . $this->record_table . '` WHERE blog_id=%d AND state_id=%d AND generation=1 AND node_hash=UNHEX(%s) AND ' . $this->record_bytes() . ' <= %d LIMIT 2';
+		$rows = $this->read( $this->wpdb->prepare( $sql, array( $this->blog_id, $id, $row['node_hash'], $max ) ) );
+		if ( count( $rows ) !== 1 ) { $this->fail( 'Missing, oversized or duplicate committed row.' ); }
+		$expected = array_merge( $row, array( 'blog_id' => $this->blog_id, 'state_id' => $id, 'generation' => 1 ) );
+		foreach ( $this->definitions[$this->record_table]['columns'] as $name => $spec ) {
+			if ( 'id' === $name ) { continue; }
+			$want = array_key_exists( $name, $expected ) ? $expected[$name] : ( $spec[1] ? null : ( false !== strpos( $spec[0], 'int' ) ? 0 : ( 'datetime' === $spec[0] ? $this->copy_created_gmt : '' ) ) );
+			$actual = $rows[0][$name];
+			if ( null !== $actual && 'binary(32)' === $spec[0] ) { $actual = bin2hex( $actual ); }
+			elseif ( null !== $actual && false !== strpos( $spec[0], 'int' ) ) { $actual = $this->number( $actual ); }
+			if ( $actual !== $want ) { $this->fail( 'Committed row differs from exact deterministic source: ' . $name ); }
+		}
+	}
+	private function is_list( $value ) { $i = 0; foreach ( $value as $key => $unused ) { if ( $key !== $i++ ) { return false; } } return true; }
+
 	/**
 	 * Each change explicitly supplies key, top-level order, kind (scalar/map/list),
 	 * value and expected_revision (null means MUST be absent). Every key, including
@@ -479,6 +633,11 @@ class LegacyTableSnapshot {
 			$this->tick(); $this->admit_memory( $encoded_bytes );
 			if ( null !== $this->snapshot_read_phase && $workspace ) {
 				$this->scale->admit_snapshot_stats_workspace( $this->snapshot_read_phase->workspace( $workspace ) );
+			} else if ( null !== $this->scale && null !== $this->scale->capacity() && $workspace ) {
+				// The owning table_verify phase carries the complete future graph;
+				// only bounded driver/row scratch is additional here. Legacy callers
+				// retain the original eight-times fallback below.
+				$this->scale->capacity()->checkpoint( $workspace );
 			} else if ( null !== $this->scale && $workspace ) {
 				$this->scale->admit_snapshot_stats_workspace( StorageScaleAdmission::checked_add( StorageScaleAdmission::checked_multiply( 8, $encoded_bytes ), $workspace ) );
 			}

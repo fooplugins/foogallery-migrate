@@ -66,9 +66,9 @@ class StorageConversion {
 			$this->storage( 'table' === $request['target'] ); // Explicit selection only; recovery never provisions.
 			$retirement = new StorageRetirement( $this->connection, $this->prefix, $this->blog, $this->policy, $this->deadline, $this->memory, $this->scale );
 			if ( $replacement ) {
-				$this->require_true( null !== $previous && 2 === $previous['version'] && 'table' === $previous['from'] && 'option' === $previous['to'] && 'option' === $from );
+				$this->require_true( null !== $previous && in_array( $previous['version'], array( 2, 4 ), true ) && 'table' === $previous['from'] && 'option' === $previous['to'] && 'option' === $from );
 			}
-			$source = 'option' === $from ? $this->option_snapshot() : $this->table_snapshot( true );
+			$source = $this->source_metadata( $from, true );
 			if ( 'option' === $from && ! $replacement ) {
 				// Include orphan/staged records, not only visible state heads.
 				$retirement->assert_empty();
@@ -76,13 +76,14 @@ class StorageConversion {
 			} elseif ( 'table' === $from ) { $this->require_true( ! $this->option_present( FOOGALLERY_MIGRATE_OPTION_DATA ) ); }
 			$id = substr( hash( 'sha256', wp_generate_password( 64, true, true ) ), 0, 32 );
 			$now = time();
-			$record = array( 'version' => null === $previous ? 2 : $previous['version'], 'blog_id' => $this->blog, 'backend' => $from,
+			$record = array( 'version' => null !== $this->capacity() ? 4 : ( null === $previous ? 2 : $previous['version'] ), 'blog_id' => $this->blog, 'backend' => $from,
 				'epoch' => null === $previous ? 0 : $previous['epoch'], 'switch_id' => $id,
 				'from' => $from, 'to' => $request['target'], 'phase' => 'copying',
 				'table_id' => 'option' === $from ? $id : $previous['table_id'],
-				'source_digest' => $source['physical'], 'logical_digest' => $this->codec->snapshot_digest( $source['value'] ),
+				'source_digest' => $source['physical'], 'logical_digest' => $source['logical'],
 				'schema' => 1, 'codec' => 1, 'created' => $now, 'updated' => $now );
-			if ( 2 === $record['version'] ) { $record['retained_digest'] = 'table' === $from ? $retirement->capture() : null; }
+			if ( in_array( $record['version'], array( 2, 4 ), true ) ) { $record['retained_digest'] = 'table' === $from ? $retirement->capture() : null; }
+			if ( 4 === $record['version'] ) { $record['copy_cursor'] = 'table' === $request['target'] ? StorageCopyCursor::initial( $record ) : null; }
 			StorageScalarObserver::milestone( 'source-verified' );
 			$this->ready(); $new = json_encode( $record ); StorageControl::decode( $new, $this->blog );
 			if ( $replacement ) {
@@ -94,7 +95,7 @@ class StorageConversion {
 				} );
 			} else { $this->controls->cas( StorageAuthority::CONTROL_OPTION, $raw, $new, null, $this->gate->maintenance_identity() ); }
 			StorageScalarObserver::milestone( 'control-copying' );
-			$result = $this->advance( $record, $source );
+			unset( $source ); $result = $this->advance( $record );
 			$this->end(); return $result;
 		} catch ( \Exception $error ) { return $this->failed( $error ); }
 		catch ( \Throwable $error ) { return $this->failed( $error ); }
@@ -115,16 +116,42 @@ class StorageConversion {
 			$this->require_true( 'stable' !== $r['phase'] && $r['to'] === $request['target'] );
 			$source = null;
 			if ( in_array( $r['phase'], array( 'copying', 'verified' ), true ) ) {
-				$source = 'option' === $r['from'] ? $this->option_snapshot() : $this->table_snapshot( false );
-				$this->require_true( $source['physical'] === $r['source_digest'] && $this->codec->snapshot_digest( $source['value'] ) === $r['logical_digest'] );
+				$source = $this->source_metadata( $r['from'], false );
+				$this->require_true( $source['physical'] === $r['source_digest'] && $source['logical'] === $r['logical_digest'] );
+				unset( $source );
 			}
-			$result = $this->advance( $r, $source ); $this->end(); return $result;
+			$result = $this->advance( $r ); $this->end(); return $result;
 		} catch ( \Exception $error ) { return $this->failed( $error ); }
 		catch ( \Throwable $error ) { return $this->failed( $error ); }
 	}
 
 	/** Shared receiver authorization; never reads or writes storage. */
-	public static function authorize_request( $r, $recovery = false, $blog = null, $replacement = false ) {
+	public function discard_copy( $request ) {
+		$this->start_memory();
+		$authorized = self::authorize_request( $request, false, $this->blog, false, true );
+		if ( is_wp_error( $authorized ) ) { return $authorized; }
+		try {
+			$this->begin(); $this->storage();
+			$r = StorageControl::decode( $this->controls->read( StorageAuthority::CONTROL_OPTION ), $this->blog );
+			$this->require_true( null !== $r && 4 === $r['version'] && 'copying' === $r['phase'] && 'option' === $r['backend'] && 'table' === $r['to'] );
+			$this->discard_source( $r ); $this->unchanged_source( $r ); $this->ready();
+			$this->require_true( null === $this->controls->read( StorageAuthority::CONTROL_OPTION ) && null === $this->controls->read( StorageAuthority::AUTHORITY_OPTION ) );
+			( new StorageRetirement( $this->connection, $this->prefix, $this->blog, $this->policy, $this->deadline, $this->memory, $this->scale ) )->assert_empty();
+			$this->end(); return array( 'blog_id' => $this->blog, 'backend' => 'option', 'epoch' => $r['epoch'], 'phase' => 'stable' );
+		} catch ( \Exception $error ) { $this->end(); return self::error( 'recovery_required' ); }
+		catch ( \Throwable $error ) { $this->end(); return self::error( 'recovery_required' ); }
+	}
+	private function discard_source( $r ) {
+		$token = $this->open_capacity( 'commit_cleanup_response' );
+		$this->discard_source_owned( $r ); $this->close_capacity( $token );
+	}
+	private function discard_source_owned( $r ) {
+		$source = $this->option_snapshot();
+		$this->require_true( $source['physical'] === $r['source_digest'] && $this->codec->snapshot_digest( $source['value'] ) === $r['logical_digest'] );
+		$this->snapshot->conversion_batch( $r, $source['value'], $this->controls, $this->gate->maintenance_identity(), true );
+	}
+
+	public static function authorize_request( $r, $recovery = false, $blog = null, $replacement = false, $discard = false ) {
 		StorageScalarObserver::refusal_scope();
 		if ( ! current_user_can( 'manage_options' ) ) { return self::error( 'forbidden' ); }
 		$blog = null === $blog ? get_current_blog_id() : $blog;
@@ -132,9 +159,9 @@ class StorageConversion {
 			! is_int( $blog ) || $blog < 1 || $blog !== get_current_blog_id() ||
 			( $r['blog_id'] !== $blog && $r['blog_id'] !== (string) $blog ) || 'site' !== $r['scope'] ||
 			! in_array( $r['target'], array( 'table', 'option' ), true ) || ! is_string( $r['nonce'] ) ||
-			( $replacement && ( $recovery || 'table' !== $r['target'] ) ) ||
-			$r['confirmation'] !== ( $replacement ? 'replace-retained-with-table' : ( $recovery ? 'recover-storage' : 'switch-to-' . $r['target'] ) ) ) { return self::error( 'invalid_request' ); }
-		$purpose = $replacement ? 'option_reimport' : ( $recovery ? 'recover' : ( 'table' === $r['target'] ? 'option_import' : 'table_export' ) );
+			( $replacement && ( $recovery || $discard || 'table' !== $r['target'] ) ) || ( $discard && ( $recovery || 'table' !== $r['target'] ) ) ||
+			$r['confirmation'] !== ( $discard ? 'discard-copy' : ( $replacement ? 'replace-retained-with-table' : ( $recovery ? 'recover-storage' : 'switch-to-' . $r['target'] ) ) ) ) { return self::error( 'invalid_request' ); }
+		$purpose = $discard ? 'discard' : ( $replacement ? 'option_reimport' : ( $recovery ? 'recover' : ( 'table' === $r['target'] ? 'option_import' : 'table_export' ) ) );
 		$nonce = wp_verify_nonce( $r['nonce'], 'foogallery_migrate_storage_' . $purpose . '_' . $blog );
 		if ( 1 !== $nonce && 2 !== $nonce ) { return self::error( 'invalid_nonce' ); }
 		StorageScalarObserver::refusal_scope( true );
@@ -177,12 +204,48 @@ class StorageConversion {
 			function ( $bytes ) { $this->table_budget( $bytes ); return true; }, $this->scale );
 	}
 
-	private function advance( $r, $source ) {
-		// Record and source are already live here; keep their backing charged.
+	private function advance( $r ) {
 		$this->memory->sample();
 		if ( 'copying' === $r['phase'] ) {
-			$this->ready();
-			if ( 'table' === $r['to'] ) {
+			$this->ready(); $r = $this->copy_source( $r );
+			if ( 4 === $r['version'] && ! $this->copy_complete ) { return $r; }
+			$target = $this->source_metadata( $r['to'], false );
+			$this->require_true( $target['logical'] === $r['logical_digest'] );
+			$this->unchanged_source( $r ); $r = $this->phase( $r, 'verified' );
+		}
+		if ( 'verified' === $r['phase'] ) {
+			$this->ready(); $this->unchanged_source( $r );
+			$target = $this->source_metadata( $r['to'], false );
+			$this->require_true( $target['logical'] === $r['logical_digest'] );
+			$this->retain_and_select( $r );
+			$this->unchanged_source( $r ); $this->ready(); $r = $this->phase( $r, 'flipped', $target );
+		}
+		if ( 'flipped' === $r['phase'] ) {
+			$this->ready(); $active = $this->source_metadata( $r['backend'], false );
+			$this->require_true( $active['logical'] === $r['logical_digest'] );
+			$this->cleanup_source( $r );
+			$this->ready(); $r = $this->phase( $r, 'stable', $active );
+		}
+		$this->require_true( StorageControl::runtime_ready( $r, $this->controls->read( StorageAuthority::AUTHORITY_OPTION ) ) );
+		return $r;
+	}
+
+	/** This helper must UNWIND before independent destination verification. */
+	private $copy_complete = true;
+	private function copy_source( $r ) {
+		$this->copy_complete = true;
+		$token = $this->open_capacity( 'table' === $r['to'] ? 'stage' : 'reverse_encode_write' );
+		$result = $this->copy_source_owned( $r );
+		$this->close_capacity( $token ); return $result;
+	}
+	private function copy_source_owned( $r ) {
+		$source = 'option' === $r['from'] ? $this->option_snapshot() : $this->table_snapshot( false );
+		$this->require_true( $source['physical'] === $r['source_digest'] && $this->codec->snapshot_digest( $source['value'] ) === $r['logical_digest'] );
+		if ( 'table' === $r['to'] ) {
+			if ( 4 === $r['version'] ) {
+				$batch = $this->snapshot->conversion_batch( $r, $source['value'], $this->controls, $this->gate->maintenance_identity() );
+				$this->copy_complete = $batch['complete']; return $batch['record'];
+			}
 				$heads = $this->heads();
 				if ( ! count( $heads ) && count( $source['value'] ) ) {
 					$changes = array(); $order = 0;
@@ -198,21 +261,17 @@ class StorageConversion {
 					}
 					$this->snapshot->replace_many( $changes );
 				}
-				$target = $this->table_snapshot( false );
-			} else {
-				$raw = $this->option_decoder()->encode( $source['value'], function ( $bytes ) { $this->budget( $bytes ); } );
-				StorageScalarObserver::milestone( 'reverse-serialized' );
-				if ( ! $this->option_present( FOOGALLERY_MIGRATE_OPTION_DATA ) ) { $this->insert_option( FOOGALLERY_MIGRATE_OPTION_DATA, $raw ); }
-				StorageScalarObserver::milestone( 'reverse-written' );
-				$target = $this->option_snapshot();
-			}
-			$this->require_true( $this->codec->snapshot_digest( $target['value'] ) === $r['logical_digest'] );
-			$this->unchanged_source( $r ); $r = $this->phase( $r, 'verified' );
+		} else {
+			// Full CURRENT source graph plus a fresh option serialization are live.
+			$raw = $this->option_decoder()->encode( $source['value'], function ( $bytes ) { $this->budget( $bytes ); } );
+			StorageScalarObserver::milestone( 'reverse-serialized' );
+			if ( ! $this->option_present( FOOGALLERY_MIGRATE_OPTION_DATA ) ) { $this->insert_option( FOOGALLERY_MIGRATE_OPTION_DATA, $raw ); }
+			StorageScalarObserver::milestone( 'reverse-written' );
 		}
-		if ( 'verified' === $r['phase'] ) {
-			$this->ready(); $this->unchanged_source( $r );
-			$target = 'table' === $r['to'] ? $this->table_snapshot( false ) : $this->option_snapshot();
-			$this->require_true( $this->codec->snapshot_digest( $target['value'] ) === $r['logical_digest'] );
+		return $r;
+	}
+
+	private function retain_and_select( $r ) {
 			if ( 'table' === $r['to'] ) {
 				$original = $this->option_raw();
 				$backup = null === $original ? serialize( array() ) : $original;
@@ -227,14 +286,8 @@ class StorageConversion {
 			} else {
 				$this->require_true( $this->controls->read( StorageAuthority::AUTHORITY_OPTION ) === json_encode( StorageControl::sentinel( $r ) ) );
 			}
-			// Last source proof and engine/drain verdict immediately before CAS.
-			$this->unchanged_source( $r ); $this->ready(); $r = $this->phase( $r, 'flipped', $target );
-		}
-		if ( 'flipped' === $r['phase'] ) {
-			$this->ready();
-			// Post-flip recovery uses ONLY the recorded destination authority.
-			$active = 'table' === $r['backend'] ? $this->table_snapshot( false ) : $this->option_snapshot();
-			$this->require_true( $this->codec->snapshot_digest( $active['value'] ) === $r['logical_digest'] );
+	}
+	private function cleanup_source( $r ) {
 			if ( 'table' === $r['backend'] ) {
 				$this->require_true( $this->controls->read( StorageAuthority::AUTHORITY_OPTION ) === json_encode( StorageControl::sentinel( $r ) ) );
 				if ( $this->option_present( FOOGALLERY_MIGRATE_OPTION_DATA ) ) {
@@ -252,16 +305,14 @@ class StorageConversion {
 					$this->controls->cas( StorageAuthority::AUTHORITY_OPTION, $sentinel, null, null, $this->gate->maintenance_identity() );
 				}
 			}
-			$this->ready(); $r = $this->phase( $r, 'stable', $active );
-		}
-		$this->require_true( StorageControl::runtime_ready( $r, $this->controls->read( StorageAuthority::AUTHORITY_OPTION ) ) );
-		return $r;
 	}
 
+
 	private function phase( $r, $phase, $destination = null ) {
+		$token = $this->open_capacity( 'commit_cleanup_response' );
 		$old = json_encode( $r );
 		$source_sentinel = 'table' === $r['from'] ? json_encode( StorageControl::sentinel( $r ) ) : null;
-		$r['phase'] = $phase; $r['updated'] = max( $r['updated'], time() );
+		$r['phase'] = $phase; if ( 4 === $r['version'] && 'copying' !== $phase ) { $r['copy_cursor'] = null; } $r['updated'] = max( $r['updated'], time() );
 		if ( 'flipped' === $phase ) { $this->require_true( $r['epoch'] < PHP_INT_MAX ); ++$r['epoch']; $r['backend'] = $r['to']; }
 		$new = json_encode( $r ); StorageControl::decode( $new, $this->blog );
 		$guard = null;
@@ -277,7 +328,7 @@ class StorageConversion {
 			$guard = array( 'kind' => 'all', 'value' => $dependencies );
 		}
 		$this->ready(); $this->controls->cas( StorageAuthority::CONTROL_OPTION, $old, $new, $guard, $this->gate->maintenance_identity() );
-		StorageScalarObserver::milestone( 'control-' . $phase ); return $r;
+		StorageScalarObserver::milestone( 'control-' . $phase ); $this->close_capacity( $token ); return $r;
 	}
 
 	private function snapshot_guard( $backend, $physical ) {
@@ -315,15 +366,44 @@ class StorageConversion {
 		return array( 'physical' => $before, 'value' => $value );
 	}
 
+	private function capacity() { return null === $this->scale ? null : $this->scale->capacity(); }
+	private function open_capacity( $phase ) {
+		$c = $this->capacity(); if ( null === $c ) { return null; }
+		return $c->open( $this, $phase, array( 'R' => $c->limit( 'max_raw_bytes' ), 'T' => $c->limit( 'max_tokens' ),
+			'N' => $c->limit( 'max_rows' ), 'E' => $c->limit( 'max_bytes' ), 'S' => $c->limit( 'max_scalar_bytes' ),
+			'M' => $c->limit( 'max_row_bytes' ), 'H' => $c->limit( 'max_heads' ), 'D' => $c->limit( 'max_depth' ), 'W' => $c->limit( 'copy_batch_bytes' ) ) );
+	}
+	private function close_capacity( $token ) { if ( null !== $token ) { $this->capacity()->close( $this, $token ); } }
+	private function source_metadata( $backend, $refresh ) {
+		$token = $this->open_capacity( 'table' === $backend ? 'table_verify' : 'option_verify' );
+		$result = $this->source_metadata_owned( $backend, $refresh );
+		$this->close_capacity( $token ); return $result;
+	}
+	private function source_metadata_owned( $backend, $refresh ) {
+		if ( 'option' === $backend || $refresh ) {
+			$s = 'option' === $backend ? $this->option_snapshot() : $this->table_snapshot( true );
+			return array( 'physical' => $s['physical'], 'logical' => $this->codec->snapshot_digest( $s['value'] ) );
+		}
+		$this->ready(); $heads = $this->heads(); $physical = hash( 'sha256', json_encode( $heads ) );
+		$logical = $this->codec->snapshot_digest_reader( count( $heads ), function ( $i ) use ( $heads ) {
+			$head = $heads[$i]; $this->require_true( $this->number( $head['state_order'] ) === $i );
+			$key = $this->codec->decode( $head['key_value'] );
+			return array( 'key' => $key, 'value' => $this->snapshot->read( $key ) );
+		} );
+		$this->require_true( $physical === $this->table_physical_digest() );
+		return array( 'physical' => $physical, 'logical' => $logical );
+	}
+
 	private function option_raw() {
 		$bytes = $this->connection->get_var( $this->connection->prepare( 'SELECT LENGTH(option_value) FROM `' . $this->prefix . 'options` WHERE option_name = %s LIMIT 1', array( FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
 		$this->require_true( empty( $this->connection->last_error ) );
 		if ( null === $bytes ) { $this->budget( 0 ); return null; }
 		$this->require_true( is_numeric( $bytes ) && (string) (int) $bytes === (string) $bytes && (int) $bytes >= 0 );
 		$bytes = (int) $bytes; $this->budget( $bytes );
+		$token = null === $this->capacity() ? null : $this->capacity()->open( $this, 'fetch_scan', array( 'R' => $bytes ) );
 		$raw = $this->connection->get_var( $this->connection->prepare( "SELECT CONCAT('v:', option_value) FROM `" . $this->prefix . 'options` WHERE option_name = %s AND LENGTH(option_value) = %d LIMIT 1', array( FOOGALLERY_MIGRATE_OPTION_DATA, $bytes ) ) );
 		$this->require_true( empty( $this->connection->last_error ) && is_string( $raw ) && 0 === strpos( $raw, 'v:' ) && strlen( $raw ) === $bytes + 2 );
-		return substr( $raw, 2 );
+		$result = substr( $raw, 2 ); unset( $raw ); $this->close_capacity( $token ); return $result;
 	}
 
 	private function limit( $name, $unscaled ) { return null === $this->scale ? $unscaled : $this->scale->limit( $name ); }
@@ -345,6 +425,9 @@ class StorageConversion {
 	/** Same amplification/reserve, co-live sample and operation-owned scale checks. */
 	private function memory_budget( $bytes, $policy ) {
 		if ( null !== $this->scale ) { $this->scale->admit_memory( $bytes ); }
+		if ( null !== $this->capacity() ) {
+			$this->require_true( is_int( $bytes ) && $bytes >= 0 && $bytes <= $policy['max_raw_bytes'] ); return;
+		}
 		$result = StoragePreflight::decode_budget( $bytes, ini_get( 'memory_limit' ), $this->memory->sample(), $policy, 'conversion-budget' );
 		$this->require_true( ! is_wp_error( $result ) && true === $result['decode_admitted'] );
 	}

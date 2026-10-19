@@ -48,13 +48,15 @@ final class StorageScaleAdmission {
 	}
 
 	/** Clock/memory seams are trusted PHP dependencies, never request fields. */
-	public function __construct( $limits, $policy, $deadline, $clock = null, $memory = null, $baseline = null ) {
+	public function __construct( $limits, $policy, $deadline, $clock = null, $memory = null, $baseline = null, $capacity = null ) {
 		if ( $this->initialized ) { self::fail(); }
 		$this->limits = self::validate( $limits );
 		if ( is_wp_error( StoragePreflight::decode_budget( 0, '-1', 0, $policy ) ) || $policy['max_raw_bytes'] > 16777216 ||
 			( null !== $clock && ! is_callable( $clock ) ) || ( null !== $memory && ! is_callable( $memory ) ) ) { self::fail(); }
 		if ( null !== $baseline && ! $baseline instanceof StorageMemoryBaseline ) { self::fail(); }
 		$this->baseline = $baseline;
+		if ( null !== $capacity && ! $capacity instanceof StorageCapacityBudget ) { self::fail(); }
+		$this->capacity = $capacity;
 		$this->policy = array();
 		foreach ( $policy as $key => $value ) { $this->policy[$key] = $value; }
 		$this->clock = $clock; $this->memory = $memory;
@@ -73,10 +75,12 @@ final class StorageScaleAdmission {
 	public function limit( $name ) { $this->valid(); if ( ! array_key_exists( $name, $this->limits ) ) { self::fail(); } return $this->limits[$name]; }
 	public function deadline() { $this->valid(); return $this->deadline; }
 	public function raw_bytes() { $this->valid(); return $this->policy['max_raw_bytes']; }
+	private $capacity;
+	public function capacity() { $this->valid(); return $this->capacity; }
 	/** Experimental native flatten only: no allocating dependency hooks or widened ceiling. */
 	public function supports_repository_flatten() {
 		$this->valid();
-		return get_class( $this ) === __CLASS__ && null === $this->clock && null === $this->memory &&
+		return null === $this->capacity && get_class( $this ) === __CLASS__ && null === $this->clock && null === $this->memory &&
 			$this->policy['reserve_bytes'] >= 33554432 && $this->limit( 'memory_ceiling_bytes' ) <= 134217728;
 	}
 	public function decoder( $bytes ) { return new LegacyOptionDecoder( $bytes, $this->limit( 'max_depth' ), $this->limit( 'max_tokens' ), $this ); }
@@ -134,6 +138,7 @@ final class StorageScaleAdmission {
 	/** Fixed finite repeated-pass work cap, never reset by phases or pages. */
 	public function tick() {
 		$this->valid();
+		if ( null !== $this->capacity ) { $this->capacity->tick(); }
 		if ( ++$this->work > 16777216 ) { StorageScalarObserver::milestone( 'scale-work-refused' ); StorageScalarObserver::refusal( 'scale-work', 'scale-tick' ); self::fail(); }
 		if ( $this->now() > $this->deadline ) { StorageScalarObserver::milestone( 'scale-deadline-refused' ); StorageScalarObserver::refusal( 'scale-deadline', 'scale-tick' ); self::fail(); }
 	}
@@ -141,6 +146,8 @@ final class StorageScaleAdmission {
 	public function admit_memory( $bytes ) {
 		$this->tick();
 		if ( ! is_int( $bytes ) || $bytes < 0 || $bytes > $this->limit( 'max_physical_bytes' ) ) { self::fail(); }
+		// New phase forecasts REPLACE, never stack with, legacy amplification.
+		if ( null !== $this->capacity ) { $this->capacity->checkpoint( $bytes ); return true; }
 		$sample = $this->memory_sample();
 		if ( ! is_array( $sample ) || array_keys( $sample ) !== array( 0, 1 ) ) { self::fail(); }
 		// Both the effective PHP limit AND a finite ceiling apply, including -1.
@@ -191,13 +198,13 @@ final class StorageScaleAdmission {
 	 */
 	public function supports_retaining_phase() {
 		$this->valid();
-		return null === $this->memory && $this->policy['reserve_bytes'] >= 33554432;
+		return null === $this->capacity && null === $this->memory && $this->policy['reserve_bytes'] >= 33554432;
 	}
 
 	/** Internal discard-only workspace; this predicate does NOT approve a host. */
 	public function supports_snapshot_stats() {
 		$this->valid();
-		return $this->policy['reserve_bytes'] >= 33554432;
+		return null === $this->capacity && $this->policy['reserve_bytes'] >= 33554432;
 	}
 
 	/**
@@ -209,6 +216,7 @@ final class StorageScaleAdmission {
 	 */
 	public function admit_snapshot_stats_workspace( $bytes ) {
 		$this->tick();
+		if ( null !== $this->capacity ) { $this->capacity->checkpoint( $bytes ); return; }
 		$sample = $this->memory_sample();
 		if ( ! is_array( $sample ) || array_keys( $sample ) !== array( 0, 1 ) ) { self::fail(); }
 		$total = self::checked_add( $bytes, self::checked_add( $this->additional_bytes, $this->retaining_pending ) );

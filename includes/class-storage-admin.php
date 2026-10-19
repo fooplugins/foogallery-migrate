@@ -13,7 +13,7 @@ class StorageAdmin {
 		if ( ! current_user_can( 'manage_options' ) ) { wp_die( __( 'Storage access denied.', 'foogallery-migrate' ) ); }
 		global $wpdb;
 		$blog = get_current_blog_id();
-		$s = array( 'backend' => 'unavailable', 'phase' => 'unavailable', 'target' => 'option', 'retained' => false, 'option_bytes' => null, 'records' => null, 'schema' => 'not provisioned', 'problem' => '', 'calibrated' => false );
+		$s = array( 'backend' => 'unavailable', 'phase' => 'unavailable', 'target' => 'option', 'retained' => false, 'discardable' => false, 'option_bytes' => null, 'records' => null, 'schema' => 'not provisioned', 'problem' => '', 'calibrated' => false );
 		try {
 			$control = new StorageControl( $wpdb, $blog );
 			$raw = $control->read( StorageAuthority::CONTROL_OPTION );
@@ -22,7 +22,8 @@ class StorageAdmin {
 			if ( is_wp_error( $runtime ) && ( null === $r || 'stable' === $r['phase'] ) ) { throw new \RuntimeException( $runtime->get_error_message() ); }
 			$s['backend'] = null === $r ? 'option' : $r['backend'];
 			$s['phase'] = null === $r ? 'stable' : $r['phase']; $s['target'] = null === $r ? 'option' : $r['to'];
-			$s['retained'] = null !== $r && 2 === $r['version'] && 'stable' === $r['phase'] && 'table' === $r['from'] && 'option' === $r['to'];
+			$s['discardable'] = null !== $r && 4 === $r['version'] && 'copying' === $r['phase'] && 'option' === $r['backend'] && 'table' === $r['to'];
+			$s['retained'] = null !== $r && in_array( $r['version'], array( 2, 4 ), true ) && 'stable' === $r['phase'] && 'table' === $r['from'] && 'option' === $r['to'];
 			$bytes = $wpdb->get_var( $wpdb->prepare( 'SELECT OCTET_LENGTH(option_value) FROM `' . $wpdb->prefix . 'options` WHERE option_name=%s LIMIT 1', FOOGALLERY_MIGRATE_OPTION_DATA ) );
 			if ( $wpdb->last_error ) { throw new \RuntimeException( __( 'Storage size is unavailable.', 'foogallery-migrate' ) ); }
 			$s['option_bytes'] = null === $bytes ? '0' : $bytes;
@@ -39,8 +40,7 @@ class StorageAdmin {
 				$s['schema'] = 'not ready';
 				if ( null !== $r ) { $s['problem'] = __( 'Shared tables need attention. No automatic repair or cleanup has been attempted.', 'foogallery-migrate' ); }
 			}
-			$profile = apply_filters( 'foogallery_migrate_storage_calibration', null );
-			$s['calibrated'] = ! is_wp_error( StorageCalibration::policy( $profile ) );
+			$s['calibrated'] = ! is_wp_error( StorageCapacityPolicy::resolve() );
 		} catch ( \Exception $error ) { $s['backend'] = 'unavailable'; $s['problem'] = $error->getMessage(); }
 		catch ( \Throwable $error ) { $s['backend'] = 'unavailable'; $s['problem'] = __( 'Storage health could not be read. Current authority has not been changed.', 'foogallery-migrate' ); }
 		return $s;
@@ -49,7 +49,11 @@ class StorageAdmin {
 	/** Display choices never authorize a mutation; the receiver revalidates all. */
 	public static function actions( $s ) {
 		if ( ! in_array( $s['backend'], array( 'option', 'table' ), true ) ) { return array(); }
-		if ( 'stable' !== $s['phase'] ) { return array( array( 'operation' => 'recover', 'target' => $s['target'], 'confirmation' => 'recover-storage', 'purpose' => 'recover', 'label' => __( 'Recover recorded switch', 'foogallery-migrate' ) ) ); }
+		if ( 'stable' !== $s['phase'] ) {
+			$a = array( array( 'operation' => 'recover', 'target' => $s['target'], 'confirmation' => 'recover-storage', 'purpose' => 'recover', 'label' => __( 'Recover recorded switch', 'foogallery-migrate' ) ) );
+			if ( ! empty( $s['discardable'] ) ) { $a[] = array( 'operation' => 'discard', 'target' => 'table', 'confirmation' => 'discard-copy', 'purpose' => 'discard', 'label' => __( 'Discard this incomplete table copy (keep current options)', 'foogallery-migrate' ) ); }
+			return $a;
+		}
 		if ( 'table' === $s['backend'] ) { return array( array( 'operation' => 'switch', 'target' => 'option', 'confirmation' => 'switch-to-option', 'purpose' => 'table_export', 'label' => __( 'Switch this site to options', 'foogallery-migrate' ) ) ); }
 		if ( $s['retained'] ) { return array( array( 'operation' => 'replace', 'target' => 'table', 'confirmation' => 'replace-retained-with-table', 'purpose' => 'option_reimport', 'label' => __( 'Replace retained table copy and switch this site to tables', 'foogallery-migrate' ) ) ); }
 		return array( array( 'operation' => 'switch', 'target' => 'table', 'confirmation' => 'switch-to-table', 'purpose' => 'option_import', 'label' => __( 'Switch this site to tables', 'foogallery-migrate' ) ) );

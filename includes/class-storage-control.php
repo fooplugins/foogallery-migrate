@@ -28,10 +28,11 @@ class StorageControl {
 		$keys = array( 'version', 'blog_id', 'backend', 'epoch', 'switch_id', 'from', 'to', 'phase', 'table_id',
 			'source_digest', 'logical_digest', 'schema', 'codec', 'created', 'updated' );
 		$scan = is_array( $r ) && isset( $r['version'] ) && 3 === $r['version'];
-		if ( is_array( $r ) && isset( $r['version'] ) && in_array( $r['version'], array( 2, 3 ), true ) ) { $keys[] = 'retained_digest'; }
+		if ( is_array( $r ) && isset( $r['version'] ) && in_array( $r['version'], array( 2, 3, 4 ), true ) ) { $keys[] = 'retained_digest'; }
 		if ( $scan ) { $keys[] = 'scan'; }
+		if ( is_array( $r ) && isset( $r['version'] ) && 4 === $r['version'] ) { $keys[] = 'copy_cursor'; }
 		if ( JSON_ERROR_NONE !== json_last_error() || ! is_array( $r ) || array_keys( $r ) !== $keys || json_encode( $r ) !== $raw ||
-			! in_array( $r['version'], array( 1, 2, 3 ), true ) || $blog !== $r['blog_id'] || 1 !== $r['schema'] || 1 !== $r['codec'] ||
+			! in_array( $r['version'], array( 1, 2, 3, 4 ), true ) || $blog !== $r['blog_id'] || 1 !== $r['schema'] || 1 !== $r['codec'] ||
 			! is_int( $r['epoch'] ) || $r['epoch'] < 0 || ! is_int( $r['created'] ) || $r['created'] < 1 ||
 			! is_int( $r['updated'] ) || $r['updated'] < $r['created'] ||
 			! in_array( $r['backend'], array( 'option', 'table' ), true ) ||
@@ -43,8 +44,12 @@ class StorageControl {
 			$length = in_array( $key, array( 'switch_id', 'table_id' ), true ) ? 32 : 64;
 			if ( ! is_string( $r[$key] ) || ! preg_match( '/^[a-f0-9]{' . $length . '}$/D', $r[$key] ) ) { self::fail(); }
 		}
-		if ( 2 === $r['version'] && ( 'table' === $r['to'] ? null !== $r['retained_digest'] :
+		if ( in_array( $r['version'], array( 2, 4 ), true ) && ( 'table' === $r['to'] ? null !== $r['retained_digest'] :
 			( ! is_string( $r['retained_digest'] ) || ! preg_match( '/^[a-f0-9]{64}$/D', $r['retained_digest'] ) ) ) ) { self::fail(); }
+		if ( 4 === $r['version'] ) {
+			if ( 'copying' === $r['phase'] && 'table' === $r['to'] ) { StorageCopyCursor::validate( $r['copy_cursor'], $r ); }
+			elseif ( null !== $r['copy_cursor'] ) { self::fail(); }
+		}
 		if ( $scan && ( 'option' !== $r['from'] || null !== $r['logical_digest'] || null !== $r['retained_digest'] ||
 			! is_array( $r['scan'] ) || array_keys( $r['scan'] ) !== array( 'generation', 'done', 'parser', 'mac' ) ||
 			! is_int( $r['scan']['generation'] ) || $r['scan']['generation'] < 1 || ! is_bool( $r['scan']['done'] ) ||

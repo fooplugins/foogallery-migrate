@@ -577,6 +577,37 @@ class LegacyRecordCodec {
 		return $row;
 	}
 
+	/** Conversion-only preorder producer: false is a handled row-boundary yield.
+	 * No complete-root row array or PHP continuation is retained. */
+	public function walk_conversion_tree( $state_key, $key, $record, $order, $emit ) {
+		if ( null === $this->scale || null === $this->scale->capacity() || ! is_callable( $emit ) ) { $this->fail( 'Conversion row walk requires an operation budget.' ); }
+		$stats = array( 'record_count' => 0, 'encoded_bytes' => 0 );
+		return $this->walk_conversion_node( $this->codec->key_hash( $state_key ), null, $key, $record, $order, 0, $emit, $stats );
+	}
+	private function walk_conversion_node( $state, $parent, $key, $record, $order, $depth, $emit, &$stats ) {
+		$this->tick(); $this->admit( 0 );
+		if ( $depth > $this->max_depth || $stats['record_count'] >= $this->max_records ) { $this->fail( 'Conversion tree exceeds finite shape.' ); }
+		$row = $this->make_row( $state, $parent, $key, $record, $order, $depth );
+		$row['logical_hash'] = $this->codec->snapshot_digest( $record );
+		if ( null === $parent && $state === $this->codec->key_hash( 'migrated' ) ) { $row['legacy_identifier_value'] = $this->codec->key_value( $key ); $row['legacy_identifier_hash'] = $this->codec->key_hash( $key ); }
+		$bytes = $this->encoded_bytes( $row );
+		if ( $bytes > $this->scale->capacity()->limit( 'max_row_bytes' ) || $bytes > $this->max_tree_bytes - $stats['encoded_bytes'] ) { $this->fail( 'Conversion row/tree exceeds finite bytes.' ); }
+		++$stats['record_count']; $stats['encoded_bytes'] += $bytes;
+		// Row-subgraph logical tokens, excluding already-emitted child subtrees.
+		$own = $record; $children = is_array( $record ) && isset( $record['children'] ) && is_array( $record['children'] );
+		if ( $children ) { unset( $own['children'] ); }
+		$footprint = $this->codec->snapshot_footprint( $own ); $tokens = $footprint['tokens'] + 1 + ( $children ? 2 : 0 ); unset( $own, $footprint );
+		if ( false === call_user_func( $emit, $row, $tokens, $bytes ) ) { return false; }
+		$node = $row['node_hash']; unset( $row );
+		if ( $children ) {
+			$ordinal = 0;
+			foreach ( $record['children'] as $child_key => $child ) {
+				if ( ! $this->walk_conversion_node( $state, $node, $child_key, $child, $ordinal++, $depth + 1, $emit, $stats ) ) { return false; }
+			}
+		}
+		return true;
+	}
+
 	private function preflight_tree( $state_hash, $parent, $key, $record, $order, $depth, &$stats, $phase = null, &$slots = null ) {
 		$this->tick();
 		if ( $depth > $this->max_depth || $stats['record_count'] >= $this->max_records ) { $this->fail( 'Tree exceeds the depth/record budget.' ); }

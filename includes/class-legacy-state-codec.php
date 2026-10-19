@@ -183,6 +183,21 @@ class LegacyStateCodec {
 		return $result['digest'];
 	}
 
+	/** Same recursive byte domain, one independently read state at a time. */
+	public function snapshot_digest_reader( $count, $reader ) {
+		if ( ! is_int( $count ) || $count < 0 || $count > 100 || ! is_callable( $reader ) ) { $this->fail( 'Invalid snapshot reader.' ); }
+		$context = hash_init( 'sha256' ); hash_update( $context, "legacy-logical-v1\0" );
+		hash_update( $context, 'array:' . $count . ':' ); $nodes = 1;
+		for ( $i = 0; $i < $count; ++$i ) {
+			$entry = call_user_func( $reader, $i );
+			if ( ! is_array( $entry ) || array_keys( $entry ) !== array( 'key', 'value' ) ) { $this->fail( 'Invalid snapshot reader entry.' ); }
+			$this->digest_value( $context, $entry['key'], 1, $nodes );
+			$this->digest_value( $context, $entry['value'], 1, $nodes );
+			unset( $entry );
+		}
+		return hash_final( $context );
+	}
+
 	/** Finite complete-snapshot footprint: its state value starts below the outer array. */
 	public function snapshot_footprint( $value ) {
 		if ( null === $this->scale ) { $this->fail( 'Snapshot footprint requires finite admission.' ); }

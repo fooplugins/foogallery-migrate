@@ -46,6 +46,12 @@ class StorageRetirement {
 	 * are refusal bounds, not a claimed production calibration/scale receipt.
 	 */
 	public function capture( $lock = false ) {
+		$c = null === $this->scale ? null : $this->scale->capacity();
+		$t = null === $c ? null : $c->open( $this, 'commit_cleanup_response', $c->max_dimensions() );
+		$result = $this->capture_owned( $lock );
+		if ( null !== $c ) { $c->close( $this, $t ); } return $result;
+	}
+	private function capture_owned( $lock ) {
 		$manifest = array(); $total = 0; $physical_rows = 0;
 		foreach ( ( new LegacyStorageSchema( $this->db ) )->definitions() as $table => $definition ) {
 			$names = array_keys( $definition['columns'] ); $actual = array();
@@ -93,8 +99,8 @@ class StorageRetirement {
 	public function replace( $old, $new, $source_digest, $owner, $ready ) {
 		$previous = StorageControl::decode( $old, $this->blog );
 		$next = StorageControl::decode( $new, $this->blog );
-		if ( 2 !== $previous['version'] || 'stable' !== $previous['phase'] || 'option' !== $previous['backend'] || 'table' !== $previous['from'] ||
-			2 !== $next['version'] || 'copying' !== $next['phase'] || 'option' !== $next['from'] || 'table' !== $next['to'] ||
+		if ( ! in_array( $previous['version'], array( 2, 4 ), true ) || 'stable' !== $previous['phase'] || 'option' !== $previous['backend'] || 'table' !== $previous['from'] ||
+			! in_array( $next['version'], array( 2, 4 ), true ) || 'copying' !== $next['phase'] || 'option' !== $next['from'] || 'table' !== $next['to'] ||
 			$next['epoch'] !== $previous['epoch'] || $next['source_digest'] !== $source_digest || ! is_string( $owner ) || ! is_callable( $ready ) ) { $this->fail(); }
 		$engine = $this->rows( $this->db->prepare( 'SELECT ENGINE FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s', array( $this->options ) ) );
 		if ( 1 !== count( $engine ) || 'innodb' !== strtolower( $engine[0]['ENGINE'] ) ) { $this->fail(); }

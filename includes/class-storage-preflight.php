@@ -18,11 +18,13 @@ class StoragePreflight {
 	 * Policy must come from trusted, benchmarked server configuration, never POST.
 	 * There is deliberately no default amplification factor or raw-size ceiling.
 	 */
-	public function __construct( $database = null, $policy = null, $memory = null ) {
+	private $capacity;
+	public function __construct( $database = null, $policy = null, $memory = null, $capacity = null ) {
 		global $wpdb;
 		$this->wpdb = null === $database ? $wpdb : $database;
 		$this->policy = $policy;
 		$this->incoming_memory = $memory;
+		$this->capacity = $capacity;
 	}
 
 	/**
@@ -59,7 +61,14 @@ class StoragePreflight {
 		}
 		$bytes = $this->option_size();
 		if ( is_wp_error( $bytes ) ) { return $bytes; }
-		$budget = self::decode_budget( $bytes, ini_get( 'memory_limit' ), $memory->sample(), $this->policy );
+		if ( null !== $this->capacity ) {
+			try {
+				$token = $this->capacity->open( $this, 'fetch_scan', array( 'R' => $bytes ) );
+				$this->capacity->close( $this, $token );
+				$budget = array( 'decode_admitted' => false, 'raw_bytes' => $bytes, 'structural_admission_required' => true );
+			} catch ( \Exception $error ) { return self::refused_error(); }
+			catch ( \Throwable $error ) { return self::refused_error(); }
+		} else { $budget = self::decode_budget( $bytes, ini_get( 'memory_limit' ), $memory->sample(), $this->policy ); }
 		if ( is_wp_error( $budget ) ) { return $budget; }
 		$budget['blog_id'] = $blog_id;
 		$budget['conversion_ready'] = false;

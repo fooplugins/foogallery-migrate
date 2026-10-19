@@ -17,6 +17,8 @@ class LegacyOptionDecoder {
 	private $max_nodes;
 	private $scale;
 	private $max_heads;
+	private $statistics;
+	private $decoding = false;
 
 	public function __construct( $max_bytes = 16777216, $max_depth = 64, $max_nodes = 30000, $scale = null ) {
 		foreach ( array( $max_bytes, $max_depth, $max_nodes ) as $limit ) {
@@ -33,11 +35,37 @@ class LegacyOptionDecoder {
 	}
 
 	public function decode( $raw ) {
+		if ( $this->decoding ) { $this->fail(); } $this->decoding = true;
+		try { $value = $this->decode_owned( $raw ); $this->decoding = false; return $value; }
+		catch ( \Exception $error ) { $this->decode_failed(); throw $error; }
+		catch ( \Throwable $error ) { $this->decode_failed(); throw $error; }
+	}
+	private function decode_failed() {
+		$this->decoding = false;
+		if ( null !== $this->scale && null !== $this->scale->capacity() ) { $this->scale->capacity()->abort(); }
+	}
+	private function decode_owned( $raw ) {
+		$statistics = $this->structural_statistics( $raw );
+		$capacity = null === $this->scale ? null : $this->scale->capacity();
+		$token = null === $capacity ? null : $capacity->open( $this, 'option_decode', $statistics );
+		$value = $this->decode_native( $raw );
+		if ( null !== $capacity ) { $capacity->close( $this, $token ); }
+		return $value;
+	}
+
+	/** Nonmaterializing dimensions, complete before native hydration. */
+	public function structural_statistics( $raw ) {
 		$this->tick();
 		if ( ! is_string( $raw ) || strlen( $raw ) > $this->max_bytes || 'a:' !== substr( $raw, 0, 2 ) ) { $this->fail(); }
+		$this->statistics = array( 'R' => strlen( $raw ), 'T' => 0, 'S' => 0, 'H' => 0, 'D' => 0 );
 		$offset = 0; $nodes = 0;
 		$this->scan( $raw, $offset, 0, $nodes, false );
 		if ( $offset !== strlen( $raw ) ) { $this->fail(); }
+		$this->statistics['T'] = $nodes;
+		return $this->statistics;
+	}
+
+	private function decode_native( $raw ) {
 		if ( null !== $this->scale ) { $this->scale->admit_memory( strlen( $raw ) ); }
 		// ALL tokens have now been proven scalar/array, including keys. No object,
 		// custom serialization, enum or reference token can reach native decoding.
@@ -107,6 +135,7 @@ class LegacyOptionDecoder {
 	private function scan( $raw, &$offset, $depth, &$nodes, $key ) {
 		$this->tick();
 		if ( $depth > $this->max_depth || ++$nodes > $this->max_nodes || $offset >= strlen( $raw ) ) { $this->fail(); }
+		if ( is_array( $this->statistics ) ) { $this->statistics['D'] = max( $this->statistics['D'], $depth ); }
 		$type = $raw[$offset];
 		if ( $key && 'i' !== $type && 's' !== $type ) { $this->fail(); }
 		if ( 'N' === $type ) { $this->literal( $raw, $offset, 'N;' ); return; }
@@ -126,6 +155,7 @@ class LegacyOptionDecoder {
 				return;
 			case 's':
 				$bytes = $this->unsigned( $raw, $offset, ':' );
+				if ( is_array( $this->statistics ) ) { $this->statistics['S'] = max( $this->statistics['S'], $bytes ); }
 				$this->literal( $raw, $offset, '"' );
 				// Skip exact bytes, never look for forbidden tokens INSIDE a string.
 				if ( $bytes > strlen( $raw ) - $offset ) { $this->fail(); }
@@ -134,6 +164,7 @@ class LegacyOptionDecoder {
 				return;
 			case 'a':
 				$count = $this->unsigned( $raw, $offset, ':' );
+				if ( 0 === $depth && is_array( $this->statistics ) ) { $this->statistics['H'] = $count; }
 				// Each entry requires a key and value node. Check before the loop,
 				// even when a malicious count has no actual serialized entries.
 				if ( ( 0 === $depth && $count > $this->max_heads ) || $count > ( $this->max_nodes - $nodes ) / 2 ) { $this->fail(); }

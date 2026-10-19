@@ -30,6 +30,7 @@ class StorageCalibration {
 		$runtime = array( PHP_VERSION, PHP_SAPI, PHP_INT_SIZE, PHP_OS, php_uname( 'm' ), php_uname( 'r' ), PHP_DEBUG, PHP_ZTS, getenv( 'USE_ZEND_ALLOC' ),
 			bin2hex( pack( 'L', 1 ) ), $wp_version, $extensions );
 		$runtime['allocator_environment'] = array();
+		$runtime['capacity_implementation_sha256'] = StorageCapacityPolicy::implementation_digest();
 		foreach ( array( 'USE_ZEND_ALLOC', 'ZEND_MM_SEG_SIZE', 'ZEND_MM_MEM_TYPE', 'ZEND_MM_COMPACT' ) as $name ) {
 			$runtime['allocator_environment'][$name] = getenv( $name );
 		}

@@ -23,35 +23,54 @@ class StorageOperations {
 		StorageScalarObserver::milestone( 'receiver-entry' );
 		$memory = null === $this->incoming_memory ? new StorageMemoryBaseline() : $this->incoming_memory;
 		$this->incoming_memory = null; $memory->sample();
-		if ( ! in_array( $operation, array( 'preflight', 'switch', 'recover', 'replace' ), true ) ||
+		if ( ! in_array( $operation, array( 'preflight', 'switch', 'recover', 'replace', 'discard' ), true ) ||
 			( 'preflight' === $operation && ( ! is_array( $request ) || ! isset( $request['target'] ) || 'table' !== $request['target'] ) ) ) {
 			return self::invalid();
 		}
-		$authorized = StorageConversion::authorize_request( $request, 'recover' === $operation, null, 'replace' === $operation );
+		$authorized = StorageConversion::authorize_request( $request, 'recover' === $operation, null, 'replace' === $operation, 'discard' === $operation );
 		if ( is_wp_error( $authorized ) ) { return $authorized; }
 		StorageScalarObserver::milestone( 'authorized' );
 		$memory->sample();
-		// Never pass POST to configuration. There is deliberately no shipped policy.
-		$profile = null === $this->calibration ? apply_filters( 'foogallery_migrate_storage_calibration', null ) : $this->calibration;
-		$policy = StorageCalibration::policy( $profile );
+		// Explicit constructor profiles are a legacy private test dependency.
+		// UI, registered HTTP and CLI all use the fixed release resolver. The old
+		// calibration filter cannot approve the production path.
+		$capacity = null;
+		if ( null === $this->calibration ) {
+			$class = StorageCapacityPolicy::resolve(); if ( is_wp_error( $class ) ) { return $class; }
+			if ( function_exists( 'wp_raise_memory_limit' ) ) { wp_raise_memory_limit( 'admin' ); }
+			try { $capacity = new StorageCapacityBudget( $class ); }
+			catch ( \Exception $error ) { return self::refused(); }
+			catch ( \Throwable $error ) { return self::refused(); }
+			// Compatibility bridge for raw-size APIs only. No old numeric profile
+			// selects or approves a release class, and no old amplification runs.
+			$policy = array( 'max_raw_bytes' => $capacity->limit( 'max_raw_bytes' ), 'amplification' => 1, 'reserve_bytes' => $class['reserve_bytes'] );
+		} else { $policy = StorageCalibration::policy( $this->calibration ); }
 		if ( is_wp_error( $policy ) ) { return $policy; }
 		StorageScalarObserver::milestone( 'policy' );
 		$memory->sample();
-		if ( 'preflight' === $operation ) { return ( new StoragePreflight( null, $policy, $memory ) )->option_import( $request ); }
+		if ( 'preflight' === $operation ) { return ( new StoragePreflight( null, $policy, $memory, $capacity ) )->option_import( $request ); }
 		// Fixed implementation bounds, NOT calibration coefficients or approval.
 		// One fresh domain per dispatch; the fingerprint binds these exact bytes.
 		try {
-			$scale = new StorageScaleAdmission( array( 'version' => 1, 'max_tokens' => 262144, 'max_rows' => 24576, 'max_bytes' => 16777216,
+			$limits = array( 'version' => 1, 'max_tokens' => 262144, 'max_rows' => 24576, 'max_bytes' => 16777216,
 				'max_depth' => 64, 'max_heads' => 100, 'max_physical_rows_per_table' => 24576,
 				'max_physical_rows' => 49152, 'max_physical_bytes' => 33554432,
-				'memory_ceiling_bytes' => 2147483647, 'max_seconds' => 10 ), $policy, microtime( true ) + 10.0, null, null, $memory );
+				'memory_ceiling_bytes' => 2147483647, 'max_seconds' => 10 );
+			if ( null !== $capacity ) { foreach ( $limits as $key => $value ) { if ( 'version' !== $key ) { $limits[$key] = $capacity->limit( $key ); } } }
+			$scale = new StorageScaleAdmission( $limits, $policy, null === $capacity ? microtime( true ) + 10.0 : $capacity->deadline(), null, null, $memory, $capacity );
 			$manager = new StorageConversion( $policy, $memory, $scale );
 		} catch ( \Exception $error ) { return self::refused(); }
 		catch ( \Throwable $error ) { return self::refused(); }
-		if ( 'replace' === $operation ) { $result = $manager->replace_retained( $request ); }
+		if ( 'discard' === $operation ) { $result = $manager->discard_copy( $request ); }
+		elseif ( 'replace' === $operation ) { $result = $manager->replace_retained( $request ); }
 		else { $result = 'recover' === $operation ? $manager->recover( $request ) : $manager->switch_backend( $request ); }
 		if ( is_wp_error( $result ) ) { return $result; }
 		StorageScalarObserver::milestone( 'response' );
+		if ( null !== $capacity ) {
+			try { $capacity->response( 512 ); }
+			catch ( \Exception $error ) { return self::refused(); }
+			catch ( \Throwable $error ) { return self::refused(); }
+		}
 		// Do not expose digests, switch IDs, source payloads or internal errors.
 		return array( 'blog_id' => $result['blog_id'], 'backend' => $result['backend'], 'epoch' => $result['epoch'], 'phase' => $result['phase'] );
 	}
