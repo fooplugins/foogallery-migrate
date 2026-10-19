@@ -198,17 +198,22 @@ class LegacyTableSnapshot {
 		$this->admit_memory( $head['payload_bytes'] + $key_bytes );
 		$root = $this->root_payload( $head['id'] );
 		if ( null !== $this->snapshot_read_phase && $root !== $this->snapshot_plans[$hash]['root'] ) { $this->fail( 'Authenticated raw root changed before decode.' ); }
+		StorageScalarObserver::acquisition( 2, strlen( $root ) );
 		$metadata = 'scalar' === $head['state_kind'] ? $this->codec->decode( $root ) : $this->codec->decode_collection_root( $root );
 		if ( ! is_array( $metadata ) || ! isset( $metadata['kind'] ) || $metadata['kind'] !== $head['state_kind'] ) { $this->fail( 'Root metadata does not match state kind.' ); }
+		StorageScalarObserver::acquisition( 3, strlen( $root ) );
 		$stats = array( 'record_count' => $head['record_count'], 'payload_bytes' => $head['payload_bytes'] - strlen( $root ) );
 		$value = $this->read_generation( $key, $head['id'], $head['active_generation'], $root, $stats, $head['state_kind'], $head['revision'], strtolower( $digests[0]['snapshot_digest'] ) );
 		if ( $reader->head( $key ) !== $head ) { $this->fail( 'Snapshot changed during read; restart.' ); }
 		$this->admit_memory( $head['payload_bytes'] + $key_bytes );
+		StorageScalarObserver::acquisition( 27 );
 		if ( $this->snapshot_digest( $key, $value ) !== strtolower( $digests[0]['snapshot_digest'] ) ) { $this->fail( 'Complete snapshot digest mismatch.' ); }
+		StorageScalarObserver::acquisition( 28 );
 		// No temporary reconstructed copy survives. The result transfers to the
 		// caller; private maxima are recorded, never released as memory credit.
 		if ( null !== $this->snapshot_owner ) { $this->snapshot_owner->finish(); }
 		$this->end_read_phase();
+		StorageScalarObserver::acquisition( 19 );
 		return $value;
 	}
 
@@ -457,7 +462,9 @@ class LegacyTableSnapshot {
 		$this->admit_memory( $encoded_bytes );
 		$stored_root = $this->root_payload( $id );
 		if ( $stored_root !== $root ) { $this->fail( 'Root metadata changed or failed staged read-back.' ); }
+		StorageScalarObserver::acquisition( 2, strlen( $root ) );
 		$metadata = 'scalar' === $kind ? $this->codec->decode( $root ) : $this->codec->decode_collection_root( $root );
+		StorageScalarObserver::acquisition( 3, strlen( $root ) );
 		if ( ! is_array( $metadata ) || ! isset( $metadata['version'], $metadata['kind'] ) || 1 !== $metadata['version'] || $kind !== $metadata['kind'] ) { $this->fail( 'Malformed root metadata.' ); }
 		if ( 'scalar' === $metadata['kind'] ) {
 			if ( array_keys( $metadata ) !== array( 'version', 'kind', 'value' ) || 0 !== $stats['record_count'] ) { $this->fail( 'Malformed scalar snapshot.' ); }
@@ -513,6 +520,7 @@ class LegacyTableSnapshot {
 			'connection' => array( get_class( $this->wpdb ), $file ? hash_file( 'sha256', $file ) : null ) );
 	}
 	private function begin_read_phase( $key, $id, $generation, $root, $revision, $digest ) {
+		StorageScalarObserver::acquisition( 1, null === $this->snapshot_read_profile ? 0 : 1 );
 		if ( ! count( $this->snapshot_witnesses ) && null === $this->snapshot_read_phase ) { return; }
 		$hash = $this->codec->key_hash( $key );
 		if ( ! isset( $this->snapshot_plans[$hash]['binding'], $this->snapshot_plans[$hash]['complete'], $this->snapshot_witnesses[$hash] ) ) {

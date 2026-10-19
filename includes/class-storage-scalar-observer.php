@@ -13,6 +13,51 @@ namespace FooPlugins\FooGalleryMigrate;
 if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 class StorageScalarObserver {
+	// Acquisition-only, privileged process-local reflection seam. No callable,
+	// profile, selector, graph retention or public activation. The harness must
+	// charge the fixed collector allowance BEFORE constructing/arming the writer.
+	const ACQUISITION_ALLOWANCE = 262144;
+	private static $acquisition_stream;
+	private static $acquisition_sequence = 0;
+	private static $acquisition_guard = 0;
+	private static $acquisition_pending = 0;
+	private static $acquisition_backing = 0;
+	private static $acquisition_native = 0;
+	private static $acquisition_reserve = 0;
+	private static $acquisition_amplification = 0;
+	private static $acquisition_ceiling = 0;
+	private static $acquisition_forecast = 0;
+
+	/** Fixed scalar samples, immediately appended; no per-event retained array. */
+	public static function acquisition( $phase, $bytes = 0, $depth = 0 ) {
+		if ( null === self::$acquisition_stream ) { return; }
+		if ( ! self::$acquisition_stream instanceof SnapshotReadTraceStream ||
+			! is_int( $phase ) || $phase < 1 || $phase > 40 || ! self::bytes( $bytes ) ||
+			! is_int( $depth ) || $depth < 0 || $depth > 64 || self::$acquisition_sequence >= 200000 ) {
+			throw new \RuntimeException( 'Acquisition scalar collector bound.' );
+		}
+		self::$acquisition_stream->append( array( 'sequence' => ++self::$acquisition_sequence,
+			'phase' => $phase, 'bytes' => $bytes, 'depth' => $depth, 'time' => microtime( true ),
+			'live' => memory_get_usage( false ), 'allocated' => memory_get_usage( true ),
+			'peak_live_cumulative' => memory_get_peak_usage( false ),
+			'peak_allocated_cumulative' => memory_get_peak_usage( true ),
+			'guard' => self::$acquisition_guard, 'forecast' => self::$acquisition_forecast,
+			'pending' => self::$acquisition_pending, 'backing' => self::$acquisition_backing,
+			'native' => self::$acquisition_native, 'reserve' => self::$acquisition_reserve,
+			'amplification' => self::$acquisition_amplification, 'ceiling' => self::$acquisition_ceiling ) );
+	}
+
+	/** Record actual guard operands, never change or release any admission debt. */
+	public static function acquisition_guard( $forecast, $pending, $backing, $native, $reserve, $amplification, $ceiling ) {
+		if ( null === self::$acquisition_stream ) { return; }
+		++self::$acquisition_guard;
+		self::$acquisition_forecast = $forecast; self::$acquisition_pending = $pending;
+		self::$acquisition_backing = $backing; self::$acquisition_native = $native;
+		self::$acquisition_reserve = $reserve; self::$acquisition_amplification = $amplification;
+		self::$acquisition_ceiling = $ceiling;
+		self::acquisition( 30 );
+	}
+
 	// Separate, finite full-conversion milestones. Privileged test reflection only;
 	// no callback, SQL/payload retention, request activation, or approval semantics.
 	private static $milestones_enabled = false;

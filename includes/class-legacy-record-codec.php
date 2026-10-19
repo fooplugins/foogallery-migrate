@@ -464,6 +464,7 @@ class LegacyRecordCodec {
 	public function rebuild_snapshot_stream( $state_key, $metadata, $source, $expected, $admit, $owner = null ) {
 		if ( ! $source instanceof LegacySnapshotRowReader || ! is_callable( $admit ) ) { $this->fail( 'Invalid snapshot row source.' ); }
 		if ( ! $owner instanceof SnapshotOwnedEventPlan || ! $owner->accepts( $state_key, $expected, $source ) ) { $owner = null; }
+		StorageScalarObserver::acquisition( 6 );
 		$ledger = array( 'visited' => 0, 'encoded_bytes' => 0, 'payload_bytes' => 0 );
 		$state_hash = $this->codec->key_hash( $state_key ); $result = array();
 		$order = 0; $id = 0; $previous = null;
@@ -477,7 +478,9 @@ class LegacyRecordCodec {
 				if ( ( null !== $previous && $order <= $previous ) || ( 'list' === $metadata['kind'] && $order !== count( $result ) ) || array_key_exists( $row['key'], $result ) ) { $this->fail( 'Duplicate or noncanonical root key/order.' ); }
 				if ( 'migrated' === $state_key && ( $row['legacy_identifier_value'] !== $this->codec->key_value( $row['key'] ) || strtolower( $row['legacy_identifier_hash'] ) !== $this->codec->key_hash( $row['key'] ) ) ) { $this->fail( 'History identifier projection mismatch.' ); }
 				$completion = null;
+				StorageScalarObserver::acquisition( 12 );
 				$result[$row['key']] = $this->rebuild_stream_node( $row, 0, $state_hash, $source, $expected, $ledger, $admit, $owner, $completion );
+				StorageScalarObserver::acquisition( 13 );
 				if ( null !== $owner ) { $owner->attached( $source, $row, $completion ); }
 				unset( $completion );
 				$previous = $order;
@@ -490,14 +493,19 @@ class LegacyRecordCodec {
 		}
 		if ( count( $result ) !== $metadata['root_count'] ) { $this->fail( 'Root count mismatch.' ); }
 		call_user_func( $admit, 0 );
-		return ( new LegacyCollectionEnvelope( $this->codec ) )->rebuild( $metadata, $result );
+		StorageScalarObserver::acquisition( 16 );
+		$result = ( new LegacyCollectionEnvelope( $this->codec ) )->rebuild( $metadata, $result );
+		StorageScalarObserver::acquisition( 17 );
+		return $result;
 	}
 
 	private function rebuild_stream_node( $row, $depth, $state_hash, $source, $expected, &$ledger, $admit, $owner, &$completion ) {
 		call_user_func( $admit, 0 );
 		if ( $depth > $this->max_depth || $row['depth'] !== $depth || ++$ledger['visited'] > $expected['record_count'] || $row['encoded_bytes'] > $expected['encoded_bytes'] - $ledger['encoded_bytes'] ) { $this->fail( 'Invalid streamed ancestry or footprint.' ); }
 		$ledger['encoded_bytes'] += $row['encoded_bytes']; $ledger['payload_bytes'] += $row['payload_bytes'];
+		StorageScalarObserver::acquisition( 8, $row['payload_bytes'], $depth );
 		list( $record, $count ) = $this->rebuild_record_fields( $row );
+		StorageScalarObserver::acquisition( 9, $row['payload_bytes'], $depth );
 		// Capture own scalar cost before descendants; NEVER describe the subtree
 		// at attachment. No event exists until validation below has returned.
 		$own = null === $owner ? 0 : SnapshotOwnedEventPlan::own_bytes( $record, null !== $count, strlen( $row['key_value'] ) );
@@ -511,7 +519,9 @@ class LegacyRecordCodec {
 				$order = $child['item_order']; $id = $this->number( $child['id'] );
 				if ( $order !== $next++ || array_key_exists( $child['key'], $record['children'] ) ) { $this->fail( 'Duplicate typed child key or sibling order.' ); }
 				$child_completion = null;
+				StorageScalarObserver::acquisition( 12, 0, $depth );
 				$record['children'][$child['key']] = $this->rebuild_stream_node( $child, $depth + 1, $state_hash, $source, $expected, $ledger, $admit, $owner, $child_completion );
+				StorageScalarObserver::acquisition( 13, 0, $depth );
 				if ( null !== $owner ) { $owner->attached( $source, $child, $child_completion ); }
 				unset( $child_completion );
 			}
@@ -519,6 +529,7 @@ class LegacyRecordCodec {
 		}
 		call_user_func( $admit, 0 );
 		$this->validate_record_output( $row, $record, $depth, $state_hash );
+		StorageScalarObserver::acquisition( 15, 0, $depth );
 		if ( null !== $owner ) { $completion = array( 'node' => $row['node_hash'], 'depth' => $depth, 'bytes' => $own ); }
 		return $record;
 	}
@@ -648,7 +659,9 @@ class LegacyRecordCodec {
 		if ( $row['depth'] > $this->max_depth || $row['row_kind'] !== ( null === $row['parent_node_hash'] ? 'root' : 'child' ) ) {
 			$this->fail( 'Invalid depth or row kind.' );
 		}
+		StorageScalarObserver::acquisition( 7, strlen( $row['key_value'] ) );
 		$key = $this->key( $row['key_type'], $row['key_value'] );
+		StorageScalarObserver::acquisition( 10, strlen( $row['key_value'] ) );
 		if ( $row['node_hash'] !== $this->codec->node_hash( $state_hash, $row['parent_node_hash'], $key ) ) { $this->fail( 'Node/key/parent identity mismatch.' ); }
 		foreach ( array( 'payload', 'mutable_payload' ) as $field ) {
 			if ( ! is_string( $row[ $field ] ) ) { $this->fail( 'Invalid encoded payload.' ); }
@@ -749,6 +762,7 @@ class LegacyRecordCodec {
 	private function rebuild_record_fields( $row ) {
 		$base = $this->codec->decode_record_payload( $row['payload'] );
 		$mutable = $this->codec->decode( $row['mutable_payload'] );
+		StorageScalarObserver::acquisition( 11, strlen( $row['mutable_payload'] ) );
 		if ( ! is_array( $base ) || ! isset( $base['version'], $base['kind'] ) || self::VERSION !== $base['version'] || ! is_array( $mutable ) ) { $this->fail( 'Unsupported record split envelope.' ); }
 		if ( 'value' === $base['kind'] ) {
 			if ( array_keys( $base ) !== array( 'version', 'kind', 'value' ) || is_array( $base['value'] ) || count( $mutable ) ) { $this->fail( 'Invalid scalar split envelope.' ); }
@@ -775,6 +789,7 @@ class LegacyRecordCodec {
 	}
 
 	private function validate_record_output( $row, $record, $depth, $state_hash ) {
+		StorageScalarObserver::acquisition( 14, 0, $depth );
 		if ( $row['logical_hash'] !== $this->codec->snapshot_digest( $record ) ) { $this->fail( 'Complete logical-record hash mismatch.' ); }
 		$projections = $this->projections( $record );
 		if ( 0 === $depth && $state_hash === $this->codec->key_hash( self::CONTENT_STATE_KEY ) ) {

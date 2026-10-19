@@ -52,7 +52,9 @@ final class LegacySnapshotRowReader {
 		$workspace = 2 * $limit * ( $maximum + 8192 ) + 16384;
 		call_user_func( $this->admit, $workspace );
 		$sql = 'SELECT ' . $this->columns . $tail . ' AND (' . $this->bytes_sql . ') <= %d' . $seek;
+		StorageScalarObserver::acquisition( 4, $workspace );
 		$rows = $this->read( $this->db->prepare( $sql, array_merge( $args, array( $maximum, $limit ) ) ) );
+		StorageScalarObserver::acquisition( 5, $workspace );
 		if ( count( $rows ) !== $limit ) { $this->fail( 'Missing or changed window rows.' ); }
 		foreach ( $rows as $i => $row ) {
 			if ( $this->number( $row['id'] ) !== $this->number( $metadata[$i]['id'] ) || $this->number( $row['item_order'] ) !== $this->number( $metadata[$i]['item_order'] ) ) { $this->fail( 'Window cursor changed.' ); }

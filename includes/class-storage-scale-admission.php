@@ -152,6 +152,7 @@ final class StorageScaleAdmission {
 			$used = self::checked_add( max( $sample[1], memory_get_usage( true ), $this->native_high_water ), self::checked_add( $this->additional_bytes, $this->retaining_pending ) );
 			$used = self::checked_add( $used, $this->authenticated_snapshot_read->workspace( 0 ) );
 		}
+		StorageScalarObserver::acquisition_guard( $bytes, self::checked_add( $this->additional_bytes, $this->retaining_pending ), $sample[1], $this->native_high_water, $policy['reserve_bytes'], $policy['amplification'], $this->limit( 'memory_ceiling_bytes' ) );
 		foreach ( array( $sample[0], (string) $this->limit( 'memory_ceiling_bytes' ) ) as $limit ) {
 			if ( is_wp_error( StoragePreflight::decode_budget( $bytes, $limit, $used, $policy ) ) ) { StorageScalarObserver::milestone( 'scale-memory-refused' ); StorageScalarObserver::refusal( 'scale-memory', 'scale-memory' ); self::fail(); }
 		}
@@ -214,6 +215,7 @@ final class StorageScaleAdmission {
 		self::checked_add( $sample[1], 0 );
 		$used = max( $sample[1], memory_get_usage( true ), $this->native_high_water );
 		$policy = array( 'max_raw_bytes' => PHP_INT_MAX, 'amplification' => 1, 'reserve_bytes' => $this->policy['reserve_bytes'] );
+		StorageScalarObserver::acquisition_guard( $bytes, self::checked_add( $this->additional_bytes, $this->retaining_pending ), $used, $this->native_high_water, $policy['reserve_bytes'], 1, $this->limit( 'memory_ceiling_bytes' ) );
 		foreach ( array( ini_get( 'memory_limit' ), $sample[0], (string) $this->limit( 'memory_ceiling_bytes' ) ) as $limit ) {
 			if ( is_wp_error( StoragePreflight::decode_budget( $total, $limit, $used, $policy ) ) ) { StorageScalarObserver::milestone( 'scale-memory-refused' ); StorageScalarObserver::refusal( 'scale-memory', 'scale-memory' ); self::fail(); }
 		}

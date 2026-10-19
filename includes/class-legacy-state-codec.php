@@ -88,13 +88,17 @@ class LegacyStateCodec {
 
 	private function decode_at_depth( $json, $depth ) {
 		$this->inspect_json_at_depth( $json, $depth );
+		StorageScalarObserver::acquisition( 23, strlen( $json ) );
 		$envelope = json_decode( $json, true, 512 );
+		StorageScalarObserver::acquisition( 24, strlen( $json ) );
 		if ( JSON_ERROR_NONE !== json_last_error() || ! is_array( $envelope ) ||
 			array_keys( $envelope ) !== array( 'version', 'value' ) || self::VERSION !== $envelope['version'] ) {
 			$this->fail( 'Unsupported or malformed record envelope.' );
 		}
 		$nodes = 0;
-		return $this->untag( $envelope['value'], $depth, $nodes );
+		$value = $this->untag( $envelope['value'], $depth, $nodes );
+		StorageScalarObserver::acquisition( 25, strlen( $json ) );
+		return $value;
 	}
 
 	/**
@@ -173,7 +177,10 @@ class LegacyStateCodec {
 	 * This domain is distinct from the physical envelope hash used above.
 	 */
 	public function snapshot_digest( $value ) {
-		$result = $this->logical_digest( $value, 0 ); return $result['digest'];
+		StorageScalarObserver::acquisition( 18 );
+		$result = $this->logical_digest( $value, 0 );
+		StorageScalarObserver::acquisition( 26 );
+		return $result['digest'];
 	}
 
 	/** Finite complete-snapshot footprint: its state value starts below the outer array. */

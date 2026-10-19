@@ -83,9 +83,12 @@ class LegacyTransactionConnection {
 		if ( ! ( $result instanceof \mysqli_result ) ) {
 			$this->last_error = 'Pinned storage read failed.'; return null;
 		}
+		StorageScalarObserver::acquisition( 20 );
 		$rows = array();
 		while ( $row = $result->fetch_assoc() ) { $rows[] = $row; }
+		StorageScalarObserver::acquisition( 21 );
 		$result->free();
+		StorageScalarObserver::acquisition( 22 );
 		return $rows;
 	}
 
