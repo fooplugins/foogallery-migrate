@@ -401,45 +401,14 @@ class LegacyTableSnapshot {
 		foreach ( $this->definitions[ $this->record_table ]['columns'] as $name => $spec ) {
 			$columns[] = 'binary(32)' === $spec[0] ? 'HEX(`' . $name . '`) AS `' . $name . '`' : '`' . $name . '`';
 		}
-		$bytes = $this->record_bytes();
-		$sql = 'SELECT ' . implode( ', ', $columns ) . ' FROM `' . $this->record_table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d '
-			. 'AND (' . $bytes . ') <= %d ORDER BY id ASC LIMIT %d';
-		$rows = $this->read( $this->wpdb->prepare( $sql, array( $this->blog_id, $id, $generation, LegacyTableReader::MAX_RECORD_BYTES, $stats['record_count'] + 1 ) ) );
-		if ( count( $rows ) !== $stats['record_count'] ) { $this->fail( 'Missing, extra or oversized snapshot rows.' ); }
-		// Driver rows now coexist with caller/source/prepared graphs. Re-sample
-		// BEFORE constructing ancestry indexes, decoded trees and output values.
-		$this->admit_memory( $encoded_bytes );
-		// Affected-root rewrites legitimately change physical IDs. Reconstruct by
-		// ancestry and logical order, not insertion ID; map order gaps are valid.
-		$result = array(); $roots = array(); $children = array(); $visited = array();
-		foreach ( $rows as $index => $row ) {
-			$this->tick();
-			if ( 0 === $index % 256 ) { $this->admit_memory( $encoded_bytes ); }
-			if ( $this->number( $row['blog_id'] ) !== $this->blog_id || $this->number( $row['state_id'] ) !== $id || $this->number( $row['generation'] ) !== $generation ) { $this->fail( 'Staged row escaped site/state/generation scope.' ); }
-			if ( null === $row['parent_node_hash'] ) {
-				$order = $this->number( $row['item_order'] );
-				if ( isset( $roots[$order] ) ) { $this->fail( 'Duplicate root order.' ); } $roots[$order] = $index;
-			} else { $children[strtolower( $row['parent_node_hash'] )][] = $index; }
-		}
-		ksort( $roots, SORT_NUMERIC );
-		$logical_order = 0;
-		foreach ( $roots as $order => $index ) {
-			if ( 'list' === $metadata['kind'] && $order !== $logical_order ) { $this->fail( 'Noncanonical list root order.' ); } ++$logical_order;
-			$tree = array(); $pending = array( $index );
-			for ( $i = 0; $i < count( $pending ); ++$i ) {
-				$this->tick();
-				if ( 0 === $i % 256 ) { $this->admit_memory( $encoded_bytes ); }
-				$position = $pending[$i];
-				if ( isset( $visited[$position] ) ) { $this->fail( 'Cycle or shared ancestry.' ); } $visited[$position] = true;
-				$row = $rows[$position]; $tree[] = $row; $hash = strtolower( $row['node_hash'] );
-				if ( isset( $children[$hash] ) ) { foreach ( $children[$hash] as $child ) { $pending[] = $child; } }
+		$admit = function ( $workspace ) use ( $encoded_bytes ) {
+			$this->tick(); $this->admit_memory( $encoded_bytes );
+			if ( null !== $this->scale && $workspace ) {
+				$this->scale->admit_snapshot_stats_workspace( StorageScaleAdmission::checked_add( StorageScaleAdmission::checked_multiply( 8, $encoded_bytes ), $workspace ) );
 			}
-			$this->admit_memory( $encoded_bytes );
-			$this->rebuild_root( $key, strtolower( $rows[$index]['node_hash'] ), $tree, $result );
-		}
-		if ( count( $visited ) !== count( $rows ) ) { $this->fail( 'Orphaned or cyclic snapshot rows.' ); }
-		if ( count( $result ) !== $metadata['root_count'] || ( 'list' === $metadata['kind'] && count( $result ) && array_keys( $result ) !== range( 0, count( $result ) - 1 ) ) ) { $this->fail( 'Root key/order/count parity failed.' ); }
-		return $envelope->rebuild( $metadata, $result );
+		};
+		$source = new LegacySnapshotRowReader( $this->wpdb, $this->record_table, implode( ', ', $columns ), $this->record_bytes(), array( $this->blog_id, $id, $generation ), $this->max_bytes, $admit );
+		return $this->records->rebuild_snapshot_stream( $key, $metadata, $source, $stats, $admit );
 	}
 
 	private function rebuild_root( $key, $hash, $tree, &$result ) {

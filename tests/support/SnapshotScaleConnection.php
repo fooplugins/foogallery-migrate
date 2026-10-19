@@ -17,6 +17,8 @@ class SnapshotScaleConnection extends SnapshotTestWpdb {
 	public $fetched_bytes = 0;
 	public $after_event;
 	public $corrupt_readback = false;
+	public $max_window_rows = 0;
+	public $max_window_bytes = 0;
 	private $statement;
 	private $serial = 0;
 	private $saved;
@@ -108,6 +110,31 @@ class SnapshotScaleConnection extends SnapshotTestWpdb {
 			$this->event( 'stats' ); return array( $stats );
 		}
 		if ( false !== strpos( $sql, 'FROM `wp_foogallery_migrate_legacy_records`' ) ) {
+			if ( false !== strpos( $sql, 'ORDER BY item_order ASC, id ASC' ) ) {
+				$metadata = 0 === strpos( $sql, 'SELECT id, item_order,' );
+				$root = false !== strpos( $sql, 'parent_node_hash IS NULL' ); $p = $root ? 3 : 4;
+				$parent = $root ? null : strtolower( $a[3] ); $limit = $a[$p + ( $metadata ? 3 : 4 )];
+				$selected = array();
+				foreach ( $this->records as $index => $r ) {
+					if ( $r['blog_id'] !== $a[0] || $r['state_id'] !== $a[1] || $r['generation'] !== $a[2] || ( null === $r['parent_node_hash'] ? null : strtolower( $r['parent_node_hash'] ) ) !== $parent ||
+						!( $r['item_order'] > $a[$p] || ( $r['item_order'] === $a[$p + 1] && $r['id'] > $a[$p + 2] ) ) || ( ! $metadata && self::bytes( $r ) > $a[$p + 3] ) ) { continue; }
+					// Bounded SQL-order selection, SAME rows; no generation cache/index.
+					$selected[] = array( $index, $r['item_order'], $r['id'] );
+					usort( $selected, function ( $x, $y ) { return $x[1] === $y[1] ? $x[2] <=> $y[2] : $x[1] <=> $y[1]; } );
+					if ( count( $selected ) > $limit ) { array_pop( $selected ); }
+				}
+				$rows = array(); $bytes = 0;
+				foreach ( $selected as $s ) {
+					$r = $this->records[$s[0]];
+					if ( $metadata ) { $rows[] = array( 'id' => (string) $r['id'], 'item_order' => (string) $r['item_order'], 'window_bytes' => (string) self::bytes( $r ) ); }
+					else { $row = array(); foreach ( $r as $k => $v ) { $row[$k] = is_int( $v ) ? (string) $v : $v; } $rows[] = $row; $bytes += self::bytes( $r ); }
+				}
+				if ( $metadata ) { $this->event( 'window-metadata' ); return $rows; }
+				++$this->fetches; $this->fetched_rows += count( $rows ); $this->fetched_bytes += $bytes;
+				$this->max_window_rows = max( $this->max_window_rows, count( $rows ) ); $this->max_window_bytes = max( $this->max_window_bytes, $bytes );
+				if ( $this->corrupt_readback && count( $rows ) ) { array_pop( $rows ); }
+				$this->event( 'fetch' ); return $rows;
+			}
 			$rows = array(); $bytes = 0;
 			foreach ( $this->records as $r ) {
 				if ( $r['blog_id'] === $a[0] && $r['state_id'] === $a[1] && $r['generation'] === $a[2] && self::bytes( $r ) <= $a[3] && count( $rows ) < $a[4] ) {

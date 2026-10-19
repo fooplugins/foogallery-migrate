@@ -456,6 +456,62 @@ class LegacyRecordCodec {
 		return $result;
 	}
 
+	/** Snapshot-only scoped reconstruction. Generic rebuild_tree stays indexed.
+	 * This conservative path intentionally grants NO completion credit: attached
+	 * output does not by itself prove which aggregate future allocations ended.
+	 * Keep the entire original forecast through root and final digest work.
+	 */
+	public function rebuild_snapshot_stream( $state_key, $metadata, $source, $expected, $admit ) {
+		if ( ! $source instanceof LegacySnapshotRowReader || ! is_callable( $admit ) ) { $this->fail( 'Invalid snapshot row source.' ); }
+		$ledger = array( 'visited' => 0, 'encoded_bytes' => 0, 'payload_bytes' => 0 );
+		$state_hash = $this->codec->key_hash( $state_key ); $result = array();
+		$order = 0; $id = 0; $previous = null;
+		while ( true ) {
+			$page = $source->page( null, $order, $id );
+			if ( ! count( $page ) ) { break; }
+			foreach ( $page as $row ) {
+				call_user_func( $admit, 0 );
+				$row = $this->validate_row( $row, $state_hash );
+				$order = $row['item_order']; $id = $this->number( $row['id'] );
+				if ( ( null !== $previous && $order <= $previous ) || ( 'list' === $metadata['kind'] && $order !== count( $result ) ) || array_key_exists( $row['key'], $result ) ) { $this->fail( 'Duplicate or noncanonical root key/order.' ); }
+				if ( 'migrated' === $state_key && ( $row['legacy_identifier_value'] !== $this->codec->key_value( $row['key'] ) || strtolower( $row['legacy_identifier_hash'] ) !== $this->codec->key_hash( $row['key'] ) ) ) { $this->fail( 'History identifier projection mismatch.' ); }
+				$result[$row['key']] = $this->rebuild_stream_node( $row, 0, $state_hash, $source, $expected, $ledger, $admit );
+				$previous = $order;
+			}
+			unset( $page, $row );
+		}
+		foreach ( $ledger as $field => $actual ) {
+			$name = 'visited' === $field ? 'record_count' : $field;
+			if ( $actual !== $expected[$name] ) { $this->fail( 'Unreachable, missing or changed snapshot rows.' ); }
+		}
+		if ( count( $result ) !== $metadata['root_count'] ) { $this->fail( 'Root count mismatch.' ); }
+		call_user_func( $admit, 0 );
+		return ( new LegacyCollectionEnvelope( $this->codec ) )->rebuild( $metadata, $result );
+	}
+
+	private function rebuild_stream_node( $row, $depth, $state_hash, $source, $expected, &$ledger, $admit ) {
+		call_user_func( $admit, 0 );
+		if ( $depth > $this->max_depth || $row['depth'] !== $depth || ++$ledger['visited'] > $expected['record_count'] || $row['encoded_bytes'] > $expected['encoded_bytes'] - $ledger['encoded_bytes'] ) { $this->fail( 'Invalid streamed ancestry or footprint.' ); }
+		$ledger['encoded_bytes'] += $row['encoded_bytes']; $ledger['payload_bytes'] += $row['payload_bytes'];
+		list( $record, $count ) = $this->rebuild_record_fields( $row );
+		$next = 0; $order = 0; $id = 0;
+		if ( null !== $count && $count > $expected['record_count'] - $ledger['visited'] ) { $this->fail( 'Impossible child count.' ); }
+		while ( null !== $count && $next < $count ) {
+			$page = $source->page( $row['node_hash'], $order, $id );
+			if ( ! count( $page ) || count( $page ) > $count - $next ) { $this->fail( 'Missing or extra children.' ); }
+			foreach ( $page as $child ) {
+				call_user_func( $admit, 0 ); $child = $this->validate_row( $child, $state_hash );
+				$order = $child['item_order']; $id = $this->number( $child['id'] );
+				if ( $order !== $next++ || array_key_exists( $child['key'], $record['children'] ) ) { $this->fail( 'Duplicate typed child key or sibling order.' ); }
+				$record['children'][$child['key']] = $this->rebuild_stream_node( $child, $depth + 1, $state_hash, $source, $expected, $ledger, $admit );
+			}
+			unset( $page, $child );
+		}
+		call_user_func( $admit, 0 );
+		$this->validate_record_output( $row, $record, $depth, $state_hash );
+		return $record;
+	}
+
 	private function mutable_fields() {
 		return array( 'migration_status', 'migrated', 'migrated_child_count', 'progress', 'part_of_migration',
 			'migrated_id', 'migrated_title', 'children_count', 'children_errors', 'error' );
@@ -648,54 +704,14 @@ class LegacyRecordCodec {
 			if ( ! isset( $visited[ $hash ] ) ) { $this->fail( 'Invalid tree ancestry/depth.' ); }
 			$visited[ $hash ] = null;
 		}
-		$base = $this->codec->decode_record_payload( $row['payload'] );
-		$mutable = $this->codec->decode( $row['mutable_payload'] );
 		$child_rows = isset( $children[ $hash ] ) ? $children[ $hash ] : array();
 		// The certificate checked exact direct-child counts without an adjacency
 		// allocation. This is not permission to skip envelope/identity/digest work.
-		$child_total = $preorder && isset( $base['kind'] ) && 'array' === $base['kind'] && isset( $base['child_count'] ) ? $this->number( $base['child_count'] ) : count( $child_rows );
-		if ( ! is_array( $base ) || ! isset( $base['version'], $base['kind'] ) || self::VERSION !== $base['version'] || ! is_array( $mutable ) ) {
-			$this->fail( 'Unsupported record split envelope.' );
-		}
-		if ( 'value' === $base['kind'] ) {
-			if ( array_keys( $base ) !== array( 'version', 'kind', 'value' ) || is_array( $base['value'] ) || count( $mutable ) || $child_total ) {
-				$this->fail( 'Invalid scalar split envelope.' );
-			}
-			$record = $base['value'];
-			if ( null !== $phase ) { $this->scale->realize_retaining_event( $phase, $this, $sequence++, GenericRetainingModel::own_record_bytes( $record, false, strlen( $row['key_value'] ) ) ); }
-		} else if ( 'array' === $base['kind'] ) {
-			if ( array_keys( $base ) !== array( 'version', 'kind', 'field_order', 'child_count', 'values' ) ||
-				! is_array( $base['field_order'] ) || ! is_array( $base['values'] ) ||
-				( count( $base['field_order'] ) && array_keys( $base['field_order'] ) !== range( 0, count( $base['field_order'] ) - 1 ) ) ) {
-				$this->fail( 'Invalid ordered record envelope.' );
-			}
-			$count = $base['child_count'];
-			if ( null !== $count ) {
-				$count = $this->number( $count );
-				if ( $child_total !== $count ) { $this->fail( 'Missing or extra children.' ); }
-			} else if ( $child_total ) { $this->fail( 'Unexpected children.' ); }
-			// Place this node's own fields before descending. Envelope arrays must
-			// not remain live at every ancestor while the final children grow.
-			$record = array(); $used_base = 0; $used_mutable = 0; $used_children = false;
-			foreach ( $base['field_order'] as $field ) {
-				$this->codec->key_value( $field );
-				$probe = array( $field => true ); $keys = array_keys( $probe );
-				if ( $keys[0] !== $field || array_key_exists( $field, $record ) ) { $this->fail( 'Duplicate or coercible field key.' ); }
-				if ( 'children' === $field && null !== $count ) {
-					$record[ $field ] = array(); $used_children = true;
-				} else if ( in_array( $field, $this->mutable_fields(), true ) ) {
-					if ( ! array_key_exists( $field, $mutable ) ) { $this->fail( 'Missing mutable field.' ); }
-					$record[ $field ] = $mutable[ $field ]; $used_mutable++;
-				} else {
-					if ( ! array_key_exists( $field, $base['values'] ) ) { $this->fail( 'Missing base field.' ); }
-					$record[ $field ] = $base['values'][ $field ]; $used_base++;
-				}
-			}
-			if ( $used_base !== count( $base['values'] ) || $used_mutable !== count( $mutable ) || ( null !== $count && ! $used_children ) ) {
-				$this->fail( 'Unaccounted fields or overlapping split values.' );
-			}
-			unset( $base, $mutable, $probe, $keys );
-			if ( null !== $phase ) { $this->scale->realize_retaining_event( $phase, $this, $sequence++, GenericRetainingModel::own_record_bytes( $record, null !== $count, strlen( $row['key_value'] ) ) ); }
+		list( $record, $count ) = $this->rebuild_record_fields( $row );
+		$child_total = $preorder && null !== $count ? $count : count( $child_rows );
+		if ( $child_total !== ( null === $count ? 0 : $count ) ) { $this->fail( 'Missing or extra children.' ); }
+		if ( null !== $phase ) { $this->scale->realize_retaining_event( $phase, $this, $sequence++, GenericRetainingModel::own_record_bytes( $record, null !== $count, strlen( $row['key_value'] ) ) ); }
+		if ( null !== $count ) {
 			$order = 0;
 			if ( $preorder ) {
 				for ( ; $order < $child_total; ++$order ) {
@@ -713,7 +729,41 @@ class LegacyRecordCodec {
 					$record['children'][ $key ] = $this->rebuild_node( $child_position, $depth + 1, $state_hash, $rows, $children, $visited, $phase, $sequence );
 				}
 			}
-		} else { $this->fail( 'Unknown record kind.' ); }
+		}
+		$this->validate_record_output( $row, $record, $depth, $state_hash );
+		return $record;
+	}
+
+	/** Shared split-envelope rules for indexed and scoped reconstruction. */
+	private function rebuild_record_fields( $row ) {
+		$base = $this->codec->decode_record_payload( $row['payload'] );
+		$mutable = $this->codec->decode( $row['mutable_payload'] );
+		if ( ! is_array( $base ) || ! isset( $base['version'], $base['kind'] ) || self::VERSION !== $base['version'] || ! is_array( $mutable ) ) { $this->fail( 'Unsupported record split envelope.' ); }
+		if ( 'value' === $base['kind'] ) {
+			if ( array_keys( $base ) !== array( 'version', 'kind', 'value' ) || is_array( $base['value'] ) || count( $mutable ) ) { $this->fail( 'Invalid scalar split envelope.' ); }
+			return array( $base['value'], null );
+		}
+		if ( 'array' !== $base['kind'] || array_keys( $base ) !== array( 'version', 'kind', 'field_order', 'child_count', 'values' ) || ! is_array( $base['field_order'] ) || ! is_array( $base['values'] ) ||
+			( count( $base['field_order'] ) && array_keys( $base['field_order'] ) !== range( 0, count( $base['field_order'] ) - 1 ) ) ) { $this->fail( 'Invalid ordered record envelope.' ); }
+		$count = null === $base['child_count'] ? null : $this->number( $base['child_count'] );
+		$record = array(); $used_base = 0; $used_mutable = 0; $used_children = false;
+		foreach ( $base['field_order'] as $field ) {
+			$this->codec->key_value( $field ); $probe = array( $field => true ); $keys = array_keys( $probe );
+			if ( $keys[0] !== $field || array_key_exists( $field, $record ) ) { $this->fail( 'Duplicate or coercible field key.' ); }
+			if ( 'children' === $field && null !== $count ) { $record[$field] = array(); $used_children = true; }
+			else if ( in_array( $field, $this->mutable_fields(), true ) ) {
+				if ( ! array_key_exists( $field, $mutable ) ) { $this->fail( 'Missing mutable field.' ); }
+				$record[$field] = $mutable[$field]; ++$used_mutable;
+			} else {
+				if ( ! array_key_exists( $field, $base['values'] ) ) { $this->fail( 'Missing base field.' ); }
+				$record[$field] = $base['values'][$field]; ++$used_base;
+			}
+		}
+		if ( $used_base !== count( $base['values'] ) || $used_mutable !== count( $mutable ) || ( null !== $count && ! $used_children ) ) { $this->fail( 'Unaccounted fields or overlapping split values.' ); }
+		return array( $record, $count );
+	}
+
+	private function validate_record_output( $row, $record, $depth, $state_hash ) {
 		if ( $row['logical_hash'] !== $this->codec->snapshot_digest( $record ) ) { $this->fail( 'Complete logical-record hash mismatch.' ); }
 		$projections = $this->projections( $record );
 		if ( 0 === $depth && $state_hash === $this->codec->key_hash( self::CONTENT_STATE_KEY ) ) {
@@ -728,7 +778,6 @@ class LegacyRecordCodec {
 			else if ( null !== $expected && substr( $field, -5 ) === '_hash' ) { $actual = $this->hex( $actual ); }
 			if ( $actual !== $expected ) { $this->fail( 'Derived projection mismatch: ' . $field ); }
 		}
-		return $record;
 	}
 
 	/** Pure projections only; raw logical values are always retained in envelopes. */

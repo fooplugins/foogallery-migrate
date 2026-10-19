@@ -20,7 +20,12 @@ class StorageSnapshotReadAdmissionTest extends TestCase {
 		$this->assertSame( $db->value, $snapshot->read_bounded( 'bucket' ) );
 		$this->assertGreaterThanOrEqual( 6, count( $seen ) );
 		$this->assertFalse( $seen[0][1] );
-		$this->assertTrue( $seen[2][1] );
+		// Scoped metadata adds pre-fetch checks; preserve the transition assertion
+		// rather than treating the old eager reader's callback index as an API.
+		$after_fetch = array_search( true, array_column( $seen, 1 ), true );
+		$this->assertIsInt( $after_fetch );
+		$this->assertFalse( $seen[$after_fetch - 1][1] );
+		$this->assertTrue( $seen[$after_fetch][1] );
 		$this->assertGreaterThan( 0, min( array_column( $seen, 0 ) ) );
 		foreach ( $db->queries as $sql ) { $this->assertStringContainsString( 'blog_id = 7', $sql ); }
 	}
@@ -89,6 +94,21 @@ class SnapshotReadAdmissionWpdb extends SnapshotTestWpdb {
 		if ( false !== strpos( $sql, 'AS record_count' ) ) { return array( $this->stats ); }
 		if ( false !== strpos( $sql, 'SELECT root_payload FROM' ) ) { return array( array( 'root_payload' => $this->root ) ); }
 		if ( false !== strpos( $sql, 'legacy_records`' ) ) {
+			if ( false !== strpos( $sql, 'ORDER BY item_order ASC, id ASC' ) ) {
+				$metadata = 0 === strpos( $sql, 'SELECT id, item_order,' ); $parent = null;
+				if ( preg_match( '/parent_node_hash = UNHEX\(\'([a-f0-9]+)\'\)/', $sql, $m ) ) { $parent = $m[1]; }
+				preg_match( '/item_order > (\d+) OR \(item_order = \d+ AND id > (\d+)\)/', $sql, $cursor );
+				preg_match( '/LIMIT (\d+)$/', $sql, $limit );
+				$rows = array_filter( $this->rows, function ( $row ) use ( $parent, $cursor ) {
+					return $row['parent_node_hash'] === $parent && ( $row['item_order'] > $cursor[1] || ( $row['item_order'] == $cursor[1] && $row['id'] > $cursor[2] ) );
+				} );
+				usort( $rows, function ( $a, $b ) { return $a['item_order'] <=> $b['item_order']; } );
+				$rows = array_slice( $rows, 0, (int) $limit[1] );
+				if ( $metadata ) { return array_map( function ( $row ) { return array( 'id' => $row['id'], 'item_order' => $row['item_order'], 'window_bytes' => strlen( $row['payload'] ) + strlen( $row['mutable_payload'] ) + strlen( $row['key_value'] ) ); }, $rows ); }
+				$this->fetched = true;
+				if ( $this->allocate_driver_slab ) { $this->driver_slab = str_repeat( 'd', 8388608 ); }
+				return $rows;
+			}
 			$this->fetched = true;
 			if ( $this->allocate_driver_slab ) { $this->driver_slab = str_repeat( 'd', 8388608 ); }
 			return $this->rows;
