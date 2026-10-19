@@ -35,19 +35,32 @@ final class SnapshotReadProfile {
 			foreach ( array( 'runtime', 'pid', 'identity', 'features', 'events', 'variants' ) as $k ) { if ( ! isset( $t[$k] ) ) { self::fail( 'trace ' . $k ); } }
 			if ( $t['runtime'] !== $cell['runtime'] || $t['identity'] !== $cell['identity'] || $t['features'] !== $p['features'] || isset( $pids[$t['pid']] ) || self::number( $t['pid'] ) < 1 || $t['variants'] !== array( 'original', 'retained-two-outputs', 'deadline-interrupted', 'fragmented-backing' ) ) { self::fail( 'trace/child/variant binding' ); }
 			$pids[$t['pid']] = true; $seen = array(); $last_remaining = array(); $before = array(); $stack = array(); $read_index = -1;
+			$lifecycle = array( 'stage' => 'entry', 'attached' => 0 );
 			foreach ( $t['events'] as $seq => $e ) {
 				foreach ( array( 'seq', 'read', 'seam', 'edge', 'row', 'remaining', 'private', 'page', 'pending', 'allocated', 'observer_backing', 'native_high_water', 'peak', 'limit', 'observer_limit', 'ceiling', 'reserve', 'residual', 'allocator_growth', 'retained_outputs' ) as $k ) { if ( ! array_key_exists( $k, $e ) ) { self::fail( 'sample ' . $k ); } }
 				if ( $e['seq'] !== $seq || ! in_array( $e['read'], array( 'staged', 'read1', 'read2' ), true ) || ! in_array( $e['edge'], array( 'before', 'after' ), true ) ) { self::fail( 'seam ordering' ); }
 				if ( ! in_array( $e['seam'], array( 'root-native', 'page-chain', 'whole-record-digest', 'cow-resize', 'envelope', 'final-digest', 'exit', 'key-native', 'payload-native', 'attach', 'unwind' ), true ) ) { self::fail( 'unknown seam' ); }
 				self::number( $e['row'] ); self::number( $e['peak'] ); self::number( $e['retained_outputs'] );
 				$ri = array_search( $e['read'], array( 'staged', 'read1', 'read2' ), true );
-				if ( $ri < $read_index || $ri > $read_index + 1 ) { self::fail( 'read ordering' ); } $read_index = $ri;
+				if ( $ri < $read_index || $ri > $read_index + 1 ) { self::fail( 'read ordering' ); }
+				if ( $ri !== $read_index ) {
+					if ( $read_index >= 0 && ( $lifecycle['stage'] !== 'complete' || count( $stack ) ) ) { self::fail( 'unfinished previous read' ); }
+					$lifecycle = array( 'stage' => 'entry', 'attached' => 0 ); $read_index = $ri;
+				}
+				self::lifecycle( $e, $p, $lifecycle, $seen, $stack );
 				$id = $e['read'] . ':' . $e['seam'] . ':' . $e['row']; $key = $id . ':' . $e['edge'];
 				if ( $e['edge'] === 'before' ) { $stack[] = $id; } else if ( array_pop( $stack ) !== $id ) { self::fail( 'unwound seam ordering' ); }
 				if ( isset( $seen[$key] ) || ( $e['edge'] === 'after' && ! isset( $seen[$id . ':before'] ) ) ) { self::fail( 'duplicate/missing seam' ); } $seen[$key] = true;
 				self::number( $e['remaining'] );
 				if ( $e['remaining'] > $p['own']['future'] || ( isset( $last_remaining[$e['read']] ) && $e['remaining'] > $last_remaining[$e['read']] ) || $e['private'] !== $private || $e['reserve'] < 33554432 ) { self::fail( 'remaining/private/reserve' ); }
 				if ( ! isset( $last_remaining[$e['read']] ) && $e['remaining'] !== $p['own']['future'] ) { self::fail( 'new owner debt' ); }
+				if ( isset( $last_remaining[$e['read']] ) && $e['remaining'] !== $last_remaining[$e['read']] && ( $e['seam'] !== 'attach' || $e['edge'] !== 'after' ) ) { self::fail( 'premature own debt discharge' ); }
+				if ( $e['seam'] === 'attach' && $e['edge'] === 'after' ) {
+					++$lifecycle['attached'];
+					// Every not-yet-attached record has positive own bytes. No per-row
+					// allocation estimate is inferred from this aggregate trace.
+					if ( $e['remaining'] >= $last_remaining[$e['read']] || $e['remaining'] < $p['own']['records'] - $lifecycle['attached'] || ( $lifecycle['attached'] === $p['own']['records'] && $e['remaining'] !== 0 ) ) { self::fail( 'attachment debt' ); }
+				}
 				$last_remaining[$e['read']] = $e['remaining'];
 				if ( $e['seam'] === 'exit' && ( $e['remaining'] !== 0 || $e['retained_outputs'] !== ( $e['read'] === 'read2' ? 2 : ( $e['read'] === 'read1' ? 1 : 0 ) ) ) ) { self::fail( 'retained output overlap' ); }
 				// Before AND after samples retain all debt. Peak must be covered by
@@ -85,6 +98,37 @@ final class SnapshotReadProfile {
 		$margin = self::add( self::add( $max_residual, $spread ), self::add( $quantum, $cell['observer']['bounded_bytes'] ) );
 		foreach ( $samples as $s ) { if ( self::add( self::add( $s[0], $margin ), $s[2] ) > $s[1] ) { self::fail( 'finite measured cell exceeds capacity with complete margin' ); } }
 		return new self( $cell, $margin );
+	}
+	/** Finite successful-read grammar, not a claim about arbitrary hook traces.
+	 * attach:after denotes assigned, validated output after the callee returned
+	 * (SnapshotOwnedEventPlan::attached). Only that event may consume own debt.
+	 * unwind samples may bracket that event or follow it; they grant no credit. */
+	private static function lifecycle( $e, $p, &$state, $seen, $stack ) {
+		$row_seam = in_array( $e['seam'], array( 'key-native', 'payload-native', 'attach', 'unwind' ), true );
+		if ( $row_seam ? ( $e['row'] < 1 || $e['row'] > $p['own']['records'] ) : $e['row'] !== 0 ) { self::fail( 'lifecycle row' ); }
+		$prefix = $e['read'] . ':'; $seam = $e['seam']; $after = $e['edge'] === 'after';
+		if ( in_array( $seam, array( 'root-native', 'page-chain', 'envelope', 'final-digest', 'exit' ), true ) ) {
+			$previous = array( 'root-native' => 'entry', 'page-chain' => 'root-native', 'envelope' => 'page-chain', 'final-digest' => 'envelope', 'exit' => 'final-digest' );
+			if ( $state['stage'] !== ( $after ? $seam . '-active' : $previous[$seam] ) || ( ! $after && count( $stack ) ) ) { self::fail( 'lifecycle completion ordering' ); }
+			if ( $seam === 'page-chain' && $after ) {
+				foreach ( array( 'whole-record-digest', 'cow-resize' ) as $required ) {
+					if ( ! isset( $seen[$prefix . $required . ':0:after'] ) ) { self::fail( 'unfinished overlap' ); }
+				}
+				for ( $row = 1; $row <= $p['own']['records']; ++$row ) {
+					foreach ( array( 'key-native', 'payload-native', 'attach', 'unwind' ) as $required ) {
+						if ( ! isset( $seen[$prefix . $required . ':' . $row . ':after'] ) ) { self::fail( 'unfinished row' ); }
+					}
+				}
+				if ( $state['attached'] !== $p['own']['records'] || $e['remaining'] !== 0 ) { self::fail( 'unfinished own debt' ); }
+			}
+			$state['stage'] = $after ? ( $seam === 'exit' ? 'complete' : $seam ) : $seam . '-active';
+		} else {
+			if ( $state['stage'] !== 'page-chain-active' ) { self::fail( 'work outside reconstruction' ); }
+			if ( $row_seam && $seam !== 'key-native' ) {
+				$required = $seam === 'payload-native' ? 'key-native' : 'payload-native';
+				if ( ! isset( $seen[$prefix . $required . ':' . $e['row'] . ':after'] ) ) { self::fail( 'premature row work' ); }
+			}
+		}
 	}
 	public function supports( $plan, $identity ) {
 		return $this->pid === getmypid() && $this->cell['runtime'] === SnapshotReadPlan::runtime_binding() && $this->cell['plan'] === $plan && $this->cell['identity'] === $identity;

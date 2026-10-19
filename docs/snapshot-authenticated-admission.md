@@ -39,8 +39,18 @@ SnapshotReadProfile is an internal OFFLINE validator. It binds exact binary,
 INI, extensions, architecture, allocator, codec implementation and compiler bytes;
 it accepts no runtime interpolation. It checks repeated fresh-process raw trace
 hashes, complete before/after row/overlap seam coverage and arithmetic, measured
-residual/spread/allocator/observer margins, monotone own consumption and retained
-private. tests/tools/qualify-snapshot-read-cell.php emits a finite host receipt,
+residual/spread/allocator/observer margins, attachment-only own consumption and
+retained private. Its finite successful-read grammar is root-native, page-chain
+(including all bounded row/digest/COW seams), envelope, final-digest, then exit.
+Each owner must exit before the next read; no work follows exit. Only attach:after
+(validated output assigned after the recursive callee returned) consumes own debt;
+unwind samples grant no credit and may bracket that event or follow it. All row
+attachments/unwinds must finish before envelope/digest/exit, with zero own debt
+but unchanged private liability. This does not reconstruct per-row byte costs,
+prove arbitrary-hook ordering, or authenticate declared variants/measurements.
+Synthetic lifecycle/arithmetic controls are NOT measured qualification. The
+separate R2 zero whole-logical component-floor finding remains OPEN.
+tests/tools/qualify-snapshot-read-cell.php emits a finite host receipt,
 not an installation, production enablement or native/literal-floor approval.
 
 Verification boundary: the mandatory regression cases exercise producer/page
