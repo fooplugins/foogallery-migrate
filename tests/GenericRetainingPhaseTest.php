@@ -132,5 +132,28 @@ class GenericRetainingPhaseTest extends TestCase {
   $custom=new \FooPlugins\FooGalleryMigrate\LegacyStateCodec(1024,64,10000,$b);
   $this->assertFalse(\FooPlugins\FooGalleryMigrate\GenericRetainingModel::supports($c,$custom,$b));
  }
+ /** Arithmetic protocol coverage, NOT qualification of the snapshot producer. */
+ public function test_partial_completion_cannot_discharge_ancestor_page_or_late_digest_scopes(): void {
+  $used=1; $b=$this->budget($used); $owner=new \stdClass(); $foreign=new \stdClass();
+  $output=$b->open_retaining_phase($owner,0); $ancestor=$b->open_retaining_phase($owner,0); $page=$b->open_retaining_phase($owner,0);
+  $b->plan_retaining_phase($output,$owner,40,30,20,2);
+  $b->plan_retaining_phase($ancestor,$owner,0,10,0,0); $b->plan_retaining_phase($page,$owner,0,10,0,0);
+  $b->admit_additional(134217728-33554432-$used-110);
+  $b->realize_retaining_event($output,$owner,0,20); $b->admit_additional(20);
+  $this->refused(function()use($b,$output,$owner){$b->close_retaining_phase($output,$owner);});
+  $this->refused(function()use($b,$output,$foreign){$b->realize_retaining_event($output,$foreign,1,20);});
+  $this->refused(function()use($b,$output,$owner){$b->realize_retaining_event(clone $output,$owner,1,20);});
+  $this->refused(function()use($b){$b->admit_memory(1);}); // Both nested scopes remain, despite completed output.
+  $b->close_retaining_phase($page,$owner); $b->admit_additional(10);
+  $b->realize_retaining_event($output,$owner,1,20); $b->admit_additional(20);
+  $this->refused(function()use($b,$output,$owner){$b->realize_retaining_event($output,$owner,1,20);});
+  // A late digest interruption is NOT a close event: private30/ancestor10/external20 all remain.
+  $this->refused(function()use($b){$b->admit_memory(1);});
+  $b->close_retaining_phase($ancestor,$owner); $b->admit_additional(10);
+  $b->close_retaining_phase($output,$owner); $b->admit_additional(30);
+  $this->refused(function()use($b){$b->admit_memory(1);}); // Caller-held external20 was never credited.
+  $this->refused(function()use($b,$output,$owner){$b->close_retaining_phase($output,$owner);});
+  $this->refused(function()use($b,$page,$owner){$b->plan_retaining_phase($page,$owner,0,0,0,0);});
+ }
 }
 

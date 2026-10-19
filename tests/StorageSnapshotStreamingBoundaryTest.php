@@ -7,6 +7,7 @@ use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
 use PHPUnit\Framework\TestCase;
 
 require_once __DIR__ . '/support/SnapshotScaleConnection.php';
+require_once __DIR__ . '/StorageScaleAdmissionTest.php';
 
 /** Scoped SQL host tests, not native driver or completion-model qualification. */
 class StorageSnapshotStreamingBoundaryTest extends TestCase {
@@ -24,7 +25,9 @@ class StorageSnapshotStreamingBoundaryTest extends TestCase {
 		$db->after_event = function ( $event, $db ) {
 			if ( 'stats' !== $event || ! count( $db->records ) ) { return; }
 			// Rewrites may assign physical IDs in the opposite of preorder.
-			foreach ( $db->records as $i => $row ) { $r = iterator_to_array( $row ); $r['id'] = 1000 - $i; $db->records[$i] = $r; }
+			$rows = array();
+			foreach ( $db->records as $i => $row ) { $r = iterator_to_array( $row ); $r['id'] = 1000 - $i; $rows[$i] = $r; }
+			$db->records = $rows;
 			$db->after_event = null;
 		};
 		$snapshot = $this->snapshot( $db ); $snapshot->replace_many( $this->change( $value ) );
@@ -97,6 +100,54 @@ class StorageSnapshotStreamingBoundaryTest extends TestCase {
 		catch ( \RuntimeException $error ) { $this->assertNotEmpty( $error->getMessage() ); }
 		$this->assertSame( 1, $db->events['rollback'] ); $this->assertArrayNotHasKey( 'publish', $db->events ); $this->assertSame( array(), $db->heads );
 		$this->assertGreaterThan( 0, min( $seen ) ); $this->assertSame( min( $seen ), max( $seen ), 'Fetching/attaching must not consume future credit.' );
+	}
+
+	public function test_caller_held_output_and_nested_ancestor_pages_keep_conservative_forecast(): void {
+		$db = new SnapshotScaleConnection(); $value = $this->value();
+		$value['root']['children']['child-0']['children'] = $this->value()['root']['children'];
+		$seen = array(); $nested_page = false;
+		$memory = function ( $bytes ) use ( $db, &$seen, &$nested_page ) {
+			if ( ! $db->fetches ) { return true; }
+			$ancestors = 0; $page = false; $generation = false;
+			foreach ( debug_backtrace( DEBUG_BACKTRACE_IGNORE_ARGS, 32 ) as $frame ) {
+				if ( 'read_generation' === $frame['function'] ) { $generation = true; }
+				if ( 'rebuild_stream_node' === $frame['function'] ) { ++$ancestors; }
+				if ( isset( $frame['class'] ) && LegacySnapshotRowReader::class === $frame['class'] && 'page' === $frame['function'] ) { $page = true; }
+			}
+			if ( $generation ) { $seen[] = $bytes; }
+			$nested_page = $nested_page || ( $page && $ancestors >= 2 );
+			return true;
+		};
+		$snapshot = $this->snapshot( $db, null, $memory ); $snapshot->replace_many( $this->change( $value ) );
+		$held = $snapshot->read_bounded( 'bucket' ); $seen = array(); $nested_page = false;
+		$second = $snapshot->read_bounded( 'bucket' );
+		$this->assertSame( serialize( $value ), serialize( $held ) ); $this->assertSame( $held, $second );
+		$this->assertTrue( $nested_page, 'Exercise a driver page with multiple live ancestors.' );
+		$this->assertGreaterThan( 0, min( $seen ) ); $this->assertSame( min( $seen ), max( $seen ) );
+	}
+
+	public function test_late_complete_snapshot_digest_interruption_never_publishes(): void {
+		$db = new SnapshotScaleConnection(); $now = 100.0; $digest_ticks = 0;
+		$clock = function () use ( $db, &$now, &$digest_ticks ) {
+			if ( $db->fetches ) {
+				$footprint = false; $digest = false;
+				foreach ( debug_backtrace( DEBUG_BACKTRACE_IGNORE_ARGS, 32 ) as $frame ) {
+					$footprint = $footprint || 'snapshot_footprint' === $frame['function'];
+					$digest = $digest || 'digest_value' === $frame['function'];
+				}
+				if ( $footprint && $digest && 5 === ++$digest_ticks ) { $now = 111.0; }
+			}
+			return $now;
+		};
+		$scale = StorageScaleAdmissionTest::admission( null, $clock, function () { return array( ini_get( 'memory_limit' ), memory_get_usage( true ) ); } );
+		$snapshot = new LegacyTableSnapshot( $db, 7, 1000, 8388608, null, null, $scale );
+		$returned = null; $authority = $GLOBALS['foogallery_migrate_test_options'];
+		try { $returned = $snapshot->replace_many( $this->change( $this->value() ) ); $this->fail( 'Interrupted final digest published.' ); }
+		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'scale admission refused', $error->getMessage() ); }
+		$this->assertSame( 5, $digest_ticks ); $this->assertNull( $returned );
+		$this->assertSame( 1, $db->events['rollback'] ); $this->assertSame( array(), $db->heads ); $this->assertSame( array(), $db->records );
+		$this->assertArrayNotHasKey( 'publish', $db->events ); $this->assertArrayNotHasKey( 'commit', $db->events );
+		$this->assertSame( $authority, $GLOBALS['foogallery_migrate_test_options'] );
 	}
 }
 

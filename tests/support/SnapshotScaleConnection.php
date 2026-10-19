@@ -9,7 +9,12 @@ require_once __DIR__ . '/SnapshotScaleRow.php';
 
 class SnapshotScaleConnection extends SnapshotTestWpdb {
 	public $heads = array();
-	public $records = array();
+	private $records = array();
+	private $records_revision = 0;
+	private $index_revision = -1;
+	private $record_index = array();
+	public $index_builds = 0;
+	public $index_row_visits = 0;
 	public $events = array();
 	public $emitted = 0;
 	public $fetches = 0;
@@ -24,6 +29,73 @@ class SnapshotScaleConnection extends SnapshotTestWpdb {
 	private $saved;
 	private $next_id = 1;
 	private $record_layouts = array();
+
+	/** Read-only COW view; rewrites assign the whole array through __set.
+	 * No mutable reference escapes the revision boundary. Persisted rows AND
+	 * offset-only indexes remain held on this connection in the original sampler.
+	 */
+	public function __get( $name ) {
+		if ( 'records' !== $name ) { throw new \LogicException( 'Unknown host property: ' . $name ); }
+		return $this->records;
+	}
+	public function __set( $name, $value ) {
+		if ( 'records' !== $name || ! is_array( $value ) ) { throw new \LogicException( 'Invalid host records rewrite.' ); }
+		$detached = array();
+		foreach ( $value as $position => $row ) {
+			if ( $row instanceof SnapshotScaleRow ) { $detached[$position] = $row; continue; }
+			if ( ! is_array( $row ) ) { throw new \LogicException( 'Invalid host record row.' ); }
+			$copy = array();
+			foreach ( $row as $column => $field ) {
+				if ( null !== $field && ! is_scalar( $field ) ) { throw new \LogicException( 'Invalid host record column.' ); }
+				$copy[$column] = $field;
+			}
+			$detached[$position] = $copy;
+		}
+		$this->records = $detached; $this->records_changed();
+	}
+	public function __isset( $name ) { return 'records' === $name; }
+	private function records_changed() {
+		++$this->records_revision;
+		$this->record_index = array();
+	}
+	private function scope_key( $blog, $state, $generation, $parent ) {
+		return serialize( array( $blog, $state, $generation, null === $parent ? null : strtolower( $parent ) ) );
+	}
+	private function ensure_record_index() {
+		if ( $this->index_revision === $this->records_revision ) { return; }
+		$index = array();
+		foreach ( $this->records as $position => $row ) {
+			++$this->index_row_visits;
+			$key = $this->scope_key( $row['blog_id'], $row['state_id'], $row['generation'], $row['parent_node_hash'] );
+			$index[$key][] = $position;
+		}
+		foreach ( $index as &$positions ) {
+			usort( $positions, function ( $a, $b ) {
+				$x = $this->records[$a]; $y = $this->records[$b];
+				return $x['item_order'] === $y['item_order'] ? $x['id'] <=> $y['id'] : $x['item_order'] <=> $y['item_order'];
+			} );
+		}
+		unset( $positions );
+		$this->record_index = $index; $this->index_revision = $this->records_revision; ++$this->index_builds;
+	}
+	private function window_positions( $a, $parent, $p, $metadata, $limit ) {
+		$this->ensure_record_index();
+		$key = $this->scope_key( $a[0], $a[1], $a[2], $parent );
+		if ( ! isset( $this->record_index[$key] ) || $limit <= 0 ) { return array(); }
+		$positions = $this->record_index[$key]; $low = 0; $high = count( $positions );
+		// First (order,id) strictly after the supplied cursor, not physical ID.
+		while ( $low < $high ) {
+			$mid = (int) floor( ( $low + $high ) / 2 ); $r = $this->records[$positions[$mid]];
+			if ( $r['item_order'] > $a[$p] || ( $r['item_order'] === $a[$p + 1] && $r['id'] > $a[$p + 2] ) ) { $high = $mid; }
+			else { $low = $mid + 1; }
+		}
+		$selected = array();
+		for ( $i = $low; $i < count( $positions ) && count( $selected ) < $limit; ++$i ) {
+			$position = $positions[$i];
+			if ( $metadata || self::bytes( $this->records[$position] ) <= $a[$p + 3] ) { $selected[] = $position; }
+		}
+		return $selected;
+	}
 
 	public function prepare( $sql, $args ) {
 		$handle = 'host-prepared-' . ++$this->serial;
@@ -48,7 +120,7 @@ class SnapshotScaleConnection extends SnapshotTestWpdb {
 			$this->saved = array( $this->heads, $this->records ); $this->event( 'start' ); return 0;
 		}
 		if ( 'ROLLBACK' === $sql ) {
-			list( $this->heads, $this->records ) = $this->saved; $this->saved = null; $this->event( 'rollback' ); return 0;
+			list( $this->heads, $this->records ) = $this->saved; $this->records_changed(); $this->saved = null; $this->event( 'rollback' ); return 0;
 		}
 		if ( 'COMMIT' === $sql ) { $this->saved = null; $this->event( 'commit' ); return 0; }
 		if ( preg_match( '/^INSERT INTO `([^`]+)` \(([^)]+)\) VALUES \((.*)\)$/D', $sql, $m ) ) {
@@ -64,6 +136,7 @@ class SnapshotScaleConnection extends SnapshotTestWpdb {
 				foreach ( $columns as $n => $column ) { $values[$layout[$column]] = 'NULL' === $expressions[$n] ? null : $a[$i++]; }
 				$values[$layout['id']] = $this->insert_id = $this->next_id++;
 				$this->records[] = new SnapshotScaleRow( $layout, $values );
+				$this->records_changed();
 				++$this->emitted; $this->event( 'record-insert' ); return 1;
 			}
 			$columns = explode( ',', str_replace( '`', '', $m[2] ) );
@@ -114,18 +187,10 @@ class SnapshotScaleConnection extends SnapshotTestWpdb {
 				$metadata = 0 === strpos( $sql, 'SELECT id, item_order,' );
 				$root = false !== strpos( $sql, 'parent_node_hash IS NULL' ); $p = $root ? 3 : 4;
 				$parent = $root ? null : strtolower( $a[3] ); $limit = $a[$p + ( $metadata ? 3 : 4 )];
-				$selected = array();
-				foreach ( $this->records as $index => $r ) {
-					if ( $r['blog_id'] !== $a[0] || $r['state_id'] !== $a[1] || $r['generation'] !== $a[2] || ( null === $r['parent_node_hash'] ? null : strtolower( $r['parent_node_hash'] ) ) !== $parent ||
-						!( $r['item_order'] > $a[$p] || ( $r['item_order'] === $a[$p + 1] && $r['id'] > $a[$p + 2] ) ) || ( ! $metadata && self::bytes( $r ) > $a[$p + 3] ) ) { continue; }
-					// Bounded SQL-order selection, SAME rows; no generation cache/index.
-					$selected[] = array( $index, $r['item_order'], $r['id'] );
-					usort( $selected, function ( $x, $y ) { return $x[1] === $y[1] ? $x[2] <=> $y[2] : $x[1] <=> $y[1]; } );
-					if ( count( $selected ) > $limit ) { array_pop( $selected ); }
-				}
+				$selected = $this->window_positions( $a, $parent, $p, $metadata, $limit );
 				$rows = array(); $bytes = 0;
 				foreach ( $selected as $s ) {
-					$r = $this->records[$s[0]];
+					$r = $this->records[$s];
 					if ( $metadata ) { $rows[] = array( 'id' => (string) $r['id'], 'item_order' => (string) $r['item_order'], 'window_bytes' => (string) self::bytes( $r ) ); }
 					else { $row = array(); foreach ( $r as $k => $v ) { $row[$k] = is_int( $v ) ? (string) $v : $v; } $rows[] = $row; $bytes += self::bytes( $r ); }
 				}
