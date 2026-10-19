@@ -26,7 +26,7 @@ final class StorageStartupAllocatorTest extends TestCase {
 	public function test_missing_native_observer_is_unknown_in_both_modes() {
 		$this->process( '1', 'unknown', 'phpinfo' ); $this->process( '0', 'unknown', 'phpinfo' );
 	}
-	public function test_unavailable_buffer_cannot_emit_phpinfo() { $this->process( '1', 'unknown', 'ob_end_clean' ); }
+	public function test_unavailable_buffer_cannot_emit_phpinfo() { $this->process( '1', 'unknown', 'ob_end_flush' ); }
 	public function test_unknown_and_ambiguous_rows_fail_closed() {
 		$m = new ReflectionMethod( StorageCapacityPolicy::class, 'allocator_row' );
 		foreach ( array( '', 'Zend Memory Manager => maybe', "Zend Memory Manager => enabled\nZend Memory Manager => disabled", '<div>Zend Memory Manager => enabled</div>' ) as $raw ) {

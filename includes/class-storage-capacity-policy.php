@@ -95,7 +95,7 @@ final class StorageCapacityPolicy {
 	 */
 	private static function allocator() {
 		if ( ! class_exists( 'ReflectionFunction', false ) ) { return null; }
-		foreach ( array( 'phpinfo', 'ob_start', 'ob_get_level', 'ob_end_clean' ) as $name ) {
+		foreach ( array( 'phpinfo', 'ob_start', 'ob_get_level', 'ob_end_flush' ) as $name ) {
 			if ( ! function_exists( $name ) ) { return null; }
 			$function = new \ReflectionFunction( $name );
 			if ( ! $function->isInternal() ) { return null; }
@@ -111,7 +111,9 @@ final class StorageCapacityPolicy {
 		try { $ok = \phpinfo( INFO_GENERAL ); }
 		catch ( \Exception $error ) { $ok = false; }
 		catch ( \Throwable $error ) { $ok = false; }
-		$closed = \ob_end_clean();
+		// PHP 5.4 clean discards an unflushed short buffer before the callback.
+		// Flush into our discard handler instead; it always returns empty output.
+		$closed = \ob_end_flush();
 		if ( ! $ok || ! $closed || $overflow || \ob_get_level() !== $level ) { return null; }
 		return self::allocator_row( $raw );
 	}
