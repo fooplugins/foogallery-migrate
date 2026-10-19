@@ -122,7 +122,7 @@ def main():
                 FOOGM_SEED_CELL=cell, FOOGM_SEED_DB='cove_fgm_seed_20261019_34032_')
             code = ''.join('define(' + json.dumps(k) + ',' + json.dumps(v) + ');' for k, v in definitions.items())
             code += 'require ' + json.dumps(str(args.source / 'tests/integration/snapshot-acquisition-seed.php')) + ';'
-            command = ['/opt/homebrew/bin/php', '-d', 'memory_limit=256M', '/opt/homebrew/bin/wp',
+            command = ['/opt/homebrew/bin/php', '-d', 'memory_limit=256M', '/opt/homebrew/opt/wp-cli/bin/wp',
                 '--path=' + str(args.site), '--skip-plugins', '--skip-themes', 'eval', code]
             result = worker.bounded_worker(command, seconds=45)
             for stream in ('stdout', 'stderr'):
