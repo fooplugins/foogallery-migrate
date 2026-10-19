@@ -115,7 +115,7 @@ class LegacyTableSnapshot {
 				return array( 'record' => null, 'complete' => true );
 			}
 			if ( $c['state_order'] === count( $value ) ) {
-				$this->write( 'ROLLBACK' ); $this->busy = false; return array( 'record' => $r, 'complete' => true );
+				$this->write( 'ROLLBACK' ); $this->busy = false; return array( 'record' => $r, 'complete' => true, 'proved_logical_digest' => $r['logical_digest'] );
 			}
 			$ordinal = 0; $key = null; $state = null;
 			foreach ( $value as $candidate_key => $candidate ) { if ( $ordinal++ === $c['state_order'] ) { $key = $candidate_key; $state = $candidate; break; } }
@@ -166,7 +166,11 @@ class LegacyTableSnapshot {
 			$controls->cas( StorageAuthority::CONTROL_OPTION, $old, $new, array( 'kind' => 'option', 'value' => $raw_hash ), $owner, $this->deadline );
 			$commit = $this->wpdb->query( 'COMMIT' ); $this->busy = false;
 			if ( false === $commit || ! empty( $this->wpdb->last_error ) ) { $this->tainted = true; $this->fail( 'Copy COMMIT uncertain; fresh pinned exact-prefix reconciliation required. No replay.' ); }
-			$this->tick(); return array( 'record' => $r, 'complete' => $c['state_order'] === count( $value ) );
+			// Ephemeral completion proof, never a persisted/unverified cursor claim:
+			// every old row was compared to the bound source above, and every new
+			// row was SQL-read back before the same control/head transaction committed.
+			$complete = $c['state_order'] === count( $value );
+			$this->tick(); return array( 'record' => $r, 'complete' => $complete, 'proved_logical_digest' => $complete ? $r['logical_digest'] : null );
 		} catch ( \Exception $error ) { if ( $this->busy ) { $this->rollback( $error ); } throw $error; }
 		catch ( \Throwable $error ) { if ( $this->busy ) { $this->rollback( $error ); } throw $error; }
 	}

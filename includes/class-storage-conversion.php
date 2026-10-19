@@ -95,7 +95,10 @@ class StorageConversion {
 				} );
 			} else { $this->controls->cas( StorageAuthority::CONTROL_OPTION, $raw, $new, null, $this->gate->maintenance_identity() ); }
 			StorageScalarObserver::milestone( 'control-copying' );
-			unset( $source ); $result = $this->advance( $record );
+			unset( $source );
+			// A finite operation owns one expensive lifetime. The durable copying
+			// intent is already source-verified; continue on a fresh public recovery.
+			$result = null !== $this->capacity() ? $record : $this->advance( $record );
 			$this->end(); return $result;
 		} catch ( \Exception $error ) { return $this->failed( $error ); }
 		catch ( \Throwable $error ) { return $this->failed( $error ); }
@@ -115,11 +118,12 @@ class StorageConversion {
 			$r = StorageControl::decode( $this->controls->read( StorageAuthority::CONTROL_OPTION ), $this->blog );
 			$this->require_true( 'stable' !== $r['phase'] && $r['to'] === $request['target'] );
 			$source = null;
-			// v4 forward copying verifies both digests in copy_source_owned before
-			// conversion_batch can mutate anything. Do not hydrate/digest the same
-			// complete source once here and again in that owned helper.
-			$copy_verifies_source = 4 === $r['version'] && 'copying' === $r['phase'] && 'option' === $r['from'] && 'table' === $r['to'];
-			if ( in_array( $r['phase'], array( 'copying', 'verified' ), true ) && ! $copy_verifies_source ) {
+			// copy_source_owned checks the exact physical AND logical source before
+			// either direction can mutate. A verified v4 forward source is still
+			// byte-bound to its original option; its fresh destination verification
+			// below must fit without a redundant whole-option decode/digest.
+			if ( 'verified' === $r['phase'] && 4 === $r['version'] && 'option' === $r['from'] ) { $this->unchanged_source( $r ); }
+			elseif ( 'verified' === $r['phase'] ) {
 				$source = $this->source_metadata( $r['from'], false );
 				$this->require_true( $source['physical'] === $r['source_digest'] && $source['logical'] === $r['logical_digest'] );
 				unset( $source );
@@ -213,9 +217,13 @@ class StorageConversion {
 		if ( 'copying' === $r['phase'] ) {
 			$this->ready(); $r = $this->copy_source( $r );
 			if ( 4 === $r['version'] && ! $this->copy_complete ) { return $r; }
-			$target = $this->source_metadata( $r['to'], false );
+			$target = null !== $this->copy_proved_logical ? array( 'physical' => $this->table_physical_digest(), 'logical' => $this->copy_proved_logical ) : $this->source_metadata( $r['to'], false );
 			$this->require_true( $target['logical'] === $r['logical_digest'] );
 			$this->unchanged_source( $r ); $r = $this->phase( $r, 'verified' );
+			// The copying transaction already compared every destination column to
+			// the exact source. Independently reconstruct/verify it before the flip,
+			// but on a fresh lifetime, not on top of the growing prefix proof.
+			if ( null !== $this->capacity() ) { return $r; }
 		}
 		if ( 'verified' === $r['phase'] ) {
 			$this->ready(); $this->unchanged_source( $r );
@@ -223,6 +231,7 @@ class StorageConversion {
 			$this->require_true( $target['logical'] === $r['logical_digest'] );
 			$this->retain_and_select( $r );
 			$this->unchanged_source( $r ); $this->ready(); $r = $this->phase( $r, 'flipped', $target );
+			if ( null !== $this->capacity() ) { return $r; }
 		}
 		if ( 'flipped' === $r['phase'] ) {
 			$this->ready(); $active = $this->source_metadata( $r['backend'], false );
@@ -236,8 +245,9 @@ class StorageConversion {
 
 	/** This helper must UNWIND before independent destination verification. */
 	private $copy_complete = true;
+	private $copy_proved_logical = null;
 	private function copy_source( $r ) {
-		$this->copy_complete = true;
+		$this->copy_complete = true; $this->copy_proved_logical = null;
 		$token = $this->open_capacity( 'table' === $r['to'] ? 'stage' : 'reverse_encode_write' );
 		$result = $this->copy_source_owned( $r );
 		$this->close_capacity( $token ); return $result;
@@ -248,7 +258,9 @@ class StorageConversion {
 		if ( 'table' === $r['to'] ) {
 			if ( 4 === $r['version'] ) {
 				$batch = $this->snapshot->conversion_batch( $r, $source['value'], $this->controls, $this->gate->maintenance_identity() );
-				$this->copy_complete = $batch['complete']; return $batch['record'];
+				$this->copy_complete = $batch['complete'];
+				if ( $this->copy_complete ) { $this->require_true( $batch['proved_logical_digest'] === $r['logical_digest'] ); $this->copy_proved_logical = $batch['proved_logical_digest']; }
+				return $batch['record'];
 			}
 				$heads = $this->heads();
 				if ( ! count( $heads ) && count( $source['value'] ) ) {

@@ -27,9 +27,11 @@ class StorageCapacityCopyTransactionTest extends TestCase {
 			$this->assertSame( ( $i + 1 ) * 2, $r['copy_cursor']['committed_rows'] );
 			$this->assertSame( $r, StorageControl::decode( $db->control, 1 ) );
 			$this->assertSame( $i === 2, $b['complete'] );
+			$this->assertSame( $i === 2 ? $r['logical_digest'] : null, $b['proved_logical_digest'] );
 		}
 		$this->assertCount( 6, $db->records ); $this->assertSame( 3, count( array_filter( $db->queries, function ( $q ) { return 'COMMIT' === $q; } ) ) );
-		$this->assertTrue( $this->batch( $db, $value, $r, $scale )['complete'] ); $this->assertCount( 6, $db->records );
+		$done = $this->batch( $db, $value, $r, $scale );
+		$this->assertTrue( $done['complete'] ); $this->assertSame( $r['logical_digest'], $done['proved_logical_digest'] ); $this->assertCount( 6, $db->records );
 	}
 	public function test_resume_walks_only_committed_prefix_and_new_batch_not_uncommitted_tail_or_append_replay(): void {
 		list( $db, $unused, $r, $scale ) = $this->setup_copy();
