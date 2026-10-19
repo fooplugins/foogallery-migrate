@@ -28,6 +28,12 @@ class LegacyTableSnapshot {
 	private $busy = false;
 	private $tainted = false;
 
+	// Qualification-only private seam. No request/filter/constant activation.
+	// Even when armed by a harness, events NEVER lower production forecasts.
+	private $snapshot_events_enabled = false;
+	private $snapshot_plans = array();
+	private $snapshot_owner;
+
 	/** Bounds apply to the entire affected replacement, including companion keys.
 	 * Optional scale is operation-owned refusal admission, NOT calibration approval.
 	 * Unscaled callers retain their existing contract.
@@ -116,10 +122,11 @@ class LegacyTableSnapshot {
 			StorageScalarObserver::milestone( 'snapshot-staged' );
 			foreach ( $staged as $hash => $stage ) {
 				$change = $prepared[ $hash ];
-				$value = $this->read_generation( $change['key'], $stage['id'], $stage['generation'], $change['root_payload'], $change['stats'], $change['kind'] );
+				$value = $this->read_generation( $change['key'], $stage['id'], $stage['generation'], $change['root_payload'], $change['stats'], $change['kind'], $stage['revision'] + 1, $change['digest'] );
 				$this->admit_memory( $change['encoded_bytes'] );
 				if ( $this->snapshot_digest( $change['key'], $value ) !== $change['digest'] ) { $this->fail( 'Staged logical snapshot does not match its source.' ); }
 				unset( $value );
+				if ( null !== $this->snapshot_owner ) { $this->snapshot_owner->finish(); }
 			}
 			StorageScalarObserver::milestone( 'snapshot-readback' );
 			$result = array();
@@ -181,10 +188,13 @@ class LegacyTableSnapshot {
 		$metadata = 'scalar' === $head['state_kind'] ? $this->codec->decode( $root ) : $this->codec->decode_collection_root( $root );
 		if ( ! is_array( $metadata ) || ! isset( $metadata['kind'] ) || $metadata['kind'] !== $head['state_kind'] ) { $this->fail( 'Root metadata does not match state kind.' ); }
 		$stats = array( 'record_count' => $head['record_count'], 'payload_bytes' => $head['payload_bytes'] - strlen( $root ) );
-		$value = $this->read_generation( $key, $head['id'], $head['active_generation'], $root, $stats, $head['state_kind'] );
+		$value = $this->read_generation( $key, $head['id'], $head['active_generation'], $root, $stats, $head['state_kind'], $head['revision'], strtolower( $digests[0]['snapshot_digest'] ) );
 		if ( $reader->head( $key ) !== $head ) { $this->fail( 'Snapshot changed during read; restart.' ); }
 		$this->admit_memory( $head['payload_bytes'] + $key_bytes );
 		if ( $this->snapshot_digest( $key, $value ) !== strtolower( $digests[0]['snapshot_digest'] ) ) { $this->fail( 'Complete snapshot digest mismatch.' ); }
+		// No temporary reconstructed copy survives. The result transfers to the
+		// caller; private maxima are recorded, never released as memory credit.
+		if ( null !== $this->snapshot_owner ) { $this->snapshot_owner->finish(); }
 		return $value;
 	}
 
@@ -280,6 +290,7 @@ class LegacyTableSnapshot {
 
 
 	private function preflight( $changes ) {
+		if ( $this->snapshot_events_enabled ) { $this->snapshot_plans = array(); }
 		if ( ! is_array( $changes ) || ! count( $changes ) || count( $changes ) > 100 ) { $this->fail( 'Replacement needs 1 to 100 explicit changes.' ); }
 		$this->admit_memory( 0 );
 		$prepared = array(); $orders = array(); $total_rows = 0; $total_bytes = 0;
@@ -293,6 +304,12 @@ class LegacyTableSnapshot {
 			if ( isset( $prepared[ $hash ] ) || isset( $orders[ $change['order'] ] ) ) { $this->fail( 'Duplicate state key or top-level order.' ); }
 			$orders[ $change['order'] ] = true;
 			$stats = array( 'record_count' => 0, 'payload_bytes' => 0, 'encoded_bytes' => 0 );
+			$event_plan = null;
+			if ( $this->snapshot_events_enabled && PHP_INT_SIZE >= 8 && get_class( $this ) === __CLASS__ && get_class( $this->records ) === __NAMESPACE__ . '\\LegacyRecordCodec' && get_class( $this->codec ) === __NAMESPACE__ . '\\LegacyStateCodec' && 'scalar' !== $change['kind'] ) {
+				// Admit descriptor construction BEFORE allocating/walking it.
+				SnapshotOwnedEventPlan::admit_descriptor( $this->scale );
+				$event_plan = new SnapshotOwnedEventPlan();
+			}
 			if ( 'scalar' === $change['kind'] ) {
 				$root = array( 'version' => 1, 'kind' => 'scalar', 'value' => $change['value'] );
 			} else if ( in_array( $change['kind'], array( 'map', 'list' ), true ) && is_array( $change['value'] ) ) {
@@ -302,7 +319,7 @@ class LegacyTableSnapshot {
 				$order = 0;
 				foreach ( $value as $key => $record ) {
 				$this->tick();
-					$tree = $this->records->preflight_stats( $change['key'], $key, $record, $order++ );
+					$tree = $this->records->preflight_stats( $change['key'], $key, $record, $order++, $event_plan );
 					if ( 'migrated' === $change['key'] ) { $tree['encoded_bytes'] += strlen( $this->codec->key_value( $key ) ); }
 					foreach ( $stats as $field => $amount ) { $stats[ $field ] += $tree[ $field ]; }
 					if ( $stats['record_count'] > $this->max_rows - $total_rows || $stats['encoded_bytes'] > $this->max_bytes - $total_bytes ) { $this->fail( 'Snapshot exceeds the row/byte budget.' ); }
@@ -318,10 +335,23 @@ class LegacyTableSnapshot {
 			$this->admit_snapshot( $hash, $stats['record_count'], $bytes );
 			$change['encoded_bytes'] = $bytes;
 			$change['stats'] = $stats;
+			if ( null !== $event_plan ) {
+				$this->snapshot_plans[$hash] = array( 'descriptor' => $event_plan->descriptor( count( $value ), strlen( $change['root_payload'] ) ),
+					'key' => $change['key'], 'root' => $change['root_payload'], 'stats' => $stats, 'digest' => null );
+			}
+			unset( $event_plan );
 			$prepared[ $hash ] = $change;
 		}
 		// Complete digests only after every affected bucket passes preflight.
-		foreach ( $prepared as &$change ) { $this->tick(); $this->admit_memory( $total_bytes ); $change['digest'] = $this->snapshot_digest( $change['key'], $change['value'] ); $this->tick(); }
+		foreach ( $prepared as &$change ) {
+			$this->tick(); $this->admit_memory( $total_bytes );
+			$change['digest'] = $this->snapshot_digest( $change['key'], $change['value'] );
+			if ( $this->snapshot_events_enabled ) {
+				$hash = $this->codec->key_hash( $change['key'] );
+				if ( isset( $this->snapshot_plans[$hash] ) ) { $this->snapshot_plans[$hash]['digest'] = $change['digest']; }
+			}
+			$this->tick();
+		}
 		unset( $change );
 		return $prepared;
 	}
@@ -380,13 +410,15 @@ class LegacyTableSnapshot {
 		$this->insert( $this->record_table, array_merge( $row, array( 'blog_id' => $this->blog_id, 'state_id' => $id, 'generation' => $generation ) ) );
 	}
 
-	private function read_generation( $key, $id, $generation, $root, $expected, $kind ) {
+	private function read_generation( $key, $id, $generation, $root, $expected, $kind, $revision, $digest ) {
+		$this->snapshot_owner = null;
 		$stats = $this->generation_stats( $id, $generation );
 		if ( $stats['record_count'] !== $expected['record_count'] || $stats['payload_bytes'] !== $expected['payload_bytes'] ) { $this->fail( 'Staged record count/byte parity failed.' ); }
 		if ( isset( $expected['encoded_bytes'] ) && $stats['encoded_bytes'] !== $expected['encoded_bytes'] ) { $this->fail( 'Staged encoded byte parity failed.' ); }
 		if ( $stats['record_count'] > $this->max_rows || $stats['encoded_bytes'] > $this->max_bytes - strlen( $root ) - strlen( $this->codec->key_value( $key ) ) ) { $this->fail( 'Snapshot exceeds the row/byte budget before payload fetch.' ); }
 		$encoded_bytes = $stats['encoded_bytes'] + strlen( $root ) + strlen( $this->codec->key_value( $key ) );
-		$this->admit_snapshot( $this->codec->key_hash( $key ), $stats['record_count'], $encoded_bytes );
+		$hash = $this->codec->key_hash( $key );
+		$this->admit_snapshot( $hash, $stats['record_count'], $encoded_bytes );
 		$this->admit_memory( $encoded_bytes );
 		$stored_root = $this->root_payload( $id );
 		if ( $stored_root !== $root ) { $this->fail( 'Root metadata changed or failed staged read-back.' ); }
@@ -408,7 +440,19 @@ class LegacyTableSnapshot {
 			}
 		};
 		$source = new LegacySnapshotRowReader( $this->wpdb, $this->record_table, implode( ', ', $columns ), $this->record_bytes(), array( $this->blog_id, $id, $generation ), $this->max_bytes, $admit );
-		return $this->records->rebuild_snapshot_stream( $key, $metadata, $source, $stats, $admit );
+		// Immutable source descriptors do not carry an event balance. Each read
+		// binds a NEW owner to this exact reader and concrete database identity.
+		if ( $this->snapshot_events_enabled && isset( $this->snapshot_plans[$hash] ) ) {
+			$plan = $this->snapshot_plans[$hash];
+			if ( $plan['key'] === $key && $plan['root'] === $root && $plan['stats'] === $stats && $plan['digest'] === $digest ) {
+				SnapshotOwnedEventPlan::admit_descriptor( $this->scale );
+				$owner = new SnapshotOwnedEventPlan();
+				$owner->bind( $plan['descriptor'], array( 'key' => $key, 'digest' => $digest, 'stats' => $stats,
+					'blog' => $this->blog_id, 'id' => $id, 'generation' => $generation, 'root' => $root, 'revision' => $revision ), $source );
+				$this->snapshot_owner = $owner;
+			}
+		}
+		return $this->records->rebuild_snapshot_stream( $key, $metadata, $source, $stats, $admit, $this->snapshot_owner );
 	}
 
 	private function rebuild_root( $key, $hash, $tree, &$result ) {

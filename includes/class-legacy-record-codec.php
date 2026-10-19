@@ -461,8 +461,9 @@ class LegacyRecordCodec {
 	 * output does not by itself prove which aggregate future allocations ended.
 	 * Keep the entire original forecast through root and final digest work.
 	 */
-	public function rebuild_snapshot_stream( $state_key, $metadata, $source, $expected, $admit ) {
+	public function rebuild_snapshot_stream( $state_key, $metadata, $source, $expected, $admit, $owner = null ) {
 		if ( ! $source instanceof LegacySnapshotRowReader || ! is_callable( $admit ) ) { $this->fail( 'Invalid snapshot row source.' ); }
+		if ( ! $owner instanceof SnapshotOwnedEventPlan || ! $owner->accepts( $state_key, $expected, $source ) ) { $owner = null; }
 		$ledger = array( 'visited' => 0, 'encoded_bytes' => 0, 'payload_bytes' => 0 );
 		$state_hash = $this->codec->key_hash( $state_key ); $result = array();
 		$order = 0; $id = 0; $previous = null;
@@ -475,7 +476,10 @@ class LegacyRecordCodec {
 				$order = $row['item_order']; $id = $this->number( $row['id'] );
 				if ( ( null !== $previous && $order <= $previous ) || ( 'list' === $metadata['kind'] && $order !== count( $result ) ) || array_key_exists( $row['key'], $result ) ) { $this->fail( 'Duplicate or noncanonical root key/order.' ); }
 				if ( 'migrated' === $state_key && ( $row['legacy_identifier_value'] !== $this->codec->key_value( $row['key'] ) || strtolower( $row['legacy_identifier_hash'] ) !== $this->codec->key_hash( $row['key'] ) ) ) { $this->fail( 'History identifier projection mismatch.' ); }
-				$result[$row['key']] = $this->rebuild_stream_node( $row, 0, $state_hash, $source, $expected, $ledger, $admit );
+				$completion = null;
+				$result[$row['key']] = $this->rebuild_stream_node( $row, 0, $state_hash, $source, $expected, $ledger, $admit, $owner, $completion );
+				if ( null !== $owner ) { $owner->attached( $source, $row, $completion ); }
+				unset( $completion );
 				$previous = $order;
 			}
 			unset( $page, $row );
@@ -489,11 +493,14 @@ class LegacyRecordCodec {
 		return ( new LegacyCollectionEnvelope( $this->codec ) )->rebuild( $metadata, $result );
 	}
 
-	private function rebuild_stream_node( $row, $depth, $state_hash, $source, $expected, &$ledger, $admit ) {
+	private function rebuild_stream_node( $row, $depth, $state_hash, $source, $expected, &$ledger, $admit, $owner, &$completion ) {
 		call_user_func( $admit, 0 );
 		if ( $depth > $this->max_depth || $row['depth'] !== $depth || ++$ledger['visited'] > $expected['record_count'] || $row['encoded_bytes'] > $expected['encoded_bytes'] - $ledger['encoded_bytes'] ) { $this->fail( 'Invalid streamed ancestry or footprint.' ); }
 		$ledger['encoded_bytes'] += $row['encoded_bytes']; $ledger['payload_bytes'] += $row['payload_bytes'];
 		list( $record, $count ) = $this->rebuild_record_fields( $row );
+		// Capture own scalar cost before descendants; NEVER describe the subtree
+		// at attachment. No event exists until validation below has returned.
+		$own = null === $owner ? 0 : SnapshotOwnedEventPlan::own_bytes( $record, null !== $count, strlen( $row['key_value'] ) );
 		$next = 0; $order = 0; $id = 0;
 		if ( null !== $count && $count > $expected['record_count'] - $ledger['visited'] ) { $this->fail( 'Impossible child count.' ); }
 		while ( null !== $count && $next < $count ) {
@@ -503,12 +510,16 @@ class LegacyRecordCodec {
 				call_user_func( $admit, 0 ); $child = $this->validate_row( $child, $state_hash );
 				$order = $child['item_order']; $id = $this->number( $child['id'] );
 				if ( $order !== $next++ || array_key_exists( $child['key'], $record['children'] ) ) { $this->fail( 'Duplicate typed child key or sibling order.' ); }
-				$record['children'][$child['key']] = $this->rebuild_stream_node( $child, $depth + 1, $state_hash, $source, $expected, $ledger, $admit );
+				$child_completion = null;
+				$record['children'][$child['key']] = $this->rebuild_stream_node( $child, $depth + 1, $state_hash, $source, $expected, $ledger, $admit, $owner, $child_completion );
+				if ( null !== $owner ) { $owner->attached( $source, $child, $child_completion ); }
+				unset( $child_completion );
 			}
 			unset( $page, $child );
 		}
 		call_user_func( $admit, 0 );
 		$this->validate_record_output( $row, $record, $depth, $state_hash );
+		if ( null !== $owner ) { $completion = array( 'node' => $row['node_hash'], 'depth' => $depth, 'bytes' => $own ); }
 		return $record;
 	}
 
@@ -877,7 +888,10 @@ class LegacyRecordCodec {
 	 * retained rows. Unsupported codec/owner/runtime keeps aggregate admission.
 	 * This is not snapshot stage/readback admission and grants no such authority.
 	 */
-	public function preflight_stats( $state_key, $key, $record, $item_order ) {
+	public function preflight_stats( $state_key, $key, $record, $item_order, $snapshot_plan = null ) {
+		// Historically extra arguments (including callables) were ignored. They
+		// are not plans, activation, callbacks or ownership authority.
+		if ( ! $snapshot_plan instanceof SnapshotOwnedEventPlan ) { $snapshot_plan = null; }
 		$phase = null;
 		if ( null !== $this->scale && SnapshotStatsModel::supports( $this, $this->codec, $this->scale ) ) {
 			$this->scale->admit_snapshot_stats_workspace( GenericRetainingModel::descriptor_bytes() );
@@ -899,7 +913,7 @@ class LegacyRecordCodec {
 			$preflight['encoded_bytes'] !== $d['encoded_bytes'] ) ) { $this->fail( 'Descriptor/preflight mismatch.' ); }
 		if ( null !== $this->scale ) { $this->codec->snapshot_digest( $record ); }
 		$this->admit( null === $phase ? $preflight['encoded_bytes'] : 0 );
-		$this->discard_stats_node( $state_hash, null, $key, $record, $item_order, 0, $stats, $phase );
+		$this->discard_stats_node( $state_hash, null, $key, $record, $item_order, 0, $stats, $phase, $snapshot_plan );
 		if ( $stats !== $preflight ) { $this->fail( 'Stats/preflight mismatch.' ); }
 		// All row/ancestor/codec/digest frames have unwound before release. On
 		// interruption the existing owner-bound ledger remains pending instead.
@@ -907,18 +921,19 @@ class LegacyRecordCodec {
 		return $stats;
 	}
 
-	private function discard_stats_node( $state_hash, $parent, $key, $record, $order, $depth, &$stats, $phase ) {
+	private function discard_stats_node( $state_hash, $parent, $key, $record, $order, $depth, &$stats, $phase, $snapshot_plan = null ) {
 		if ( null !== $phase ) { $this->scale->admit_snapshot_stats_workspace( 0 ); }
 		$row = $this->make_row( $state_hash, $parent, $key, $record, $order, $depth, $phase );
 		// Match flatten's complete-record digest validation, including no-scale
 		// depth/domain refusal. Digests are checked, never exported or retained.
 		$this->codec->snapshot_digest( $record );
 		$stats['record_count']++; $stats['payload_bytes'] += $row['payload_bytes']; $stats['encoded_bytes'] += $this->encoded_bytes( $row );
+		if ( null !== $snapshot_plan ) { $snapshot_plan->observe( $record, $row, $this->codec ); }
 		$hash = $row['node_hash']; unset( $row );
 		if ( is_array( $record ) && isset( $record['children'] ) && is_array( $record['children'] ) ) {
 			$order = 0;
 			foreach ( $record['children'] as $child_key => $child ) {
-				$this->discard_stats_node( $state_hash, $hash, $child_key, $child, $order++, $depth + 1, $stats, $phase );
+				$this->discard_stats_node( $state_hash, $hash, $child_key, $child, $order++, $depth + 1, $stats, $phase, $snapshot_plan );
 			}
 		}
 	}
