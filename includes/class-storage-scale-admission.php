@@ -145,9 +145,13 @@ final class StorageScaleAdmission {
 
 	public function admit_memory( $bytes ) {
 		$this->tick();
-		if ( ! is_int( $bytes ) || $bytes < 0 || $bytes > $this->limit( 'max_physical_bytes' ) ) { self::fail(); }
+		if ( ! is_int( $bytes ) || $bytes < 0 ) { self::fail(); }
 		// New phase forecasts REPLACE, never stack with, legacy amplification.
+		// Scratch (including the full record workspace) is not persisted bytes.
+		// Keep that complete reservation in the capacity memory check; physical
+		// snapshot/census bounds remain independently enforced by their owners.
 		if ( null !== $this->capacity ) { $this->capacity->checkpoint( $bytes ); return true; }
+		if ( $bytes > $this->limit( 'max_physical_bytes' ) ) { self::fail(); }
 		$sample = $this->memory_sample();
 		if ( ! is_array( $sample ) || array_keys( $sample ) !== array( 0, 1 ) ) { self::fail(); }
 		// Both the effective PHP limit AND a finite ceiling apply, including -1.
