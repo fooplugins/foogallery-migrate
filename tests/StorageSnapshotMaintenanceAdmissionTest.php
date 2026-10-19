@@ -49,6 +49,43 @@ class StorageSnapshotMaintenanceAdmissionTest extends TestCase {
 			if ( 0 === strpos( $sql, 'SELECT' ) && false !== strpos( $sql, ' FROM ' ) ) { $this->assertStringContainsString( 'blog_id = 7', $sql ); }
 		}
 	}
+	public function test_owning_metadata_reads_real_bounded_snapshot(): void {
+		$db = new MaintenanceAdmissionWpdb(); $memory = new SnapshotAdmissionBaseline();
+		$manager = $this->coordinator( $db, $memory ); $db->published = true;
+		$snapshot = ( new \ReflectionProperty( $manager, 'snapshot' ) )->getValue( $manager );
+		$this->assertSame( LegacyTableSnapshot::class, get_class( $snapshot ) );
+		$this->assertTrue( ( new \ReflectionMethod( $snapshot, 'read' ) )->isPrivate() );
+		$result = ( new \ReflectionMethod( $manager, 'source_metadata' ) )->invoke( $manager, 'table', false );
+		$this->assertSame( ( new LegacyStateCodec() )->snapshot_digest( array( 'bucket' => $db->value ) ), $result['logical'] );
+		$this->assertSame( hash( 'sha256', json_encode( $db->get_results( 'ORDER BY state_order LIMIT 101', ARRAY_A ) ) ), $result['physical'] );
+		$this->assertTrue( $db->records_fetched );
+		$this->assertNotContains( 'START TRANSACTION', $db->queries );
+		foreach ( $db->queries as $sql ) {
+			if ( 0 === strpos( $sql, 'SELECT' ) ) { $this->assertStringContainsString( 'blog_id = 7', $sql ); }
+		}
+	}
+	/** @dataProvider owningMetadataFailures */
+	public function test_owning_metadata_preserves_bounded_reader_refusals( $seam ): void {
+		$db = new OwningMetadataWpdb(); $memory = new SnapshotAdmissionBaseline();
+		$manager = $this->coordinator( $db, $memory ); $db->published = true; $db->dirty_digest = 'dirty' === $seam;
+		if ( 'digest' === $seam ) { $db->corrupt_digest = true; }
+		if ( 'memory' === $seam ) { $memory->observed_bytes = 134217728; }
+		if ( 'owner' === $seam ) { $GLOBALS['foogallery_migrate_test_blog_id'] = 8; }
+		$previous = ini_get( 'memory_limit' ); ini_set( 'memory_limit', '128M' );
+		try {
+			( new \ReflectionMethod( $manager, 'source_metadata' ) )->invoke( $manager, 'table', false );
+			$this->fail( 'Owning metadata bypassed bounded reader refusal.' );
+		} catch ( \RuntimeException $error ) {
+			$messages = array( 'dirty' => 'Snapshot digest is absent, dirty or stale.', 'digest' => 'digest',
+				'memory' => 'Retain recorded authority', 'owner' => 'Retain recorded authority' );
+			$this->assertStringContainsString( $messages[$seam], $error->getMessage() );
+		} finally { ini_set( 'memory_limit', $previous ); }
+		$this->assertNotContains( 'START TRANSACTION', $db->queries );
+		if ( 'dirty' === $seam ) { $this->assertFalse( $db->records_fetched ); }
+		if ( in_array( $seam, array( 'memory', 'owner' ), true ) ) { $this->assertFalse( $db->payload_fetched ); }
+		if ( 'owner' === $seam ) { $this->assertSame( array(), $db->queries ); }
+	}
+	public static function owningMetadataFailures(): array { return array( array( 'dirty' ), array( 'digest' ), array( 'memory' ), array( 'owner' ) ); }
 	public function test_direct_maintenance_refusal_precedes_root_hydration(): void {
 		$db = new MaintenanceAdmissionWpdb(); $seen = array();
 		$snapshot = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( &$seen ) { $seen[] = $bytes; return false; } );
@@ -178,3 +215,17 @@ class MaintenanceAdmissionWpdb extends SnapshotTestWpdb {
 		array_pop( $this->queries ); return parent::get_results( $sql, $format );
 	}
 }
+
+class OwningMetadataWpdb extends MaintenanceAdmissionWpdb {
+	public $corrupt_digest = false;
+	public $dirty_digest = false;
+	public function get_results( $sql, $format ) {
+		$rows = parent::get_results( $sql, $format );
+		if ( false !== strpos( $sql, 'AS snapshot_digest' ) ) {
+			if ( $this->corrupt_digest ) { $rows[0]['snapshot_digest'] = str_repeat( '0', 64 ); }
+			if ( $this->dirty_digest ) { $rows[0]['digest_status'] = 'dirty'; }
+		}
+		return $rows;
+	}
+}
+

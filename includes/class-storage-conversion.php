@@ -388,7 +388,7 @@ class StorageConversion {
 		$logical = $this->codec->snapshot_digest_reader( count( $heads ), function ( $i ) use ( $heads ) {
 			$head = $heads[$i]; $this->require_true( $this->number( $head['state_order'] ) === $i );
 			$key = $this->codec->decode( $head['key_value'] );
-			return array( 'key' => $key, 'value' => $this->snapshot->read( $key ) );
+			return array( 'key' => $key, 'value' => $this->snapshot->read_bounded( $key ) );
 		} );
 		$this->require_true( $physical === $this->table_physical_digest() );
 		return array( 'physical' => $physical, 'logical' => $logical );
