@@ -377,7 +377,6 @@ class LegacyTableSnapshot {
 	 * large-state runtime facade. export_page provides revision-bound continuation.
 	 */
 	public function verify_digest( $key, $expected_revision, $max_seconds = 10 ) {
-		if ( null !== $this->scale ) { $this->fail( 'Finite scale propagation is not admitted for maintenance.' ); }
 		$this->admit(); $this->typed_key( $key );
 		if ( ! is_int( $expected_revision ) || $expected_revision < 1 || ! is_int( $max_seconds ) || $max_seconds < 1 ) { $this->fail( 'Invalid maintenance admission.' ); }
 		$deadline = microtime( true ) + $max_seconds;
@@ -393,30 +392,45 @@ class LegacyTableSnapshot {
 		if ( $root['kind'] !== $head['state_kind'] ) { $this->fail( 'Invalid maintenance root.' ); }
 		$bytes = strlen( $head['root_payload'] ) + strlen( $this->codec->key_value( $key ) );
 		if ( $head['record_count'] > $this->max_rows || $bytes > $this->max_bytes ) { $this->fail( 'Maintenance exceeds total row/byte budget.' ); }
-		$repository = new LegacyTableRepository( $this->wpdb, $this->blog_id, $this->max_rows, $this->max_bytes, $max_seconds );
-		$hash = hash_init( 'sha256' ); hash_update( $hash, "legacy-logical-v1\0" ); $envelope->begin_digest( $hash, $root );
-		$cursor = null; $roots = 0; $rows = 0; $payload = strlen( $head['root_payload'] );
-		do {
-			if ( microtime( true ) > $deadline ) { $this->fail( 'Maintenance time budget exceeded.' ); }
-			// export_page hydrates and reconstructs one complete root internally.
-			// Recheck the existing policy before that work and again while the
-			// returned page and previous loop locals remain live, before hashing.
+		if ( null !== $this->scale ) {
+			// The paged repository below has no operation-owned scale. Finite
+			// maintenance instead uses the same bounded reconstruction as snapshot
+			// reads: aggregate footprint/tokens, codec work/depth, full memory and
+			// shared deadline admission stay on this exact operation's domain.
+			$value = $this->read_generation( $key, $head['id'], $head['active_generation'], $head['root_payload'], $stats, $head['state_kind'], $expected_revision, $head['logical_digest'] );
 			$this->admit_memory( $encoded_bytes );
-			$page = $repository->export_page( $key, 1, $cursor );
+			$digest = $this->snapshot_digest( $key, $value );
+			unset( $value );
+			if ( null !== $this->snapshot_owner ) { $this->snapshot_owner->finish(); }
+			$this->end_read_phase();
+			$this->tick();
+			if ( microtime( true ) > $deadline || $this->generation_stats( $head['id'], $head['active_generation'] ) !== $stats || $this->maintenance_head( $key ) !== $head ) { $this->fail( 'Maintenance physical parity or revision changed.' ); }
+		} else {
+			$repository = new LegacyTableRepository( $this->wpdb, $this->blog_id, $this->max_rows, $this->max_bytes, $max_seconds );
+			$hash = hash_init( 'sha256' ); hash_update( $hash, "legacy-logical-v1\0" ); $envelope->begin_digest( $hash, $root );
+			$cursor = null; $roots = 0; $rows = 0; $payload = strlen( $head['root_payload'] );
+			do {
+				if ( microtime( true ) > $deadline ) { $this->fail( 'Maintenance time budget exceeded.' ); }
+				// export_page hydrates and reconstructs one complete root internally.
+				// Recheck the existing policy before that work and again while the
+				// returned page and previous loop locals remain live, before hashing.
+				$this->admit_memory( $encoded_bytes );
+				$page = $repository->export_page( $key, 1, $cursor );
+				$this->admit_memory( $encoded_bytes );
+				if ( $page['revision'] !== $expected_revision ) { $this->fail( 'State changed during maintenance.' ); }
+				if ( $page['record_count'] > $this->max_rows - $rows || $page['encoded_bytes'] > $this->max_bytes - $bytes ) { $this->fail( 'Maintenance exceeds total row/byte budget.' ); }
+				$rows += $page['record_count']; $payload += $page['payload_bytes']; $bytes += $page['encoded_bytes'];
+				foreach ( $page['rows'] as $item ) {
+					if ( $roots >= $root['root_count'] || ( 'list' === $head['state_kind'] && ( $item['key'] !== $roots || $page['cursor']['order'] !== $roots ) ) ) { $this->fail( 'List/root count parity failed.' ); }
+					$envelope->digest_item( $hash, $root, $item['key'], $item['value'] ); ++$roots;
+				}
+				$cursor = $page['cursor'];
+			} while ( count( $page['rows'] ) );
+			if ( $roots !== $root['root_count'] || $rows !== $head['record_count'] || $payload !== $head['payload_bytes'] ||
+				$this->generation_stats( $head['id'], $head['active_generation'] ) !== $stats || $this->maintenance_head( $key ) !== $head ) { $this->fail( 'Maintenance physical parity or revision changed.' ); }
 			$this->admit_memory( $encoded_bytes );
-			if ( $page['revision'] !== $expected_revision ) { $this->fail( 'State changed during maintenance.' ); }
-			if ( $page['record_count'] > $this->max_rows - $rows || $page['encoded_bytes'] > $this->max_bytes - $bytes ) { $this->fail( 'Maintenance exceeds total row/byte budget.' ); }
-			$rows += $page['record_count']; $payload += $page['payload_bytes']; $bytes += $page['encoded_bytes'];
-			foreach ( $page['rows'] as $item ) {
-				if ( $roots >= $root['root_count'] || ( 'list' === $head['state_kind'] && ( $item['key'] !== $roots || $page['cursor']['order'] !== $roots ) ) ) { $this->fail( 'List/root count parity failed.' ); }
-				$envelope->digest_item( $hash, $root, $item['key'], $item['value'] ); ++$roots;
-			}
-			$cursor = $page['cursor'];
-		} while ( count( $page['rows'] ) );
-		if ( $roots !== $root['root_count'] || $rows !== $head['record_count'] || $payload !== $head['payload_bytes'] ||
-			$this->generation_stats( $head['id'], $head['active_generation'] ) !== $stats || $this->maintenance_head( $key ) !== $head ) { $this->fail( 'Maintenance physical parity or revision changed.' ); }
-		$this->admit_memory( $encoded_bytes );
-		$envelope->end_digest( $hash, $root ); $digest = hash_final( $hash );
+			$envelope->end_digest( $hash, $root ); $digest = hash_final( $hash );
+		}
 		if ( 'current' === $head['digest_status'] && $digest !== $head['logical_digest'] ) { $this->fail( 'Current logical digest mismatch; not repairing corruption.' ); }
 		( new LegacyStorageSchema( $this->wpdb ) )->verify();
 		$mode = $this->read( 'SELECT @@SESSION.autocommit AS autocommit' );
