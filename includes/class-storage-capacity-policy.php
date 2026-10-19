@@ -87,21 +87,56 @@ final class StorageCapacityPolicy {
 		return $c;
 	}
 
+	/**
+	 * Native effective Zend-MM state, not the mutable USE_ZEND_ALLOC environment.
+	 * phpinfo(INFO_GENERAL) calls is_zend_mm() in the engine (including PHP 5.4).
+	 * "system" means Zend MM disabled, NOT proof of libc/backing allocator identity.
+	 * Bound and discard ALL output, including on unsupported/ambiguous formats.
+	 */
+	private static function allocator() {
+		if ( ! class_exists( 'ReflectionFunction', false ) ) { return null; }
+		foreach ( array( 'phpinfo', 'ob_start', 'ob_get_level', 'ob_end_clean' ) as $name ) {
+			if ( ! function_exists( $name ) ) { return null; }
+			$function = new \ReflectionFunction( $name );
+			if ( ! $function->isInternal() ) { return null; }
+		}
+		$raw = ''; $overflow = false; $level = \ob_get_level();
+		$discard = function ( $chunk ) use ( &$raw, &$overflow ) {
+			if ( ! $overflow && strlen( $chunk ) <= 65536 - strlen( $raw ) ) { $raw .= $chunk; }
+			else { $overflow = true; $raw = ''; }
+			return '';
+		};
+		if ( ! \ob_start( $discard, 4096 ) ) { return null; }
+		$ok = false;
+		try { $ok = \phpinfo( INFO_GENERAL ); }
+		catch ( \Exception $error ) { $ok = false; }
+		catch ( \Throwable $error ) { $ok = false; }
+		$closed = \ob_end_clean();
+		if ( ! $ok || ! $closed || $overflow || \ob_get_level() !== $level ) { return null; }
+		return self::allocator_row( $raw );
+	}
+
+	/** Native CLI text and web-SAPI HTML only; no guessed fallback. */
+	private static function allocator_row( $raw ) {
+		$pattern = '~^(?:Zend Memory Manager => (enabled|disabled)|<tr><td class="e">Zend Memory Manager </td><td class="v">(enabled|disabled) </td></tr>)[\r]?$~mD';
+		if ( 1 !== preg_match_all( $pattern, $raw, $matches, PREG_SET_ORDER ) ) { return null; }
+		$mode = '' !== $matches[0][1] ? $matches[0][1] : $matches[0][2];
+		return 'enabled' === $mode ? 'zend' : 'system';
+	}
+
 	/** Only observed allocation facts participate; diagnostic host identity does not. */
 	public static function facts() {
 		global $wp_version;
 		$ini = array();
 		foreach ( array( 'precision', 'serialize_precision', 'zend.enable_gc', 'opcache.enable', 'opcache.enable_cli', 'opcache.jit', 'opcache.jit_buffer_size' ) as $name ) { $ini[$name] = ini_get( $name ); }
-		// Environment is mutable after startup: it cannot attest allocator mode.
-		// Until a qualified startup observer exists, this fact is UNKNOWN and
-		// release selection refuses. A lab overlay is a different implementation.
+		// Observe the engine, never a request/filter/constant or current getenv().
 		$capabilities = array();
 		foreach ( array( 'hash_init', 'json_decode', 'mysqli_query', 'getrusage' ) as $name ) { if ( function_exists( $name ) ) { $capabilities[] = $name; } }
 		$instrumented = false;
 		foreach ( array( 'xdebug', 'xhprof', 'tideways', 'blackfire', 'uopz', 'runkit' ) as $name ) { if ( extension_loaded( $name ) ) { $instrumented = true; } }
 		return array( 'php_versions' => PHP_VERSION, 'wp_versions' => $wp_version, 'sapi' => PHP_SAPI, 'word_bytes' => PHP_INT_SIZE,
 			'endian' => '01000000' === bin2hex( pack( 'L', 1 ) ) ? 'little' : 'big', 'os_family' => 0 === strpos( PHP_OS, 'WIN' ) ? 'Windows' : PHP_OS,
-			'allocator' => null, 'debug' => (bool) PHP_DEBUG, 'zts' => (bool) PHP_ZTS, 'driver_family' => function_exists( 'mysqli_query' ) ? 'mysqli' : null,
+			'allocator' => self::allocator(), 'debug' => (bool) PHP_DEBUG, 'zts' => (bool) PHP_ZTS, 'driver_family' => function_exists( 'mysqli_query' ) ? 'mysqli' : null,
 			'driver_versions' => function_exists( 'mysqli_get_client_info' ) ? mysqli_get_client_info() : null, 'required_ini' => $ini,
 			'required_capabilities' => $capabilities, 'instrumented' => $instrumented );
 	}
