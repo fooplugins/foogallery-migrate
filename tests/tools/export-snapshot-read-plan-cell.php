@@ -4,6 +4,11 @@ require getenv( 'QUAL_BOOTSTRAP' ) ? getenv( 'QUAL_BOOTSTRAP' ) : dirname( __DIR
 require_once dirname( __DIR__ ) . '/SnapshotReadProfilePlanFloorsTest.php';
 use FooPlugins\FooGalleryMigrate\Tests\SnapshotReadProfilePlanFloorsTest;
 use FooPlugins\FooGalleryMigrate\SnapshotReadProfile;
+if ( $argc === 3 && is_dir( $argv[2] ) && in_array( $argv[1], array( 'transport-small', 'transport-original-volume' ), true ) ) {
+	require_once dirname( __DIR__ ) . '/support/SnapshotReadTransportFixture.php';
+	print json_encode( \FooPlugins\FooGalleryMigrate\Tests\SnapshotReadTransportFixture::export( $argv[2], $argv[1] === 'transport-small' ? 1 : 20208 ), JSON_PRETTY_PRINT ) . "\n";
+	exit( 0 );
+}
 if ( $argc !== 3 || ! isset( SnapshotReadProfilePlanFloorsTest::cases()[$argv[1]] ) || ! is_dir( $argv[2] ) ) { throw new RuntimeException( 'Expected named synthetic case and existing output directory.' ); }
 list( $cell, $raw, $compiled ) = SnapshotReadProfilePlanFloorsTest::fixture( $argv[1] );
 file_put_contents( $argv[2] . '/cell.json', json_encode( $cell, JSON_PRETTY_PRINT ) . "\n" );

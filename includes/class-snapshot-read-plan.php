@@ -61,7 +61,7 @@ final class SnapshotReadPlan {
 		$files = array();
 		foreach ( array( 'legacy-table-snapshot', 'legacy-snapshot-row-reader', 'legacy-record-codec', 'legacy-state-codec',
 			'legacy-collection-envelope', 'snapshot-page-witness', 'snapshot-read-plan', 'snapshot-owned-event-plan',
-			'snapshot-read-profile', 'snapshot-read-phase', 'generic-retaining-model', 'storage-scale-admission', 'storage-preflight' ) as $file ) {
+			'snapshot-read-profile', 'snapshot-read-trace-stream', 'snapshot-read-workspace', 'snapshot-read-phase', 'generic-retaining-model', 'storage-scale-admission', 'storage-preflight' ) as $file ) {
 			$files[$file] = hash_file( 'sha256', __DIR__ . '/class-' . $file . '.php' );
 		}
 		$encoder = null;
