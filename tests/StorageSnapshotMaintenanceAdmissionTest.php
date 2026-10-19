@@ -228,4 +228,3 @@ class OwningMetadataWpdb extends MaintenanceAdmissionWpdb {
 		return $rows;
 	}
 }
-
