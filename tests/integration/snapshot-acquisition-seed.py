@@ -57,7 +57,9 @@ def validate(path, receipt):
             assert e['sequence'] == count and e['time'] >= last_time and e['guard'] >= guard
             assert 1 <= e['phase'] <= 40 and e['depth'] <= 64
             if e['phase'] == 1:
-                assert not root_seen and e['bytes'] == 0, 'real pre-root legacy-only selector'
+                assert e['bytes'] == 0, 'legacy-only selector, including checked reentry'
+                if 1 not in phases:
+                    assert not root_seen, 'initial actual pre-root selector'
             if e['phase'] == 2:
                 assert 1 in phases, 'selector before root native decode'
                 root_seen = True
