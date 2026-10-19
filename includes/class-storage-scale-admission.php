@@ -31,6 +31,7 @@ final class StorageScaleAdmission {
 	private $tokens = 1; // Complete logical snapshot's outer array token.
 	private $snapshot_blog;
 	private $snapshot_write = false;
+	private $authenticated_snapshot_read;
 
 	public static function validate( $limits ) {
 		$ceilings = array( 'version' => 1, 'max_tokens' => 262144, 'max_rows' => 24576, 'max_bytes' => 16777216,
@@ -147,6 +148,10 @@ final class StorageScaleAdmission {
 		// Pending is NEVER credited against a later sample, including nested raw,
 		// snapshot, rebuild and per-row checks. Preserve their original multiplier.
 		$used = self::checked_add( $sample[1], self::checked_add( $this->additional_bytes, $this->retaining_pending ) );
+		if ( null !== $this->authenticated_snapshot_read ) {
+			$used = self::checked_add( max( $sample[1], memory_get_usage( true ), $this->native_high_water ), self::checked_add( $this->additional_bytes, $this->retaining_pending ) );
+			$used = self::checked_add( $used, $this->authenticated_snapshot_read->workspace( 0 ) );
+		}
 		foreach ( array( $sample[0], (string) $this->limit( 'memory_ceiling_bytes' ) ) as $limit ) {
 			if ( is_wp_error( StoragePreflight::decode_budget( $bytes, $limit, $used, $policy ) ) ) { StorageScalarObserver::milestone( 'scale-memory-refused' ); StorageScalarObserver::refusal( 'scale-memory', 'scale-memory' ); self::fail(); }
 		}
@@ -169,6 +174,7 @@ final class StorageScaleAdmission {
 		if ( ! is_array( $sample ) || array_keys( $sample ) !== array( 0, 1 ) ) { self::fail(); }
 		$policy = array( 'max_raw_bytes' => PHP_INT_MAX, 'amplification' => 1, 'reserve_bytes' => $this->policy['reserve_bytes'] );
 		$forecast = self::checked_add( $total, $this->retaining_pending );
+		if ( null !== $this->authenticated_snapshot_read ) { $forecast = self::checked_add( $forecast, $this->authenticated_snapshot_read->workspace( 0 ) ); }
 		foreach ( array( $sample[0], (string) $this->limit( 'memory_ceiling_bytes' ) ) as $limit ) {
 			if ( is_wp_error( StoragePreflight::decode_budget( $forecast, $limit, $sample[1], $policy ) ) ) { StorageScalarObserver::milestone( 'scale-memory-refused' ); StorageScalarObserver::refusal( 'scale-memory', 'scale-memory' ); self::fail(); }
 		}
@@ -206,16 +212,29 @@ final class StorageScaleAdmission {
 		if ( ! is_array( $sample ) || array_keys( $sample ) !== array( 0, 1 ) ) { self::fail(); }
 		$total = self::checked_add( $bytes, self::checked_add( $this->additional_bytes, $this->retaining_pending ) );
 		self::checked_add( $sample[1], 0 );
-		$used = max( $sample[1], memory_get_usage( true ) );
+		$used = max( $sample[1], memory_get_usage( true ), $this->native_high_water );
 		$policy = array( 'max_raw_bytes' => PHP_INT_MAX, 'amplification' => 1, 'reserve_bytes' => $this->policy['reserve_bytes'] );
 		foreach ( array( ini_get( 'memory_limit' ), $sample[0], (string) $this->limit( 'memory_ceiling_bytes' ) ) as $limit ) {
 			if ( is_wp_error( StoragePreflight::decode_budget( $total, $limit, $used, $policy ) ) ) { StorageScalarObserver::milestone( 'scale-memory-refused' ); StorageScalarObserver::refusal( 'scale-memory', 'scale-memory' ); self::fail(); }
 		}
 	}
 
+	/** Private qualified scope. Interrupted scopes cannot be reset/released. */
+	public function open_authenticated_snapshot_read( $phase ) {
+		if ( null !== $this->authenticated_snapshot_read || ! $phase instanceof SnapshotReadPhase || ! $this->supports_snapshot_stats() ) { self::fail(); }
+		$this->authenticated_snapshot_read = $phase;
+		$this->admit_snapshot_stats_workspace( $phase->workspace( 0 ) );
+	}
+	public function close_authenticated_snapshot_read( $phase ) {
+		if ( $phase !== $this->authenticated_snapshot_read || ! $phase->completed() ) { self::fail(); }
+		$this->admit_snapshot_stats_workspace( $phase->workspace( 0 ) );
+		$this->authenticated_snapshot_read = null;
+	}
+
 	private function check_pending( $pending ) {
 		$this->tick();
 		$total = self::checked_add( $this->additional_bytes, $pending );
+		if ( null !== $this->authenticated_snapshot_read ) { $total = self::checked_add( $total, $this->authenticated_snapshot_read->workspace( 0 ) ); }
 		$sample = $this->memory_sample();
 		if ( ! is_array( $sample ) || array_keys( $sample ) !== array( 0, 1 ) ) { self::fail(); }
 		$policy = array( 'max_raw_bytes' => PHP_INT_MAX, 'amplification' => 1, 'reserve_bytes' => $this->policy['reserve_bytes'] );

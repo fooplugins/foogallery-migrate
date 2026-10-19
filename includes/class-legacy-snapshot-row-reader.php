@@ -12,12 +12,14 @@ final class LegacySnapshotRowReader {
 	private $scope;
 	private $window_bytes;
 	private $admit;
+	private $witness;
 
-	public function __construct( $db, $table, $columns, $bytes_sql, $scope, $max_bytes, $admit ) {
+	public function __construct( $db, $table, $columns, $bytes_sql, $scope, $max_bytes, $admit, $witness = null ) {
 		$this->db = $db; $this->table = $table; $this->columns = $columns;
 		$this->bytes_sql = $bytes_sql; $this->scope = $scope;
 		$this->window_bytes = min( LegacyTableReader::MAX_RECORD_BYTES, $max_bytes );
-		$this->admit = $admit;
+		$this->admit = $admit; $this->witness = $witness;
+		if ( null !== $witness && ( ! $witness instanceof SnapshotPageWitness || ! $witness->scope_matches( $scope ) ) ) { $this->fail( 'Wrong producer witness scope.' ); }
 	}
 
 	/** Stable parent/order/id seek, independent of insertion/preorder IDs.
@@ -60,9 +62,13 @@ final class LegacySnapshotRowReader {
 			$actual_parent = null === $row['parent_node_hash'] ? null : strtolower( $row['parent_node_hash'] );
 			if ( $actual_parent !== $parent ) { $this->fail( 'Window escaped parent.' ); }
 		}
+		// Authenticate EVERY row before returning any raw column for native decode.
+		if ( null !== $this->witness ) { $this->witness->authenticate( $rows ); }
 		call_user_func( $this->admit, $workspace );
 		return $rows;
 	}
+
+	public function uses_witness( $witness ) { return null !== $witness && $this->witness === $witness; }
 
 	private function read( $sql ) {
 		$rows = $this->db->get_results( $sql, ARRAY_A );

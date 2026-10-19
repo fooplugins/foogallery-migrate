@@ -5,9 +5,11 @@ use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
 use PHPUnit\Framework\TestCase;
 require_once __DIR__ . '/support/SnapshotScaleConnection.php';
 require_once __DIR__ . '/StorageScaleAdmissionTest.php';
+require_once __DIR__ . '/support/SnapshotAuthenticatedAdmissionCases.php';
 
 /** Actual snapshot producer path. Not allocator/source+ZIP qualification. */
 class StorageSnapshotOwnedEventTest extends TestCase {
+	use SnapshotAuthenticatedAdmissionCases;
 	private function property( $object, $name, $value = null, $set = false ) {
 		$p = new \ReflectionProperty( $object, $name ); if ( PHP_VERSION_ID < 80100 ) { $p->setAccessible( true ); }
 		if ( $set ) { $p->setValue( $object, $value ); }

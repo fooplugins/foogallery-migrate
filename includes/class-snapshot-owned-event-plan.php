@@ -128,6 +128,9 @@ final class SnapshotOwnedEventPlan {
 	}
 	public function matches( $binding ) { return $this->binding === $binding; }
 	public function owns_source( $source ) { return $source === $this->source; }
+	/** Internal phase accounting; completion never consumes private liability. */
+	public function is_complete() { return $this->complete; }
+	public function remaining_own_output() { if ( null === $this->binding ) { self::fail(); } return $this->remaining; }
 	/** DIAGNOSTIC ONLY: not a qualified replacement for aggregate admission.
 	 * Own-only attachments reduce future, never private/digest obligations. Keep
 	 * every private maximum plus the prospective driver+PHP page even if that

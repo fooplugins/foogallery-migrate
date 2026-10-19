@@ -33,6 +33,11 @@ class LegacyTableSnapshot {
 	private $snapshot_events_enabled = false;
 	private $snapshot_plans = array();
 	private $snapshot_owner;
+	// Internal author/qualification seam only. No shipped profiles, options or SQL input.
+	private $snapshot_authentication_enabled = false;
+	private $snapshot_read_profile;
+	private $snapshot_read_phase;
+	private $snapshot_witnesses = array();
 
 	/** Bounds apply to the entire affected replacement, including companion keys.
 	 * Optional scale is operation-owned refusal admission, NOT calibration approval.
@@ -127,6 +132,7 @@ class LegacyTableSnapshot {
 				if ( $this->snapshot_digest( $change['key'], $value ) !== $change['digest'] ) { $this->fail( 'Staged logical snapshot does not match its source.' ); }
 				unset( $value );
 				if ( null !== $this->snapshot_owner ) { $this->snapshot_owner->finish(); }
+				$this->end_read_phase();
 			}
 			StorageScalarObserver::milestone( 'snapshot-readback' );
 			$result = array();
@@ -170,6 +176,10 @@ class LegacyTableSnapshot {
 		return $result;
 	}
 
+	public function __clone() { if ( count( $this->snapshot_witnesses ) || null !== $this->snapshot_read_phase ) { $this->fail( 'Cannot clone producer authority.' ); } }
+	public function __sleep() { if ( count( $this->snapshot_witnesses ) || null !== $this->snapshot_read_phase ) { $this->fail( 'Cannot serialize producer authority.' ); } return array_keys( get_object_vars( $this ) ); }
+	public function __wakeup() { if ( count( $this->snapshot_witnesses ) || null !== $this->snapshot_read_phase ) { $this->fail( 'Cannot restore producer authority.' ); } }
+
 	/** Small/explicit snapshot reads only, not an unbounded collection API. */
 	public function read_bounded( $key ) {
 		$this->admit();
@@ -183,8 +193,11 @@ class LegacyTableSnapshot {
 		$sql = 'SELECT HEX(snapshot_digest) AS snapshot_digest, digest_revision, digest_status FROM `' . $this->state_table . '` WHERE blog_id = %d AND id = %d AND revision = %d AND active_generation = %d LIMIT 1';
 		$digests = $this->read( $this->wpdb->prepare( $sql, array( $this->blog_id, $head['id'], $head['revision'], $head['active_generation'] ) ) );
 		if ( count( $digests ) !== 1 || 'current' !== $digests[0]['digest_status'] || $this->number( $digests[0]['digest_revision'] ) !== $head['revision'] || ! is_string( $digests[0]['snapshot_digest'] ) || ! preg_match( '/^[0-9a-f]{64}$/Di', $digests[0]['snapshot_digest'] ) ) { $this->fail( 'Snapshot digest is absent, dirty or stale.' ); }
+		$hash = $this->codec->key_hash( $key );
+		if ( isset( $this->snapshot_plans[$hash]['root'] ) ) { $this->begin_read_phase( $key, $head['id'], $head['active_generation'], $this->snapshot_plans[$hash]['root'], $head['revision'], strtolower( $digests[0]['snapshot_digest'] ) ); }
 		$this->admit_memory( $head['payload_bytes'] + $key_bytes );
 		$root = $this->root_payload( $head['id'] );
+		if ( null !== $this->snapshot_read_phase && $root !== $this->snapshot_plans[$hash]['root'] ) { $this->fail( 'Authenticated raw root changed before decode.' ); }
 		$metadata = 'scalar' === $head['state_kind'] ? $this->codec->decode( $root ) : $this->codec->decode_collection_root( $root );
 		if ( ! is_array( $metadata ) || ! isset( $metadata['kind'] ) || $metadata['kind'] !== $head['state_kind'] ) { $this->fail( 'Root metadata does not match state kind.' ); }
 		$stats = array( 'record_count' => $head['record_count'], 'payload_bytes' => $head['payload_bytes'] - strlen( $root ) );
@@ -195,6 +208,7 @@ class LegacyTableSnapshot {
 		// No temporary reconstructed copy survives. The result transfers to the
 		// caller; private maxima are recorded, never released as memory credit.
 		if ( null !== $this->snapshot_owner ) { $this->snapshot_owner->finish(); }
+		$this->end_read_phase();
 		return $value;
 	}
 
@@ -290,7 +304,8 @@ class LegacyTableSnapshot {
 
 
 	private function preflight( $changes ) {
-		if ( $this->snapshot_events_enabled ) { $this->snapshot_plans = array(); }
+		if ( $this->snapshot_authentication_enabled || $this->snapshot_read_profile instanceof SnapshotReadProfile ) { $this->snapshot_events_enabled = true; }
+		if ( $this->snapshot_events_enabled ) { $this->snapshot_plans = array(); $this->snapshot_witnesses = array(); }
 		if ( ! is_array( $changes ) || ! count( $changes ) || count( $changes ) > 100 ) { $this->fail( 'Replacement needs 1 to 100 explicit changes.' ); }
 		$this->admit_memory( 0 );
 		$prepared = array(); $orders = array(); $total_rows = 0; $total_bytes = 0;
@@ -338,6 +353,13 @@ class LegacyTableSnapshot {
 			if ( null !== $event_plan ) {
 				$this->snapshot_plans[$hash] = array( 'descriptor' => $event_plan->descriptor( count( $value ), strlen( $change['root_payload'] ) ),
 					'key' => $change['key'], 'root' => $change['root_payload'], 'stats' => $stats, 'digest' => null );
+				if ( $this->snapshot_authentication_enabled || $this->snapshot_read_profile instanceof SnapshotReadProfile ) {
+					// Descriptor arena already admitted. Charge scalar encode/walk scratch
+					// with the existing full preflight guard before the complete traversal.
+					$this->admit_memory( $bytes );
+					$this->snapshot_plans[$hash]['complete'] = SnapshotReadPlan::compile( $change['value'], $this->snapshot_plans[$hash]['descriptor'], $this->codec, $this->scale );
+				}
+
 			}
 			unset( $event_plan );
 			$prepared[ $hash ] = $change;
@@ -389,6 +411,10 @@ class LegacyTableSnapshot {
 		}
 		$stats = $this->generation_stats( $head['id'], $generation );
 		if ( $stats['record_count'] !== 0 ) { $this->fail( 'Inactive generation already contains rows; explicit recovery is required.' ); }
+		if ( isset( $this->snapshot_plans[$hash]['complete'] ) ) {
+			$this->admit_witness_lifetime( SnapshotPageWitness::workspace( $change['stats']['record_count'] ) );
+			$this->snapshot_witnesses[$hash] = new SnapshotPageWitness( $this->definitions[$this->record_table]['columns'], array( $this->blog_id, $head['id'], $generation ), $change['stats']['record_count'] );
+		}
 		if ( 'scalar' !== $change['kind'] ) {
 			$repo = $this; $id = $head['id']; $order = 0;
 			foreach ( $change['items'] as $key => $record ) {
@@ -397,6 +423,11 @@ class LegacyTableSnapshot {
 					$repo->insert_record( $id, $generation, $row, $state_key );
 				} );
 			}
+		}
+		if ( isset( $this->snapshot_witnesses[$hash] ) ) {
+			$binding = $this->read_binding( $change['key'], $head['id'], $generation, $change['root_payload'], $change['stats'], $head['revision'] + 1, $change['digest'] );
+			$this->snapshot_witnesses[$hash]->seal( $binding, $this->snapshot_plans[$hash]['complete'] );
+			$this->snapshot_plans[$hash]['binding'] = $binding;
 		}
 		return array( 'id' => $head['id'], 'old_generation' => $head['active_generation'], 'generation' => $generation, 'revision' => $head['revision'] );
 	}
@@ -407,17 +438,21 @@ class LegacyTableSnapshot {
 			$key = 'integer' === $row['key_type'] ? (int) base64_decode( $row['key_value'], true ) : base64_decode( $row['key_value'], true );
 			$row['legacy_identifier_value'] = $this->codec->key_value( $key ); $row['legacy_identifier_hash'] = $this->codec->key_hash( $key );
 		}
-		$this->insert( $this->record_table, array_merge( $row, array( 'blog_id' => $this->blog_id, 'state_id' => $id, 'generation' => $generation ) ) );
+		$witness = null;
+		if ( count( $this->snapshot_witnesses ) ) { $hash = $this->codec->key_hash( $state_key ); $witness = isset( $this->snapshot_witnesses[$hash] ) ? $this->snapshot_witnesses[$hash] : null; }
+		$this->insert( $this->record_table, array_merge( $row, array( 'blog_id' => $this->blog_id, 'state_id' => $id, 'generation' => $generation ) ), $witness );
 	}
 
 	private function read_generation( $key, $id, $generation, $root, $expected, $kind, $revision, $digest ) {
 		$this->snapshot_owner = null;
+		$this->begin_read_phase( $key, $id, $generation, $root, $revision, $digest );
 		$stats = $this->generation_stats( $id, $generation );
 		if ( $stats['record_count'] !== $expected['record_count'] || $stats['payload_bytes'] !== $expected['payload_bytes'] ) { $this->fail( 'Staged record count/byte parity failed.' ); }
 		if ( isset( $expected['encoded_bytes'] ) && $stats['encoded_bytes'] !== $expected['encoded_bytes'] ) { $this->fail( 'Staged encoded byte parity failed.' ); }
 		if ( $stats['record_count'] > $this->max_rows || $stats['encoded_bytes'] > $this->max_bytes - strlen( $root ) - strlen( $this->codec->key_value( $key ) ) ) { $this->fail( 'Snapshot exceeds the row/byte budget before payload fetch.' ); }
 		$encoded_bytes = $stats['encoded_bytes'] + strlen( $root ) + strlen( $this->codec->key_value( $key ) );
 		$hash = $this->codec->key_hash( $key );
+		if ( null !== $this->snapshot_read_phase && $stats !== $this->snapshot_plans[$hash]['stats'] ) { $this->fail( 'Authenticated read statistics changed.' ); }
 		$this->admit_snapshot( $hash, $stats['record_count'], $encoded_bytes );
 		$this->admit_memory( $encoded_bytes );
 		$stored_root = $this->root_payload( $id );
@@ -435,11 +470,19 @@ class LegacyTableSnapshot {
 		}
 		$admit = function ( $workspace ) use ( $encoded_bytes ) {
 			$this->tick(); $this->admit_memory( $encoded_bytes );
-			if ( null !== $this->scale && $workspace ) {
+			if ( null !== $this->snapshot_read_phase && $workspace ) {
+				$this->scale->admit_snapshot_stats_workspace( $this->snapshot_read_phase->workspace( $workspace ) );
+			} else if ( null !== $this->scale && $workspace ) {
 				$this->scale->admit_snapshot_stats_workspace( StorageScaleAdmission::checked_add( StorageScaleAdmission::checked_multiply( 8, $encoded_bytes ), $workspace ) );
 			}
 		};
-		$source = new LegacySnapshotRowReader( $this->wpdb, $this->record_table, implode( ', ', $columns ), $this->record_bytes(), array( $this->blog_id, $id, $generation ), $this->max_bytes, $admit );
+		$witness = null;
+		if ( isset( $this->snapshot_witnesses[$hash], $this->snapshot_plans[$hash]['complete'] ) ) {
+			$binding = $this->read_binding( $key, $id, $generation, $root, $stats, $revision, $digest );
+			if ( $this->snapshot_witnesses[$hash]->matches( $binding, $this->snapshot_plans[$hash]['complete'] ) ) { $witness = $this->snapshot_witnesses[$hash]; }
+		}
+		if ( null !== $this->snapshot_read_phase && null === $witness ) { $this->fail( 'Active authenticated read lost producer authority.' ); }
+		$source = new LegacySnapshotRowReader( $this->wpdb, $this->record_table, implode( ', ', $columns ), $this->record_bytes(), array( $this->blog_id, $id, $generation ), $this->max_bytes, $admit, $witness );
 		// Immutable source descriptors do not carry an event balance. Each read
 		// binds a NEW owner to this exact reader and concrete database identity.
 		if ( $this->snapshot_events_enabled && isset( $this->snapshot_plans[$hash] ) ) {
@@ -453,7 +496,51 @@ class LegacyTableSnapshot {
 				}
 			}
 		}
+		if ( null !== $this->snapshot_read_phase ) {
+			if ( null === $this->snapshot_owner ) { $this->fail( 'Active authenticated read lost its event owner.' ); }
+			$this->snapshot_read_phase->attach_owner( $this->snapshot_owner, $source );
+		}
 		return $this->records->rebuild_snapshot_stream( $key, $metadata, $source, $stats, $admit, $this->snapshot_owner );
+	}
+
+	/** Only an exact producer-sealed pair may select a finite read profile.
+	 * Missing/stale/unsupported pairs keep the legacy path BEFORE a read starts. */
+	private function read_binding( $key, $id, $generation, $root, $stats, $revision, $digest ) {
+		$f = new \ReflectionClass( $this->wpdb ); $file = $f->getFileName();
+		return array( 'key' => $key, 'digest' => $digest, 'stats' => $stats, 'blog' => $this->blog_id,
+			'id' => $id, 'generation' => $generation, 'root' => $root, 'revision' => $revision,
+			'compiler_runtime' => SnapshotReadPlan::runtime_binding(),
+			'connection' => array( get_class( $this->wpdb ), $file ? hash_file( 'sha256', $file ) : null ) );
+	}
+	private function begin_read_phase( $key, $id, $generation, $root, $revision, $digest ) {
+		if ( ! count( $this->snapshot_witnesses ) && null === $this->snapshot_read_phase ) { return; }
+		$hash = $this->codec->key_hash( $key );
+		if ( ! isset( $this->snapshot_plans[$hash]['binding'], $this->snapshot_plans[$hash]['complete'], $this->snapshot_witnesses[$hash] ) ) {
+			if ( null !== $this->snapshot_read_phase ) { $this->fail( 'Active authenticated phase lost authority.' ); } return;
+		}
+		$p = $this->snapshot_plans[$hash];
+		$b = $this->read_binding( $key, $id, $generation, $root, $p['stats'], $revision, $digest );
+		if ( null !== $this->snapshot_read_phase ) {
+			if ( ! $this->snapshot_read_phase->matches( $b ) ) { $this->fail( 'Active authenticated phase changed binding.' ); } return;
+		}
+		if ( null === $this->scale || ! $this->snapshot_read_profile instanceof SnapshotReadProfile || $p['descriptor'] !== $p['complete']['own'] ||
+			! $this->snapshot_witnesses[$hash]->matches( $b, $p['complete'] ) ||
+			! $this->snapshot_read_profile->supports( $p['complete'], SnapshotReadPhase::identity( $b ) ) ) { return; }
+		$this->snapshot_read_phase = new SnapshotReadPhase( $p['complete'], $this->snapshot_witnesses[$hash], $b, $this->snapshot_read_profile );
+		$this->scale->open_authenticated_snapshot_read( $this->snapshot_read_phase );
+	}
+	private function end_read_phase() {
+		if ( null !== $this->snapshot_read_phase ) {
+			// Complete private + zero remaining + actual backing still enter the
+			// final guard. Only a fully completed operation can leave this scope.
+			$this->scale->close_authenticated_snapshot_read( $this->snapshot_read_phase );
+			$this->snapshot_read_phase = null;
+		}
+	}
+	private function admit_witness_lifetime( $bytes ) {
+		if ( null !== $this->scale ) { $this->scale->admit_additional( $bytes ); return; }
+		$policy = array( 'max_raw_bytes' => PHP_INT_MAX, 'amplification' => 1, 'reserve_bytes' => 33554432 );
+		if ( is_wp_error( StoragePreflight::decode_budget( $bytes, ini_get( 'memory_limit' ), memory_get_usage( true ), $policy ) ) ) { $this->fail( 'Producer witness construction refused.' ); }
 	}
 
 	private function rebuild_root( $key, $hash, $tree, &$result ) {
@@ -488,7 +575,8 @@ class LegacyTableSnapshot {
 	 * means the existing standalone repository contract, not safe-memory approval.
 	 */
 	private function admit_memory( $bytes ) {
-		if ( null !== $this->scale ) { $this->scale->admit_memory( $bytes ); }
+		if ( null !== $this->snapshot_read_phase ) { $this->scale->admit_snapshot_stats_workspace( $this->snapshot_read_phase->workspace( 0 ) ); }
+		else if ( null !== $this->scale ) { $this->scale->admit_memory( $bytes ); }
 		if ( null !== $this->memory_admission && true !== call_user_func( $this->memory_admission, $bytes ) ) {
 			$this->fail( 'Snapshot memory admission was not affirmed.' );
 		}
@@ -515,12 +603,13 @@ class LegacyTableSnapshot {
 		return $stats;
 	}
 
-	private function insert( $table, $values ) {
-		$columns = array(); $expressions = array(); $args = array();
+	private function insert( $table, $values, $witness = null ) {
+		$columns = array(); $expressions = array(); $args = array(); $raw = array();
 		foreach ( $this->definitions[ $table ]['columns'] as $name => $spec ) {
 			if ( 'id' === $name ) { continue; }
 			$value = $spec[1] ? null : ( false !== strpos( $spec[0], 'int' ) ? 0 : ( 'datetime' === $spec[0] ? gmdate( 'Y-m-d H:i:s' ) : '' ) );
 			if ( array_key_exists( $name, $values ) ) { $value = $values[ $name ]; }
+			if ( null !== $witness ) { $raw[$name] = $value; }
 			$columns[] = '`' . $name . '`';
 			if ( null === $value ) { $expressions[] = 'NULL'; continue; }
 			$expressions[] = 'binary(32)' === $spec[0] ? 'UNHEX(%s)' : ( false !== strpos( $spec[0], 'int' ) ? '%d' : '%s' );
@@ -530,6 +619,7 @@ class LegacyTableSnapshot {
 		if ( 1 !== $this->write( $this->wpdb->prepare( $sql, $args ) ) ) { $this->fail( 'Staged insert did not write exactly one row.' ); }
 		$id = $this->number( $this->wpdb->insert_id );
 		if ( $id < 1 ) { $this->fail( 'Missing staged row ID.' ); }
+		if ( null !== $witness ) { $raw['id'] = $id; $witness->append( $raw ); }
 		return $id;
 	}
 
@@ -539,6 +629,8 @@ class LegacyTableSnapshot {
 	}
 
 	private function rollback( $error ) {
+		$this->snapshot_witnesses = array(); $this->snapshot_plans = array();
+		// An interrupted active phase remains charged on its scale object.
 		$result = $this->wpdb->query( 'ROLLBACK' );
 		$this->busy = false;
 		if ( false === $result || ! empty( $this->wpdb->last_error ) ) { $this->tainted = true; $this->fail( 'Rollback failed; connection state is uncertain. Reconcile on a fresh connection.' ); }
