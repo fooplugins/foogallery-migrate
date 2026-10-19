@@ -31,16 +31,37 @@ class StorageCapacityCopyTransactionTest extends TestCase {
 		$this->assertCount( 6, $db->records ); $this->assertSame( 3, count( array_filter( $db->queries, function ( $q ) { return 'COMMIT' === $q; } ) ) );
 		$this->assertTrue( $this->batch( $db, $value, $r, $scale )['complete'] ); $this->assertCount( 6, $db->records );
 	}
+	public function test_resume_walks_only_committed_prefix_and_new_batch_not_uncommitted_tail_or_append_replay(): void {
+		list( $db, $unused, $r, $scale ) = $this->setup_copy();
+		$value = array( 'tree' => array_fill( 0, 128, array( 'id' => 1 ) ) );
+		$db->raw_hash = hash( 'sha256', serialize( $value ) );
+		$r['source_digest'] = hash( 'sha256', 'present:' . $db->raw_hash );
+		$r['logical_digest'] = ( new LegacyStateCodec() )->snapshot_digest( $value ); $db->control = json_encode( $r );
+		$r = $this->batch( $db, $value, $r, $scale )['record'];
+		$codec = new LegacyStateCodec( 1048576, 64, 10000, $scale );
+		$walks = new CopyWalkCounter( $codec, 24576, 16777216, $scale );
+		$repo = new LegacyTableSnapshot( $db, 1, 24576, 16777216, null, null, $scale );
+		$p = new \ReflectionProperty( $repo, 'records' ); $p->setAccessible( true ); $p->setValue( $repo, $walks );
+		$b = $repo->conversion_batch( $r, $value, new StorageControl( $db, 1 ), json_encode( array( 'version' => 1, 'blog_id' => 1, 'token' => str_repeat( 'a', 32 ), 'expires' => time() + 300 ) ) );
+		$this->assertSame( 4, $b['record']['copy_cursor']['committed_rows'] );
+		// Two committed roots proved, two appended, one row-boundary lookahead.
+		$this->assertSame( array( 0, 1, 2, 3, 4 ), $walks->orders );
+	}
 	public function test_prefix_corruption_and_foreign_rows_refuse_before_any_new_insert(): void {
-		foreach ( array( 'payload', 'foreign', 'source' ) as $fault ) {
+		foreach ( array( 'payload', 'foreign', 'source', 'generation', 'revision', 'blog', 'stale-control', 'cursor-root', 'cursor-node' ) as $fault ) {
 			list( $db, $value, $r, $scale ) = $this->setup_copy(); $r = $this->batch( $db, $value, $r, $scale )['record'];
 			if ( 'payload' === $fault ) { $db->records[0]['payload'][0] = 'X'; }
 			elseif ( 'foreign' === $fault ) { $extra = $db->records[0]; $extra['node_hash'] = str_repeat( 'x', 32 ); $db->records[] = $extra; }
-			else { $db->raw_hash = str_repeat( '0', 64 ); }
-			$before = count( $db->records );
+			elseif ( 'source' === $fault ) { $db->raw_hash = str_repeat( '0', 64 ); }
+			elseif ( 'generation' === $fault ) { $db->records[0]['generation'] = 2; }
+			elseif ( 'revision' === $fault ) { $db->heads[0]['revision'] = 1; }
+			elseif ( 'blog' === $fault ) { $db->records[0]['blog_id'] = 2; }
+			elseif ( 'stale-control' === $fault ) { $r['updated'] = 2; }
+			else { $r['copy_cursor'][ 'cursor-root' === $fault ? 'next_root_ordinal' : 'next_node_ordinal' ] = 99; $db->control = json_encode( $r ); }
+			$before = count( $db->records ); $control_before = $db->control;
 			try { $this->batch( $db, $value, $r, $scale ); $this->fail( 'Changed prefix/source admitted.' ); }
 			catch ( \RuntimeException $e ) { $this->assertNotEmpty( $e->getMessage() ); }
-			$this->assertCount( $before, $db->records ); $this->assertSame( json_encode( $r ), $db->control );
+			$this->assertCount( $before, $db->records ); $this->assertSame( $control_before, $db->control );
 		}
 	}
 	public function test_precommit_row_failure_rolls_back_rows_head_and_control_together(): void {
@@ -74,6 +95,14 @@ class StorageCapacityCopyTransactionTest extends TestCase {
 		list( $db, $value, $r, $scale ) = $this->setup_copy(); $r = $this->batch( $db, $value, $r, $scale )['record'];
 		$this->assertNull( $this->batch( $db, $value, $r, $scale, true )['record'] );
 		$this->assertNull( $db->control ); $this->assertCount( 0, $db->records ); $this->assertCount( 0, $db->heads );
+	}
+}
+
+class CopyWalkCounter extends \FooPlugins\FooGalleryMigrate\LegacyRecordCodec {
+	public $orders = array();
+	public function walk_conversion_tree( $state_key, $key, $record, $order, $emit ) {
+		$this->orders[] = $order;
+		return parent::walk_conversion_tree( $state_key, $key, $record, $order, $emit );
 	}
 }
 

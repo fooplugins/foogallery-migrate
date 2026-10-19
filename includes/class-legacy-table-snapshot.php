@@ -130,6 +130,10 @@ class LegacyTableSnapshot {
 			}
 			$root_ordinal = 0; $batch_rows = 0; $batch_bytes = 0; $finished = true; $start = $c;
 			foreach ( $split['items'] as $item_key => $item ) {
+				// The exact committed prefix was proved above in this transaction.
+				// Skip whole roots BEFORE encoding, not in the row callback after
+				// their full payload, projections and logical hash have been rebuilt.
+				if ( $root_ordinal < $start['next_root_ordinal'] ) { ++$root_ordinal; continue; }
 				$node = 0; $repo = $this; $current_root = $root_ordinal;
 				$finished = $this->records->walk_conversion_tree( $key, $item_key, $item, $root_ordinal, function ( $row, $tokens, $encoded_bytes ) use ( $repo, $key, $current_root, &$node, &$c, &$batch_rows, &$batch_bytes, $capacity, $start ) {
 					$at = $node++;
@@ -186,6 +190,10 @@ class LegacyTableSnapshot {
 			( ! $complete && ( $head['id'] !== $cursor['state_id'] || $head['record_count'] !== 0 || $head['payload_bytes'] !== 0 || $head['digest_revision'] !== 0 || null !== $head['logical_digest'] ) ) ) { $this->fail( 'Committed conversion head changed.' ); }
 		$rows = 0; $payload = 0; $bytes = 0; $root_order = 0; $position_seen = $complete || ( $cursor['next_root_ordinal'] === count( $split['items'] ) && 0 === $cursor['next_node_ordinal'] );
 		foreach ( $split['items'] as $item_key => $item ) {
+			// Uncommitted roots are not part of this proof. A zero node cursor
+			// at a real root boundary is proved without encoding that future root.
+			if ( ! $complete && $root_order > $cursor['next_root_ordinal'] ) { break; }
+			if ( ! $complete && $root_order === $cursor['next_root_ordinal'] && 0 === $cursor['next_node_ordinal'] ) { $position_seen = true; break; }
 			$node = 0; $repo = $this; $order = $root_order;
 			$this->records->walk_conversion_tree( $key, $item_key, $item, $root_order++, function ( $row, $tokens, $encoded_bytes ) use ( $repo, $key, $head, $complete, $cursor, $order, &$node, &$rows, &$payload, &$bytes, &$totals, &$position_seen ) {
 				$at = $node++;

@@ -115,7 +115,11 @@ class StorageConversion {
 			$r = StorageControl::decode( $this->controls->read( StorageAuthority::CONTROL_OPTION ), $this->blog );
 			$this->require_true( 'stable' !== $r['phase'] && $r['to'] === $request['target'] );
 			$source = null;
-			if ( in_array( $r['phase'], array( 'copying', 'verified' ), true ) ) {
+			// v4 forward copying verifies both digests in copy_source_owned before
+			// conversion_batch can mutate anything. Do not hydrate/digest the same
+			// complete source once here and again in that owned helper.
+			$copy_verifies_source = 4 === $r['version'] && 'copying' === $r['phase'] && 'option' === $r['from'] && 'table' === $r['to'];
+			if ( in_array( $r['phase'], array( 'copying', 'verified' ), true ) && ! $copy_verifies_source ) {
 				$source = $this->source_metadata( $r['from'], false );
 				$this->require_true( $source['physical'] === $r['source_digest'] && $source['logical'] === $r['logical_digest'] );
 				unset( $source );
