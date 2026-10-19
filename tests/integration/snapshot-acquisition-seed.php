@@ -91,19 +91,4 @@ try {
     $receipt['output_digest'] = $codec->snapshot_digest( $returned ); $receipt['ok'] = true;
 } catch ( Exception $e ) { $error = $e; }
 catch ( Throwable $e ) { $error = $e; }
-$set( StorageScalarObserver::class, 'acquisition_stream', null );
-if ( null !== $error ) {
-    $receipt['first_failure'] = get_class( $error ) . ': ' . $error->getMessage();
-    if ( null !== $stream && ! isset( $receipt['trace_sha256'] ) ) { $receipt['trace_sha256'] = $stream->finish(); $receipt['events'] = $get( StorageScalarObserver::class, 'acquisition_sequence' ); }
-}
-$receipt['resources'] = array( 'live' => memory_get_usage( false ), 'allocated' => memory_get_usage( true ),
-    'peak_live_cumulative' => memory_get_peak_usage( false ), 'peak_allocated_cumulative' => memory_get_peak_usage( true ), 'rusage' => getrusage() );
-$cleanup = array(); foreach ( array_reverse( $created ) as $table ) {
-    $assert( false !== $connection->query( 'DROP TABLE `' . $table . '`' ), 'Owned table drop.' );
-    $cleanup[$table] = null === $connection->get_var( $connection->prepare( 'SHOW TABLES LIKE %s', $connection->esc_like( $table ) ) );
-}
-$receipt['cleanup_readback'] = $cleanup;
-$receipt['ok'] = $receipt['ok'] && ! in_array( false, $cleanup, true );
-file_put_contents( FOOGM_SEED_OUT . '/receipt.json', json_encode( $receipt, JSON_PRETTY_PRINT ) . "\n" );
-echo json_encode( array( 'ok' => $receipt['ok'], 'cell' => FOOGM_SEED_CELL, 'pid' => getmypid(), 'failure' => isset( $receipt['first_failure'] ) ? $receipt['first_failure'] : null ) ) . "\n";
-if ( ! $receipt['ok'] ) { exit( 2 ); }
+require dirname( __DIR__ ) . '/support/snapshot-acquisition-finalize.php';

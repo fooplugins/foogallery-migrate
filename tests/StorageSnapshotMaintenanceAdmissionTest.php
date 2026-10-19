@@ -57,6 +57,22 @@ class StorageSnapshotMaintenanceAdmissionTest extends TestCase {
 		$this->assertCount( 1, $seen ); $this->assertGreaterThan( 0, $seen[0] );
 		$this->assertFalse( $db->payload_fetched ); $this->assertFalse( $db->published );
 	}
+	public function test_cursor_double_honours_order_id_ties_limits_and_window_projection(): void {
+		$db = new MaintenanceAdmissionWpdb();
+		$property = new \ReflectionProperty( $db, 'rows' ); $row = $property->getValue( $db )[0];
+		$property->setValue( $db, array( array_merge( $row, array( 'id' => 9, 'item_order' => 1 ) ),
+			array_merge( $row, array( 'id' => 2 ) ), $row ) );
+		$select = 'SELECT id, item_order, (OCTET_LENGTH(payload)) AS window_bytes FROM `wp_foogallery_legacy_records` WHERE parent_node_hash IS NULL AND ';
+		$seek = function ( $order, $id, $limit ) use ( $db, $select ) {
+			return $db->get_results( $select . '(item_order > ' . $order . ' OR (item_order = ' . $order . ' AND id > ' . $id . ')) ORDER BY item_order ASC, id ASC LIMIT ' . $limit, ARRAY_A );
+		};
+		$this->assertSame( array( array( 'id' => 1, 'item_order' => 0, 'window_bytes' => strlen( $row['payload'] ) ) ), $seek( 0, 0, 1 ) );
+		$this->assertSame( array( 2, 9 ), array_column( $seek( 0, 1, 32 ), 'id' ) );
+		$this->assertSame( array( 9 ), array_column( $seek( 0, 2, 32 ), 'id' ) );
+		$this->assertSame( array(), $seek( 1, 9, 32 ) );
+		$this->assertFalse( $db->records_fetched );
+	}
+
 	/** @dataProvider maintenanceSeams */
 	public function test_material_maintenance_phases_are_rechecked( $seam ): void {
 		$db = new MaintenanceAdmissionWpdb(); $seen = 0;
@@ -138,11 +154,26 @@ class MaintenanceAdmissionWpdb extends SnapshotTestWpdb {
 		if ( false !== strpos( $sql, 'SELECT root_payload FROM' ) ) { $this->payload_fetched = true; return array( array( 'root_payload' => $this->root ) ); }
 		if ( false !== strpos( $sql, 'AS record_count' ) ) { $this->stats_fetched = true; return array( $this->stats ); }
 		if ( 0 === strpos( $sql, 'SELECT' ) && false !== strpos( $sql, 'legacy_records`' ) ) {
-			if ( false !== strpos( $sql, 'parent_node_hash = UNHEX' ) || false !== strpos( $sql, 'item_order > 0' ) ) { return array(); }
-			if ( false !== strpos( $sql, '`payload`' ) ) { $this->records_fetched = true; return $this->rows; }
+			if ( false !== strpos( $sql, 'parent_node_hash = UNHEX' ) ) { return array(); }
+			$rows = $this->rows;
+			if ( preg_match( '/\(item_order > (\d+) OR \(item_order = (\d+) AND id > (\d+)\)\)/', $sql, $cursor ) ) {
+				$rows = array_values( array_filter( $rows, function ( $row ) use ( $cursor ) {
+					return $row['item_order'] > (int) $cursor[1] || ( $row['item_order'] === (int) $cursor[2] && $row['id'] > (int) $cursor[3] );
+				} ) );
+			}
+			usort( $rows, function ( $a, $b ) { return $a['item_order'] === $b['item_order'] ? $a['id'] <=> $b['id'] : $a['item_order'] <=> $b['item_order']; } );
+			if ( preg_match( '/LIMIT (\d+)/', $sql, $limit ) ) { $rows = array_slice( $rows, 0, (int) $limit[1] ); }
+			if ( false !== strpos( $sql, '`payload`' ) ) { $this->records_fetched = true; return $rows; }
 			$fields = false !== strpos( $sql, 'SELECT id, item_order' ) ? array( 'id', 'item_order', 'node_hash' ) :
 				array( 'id', 'blog_id', 'state_id', 'generation', 'item_order', 'node_hash', 'parent_node_hash', 'payload_bytes', 'encoded_bytes' );
-			return array( array_intersect_key( $this->rows[0], array_flip( $fields ) ) );
+			if ( false !== strpos( $sql, 'AS window_bytes' ) ) { $fields = array( 'id', 'item_order', 'window_bytes' ); }
+			return array_map( function ( $row ) use ( $fields, $sql ) {
+				if ( in_array( 'window_bytes', $fields, true ) ) {
+					preg_match_all( '/OCTET_LENGTH\(`?(\w+)`?\)/', $sql, $columns ); $row['window_bytes'] = 0;
+					foreach ( $columns[1] as $column ) { $row['window_bytes'] += isset( $row[$column] ) ? strlen( $row[$column] ) : 0; }
+				}
+				$projected = array(); foreach ( $fields as $field ) { $projected[$field] = $row[$field]; } return $projected;
+			}, $rows );
 		}
 		array_pop( $this->queries ); return parent::get_results( $sql, $format );
 	}
