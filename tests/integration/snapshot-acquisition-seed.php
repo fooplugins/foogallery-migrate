@@ -27,7 +27,7 @@ $get = function ( $object, $field ) {
 $assert = function ( $yes, $label ) { if ( ! $yes ) { throw new RuntimeException( $label ); } };
 global $wpdb, $wp_version, $wp_filter;
 $connection = new LegacyTransactionConnection( $wpdb );
-$schema = new LegacyStorageSchema( $connection ); $tables = array_keys( $schema->definitions() );
+$schema = new LegacyStorageSchema( $wpdb ); $tables = array_keys( $schema->definitions() );
 foreach ( $tables as $table ) {
     $assert( null === $connection->get_var( $connection->prepare( 'SHOW TABLES LIKE %s', $connection->esc_like( $table ) ) ), 'Refuse preexisting tables.' );
 }
