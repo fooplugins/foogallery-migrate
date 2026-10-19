@@ -120,10 +120,10 @@ def main():
             dest = args.out / (cell + '-' + str(repeat)); dest.mkdir()
             definitions = dict(FOOGM_SEED_ROOT=str(args.product.resolve()), FOOGM_SEED_OUT=str(dest.resolve()),
                 FOOGM_SEED_CELL=cell, FOOGM_SEED_DB='cove_fgm_seed_20261019_34032_')
-            code = ''.join('define(' + json.dumps(k) + ',' + json.dumps(v) + ');' for k, v in definitions.items())
+            code = 'define("WP_USE_THEMES",false);require ' + json.dumps(str(args.site / 'wp-load.php')) + ';'
+            code += ''.join('define(' + json.dumps(k) + ',' + json.dumps(v) + ');' for k, v in definitions.items())
             code += 'require ' + json.dumps(str(args.source / 'tests/integration/snapshot-acquisition-seed.php')) + ';'
-            command = ['/opt/homebrew/bin/php', '-d', 'memory_limit=256M', '/opt/homebrew/opt/wp-cli/bin/wp',
-                '--path=' + str(args.site), '--skip-plugins', '--skip-themes', 'eval', code]
+            command = ['/opt/homebrew/bin/php', '-d', 'memory_limit=256M', '-r', code]
             result = worker.bounded_worker(command, seconds=45)
             for stream in ('stdout', 'stderr'):
                 (dest / (stream + '.txt')).write_bytes(result.pop(stream))
