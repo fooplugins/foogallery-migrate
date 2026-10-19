@@ -163,6 +163,30 @@ class SnapshotScaleConnectionContractTest extends TestCase {
 		$db->query( 'ROLLBACK' ); $this->assertSame( $heads, $db->heads ); $this->assertSame( 1, $db->events['publish'] );
 		$empty = new SnapshotScaleConnection(); $empty->query( 'START TRANSACTION' ); $this->insert( $empty, $this->values() ); $empty->query( 'ROLLBACK' ); $this->assertSame( array(), $empty->records );
 	}
+	public function test_constructor_reentry_preserves_exact_external_and_rollback_snapshots(): void {
+		foreach ( array( array(), array( 'replacement' ) ) as $replacement ) {
+			$db = new SnapshotScaleConnection(); $expected = $this->insert( $db, $this->values() );
+			$records = $db->records; $db->query( 'START TRANSACTION' ); $rejected = false;
+			try { $db->records[0]->__construct( array( 'payload' => 0 ), $replacement ); }
+			catch ( \LogicException $error ) { $rejected = true; }
+			$external = $this->named( $records[0] );
+			$db->query( 'ROLLBACK' );
+			// Compare detached named values, not object identity shared by both snapshots.
+			$this->assertSame( array( $expected, $expected ), array( $external, $this->named( $db->records[0] ) ) );
+			$this->assertSame( array( "\0\xffp", "\0\xffp" ), array( $records[0]['payload'], $db->records[0]['payload'] ) );
+			$this->assertTrue( $rejected );
+			$this->assertSame( array( $this->driver( $expected ) ), $this->read( $db, array( 7, 12, 1, 8, 2 ) ) );
+		}
+	}
+	public function test_empty_row_constructor_initializes_only_once(): void {
+		foreach ( array( array(), array( 'payload' => 0 ) ) as $layout ) {
+			$row = new SnapshotScaleRow( array(), array() ); $rejected = false;
+			try { $row->__construct( $layout, array( "\0\xffchanged" ) ); }
+			catch ( \LogicException $error ) { $rejected = true; }
+			$this->assertSame( array(), $this->named( $row ) );
+			$this->assertTrue( $rejected );
+		}
+	}
 	public function test_unsupported_sql_including_delete_remains_fail_closed(): void {
 		$db = new SnapshotScaleConnection(); $this->insert( $db, $this->values() ); $records = $db->records;
 		foreach ( array( 'DELETE FROM `wp_foogallery_migrate_legacy_records`', 'TRUNCATE TABLE records', 'UPDATE records SET payload = 1' ) as $sql ) { $this->rejected( function () use ( $db, $sql ) { $db->query( $db->prepare( $sql, array() ) ); }, 'Unsupported host write' ); }
