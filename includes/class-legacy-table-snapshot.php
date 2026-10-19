@@ -444,12 +444,13 @@ class LegacyTableSnapshot {
 		// binds a NEW owner to this exact reader and concrete database identity.
 		if ( $this->snapshot_events_enabled && isset( $this->snapshot_plans[$hash] ) ) {
 			$plan = $this->snapshot_plans[$hash];
-			if ( $plan['key'] === $key && $plan['root'] === $root && $plan['stats'] === $stats && $plan['digest'] === $digest ) {
+			if ( isset( $plan['descriptor'] ) && $plan['key'] === $key && $plan['root'] === $root && $plan['stats'] === $stats && $plan['digest'] === $digest ) {
 				SnapshotOwnedEventPlan::admit_descriptor( $this->scale );
 				$owner = new SnapshotOwnedEventPlan();
-				$owner->bind( $plan['descriptor'], array( 'key' => $key, 'digest' => $digest, 'stats' => $stats,
-					'blog' => $this->blog_id, 'id' => $id, 'generation' => $generation, 'root' => $root, 'revision' => $revision ), $source );
-				$this->snapshot_owner = $owner;
+				if ( $owner->bind( $plan['descriptor'], array( 'key' => $key, 'digest' => $digest, 'stats' => $stats,
+					'blog' => $this->blog_id, 'id' => $id, 'generation' => $generation, 'root' => $root, 'revision' => $revision ), $source ) ) {
+					$this->snapshot_owner = $owner;
+				}
 			}
 		}
 		return $this->records->rebuild_snapshot_stream( $key, $metadata, $source, $stats, $admit, $this->snapshot_owner );

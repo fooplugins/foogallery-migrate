@@ -99,18 +99,45 @@ final class SnapshotOwnedEventPlan {
 			'fields' => $this->fields, 'keys' => $this->keys, 'strings' => $this->strings,
 			'growth_resize_cow' => $growth, 'pages' => $pages, 'native_tagged' => $native, 'digest' => $digest, 'envelope' => $envelope );
 	}
-	/** Fresh ownership for EACH exact source; immutable descriptors carry no credit. */
+	/** Structural arithmetic only, NOT source authentication or calibration.
+	 * A damaged/incomplete descriptor is not an alternative admission policy. */
+	private static function valid_descriptor( $d ) {
+		$fields = array( 'future', 'records', 'private', 'fields', 'keys', 'strings', 'growth_resize_cow', 'pages', 'native_tagged', 'digest', 'envelope' );
+		if ( ! is_array( $d ) || count( $d ) !== count( $fields ) || array_diff( $fields, array_keys( $d ) ) ) { return false; }
+		foreach ( $d as $n ) { if ( ! is_int( $n ) || $n < 0 ) { return false; } }
+		try {
+			$private = self::descriptor_bytes();
+			foreach ( array( 'growth_resize_cow', 'pages', 'native_tagged', 'digest', 'envelope' ) as $field ) { $private = self::add( $private, $d[$field] ); }
+			self::add( $d['future'], $private );
+			$minimum = self::mul( 64, $d['records'] ); // own_record_bytes has a 64-byte floor.
+		} catch ( \Exception $e ) { return false; }
+		return $private === $d['private'] && $d['digest'] >= 16384 && $d['future'] >= $minimum && ( 0 !== $d['records'] || 0 === $d['future'] );
+	}
+	/** Fresh ownership for EACH exact source; immutable descriptors carry no credit.
+	 * False leaves this owner unbound; the repository must use its legacy path. */
 	public function bind( $descriptor, $binding, $source ) {
-		if ( null !== $this->binding || ! $source instanceof LegacySnapshotRowReader || $descriptor['records'] !== $binding['stats']['record_count'] ) { self::fail(); }
+		if ( null !== $this->binding || ! $source instanceof LegacySnapshotRowReader ) { self::fail(); }
+		if ( ! self::valid_descriptor( $descriptor ) || $descriptor['records'] !== $binding['stats']['record_count'] ) { return false; }
 		$this->binding = $binding; $this->source = $source;
 		$this->remaining = $descriptor['future']; $this->private_bytes = $descriptor['private'];
 		$this->records = $descriptor['records'];
+		return true;
 	}
 	public function accepts( $key, $stats, $source ) {
 		return ! $this->complete && null !== $this->binding && $this->binding['key'] === $key && $this->binding['stats'] === $stats && $this->owns_source( $source );
 	}
 	public function matches( $binding ) { return $this->binding === $binding; }
 	public function owns_source( $source ) { return $source === $this->source; }
+	/** DIAGNOSTIC ONLY: not a qualified replacement for aggregate admission.
+	 * Own-only attachments reduce future, never private/digest obligations. Keep
+	 * every private maximum plus the prospective driver+PHP page even if that
+	 * conservatively overlaps the existing page maximum. No sample subtraction,
+	 * shared retaining credit or output-release assumption (including standalone
+	 * reads). Null means legacy fallback, NOT zero remaining work. */
+	public function remaining_workspace( $key, $stats, $source, $prospective_page ) {
+		if ( ! $this->accepts( $key, $stats, $source ) ) { return null; }
+		return self::add( self::add( $this->remaining, $this->private_bytes ), $prospective_page );
+	}
 	/** Caller has assigned validated output and the recursive callee has unwound.
 		* Own bytes ONLY; children/output capacities, pages and digest stay private.
 		* This shadow event does not alter memory admission or release any obligation.

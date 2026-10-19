@@ -153,6 +153,77 @@ class StorageSnapshotOwnedEventTest extends TestCase {
 		catch ( \RuntimeException $e ) { $this->assertStringContainsString( 'scale admission refused', $e->getMessage() ); }
 		$this->assertSame( array(), $db->records ); $this->assertSame( array(), $db->heads );
 	}
+	public function test_remaining_workspace_is_diagnostic_and_keeps_private_digest_and_prospective_page(): void {
+		$db = new SnapshotScaleConnection(); $s = null; $seen = array();
+		$s = $this->snapshot( $db, function () use ( &$s, &$seen ) {
+			if ( null === $s ) { return true; } $owner = $this->property( $s, 'snapshot_owner' );
+			if ( null === $owner || $this->property( $owner, 'complete' ) ) { return true; }
+			$binding = $this->property( $owner, 'binding' ); $source = $this->property( $owner, 'source' );
+			$remaining = $this->property( $owner, 'remaining' ); $private = $this->property( $owner, 'private_bytes' );
+			// Prospective transport is additional even though private already keeps
+			// all ancestor/page maxima. Never infer release from sampled backing.
+			$this->assertSame( $remaining + $private + 12345, $owner->remaining_workspace( 'bucket', $binding['stats'], $source, 12345 ) );
+			$seen[$this->property( $owner, 'events' )] = array( $remaining, $private );
+			return true;
+		} );
+		$s->replace_many( $this->change() );
+		$this->assertCount( 6, $seen ); $this->assertSame( 0, $seen[5][0] );
+		$this->assertSame( $seen[0][1], $seen[5][1], 'Private/digest maxima never become attachment credit.' );
+		$this->assertGreaterThan( 0, $seen[5][1] );
+		$owner = $this->property( $s, 'snapshot_owner' ); $binding = $this->property( $owner, 'binding' );
+		$this->assertNull( $owner->remaining_workspace( 'bucket', $binding['stats'], new \stdClass(), 12345 ), 'Completed ownership must not forecast a later read.' );
+		// Both standalone reads bind fresh owners; their returned values remain
+		// caller-owned. Neither previous completion nor transfer releases private.
+		for ( $i = 0; $i < 2; ++$i ) {
+			$seen = array(); $this->assertSame( $this->value(), $s->read_bounded( 'bucket' ) );
+			$this->assertCount( 6, $seen ); $this->assertSame( 0, $seen[5][0] );
+			$this->assertSame( $seen[0][1], $seen[5][1] );
+			$this->assertNotSame( $owner, $this->property( $s, 'snapshot_owner' ) );
+			$owner = $this->property( $s, 'snapshot_owner' );
+		}
+	}
+	public function test_corrupt_or_incomplete_descriptor_falls_back_to_full_legacy_read(): void {
+		$db = new SnapshotScaleConnection(); $samples = array();
+		$s = $this->snapshot( $db, function ( $bytes ) use ( &$samples ) { $samples[] = $bytes; return true; } );
+		$s->replace_many( $this->change() ); $samples = array(); $s->read_bounded( 'bucket' ); $baseline = $samples;
+		$original = $this->property( $s, 'snapshot_plans' ); $hash = key( $original );
+		$bad = array( null ); $d = $original[$hash]['descriptor'];
+		foreach ( array( 'future' => -1, 'private' => 0, 'records' => $d['records'] + 1, 'pages' => '0' ) as $field => $value ) {
+			$changed = $d; $changed[$field] = $value; $bad[] = $changed;
+		}
+		$changed = $d; unset( $changed['digest'] ); $bad[] = $changed;
+		$changed = $d; $changed['future'] = PHP_INT_MAX; $bad[] = $changed;
+		$changed = $d; $changed['future'] = 0; $bad[] = $changed;
+		foreach ( $bad as $descriptor ) {
+			$plans = $original; $plans[$hash]['descriptor'] = $descriptor;
+			$this->property( $s, 'snapshot_plans', $plans, true );
+			$samples = array();
+			$this->assertSame( $this->value(), $s->read_bounded( 'bucket' ) );
+			$this->assertNull( $this->property( $s, 'snapshot_owner' ), 'Invalid descriptor must not create partial credit.' );
+			$this->assertSame( $baseline, $samples, 'Fallback preserves every legacy observer call and forecast.' );
+		}
+	}
+	public function test_incomplete_owner_cannot_finish_or_forecast_for_a_different_reader(): void {
+		$db = new SnapshotScaleConnection(); $s = null;
+		$s = $this->snapshot( $db, function () use ( &$s ) {
+			if ( null !== $s ) { $owner = $this->property( $s, 'snapshot_owner' );
+				if ( null !== $owner && 1 === $this->property( $owner, 'events' ) ) { return false; }
+			}
+			return true;
+		} );
+		try { $s->replace_many( $this->change() ); $this->fail( 'Interrupted read published.' ); }
+		catch ( \RuntimeException $e ) { $this->assertStringContainsString( 'memory admission', $e->getMessage() ); }
+		$owner = $this->property( $s, 'snapshot_owner' ); $binding = $this->property( $owner, 'binding' );
+		$source = $this->property( $owner, 'source' );
+		$before = $owner->remaining_workspace( 'bucket', $binding['stats'], $source, 12345 );
+		$this->assertNull( $owner->remaining_workspace( 'bucket', $binding['stats'], new \stdClass(), 12345 ) );
+		$changed = $binding['stats']; ++$changed['record_count'];
+		$this->assertNull( $owner->remaining_workspace( 'bucket', $changed, $source, 12345 ) );
+		try { $owner->finish(); $this->fail( 'Incomplete owner finished.' ); }
+		catch ( \RuntimeException $e ) { $this->assertStringContainsString( 'event plan', $e->getMessage() ); }
+		$this->assertSame( $before, $owner->remaining_workspace( 'bucket', $binding['stats'], $source, 12345 ) );
+		$this->assertSame( 1, $db->events['rollback'] ); $this->assertArrayNotHasKey( 'publish', $db->events );
+	}
 	public function test_complete_digest_keeps_owner_private_and_full_future_on_interrupt(): void {
 		$db = new SnapshotScaleConnection(); $s = null; $seen = false;
 		$s = $this->snapshot( $db, function () use ( &$s, &$seen, $db ) {
