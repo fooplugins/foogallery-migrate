@@ -21,6 +21,8 @@ final class StorageCapacityPolicy {
 
 	/** No discovery or executable include of policy data; fixed bounded read. */
 	public static function resolve() {
+		$site = StorageAuthority::table_mode_error();
+		if ( is_wp_error( $site ) ) { return $site; }
 		try {
 			$path = dirname( __FILE__ ) . '/storage-capacity-policy.json';
 			if ( ! is_file( $path ) || ! is_readable( $path ) ) { self::fail(); }

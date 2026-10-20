@@ -31,7 +31,10 @@ class StorageAdmin {
 			try {
 				$main = is_multisite() ? get_main_site_id( get_main_network_id() ) : $blog;
 				$metadata = $wpdb->get_blog_prefix( $main ) . 'options';
-				if ( ! preg_match( '/^[A-Za-z0-9_]+$/D', $metadata ) || '1' !== (string) $wpdb->get_var( $wpdb->prepare( 'SELECT 1 FROM `' . $metadata . '` WHERE option_name=%s AND BINARY option_value=BINARY %s', LegacyStorageSchema::VERSION_OPTION, (string) LegacyStorageSchema::VERSION ) ) || $wpdb->last_error ) { throw new \RuntimeException( 'Shared schema ownership is not verified.' ); }
+				// PHP5's native SQL object result loses numeric property names when
+				// wpdb projects them through get_object_vars(). Keep the exact byte
+				// ownership predicate, but give its literal result a named column.
+				if ( ! preg_match( '/^[A-Za-z0-9_]+$/D', $metadata ) || '1' !== (string) $wpdb->get_var( $wpdb->prepare( 'SELECT 1 AS owned FROM `' . $metadata . '` WHERE option_name=%s AND BINARY option_value=BINARY %s', LegacyStorageSchema::VERSION_OPTION, (string) LegacyStorageSchema::VERSION ) ) || $wpdb->last_error ) { throw new \RuntimeException( 'Shared schema ownership is not verified.' ); }
 				$schema->verify(); $s['schema'] = 'verified';
 				$tables = array_keys( $schema->definitions() ); $table = $tables[1];
 				$s['records'] = $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM `' . $table . '` WHERE blog_id=%d', $blog ) );
@@ -48,6 +51,7 @@ class StorageAdmin {
 
 	/** Display choices never authorize a mutation; the receiver revalidates all. */
 	public static function actions( $s ) {
+		if ( is_multisite() ) { return array(); }
 		if ( ! in_array( $s['backend'], array( 'option', 'table' ), true ) ) { return array(); }
 		if ( 'stable' !== $s['phase'] ) {
 			$a = array( array( 'operation' => 'recover', 'target' => $s['target'], 'confirmation' => 'recover-storage', 'purpose' => 'recover', 'label' => __( 'Recover recorded switch', 'foogallery-migrate' ) ) );
@@ -68,12 +72,12 @@ class StorageAdmin {
 		foreach ( array( __( 'Site ID', 'foogallery-migrate' ) => $blog, __( 'Backend', 'foogallery-migrate' ) => $s['backend'], __( 'Switch phase', 'foogallery-migrate' ) => $s['phase'], __( 'Shared schema', 'foogallery-migrate' ) => $s['schema'], __( 'Option bytes', 'foogallery-migrate' ) => $s['option_bytes'], __( 'Site table records (including retained copies)', 'foogallery-migrate' ) => $s['records'] ) as $label => $value ) {
 			echo '<dt><strong>' . esc_html( $label ) . '</strong></dt><dd>' . esc_html( null === $value ? __( 'Unavailable', 'foogallery-migrate' ) : $value ) . '</dd>';
 		}
-		echo '</dl><p>' . esc_html( $s['calibrated'] ? __( 'Runtime capacity profile available. Each operation still checks size, memory, ownership and the deadline.', 'foogallery-migrate' ) : __( 'Not approved for this runtime. Switching and recovery will refuse safely until a reviewed capacity profile is configured. No fallback to unlimited memory or automatic switching.', 'foogallery-migrate' ) ) . '</p>';
+		echo '</dl><p>' . esc_html( $s['calibrated'] ? __( 'Release capacity policy available. Each operation still checks size, memory, ownership and the deadline.', 'foogallery-migrate' ) : __( 'Not approved for this runtime by the shipped release capacity policy. Switching and recovery refuse safely. A customer certificate or manually configured profile cannot enable this release. No fallback to unlimited memory or automatic switching.', 'foogallery-migrate' ) ) . '</p>';
 		if ( '' !== $s['problem'] ) { echo '<p role="alert">' . esc_html( $s['problem'] ) . '</p>'; }
-		echo '<p>' . esc_html__( 'Table provisioning on multisite requires network activation. This does not authorize a network-wide backend switch. Recovery follows only the recorded authoritative phase. Foreign ownership, corrupt storage or insufficient capacity must be resolved before retrying.', 'foogallery-migrate' ) . '</p>';
+		echo '<p>' . esc_html__( 'Table migration storage is supported on single-site installations only. Multisite continues to use options. Recovery follows only the recorded authoritative phase. Foreign ownership, corrupt storage or insufficient capacity must be resolved before retrying. Never clear an owner because of its age, a missing PID or a closed browser; assisted recovery requires independently established whole-worker and output quiescence.', 'foogallery-migrate' ) . '</p>';
 		if ( $s['retained'] ) { echo '<p>' . esc_html__( 'A previous table copy is retained after reversing to options. Re-import explicitly replaces that inactive copy; it never merges both backends.', 'foogallery-migrate' ) . '</p>'; }
 		$actions = self::actions( $s );
-		if ( 'option' === $s['backend'] && 'stable' === $s['phase'] && 'verified' !== $s['schema'] && ( ! is_multisite() || current_user_can( 'manage_network_options' ) ) ) {
+		if ( ! is_multisite() && 'option' === $s['backend'] && 'stable' === $s['phase'] && 'verified' !== $s['schema'] ) {
 			array_unshift( $actions, array( 'operation' => 'provision', 'scope' => 'installation', 'target' => 'table', 'confirmation' => 'provision-shared-schema', 'purpose' => 'provision_schema', 'label' => __( 'Provision shared schema only (keep options)', 'foogallery-migrate' ) ) );
 		}
 		foreach ( $actions as $a ) {

@@ -21,6 +21,12 @@ class StorageAuthority {
 	const SHARED_STATE_TABLE_SUFFIX = 'foogallery_migrate_legacy_state';
 	const SHARED_RECORDS_TABLE_SUFFIX = 'foogallery_migrate_legacy_records';
 
+	/** Release scope only. Never infer option authority from this restriction. */
+	public static function table_mode_error() {
+		return is_multisite() ? new \WP_Error( 'foogallery_migrate_storage_single_site_required',
+			__( 'Table migration storage is supported on single-site installations only. Multisite continues to use options. No storage was changed; retain any existing table or recovery evidence for administrator assistance.', 'foogallery-migrate' ) ) : false;
+	}
+
 	/**
 	 * @return false|\WP_Error False only for unambiguous legacy option authority.
 	 */
@@ -105,6 +111,9 @@ class StorageAuthority {
 				return is_wp_error( $error ) ? $error : null;
 			}
 			$r = StorageControl::decode( $raw, $blog );
+			// A pre-existing table selection is evidence, NOT permission to fall
+			// back to stale options when table mode is outside this release scope.
+			if ( 'table' === $r['backend'] && is_wp_error( self::table_mode_error() ) ) { return self::table_mode_error(); }
 			if ( ! StorageControl::runtime_ready( $r, $control->read( self::AUTHORITY_OPTION ) ) ) { return self::recovery_error(); }
 			$markers = array( 'foogallery_migrate_storage', MigratedStore::SCHEMA_OPTION, MigratedStore::MIGRATION_OPTION );
 			if ( ! $writer instanceof StorageMaintenanceGate || true !== $writer->assert_writer() ) { $markers[] = self::MAINTENANCE_OPTION; }

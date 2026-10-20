@@ -49,6 +49,8 @@ class StorageProvisioning {
 			( $r['blog_id'] !== $blog && $r['blog_id'] !== (string) $blog ) || 'installation' !== $r['scope'] || 'table' !== $r['target'] ||
 			'provision-shared-schema' !== $r['confirmation'] || ! is_string( $r['nonce'] ) ) { return self::error( 'invalid_request' ); }
 		if ( ! wp_verify_nonce( $r['nonce'], 'foogallery_migrate_storage_provision_schema_' . $blog ) ) { return self::error( 'invalid_nonce' ); }
+		$site = StorageAuthority::table_mode_error();
+		if ( is_wp_error( $site ) ) { return $site; }
 		return true;
 	}
 
@@ -59,6 +61,7 @@ class StorageProvisioning {
 	/** Caller already owns the current site's quiescent maintenance gate. */
 	public function __construct( $gate, $deadline ) {
 		global $wpdb;
+		if ( is_wp_error( StorageAuthority::table_mode_error() ) ) { $this->fail(); }
 		$this->db = $wpdb; $this->gate = $gate; $this->pin = $gate->connection();
 		$this->blog = get_current_blog_id(); $this->prefix = $wpdb->prefix; $this->deadline = $deadline;
 		$this->main = is_multisite() ? get_main_site_id( get_main_network_id() ) : $this->blog;
@@ -69,11 +72,7 @@ class StorageProvisioning {
 	/** Missing-table repair is additive. Never alter/drop an existing table. */
 	public function ensure() {
 		$this->context();
-		if ( is_multisite() ) {
-			if ( ! current_user_can( 'manage_network_options' ) ) { $this->fail(); }
-			if ( ! function_exists( 'is_plugin_active_for_network' ) ) { require_once ABSPATH . 'wp-admin/includes/plugin.php'; }
-			if ( ! is_plugin_active_for_network( plugin_basename( FOOGM_FILE ) ) ) { $this->fail(); }
-		}
+		if ( is_wp_error( StorageAuthority::table_mode_error() ) ) { $this->fail(); }
 		$schema = new LegacyStorageSchema( $this->db );
 		$statements = $schema->statements();
 		$database = $this->pin->get_var( 'SELECT DATABASE()' );

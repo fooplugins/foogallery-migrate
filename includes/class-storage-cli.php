@@ -19,13 +19,13 @@ class StorageCli {
 	 * ## OPTIONS
 	 *
 	 * <operation>
-	 * : status, preflight, switch, recover or replace.
+	 * : status, provision, preflight, switch, recover, replace or discard.
 	 *
 	 * [--target=<backend>]
 	 * : table or option. Required except for status; preflight requires table.
 	 *
 	 * [--confirm=<intent>]
-	 * : switch-to-table, switch-to-option, recover-storage or replace-retained-with-table.
+	 * : provision-shared-schema, switch-to-table, switch-to-option, recover-storage, replace-retained-with-table or discard-copy.
 	 *
 	 * ## EXAMPLES
 	 *
@@ -41,16 +41,16 @@ class StorageCli {
 
 	public static function execute( $operation, $flags ) {
 		if ( ! current_user_can( 'manage_options' ) ) { return new \WP_Error( 'foogallery_migrate_storage_forbidden', __( 'Select an authorized site administrator with --user.', 'foogallery-migrate' ) ); }
-		if ( ! is_array( $flags ) || ! in_array( $operation, array( 'status', 'preflight', 'switch', 'recover', 'replace' ), true ) ) { return self::invalid(); }
+		if ( ! is_array( $flags ) || ! in_array( $operation, array( 'status', 'provision', 'preflight', 'switch', 'recover', 'replace', 'discard' ), true ) ) { return self::invalid(); }
 		if ( 'status' === $operation ) { return count( $flags ) ? self::invalid() : StorageAdmin::status(); }
 		if ( 2 !== count( $flags ) || ! isset( $flags['target'], $flags['confirm'] ) || ! in_array( $flags['target'], array( 'option', 'table' ), true ) ) { return self::invalid(); }
 		$target = $flags['target'];
-		if ( ( 'preflight' === $operation || 'replace' === $operation ) && 'table' !== $target ) { return self::invalid(); }
-		$confirmation = 'recover' === $operation ? 'recover-storage' : ( 'replace' === $operation ? 'replace-retained-with-table' : 'switch-to-' . $target );
+		if ( in_array( $operation, array( 'provision', 'preflight', 'replace', 'discard' ), true ) && 'table' !== $target ) { return self::invalid(); }
+		$confirmation = 'recover' === $operation ? 'recover-storage' : ( 'replace' === $operation ? 'replace-retained-with-table' : ( 'provision' === $operation ? 'provision-shared-schema' : ( 'discard' === $operation ? 'discard-copy' : 'switch-to-' . $target ) ) );
 		if ( $confirmation !== $flags['confirm'] ) { return self::invalid(); }
-		$purpose = 'recover' === $operation ? 'recover' : ( 'replace' === $operation ? 'option_reimport' : ( 'table' === $target ? 'option_import' : 'table_export' ) );
+		$purpose = 'recover' === $operation ? 'recover' : ( 'replace' === $operation ? 'option_reimport' : ( 'provision' === $operation ? 'provision_schema' : ( 'discard' === $operation ? 'discard' : ( 'table' === $target ? 'option_import' : 'table_export' ) ) ) );
 		$blog = get_current_blog_id();
-		$request = array( 'blog_id' => $blog, 'scope' => 'site', 'target' => $target, 'confirmation' => $confirmation, 'nonce' => wp_create_nonce( 'foogallery_migrate_storage_' . $purpose . '_' . $blog ) );
+		$request = array( 'blog_id' => $blog, 'scope' => 'provision' === $operation ? 'installation' : 'site', 'target' => $target, 'confirmation' => $confirmation, 'nonce' => wp_create_nonce( 'foogallery_migrate_storage_' . $purpose . '_' . $blog ) );
 		return ( new StorageOperations() )->dispatch( $operation, $request );
 	}
 

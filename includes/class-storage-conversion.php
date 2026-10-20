@@ -172,6 +172,8 @@ class StorageConversion {
 		$purpose = $discard ? 'discard' : ( $replacement ? 'option_reimport' : ( $recovery ? 'recover' : ( 'table' === $r['target'] ? 'option_import' : 'table_export' ) ) );
 		$nonce = wp_verify_nonce( $r['nonce'], 'foogallery_migrate_storage_' . $purpose . '_' . $blog );
 		if ( 1 !== $nonce && 2 !== $nonce ) { return self::error( 'invalid_nonce' ); }
+		$site = StorageAuthority::table_mode_error();
+		if ( is_wp_error( $site ) ) { return $site; }
 		StorageScalarObserver::refusal_scope( true );
 		return true;
 	}

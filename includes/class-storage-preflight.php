@@ -59,6 +59,8 @@ class StoragePreflight {
 		if ( 1 !== $nonce && 2 !== $nonce ) {
 			return self::error( 'invalid_nonce', 'The migration storage request has expired or is invalid.' );
 		}
+		$site = StorageAuthority::table_mode_error();
+		if ( is_wp_error( $site ) ) { return $site; }
 		$bytes = $this->option_size();
 		if ( is_wp_error( $bytes ) ) { return $bytes; }
 		if ( null !== $this->capacity ) {
