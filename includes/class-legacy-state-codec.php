@@ -228,7 +228,9 @@ class LegacyStateCodec {
 			}
 		} else {
 			$encoded = $this->encode( $value );
-			hash_update( $context, 'value:' . strlen( $encoded ) . ':' . $encoded );
+			// Same byte domain, without another full encoded scalar concatenation.
+			hash_update( $context, 'value:' . strlen( $encoded ) . ':' );
+			hash_update( $context, $encoded );
 		}
 	}
 

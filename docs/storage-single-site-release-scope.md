@@ -59,3 +59,27 @@ workloads, interruption/refusal safety, browser workflow execution, and independ
 immutable source/package acceptance. Arbitrary-byte exact codec/refusal evidence
 remains distinct from native-text public-conversion success. No cap, ownership,
 authorization, source-equality or losslessness guarantee is relaxed here.
+
+## Representation-lifetime checkpoint (21 October 2026)
+
+The next bounded source slice releases raw bytes after exact option decoding,
+refreshes table metadata one state at a time, preserves the logical hash byte
+domain without scalar concatenation, and admits backup/exact-cleanup material
+before allocation. Current-data reversal and all existing caps remain unchanged.
+This reduces simultaneous representations; it does not eliminate full decode,
+the largest single-state graph, native roundtrip or buffered SQL workspace.
+
+Host lifetime regressions pass (15 tests / 87 assertions); an expanded focused
+set passes (164 tests / 25,336 assertions at 128M). The retained default-memory
+20K roundtrip still errors at finite scale admission, not an OOM fatal. No
+baseline classification or full-suite pass is claimed. The new positive journey
+companion's host barrier is RED at the real empty-policy resolver, before SQL.
+Its native20K conversion and distinct actual10K AIGPL migration/edit/reversal
+steps have not been executed. Fixture teardown is not product retirement proof.
+
+Release classes remain empty. Native driver/preparation workspace is not yet
+source-qualified; no numerical policy is approved. Native identity transport
+did not produce an identity receipt, so there is no new floor/package claim.
+One separate PHPUnit child was not pre-reserved; the execution ledger records
+the late debit and stops further probes/builds. These partial results require
+independent review on task t_fc1db765, not feature or release acceptance.

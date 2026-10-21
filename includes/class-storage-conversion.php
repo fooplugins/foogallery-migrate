@@ -290,6 +290,14 @@ class StorageConversion {
 	}
 
 	private function retain_and_select( $r ) {
+		$token = $this->open_capacity( 'commit_cleanup_response' );
+		try { $this->retain_and_select_owned( $r ); }
+		catch ( \Exception $error ) { $this->abort_capacity(); throw $error; }
+		catch ( \Throwable $error ) { $this->abort_capacity(); throw $error; }
+		// The owned helper's raw/backup/SQL buffers have unwound before release.
+		$this->close_capacity( $token );
+	}
+	private function retain_and_select_owned( $r ) {
 			if ( 'table' === $r['to'] ) {
 				$original = $this->option_raw();
 				$backup = null === $original ? serialize( array() ) : $original;
@@ -306,6 +314,14 @@ class StorageConversion {
 			}
 	}
 	private function cleanup_source( $r ) {
+		$token = $this->open_capacity( 'commit_cleanup_response' );
+		try { $this->cleanup_source_owned( $r ); }
+		catch ( \Exception $error ) { $this->abort_capacity(); throw $error; }
+		catch ( \Throwable $error ) { $this->abort_capacity(); throw $error; }
+		// In particular, keep the exact-byte DELETE's escaped SQL forecast live.
+		$this->close_capacity( $token );
+	}
+	private function cleanup_source_owned( $r ) {
 			if ( 'table' === $r['backend'] ) {
 				$this->require_true( $this->controls->read( StorageAuthority::AUTHORITY_OPTION ) === json_encode( StorageControl::sentinel( $r ) ) );
 				if ( $this->option_present( FOOGALLERY_MIGRATE_OPTION_DATA ) ) {
@@ -373,9 +389,10 @@ class StorageConversion {
 			$this->budget( strlen( $raw ) );
 			StorageScalarObserver::milestone( 'source-read' );
 			// Structural proof before native hydration also protects PHP5.4, which
-			// lacks allowed_classes. This is NOT streaming conversion and does not
-			// reduce the calibrated whole-option memory requirement.
+			// lacks allowed_classes. Decode still requires the whole option graph
+			// and its exact serialized roundtrip; this is NOT streaming conversion.
 			$value = $this->option_decoder()->decode( $raw );
+			unset( $raw ); // Exact decode is complete; hashing needs only the graph.
 			StorageScalarObserver::milestone( 'source-decoded' );
 		}
 		$this->require_true( count( $value ) <= $this->limit( 'max_heads', 100 ) );
@@ -392,20 +409,25 @@ class StorageConversion {
 			'M' => $c->limit( 'max_row_bytes' ), 'H' => $c->limit( 'max_heads' ), 'D' => $c->limit( 'max_depth' ), 'W' => $c->limit( 'copy_batch_bytes' ) ) );
 	}
 	private function close_capacity( $token ) { if ( null !== $token ) { $this->capacity()->close( $this, $token ); } }
+	private function abort_capacity() { if ( null !== $this->capacity() ) { $this->capacity()->abort(); } }
 	private function source_metadata( $backend, $refresh ) {
 		$token = $this->open_capacity( 'table' === $backend ? 'table_verify' : 'option_verify' );
-		$result = $this->source_metadata_owned( $backend, $refresh );
+		try { $result = $this->source_metadata_owned( $backend, $refresh ); }
+		catch ( \Exception $error ) { $this->abort_capacity(); throw $error; }
+		catch ( \Throwable $error ) { $this->abort_capacity(); throw $error; }
 		$this->close_capacity( $token ); return $result;
 	}
 	private function source_metadata_owned( $backend, $refresh ) {
-		if ( 'option' === $backend || $refresh ) {
-			$s = 'option' === $backend ? $this->option_snapshot() : $this->table_snapshot( true );
+		if ( 'option' === $backend ) {
+			$s = $this->option_snapshot();
 			return array( 'physical' => $s['physical'], 'logical' => $this->codec->snapshot_digest( $s['value'] ) );
 		}
-		$this->ready(); $heads = $this->heads(); $physical = hash( 'sha256', json_encode( $heads ) );
-		$logical = $this->codec->snapshot_digest_reader( count( $heads ), function ( $i ) use ( $heads ) {
+		$heads = $this->table_heads( $refresh ); $physical = hash( 'sha256', json_encode( $heads ) ); $seen = array();
+		$logical = $this->codec->snapshot_digest_reader( count( $heads ), function ( $i ) use ( $heads, &$seen ) {
+			$this->ready();
 			$head = $heads[$i]; $this->require_true( $this->number( $head['state_order'] ) === $i );
 			$key = $this->codec->decode( $head['key_value'] );
+			$this->require_true( ( is_int( $key ) || is_string( $key ) ) && ! array_key_exists( $key, $seen ) ); $seen[$key] = true;
 			return array( 'key' => $key, 'value' => $this->snapshot->read_bounded( $key ) );
 		} );
 		$this->require_true( $physical === $this->table_physical_digest() );
@@ -479,8 +501,9 @@ class StorageConversion {
 
 	private function table_physical_digest() { return hash( 'sha256', json_encode( $this->heads() ) ); }
 
-	private function table_snapshot( $verify_dirty ) {
-		$this->ready(); $heads = $this->heads(); $value = array();
+	/** Maintenance may refresh heads, but never retains a complete state graph. */
+	private function table_heads( $verify_dirty ) {
+		$this->ready(); $heads = $this->heads();
 		// Dirty-head maintenance is material snapshot work too, not a free
 		// metadata pass before the coordinator's operation-owned admission.
 		$encoded_bytes = 0;
@@ -494,10 +517,15 @@ class StorageConversion {
 			}
 			$heads = $this->heads();
 		}
-		$before = hash( 'sha256', json_encode( $heads ) );
 		$encoded_bytes = 0;
 		foreach ( $heads as $head ) { $encoded_bytes += (int) $head['payload_bytes']; }
 		$this->table_budget( $encoded_bytes );
+		return $heads;
+	}
+
+	private function table_snapshot( $verify_dirty ) {
+		$heads = $this->table_heads( $verify_dirty ); $value = array();
+		$before = hash( 'sha256', json_encode( $heads ) );
 		foreach ( $heads as $head ) {
 			$this->ready(); $key = $this->codec->decode( $head['key_value'] );
 			$this->require_true( ( is_int( $key ) || is_string( $key ) ) && ! array_key_exists( $key, $value ) );
@@ -531,6 +559,7 @@ class StorageConversion {
 	private function require_true( $value ) { if ( true !== $value ) { throw new \RuntimeException( 'Retain recorded authority and all conversion evidence; storage recovery is required.' ); } }
 	private function end() { $this->require_true( $this->gate->release_maintenance() ); $this->owns_gate = false; $this->gate = null; StorageScalarObserver::milestone( 'released' ); }
 	private function failed( $error ) {
+		$this->abort_capacity();
 		// Only this object's owner may release. An uncertain phase/CAS is never
 		// rolled back by guessing which backend won; its raw evidence remains.
 		if ( $this->owns_gate && $this->gate instanceof StorageMaintenanceGate ) { $this->gate->release_maintenance(); $this->owns_gate = false; $this->gate = null; }
