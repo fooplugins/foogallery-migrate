@@ -1,182 +1,176 @@
-# Legacy storage upgrade — completion plan
+# Legacy storage upgrade — first-release plan
 
-**Prepared:** 2026-10-22
+**Updated:** 2026-10-22
 
-**Status:** Documentation ready; implementation not started under this plan
+**Status:** Five scope cuts approved; documentation only. Implementation remains stopped.
 
 **Branch:** `feature/migrated-store-scalability`
 
-**Starting PR head:** `206655cbfd49541b0f957d32028d1e53c17f39a1`
+**Reviewed PR source:** `206655cbfd49541b0f957d32028d1e53c17f39a1`
 
-**Pre-PR comparison base:** `3bb151465818fbb164edb35866118794563ce12a` (`develop`)
+**Pre-PR behavior comparison:** `3bb151465818fbb164edb35866118794563ce12a` (`develop`)
 
-**PR:** [#15 — Use a bounded store for migrated object state](https://github.com/fooplugins/foogallery-migrate/pull/15)
+**Previous plan commit:** `cb8aa51`; its S0–S9 sequence is superseded by R0–R4 below.
 
-**Requirements:** [Legacy storage upgrade](legacy-storage-upgrade.md)
+**Requirements:** [Storage design and approved release boundary](legacy-storage-upgrade.md#approved-first-release-boundary)
 
-## Scope and acceptance
+## Approved scope and authority
 
-Finish the storage-only upgrade already started in PR #15. Retain its codecs, option/table backends, repositories, schema, authority, maintenance and conversion infrastructure. Do not restart that architecture, add a v2 engine, introduce migration-config JSON, change source adapters, or change legacy migration semantics.
+On 2026-10-22 Brad explicitly approved all five cuts in the [PR simplification proposal](https://github.com/fooplugins/foogallery-migrate/pull/15#issuecomment-6287530658), requested this documentation update/commit, and said not to start implementation. The comment originally recorded a proposal; this later approval settles its scope amendments. It does not authorize development, delegation, database changes, pushing, merging or release.
 
-Persistence-facing caller changes in the existing engine are permitted only to replace unbounded storage access. Queue order, identities, selection, statuses, batching, child loading, destination writes, retries, content replacement and image-tag results must remain equivalent to the pre-PR implementation. Any change to those decisions is outside this plan and requires separate approval.
+Deliver a testable **single-site** storage upgrade using the existing migration engine and useful PR #15 foundations. Preserve codecs, repositories, authority and bounded table access where they serve the release. Existing complexity is not automatically a requirement to preserve: simplify or remove obsolete product calibration/proof paths with reviewed replacement coverage, without rewriting the engine.
 
-The user-facing outcome is reliable large-site storage, not merely more repository methods or admission refusals:
+| Approved cut | First release | Explicitly deferred/excluded |
+|---|---|---|
+| Capacity policy | Small release-owned policy, measured conservative limits/headroom, clear unsupported-input refusals | Per-machine/customer certificates and bespoke dataset qualification; allocation diagnostics as customer prerequisites |
+| Single-site only | Table mode on single-site; unchanged multisite option behavior and explicit refusal of table operations | Network table enablement/provisioning, registry/topology expansion, large-network uninstall preparation |
+| Assisted hard-crash recovery | Resume ordinary handled failures; uncertain ownership blocks until documented operator procedure proves old workers cannot resume | Automatic ambiguous-owner takeover, new worker-fencing platform, age/PID/browser-based lock removal |
+| Minimal maintenance UI | Inspect → explicitly enable → copy/verify → switch; current-data reversal when safe, basic size recommendation, essential cleanup/uninstall | Multi-tier advice, growth-triggered repeat notices, separate convenience controls and diagnostic polish |
+| Bounded conversion and appropriate proof | Initial full legacy-option decode within measured limits, then bounded copy/verification; native WordPress text journey plus separate arbitrary-byte codec/refusal tests | Universal streaming decoder; requiring invalid UTF-8 to survive a native text round trip unchanged |
 
-| Acceptance | Tasks |
-|---|---|
-| Options remain the default; upgrade/activation do not create tables or convert data; existing behavior and readable compact/non-compact state remain compatible | S0, S2–S6, S8 |
-| Table-backed log, lookup, list, selection, migration-turn, content and tag requests use page/affected-tree memory, not total stored state | S2–S5, S8 |
-| Administrators can clear state, reset storage and remove all internal data; uninstall works from the shipped ZIP; outputs/source data remain untouched | S1, S7–S9 |
-| Supported single-site users can explicitly enable, recover and reverse table mode from current data with verified authority and bounded work | S6–S8 |
-| Size-based, filterable recommendations are useful and never select table mode automatically | S7–S8 |
-| Full source/package acceptance, supported runtime checks and representative native scaling evidence pass | S0, S6, S8 |
-| Multisite table selection remains unavailable until network lifecycle, isolation and cleanup acceptance pass | S9 |
+No v2 engine, migration-config JSON, source adapter redesign, new identities, queue semantics, destination behavior, background runner or runtime-floor increase. Persistence-facing caller edits must preserve existing selections, statuses, ordering, lazy child loading, batching, retry/resume, content replacement and tag results.
 
-Single-site acceptance at S8 is an intermediate delivery milestone, not completion of the full multisite design. Storage cleanup never rolls back migrations or deletes FooGallery output, attachments, source-plugin data, or edited post content.
+## Two milestones, not one expanding finish line
 
-## Current implementation and evidence
+### M1 — Testable integrated candidate (R1)
 
-See the [PR implementation inventory](legacy-storage-upgrade.md#pr-15-implementation-status) for what to reuse. Repository/schema existence is not end-to-end acceptance. In particular:
+On a deliberately owned disposable single-site installation, using production entry points and real WordPress/SQL:
 
-- Production backend selection exists; this is no longer just an injected table prototype.
-- Table scalar creation/deletion and atomic content-reset primitives exist; do not repeat obsolete TODOs from early checkpoint documents.
-- Whole-collection gallery/album reads, whole-history consumers and full image-tag construction remain.
-- Current uninstall does not cover the new schema/resources and requires development-only Composer files.
-- Public capacity classes are empty; injected policies do not demonstrate a usable public feature.
-- Multisite table operations are intentionally rejected.
+1. Inspect existing large option-backed state and explicitly enable table mode.
+2. Copy and verify before flipping the single authority.
+3. Run an actual representative large migration through the existing engine.
+4. Edit table-backed state and demonstrate the edits are retained.
+5. Reverse from **current** table data when the option representation fits safely.
+6. Clear/remove internal state and exercise packaged uninstall without deleting migrated/source content.
 
-Evidence to retain, but not promote to a current release pass:
+Exercise this path from R0, fixing its first concrete failing step in small R1 slices. Demonstrate it on the supported runtime floor as well as the development runtime before expanding the matrix. A matching ZIP must work without development dependencies. A fake backend, injected test policy, safe refusal, or collection of isolated passes does not satisfy M1.
 
-- [October 20 review checkpoint](pr15-review-checkpoint-2026-10-20.md): failing/timed-out full PHPUnit discovery, focused passes, package checks and outstanding acceptance.
-- [Single-site scope / October 21 lifetime checkpoint](storage-single-site-release-scope.md): limited runtime-floor scope passes, focused tests, full-suite timeout, and unexecuted positive native20K/actual10K AIGPL journeys.
-- [Native recovery checkpoint](storage-native-recovery-checkpoint.md): distinguish recoverable handled failures from ambiguous/dead-worker recovery; age alone never proves safety.
+M1 is for controlled testing, not release. Record known incomplete paths and prevent unsupported use; do not broadly expose table mode just because the selected journey works.
 
-These reports are tied to their own source/package revisions. This planning commit has not rerun runtime tests or modified a WordPress database. S0 must establish a fresh baseline at the actual implementation starting commit.
+### M2 — First-release readiness (R4)
+
+M1 stays green, all supported storage-backed flows are compatible and bounded, essential cleanup/recovery is verified, the basic advisor works, and the maintained release suite plus source/ZIP acceptance pass. Deferred features are **not** M2 requirements. Readiness is not authorization to publish.
+
+## Existing work and evidence
+
+The [source inventory](legacy-storage-upgrade.md#pr-15-implementation-status) is pinned to the reviewed PR head, not a current test pass. Reuse the option/table backends, schema, scalar mutation, history/content primitives, authority, provisioning and conversion services. Do not redo extraction.
+
+Known starting barriers:
+
+- Empty shipped capacity classes prevent production conversion; test-injected policies do not solve that.
+- Uninstall requires excluded `vendor/autoload.php` and targets the older table layout rather than all current resources.
+- Whole-collection gallery/album paths, option-only history consumers, unsupported URL lookup and full-history tag construction remain.
+- Full PHPUnit discovery previously failed/timed out; focused passes are not complete acceptance.
+- Multisite table refusal is intentional and remains a release requirement, not a bug to remove.
+
+Historical receipts: [October 20 review](pr15-review-checkpoint-2026-10-20.md), [single-site/lifetime checkpoint](storage-single-site-release-scope.md), and [native recovery checkpoint](storage-native-recovery-checkpoint.md). Keep them unchanged as historical records. Their old “not waived” language does not reinstate requirements explicitly amended by Brad, and their successes do not certify a newer source tree.
 
 ## Ordered work
 
-Execute in the order below. Each task needs its focused tests, independent review and an accepted local commit before dependent work begins. Do not turn public table selection on early. A task may be split into smaller commits without changing its exit criteria or creating another tracker.
+R0–R4 replace the previous S0–S9 sequence. All tasks are `pending`: no agents assigned, zero repairs, no new runtime evidence or implementation commits. Proposed routing below applies only after an authorized development kickoff and budget. Independent QA is GPT-6 Sol Medium, separate from the developer.
 
-All tasks are currently `pending`, with no developer/QA agent assigned, zero repairs, no new validation evidence and no implementation commit. The model column is proposed routing for a future authorized `budget-dev` run, not agents launched by this documentation task. Independent QA is GPT-6 Sol Medium for every task.
+| ID | Deliverable / exit | Depends on | Owned areas | Proposed developer and reason |
+|---|---|---|---|---|
+| R0 | Runnable disposable journey, first reproducible failure, classified baseline | — | Existing integration runners/fixtures, relevant tests, this tracker | Sol High — environment, failure attribution and compatibility |
+| R1 | M1: smallest safe integrated large-site journey passes on source/ZIP and runtime floor | R0 | Capacity/conversion, affected repository/caller paths, essential cleanup/uninstall; one failing-step slice at a time | Sol High — cross-component authority, memory and lifecycle |
+| R2 | Remaining supported hot paths, parity and failure safety complete | R1 | History/log, content, gallery/album, image-tag, cleanup/recovery tests and affected source | Sol High — bounded access and legacy behavior |
+| R3 | Basic recommendation and usable minimal operator workflow | R2 | Storage admin/CLI/views, advisor, user guidance | Luna High — established services and bounded presentation work; cross-service defects go to Sol |
+| R4 | M2: independent first-release source/package acceptance | R3 | Maintained suites, native/browser/package checks, performance evidence, this tracker | Sol High — integrated qualification, with separate Sol Medium QA |
 
-| ID | Priority / deliverable | Depends on | Likely owned areas | Proposed developer and reason | Status |
-|---|---|---|---|---|---|
-| S0 | P0: Reproduce baseline, map callers and lock compatibility fixtures | — | `tests/`, integration runners, this plan | Sol High — cross-cutting failure diagnosis and parity | pending |
-| S1 | P0: Complete cleanup services and packaged uninstall | S0 | Lifecycle/bootstrap, resource manifest, cleanup services, lifecycle/package tests | Sol High — destructive scope, interrupted work and cache correctness | pending |
-| S2 | P0: Finish history operations and production consumers | S1 | History/table repositories, engine, log view, lookup consumers | Sol High — cross-component identity/revision semantics | pending |
-| S3 | P0: Finish bounded content scan/list/replacement access | S2 | Content repository/migrator/views, source-identity/count lookups | Sol High — atomic checkpoint and content-safety parity | pending |
-| S4 | P0: Finish gallery/album paging and affected-tree mutations | S3 | Collection/table repositories, settings facade, migrator base/engine/views | Sol High — queue/selection/child semantics and memory | pending |
-| S5 | P0: Finish incremental image-tag queue | S4 | Image-tag repository, engine tag paths, tag fixtures | Sol High — resumable queue construction and merge parity | pending |
-| S6 | P0: Qualify public conversion, capacity and recovery | S5 | Capacity policy/admission, conversion/control/gate, native journeys | Sol High — real SQL, authority and finite memory qualification | pending |
-| S7 | P1: Finish recommendation, status and cleanup controls | S6 | Storage admin/CLI/views/assets, advisor and UX tests | Luna High — established services and explicitly defined UI behavior; escalate cross-service defects | pending |
-| S8 | P0 release gate: Accept the single-site source and ZIP | S7 | Test/integration/package evidence, user documentation, this plan | Sol High — independent end-to-end integration and performance qualification | pending |
-| S9 | P2 separate milestone: Complete multisite lifecycle and enablement | S8 | Registry/schema authority, site hooks, network admin/CLI, multisite tests | Sol High — cross-network scope and large-network cleanup | pending |
+Dependencies govern acceptance, not when tests may be tried. Run the journey from R0 onward; do not wait for complete domain repositories, an exhaustive matrix or UI polish. Commit accepted slices serially; keep integration runnable between them.
 
-P0 marks blockers to a safe, usable single-site release. S7 is still required before S8 acceptance. Multisite support must not delay identification/fixing of single-site defects, but its existing option-mode behavior must not regress during S0–S8.
+### R0 — Prepare once and expose the first real failure
 
-### S0 — Establish the baseline and executable parity contract
+- Verify Git state, actual starting SHA, PHP/WP/database versions, dependencies and access to an explicitly owned disposable site. Prepare one reproducible runner and teardown procedure using existing guards; never run destructive fixtures on Brad's working Local site.
+- Choose a representative actual gallery migration fixture, including the known AIGPL shape, and record its size, expected outputs and protected content. Prefer existing native journey scripts. Run the public path immediately and capture its first failure (the empty policy is the known starting barrier).
+- Attempt baseline discovery once with an explicit runtime budget and capture exact failures/timeouts. Split it for attribution where necessary; do not repeatedly rerun the same uninformative timeout. Apply the test classification below.
+- Inventory operational resources and high-cardinality production callers; map gaps to R1 or R2. Add/reuse golden pre-PR fixtures for the next affected behavior, not an exhaustive new framework before beginning repairs.
+- Record ready-to-run commands, fixture ownership and the next smallest repair. Lack of a passing whole suite is not a reason to postpone all integration work; unexplained relevant failures still block M2.
 
-1. Record exact HEAD, PHP/WP/database versions, memory limits, dependencies and test commands. Confirm the current checkout and retain any unrelated user changes.
-2. Run the complete host suite and separate PHP/JS regressions. Capture exact failure names and distinguish deterministic failures, admission refusals and timeouts. Split discovery into reproducible groups if needed; a partial run is not a pass. Do not increase limits silently to hide the problem.
-3. Trace every operational key and every production caller of the five repositories. Record reads/writes that hydrate complete state, not only obvious `get_all()` calls. Include logs, debug mode, AJAX list/selection/retry/cancel, source identity/URL lookup, content counts and image tags.
-4. Establish golden fixtures against the pre-PR base for logical state and user-visible transitions/results: typed/missing/false/null keys, order, nested children, errors, history identities/revisions, retry/resume and source adapter behavior. Audit PR compaction/child-loading changes explicitly.
-5. Extend the exact resource manifest with new and superseded options/tables, locks, writers, backups, transients and schema metadata. Identify disposable native fixtures and prove their setup/teardown ownership before running them.
-6. Classify the first real public-journey blocker (currently empty policy) and map downstream outstanding workload checks. Keep native identity transport, exact-byte codec/refusal cases and customer-shaped positive journeys distinct.
+**Exit:** Environment and runner work, first failure is reproducible, relevant baseline failures are classified, and the next slice is concrete. R0 is not an open-ended architecture audit or permission to weaken test guards.
 
-**Exit:** Reproducible current failures and passing checks are recorded here; every hot path has an owner task; compatibility fixtures exist; no red test is silently waived. Baseline failures are either repaired within their owning storage task or explicitly block S8. Avoid an open-ended new test/telemetry framework.
+### R1 — Repair toward one integrated candidate
 
-### S1 — Cleanup before exposing table mode
+Work from the first failing journey step, not from a list of frameworks to finish. Each slice records reproduction → smallest in-scope change → focused safety/parity checks → rerun journey → independent review → scoped commit.
 
-Reuse the existing authority/gate and fixed schema naming. Implement one manifest-driven cleanup service shared by admin, CLI and uninstall; do not build separate destructive implementations.
+- Replace customer/host-specific qualification requirements with a small tested release-owned policy. Measure required headroom for the supported path and reject unsupported inputs; do not populate arbitrary coefficients, bypass production admission or require a new certificate from each customer. Audit existing calibration/allocator machinery for diagnostic-only retention or removal with replacement tests.
+- Keep initial full option decode and largest-tree limits explicit. Bound subsequent copy, verification and normal table work. Reuse the lossless codec and protect unsupported text/objects with safe refusal.
+- Preserve authorization, source verification, one authority, no stale fallback and reversal from current table data. Keep ordinary handled-failure resume. Define an assisted hard-crash runbook that prevents old requests/workers from resuming before inspecting authority and resuming/discarding verified work; never infer quiescence solely from expired locks.
+- Fix only repository/caller gaps actually encountered by this path initially, preserving legacy behavior. Record remaining supported-path work for R2 rather than declaring it complete.
+- Complete essential single-site cleanup used by the journey: backend-aware existing state clear, remove-all and packaged uninstall. Cover old and new owned resources, stale copies, cache invalidation and interrupted cleanup. Remove the uninstall dependency on development files. Keep deactivation non-destructive.
+- Use existing admin/CLI entry points; no new UI framework. Re-run enable → actual migration → edit → current-data reverse → cleanup on real SQL and the runtime floor, then verify the matching production ZIP.
 
-- Implement the exact scopes in the [cleanup action matrix](legacy-storage-upgrade.md#storage-and-cleanup-administration): clear current state, retire inactive copies, reset to option defaults, and remove all internal data. Clear keeps preferences/mode/schema; reset keeps preferences but returns to empty options; single-site remove-all also removes preferences and drops both exact shared tables.
-- Include old `foogallery_migrate_objects` artifacts where owned, both current legacy tables, data/settings, schema/control/sentinel/backup, active-writer/maintenance, transient/timeout and notice resources. Resolve explicit targets; never delete output/source data or use wildcard table drops.
-- Make partial cleanup idempotent/resumable with exact residual reporting and a cleanup-in-progress block removed last. Do not erase uncertain live ownership to force progress. Clear active and stale state so an old copy cannot resurrect history.
-- Replace the uninstall Composer dependency with a minimal packaged dependency path. Verify uninstall while inactive and without `vendor/`, without booting the migration/admin engine. Keep deactivation non-destructive and activation storage-neutral.
-- Invalidate persistent caches, exercise denied SQL/DDL and partial schema states, and verify repeated cleanup. Keep site-level cleanup isolated on multisite; do not drop shared tables from a site action. The complete large-network lifecycle is S9.
-- Wire the existing clear-history handler to the new backend-aware state-clear service. New screen controls follow in S7; test the service and existing handler now.
+**Exit:** M1 has reproducible positive evidence, basic refusal/interruption checks, protected output checks and an explicit known-gaps list. A supported-path refusal is a defect to fix, not evidence that the feature works. No claim of general release readiness.
 
-**Exit:** Real single-site options/table/stale/interrupted states clean correctly; package uninstall leaves zero owned remnants; output/source fixtures remain byte-for-byte/logically unchanged. No automatic provisioning or conversion is introduced.
+### R2 — Complete supported flows without expanding scope
 
-### S2 — History and all lookup/log consumers
+Retain the M1 journey as the integration check after every affected change. Address these bounded slices serially because they share engine/settings/repository code:
 
-- Retain direct/batched lookup, source-identity projections, revision-coupled writes, summary and cursor APIs. Implement genuinely missing table operations required by callers, including valid source-URL and parent lookups, with the original identity/order contract.
-- Replace table-path calls to option-only `get_all()`, `log_page()` and `get_by_parent()` with bounded operations. Wire log paging/filtering, factory reuse, history presence/status/retry and debug diagnostics; coordinate content/tag consumers with S3/S5.
-- Avoid full-history exports for routine requests. Distinguish internal export for verified switching from a production query. Ensure atomic record+revision changes and no hidden full scan in helpers.
+- **History/log:** Direct/batch/source-ID and URL/parent lookup, log paging/filtering, factory reuse, revisions, retry and debug paths. Replace table calls to option-only whole-history APIs; preserve exact identities and first-match order.
+- **Content:** Reuse windows/get-many and batch/checkpoint primitives. Finish deduplication, exact selection, count/list/reconciliation and replacement access; findings/checkpoints remain atomic and stale-content protections unchanged.
+- **Galleries/albums:** Replace whole-collection hydration and old-state diff reconstruction with page/aggregate/selection patch/next-object/affected-tree operations. Preserve queue order, lazy children, all-or-nothing patches, retries and images-per-turn.
+- **Image tags:** Incremental history-driven queue construction, indexed page-local resolution and queue/checkpoint writes; preserve tag merging, deduplication, retries and resume.
+- **Cleanup/recovery:** Verify all essential single-site clear/remove-all/uninstall scopes in option, table, stale-copy, partial-schema and interrupted states. Cleanup is idempotent, reports residuals and leaves a blocking marker until complete. Assisted ambiguous-owner recovery is tested as an operator procedure, not automatic fencing. Ordinary handled failures remain resumable.
+- **Compatibility/scaling:** Unknown scalars, typed/missing/false/null keys, ordering, errors, compact/non-compact reads and pre-PR results remain equivalent. Show-all keeps its UX with internally batched storage reads; disclose O(N) output buffering and largest-tree/source-discovery limits.
+- **Multisite regression only:** Existing options still work; provisioning/switching table mode refuses safely. Unexpected pre-existing table authority preserves evidence and blocks, never falls back to stale options. No network feature expansion.
 
-**Exit:** History repository, log and lookup paths owned by S2 are table-supported; cross-backend parity holds; enlarging unrelated history does not enlarge fixed-page request memory. Content/tag consumer integration completes in S3/S5. Missing/false/duplicate keys, URL identities, first-match ordering and retry behavior remain unchanged.
+**Exit:** Every supported production storage path is bounded and compatible; required safety/cleanup tests pass. Growing unrelated state does not inflate fixed-page/affected-tree working memory. Fixed caps alone are not proof of bounded access.
 
-### S3 — Content state and user flows
+### R3 — Basic recommendation and minimal administration
 
-- Reuse window/get-many and batch/checkpoint primitives, including the existing atomic reset. Remove residual full snapshots from discovery deduplication, reconciliation, list/count, exact selection, replacement and progress.
-- Use bounded source-identity batches and preserve legacy matching/occurrence keys and filtered WordPress Core counts.
-- Findings and checkpoint must commit together. Mid-batch failure or reset failure leaves the previous coherent state visible. Preserve stale-content checks, parsing and destination content behavior.
-- Implement bounded internal retrieval for `page_size=0`; distinguish unavoidable full HTML output size from avoidable storage hydration/buffering.
+- Provide one understandable storage workflow using existing services: status, explicit enable/copy/verify/switch, current-data reversal if safe, handled-failure resume or assisted-recovery instructions, state clear and remove-all.
+- Preserve the user's requested size suggestion: a basic filterable serialized-byte threshold, provisionally 1 MiB pending measurements, with observed size, benefit, limits and a link to the storage screen. Query bytes without hydrating the option. Unsupported runtimes get an explanation, not a broken switch action.
+- Do not add early-warning tiers, hydration-estimate tiers, growth-triggered repeat notices, extensive dismissal state or separate stale-copy/reset convenience screens. Essential cleanup must still remove stale resources even without dedicated buttons.
+- Keep capability/nonce checks, confirmations, fixed target allowlists, redacted errors and the explicit warning that storage cleanup does not undo migrations. CLI maintenance uses the same services; do not build a broader command matrix.
+- Document supported limits, downgrade preparation and assisted recovery. Never automatically create/select tables. Do not let recommendation thresholds override conversion/reversal safety limits.
 
-**Exit:** Existing content PHP/JS and native content-flow checks pass in both backends, including resume, cancelled/failed turns, stale edits and exact selection. Increasing unrelated findings/history does not grow fixed-window working memory.
+**Exit:** Authorized administrators can understand and complete the minimal browser/CLI workflow; invalid/unauthorized actions refuse safely. Basic recommendation remains useful without advanced notification machinery.
 
-### S4 — Gallery/album collections and migration turns
+### R4 — Accept the first release, not the entire future roadmap
 
-- Replace active-table `get_migrator_setting()` collection hydration and old-state reconstruction in `replace_collection()` with purpose-specific bounded operations. Keep full-array option compatibility methods off table hot paths.
-- Route list views, selection/cancel patches, first queued/started lookup, requested-gallery retry, global error audit, progress and one-parent migration turns through pages/aggregates/affected-tree access.
-- Preserve all-or-nothing selection patches, order and status transitions. Update an affected root tree without reading/diffing every other root. Keep lazy child loading and existing images-per-turn behavior.
-- Handle show-all via internal batches, without silently changing its UX. Publish the remaining largest-single-tree and output-rendering bounds; this storage upgrade cannot promise bounded source discovery for adapters that inherently materialize all source objects.
+- Complete all retained release suites without unexplained failures/timeouts. Record dispositions for removed/superseded diagnostic tests; no hidden skips or unsupported blanket green claim.
+- Run M1 plus remaining supported gallery/album/content/log/tag and cleanup/recovery flows against immutable source and matching production ZIP without dev dependencies, using real InnoDB, persistent cache and browser interactions.
+- Keep current declared floors: PHP 5.4 / runtime WP 5.0 and the separate readme WP 6.0 declaration. Verify applicable floor pairs and a current supported runtime; do not raise floors or build a universal host certification matrix to escape concrete defects.
+- Measure realistic large native-text workloads (including the existing native20K and actual10K AIGPL cases), fixed-page scaling with unrelated records, affected-tree writes and largest-tree boundaries. Preserve separate arbitrary-byte codec/refusal coverage. Unsupported shapes must refuse safely; supported cases must actually succeed.
+- Record peak memory, duration, bytes/queries/changed rows and source/ZIP hashes. Recheck policy limits after affected changes. Retain historical failed evidence without turning obsolete host-specific proofs into release gates.
+- Independent QA reviews the exact final source/package and user workflow. Confirm essential uninstall leaves zero owned remnants on single-site without touching output/source content. Confirm multisite options/refusal behavior has not regressed.
 
-**Exit:** Golden queue/transition/output fixtures match the pre-PR engine; no table request reconstructs unrelated roots; atomic rollback and largest-gallery/album cases are tested. Fixed caps/refusals alone do not satisfy this exit.
+**Exit:** M2 accepted and committed with documented limits and no remaining first-release blockers. No multisite table implementation or advanced advisor is needed for this exit. Public release still requires explicit approval.
 
-### S5 — Incremental image-tag queue
+## Test classification and simplification guardrails
 
-- Replace `build_image_tag_sync_state()` full-history iteration and global URL/ID maps with bounded history pages and indexed lookups.
-- Store high-cardinality queue entries as records, not one growing scalar/snapshot. Persist construction cursor, counters and queue writes atomically; page execution and completion updates.
-- Preserve deduplication, tag merge order, retries, missing targets, completion and resume across requests. Do not introduce a background runner or new execution semantics.
+R0 records each failing test/group as one of:
 
-**Exit:** Growing unrelated history/queue records does not inflate per-turn memory; interrupted construction/execution resumes without lost or duplicated work; output tags match option-mode fixtures.
+| Class | Treatment |
+|---|---|
+| Product behavior / compatibility | Fix; must pass for supported flows |
+| Safety / integrity / authorization / cleanup | Keep equivalent or stronger coverage; cannot be waived for convenience |
+| Supported performance / positive customer journey | Measure and fix; an admission refusal is not a positive pass |
+| Superseded implementation diagnostic | Preserve as optional engineering evidence, or remove/replace after documented rationale and independent review |
+| Environment / fixture defect | Repair the owned runner or report missing access; do not alter product policy merely to accommodate the harness |
 
-### S6 — Make public switching usable within evidenced limits
+For each reclassification record the original test/failure, requirement, replacement coverage or reason it is diagnostic, reviewer and commit. The approved test-domain amendment separates native-text WordPress conversion from arbitrary-byte codec/refusal behavior; it does not authorize data loss or normalization. Any further reduction of product guarantees requires Brad's decision. No test is retired merely because it is red.
 
-- Reuse staged conversion, authority, verification, maintenance and current-data reversal. First repair the concrete failures reproduced by S0–S5; do not add another generalized calibration/parser subsystem.
-- Measure native driver/preparation workspace and simultaneous representations at declared limits, including 128M/256M where applicable. Document full old-option decode, largest-state/tree and reverse-to-option size limits honestly.
-- Derive a finite conservative supported policy from reproducible positive/negative evidence, headroom and implementation/evidence digests. Populate the empty policy only after that evidence exists. Runtime or policy mismatch must continue to refuse safely.
-- Execute public admin/CLI preflight → enable → migrate/edit → reverse from current table data → cleanup. Include representative native20K and distinct actual10K AIGPL journeys plus applicable retained exact-byte workloads. Test-injected profiles, fake table benchmarks and a safe refusal are not successful positive journeys.
-- Exercise interruption before/during/after the authority flip, failed verification, corrupt staging, denied privileges, source changes, ambiguous SQL outcomes and stale active-copy handling. Verify no stale fallback and exactly one authority.
-- Preserve the conservative worker-ownership rule. Dead/aged owners require proven quiescence and an explicit assisted recovery path; never infer safety from age, PID absence or browser closure.
+Do not require every historical allocator/host-identity experiment to pass after its architecture is superseded. Conversely, do not silently exclude failing tests from full discovery. Maintain a clear release suite and separately labelled optional diagnostics, and report exactly what ran.
 
-**Exit:** At least one documented supported public single-site class successfully completes the real positive journey; unsupported cases refuse before unsafe mutation; resumability/reversal/cleanup work with measurable bounds. The policy must not mask incomplete hot paths.
+## Workflow to avoid repeated blockers
 
-### S7 — Recommend table mode and finish operator controls
+These rules apply **only after** development and its usage allowance are authorized. This documentation commit starts no workers or implementation.
 
-- Reuse StorageAdmin/StorageCli and expose status plus S1 cleanup actions, with capability+nonce checks, fixed target allowlists and scope-specific confirmation. Offer CLI parity for long-running maintenance, not a new migration engine.
-- Measure serialized option bytes without loading the whole option where possible; report counts/size, current authority, schema health, pending maintenance, inactive copies and limits.
-- Implement the [filterable provisional size thresholds](legacy-storage-upgrade.md#storage-recommendation-policy): early warning at 512 KiB/1,000 records; table recommendation at 1 MiB/2,000 records or estimated hydrated state reaching 20% of the effective PHP memory limit. Finalize thresholds from S6/S8 evidence; these are not conversion-admission guarantees.
-- Persist/re-evaluate dismissal as specified. Never auto-select/provision table mode. If unsupported, explain why and the safe next step instead of offering a broken switch. Multisite remains option-only until S9.
-- Clearly distinguish clear-state, reset, remove-all and inactive-copy retirement. Explain that cleanup does not undo migrated output. Surface recoverable failures and residual resources without leaking payloads or SQL.
+1. **One supervisor, one tracker, one settled release contract.** This file is the forward tracker; no per-worker plans or parallel acceptance ledgers. Old checkpoints are historical evidence. Record new decisions here without reopening the five approved cuts.
+2. **Prepare the environment once.** Record the disposable site's ownership, runner, dependencies, runtime-floor access and teardown. Reuse it; never assume old private fixture paths exist. Missing access is a real blocker, not a reason to invent another test platform.
+3. **Standing execution authority within scope and budget.** Routine investigation, implementation, tests, repairs, independent QA and scoped local commits continue without repeated permission requests. A failed test, a worker handoff or the end of a subtask is not itself a reason to ask Brad to continue.
+4. **Small work packages with observable outcomes.** Every dispatch names the failing user-path step, allowed files, non-goals, test and exit condition. Start with one developer; serialize shared engine/storage edits and commits. Use the budget-dev developer/QA routing when invoked; do not spawn nested oversight teams.
+5. **Bound diagnostics by a hypothesis.** State the suspected cause, one discriminating experiment and what the result changes. If a probe adds no decision-relevant evidence, change the approach. Do not repeatedly raise memory, re-run identical timeouts or create helper frameworks just to produce another receipt.
+6. **Repair loops trigger reassessment, not permission churn.** After one unsuccessful Luna repair, Sol reassesses/reassigns per the workflow. After two unsuccessful repair cycles, classify implementation vs environment vs superseded assumption, choose a different bounded approach, and preserve repair counts. Continue in-scope work when possible; do not automatically stop or silently weaken requirements.
+7. **Escalate only a concrete unresolved decision.** Ask Brad for missing access/authority, a genuinely new product/scope decision, additional budget when the authorized allowance is exceeded, or separately controlled actions such as an Astra assignment or release. Include reproduction, attempts, options/tradeoffs and a recommendation. Routine in-scope choices stay with the supervisor.
+8. **Keep useful progress possible.** If one dependency is externally blocked, continue independent approved work with clear ownership. Do not claim dependent acceptance or leave uncontrolled test workers running. Record/stop owned processes at handoff.
+9. **Report customer progress.** Updates identify the last passing journey step, current failure, next repair and milestone status. Focused test counts and diagnostics support that story; they are not the outcome.
+10. **Commit verified slices, preserve incomplete work honestly.** Separate developer completion from independent QA and supervisor acceptance. Update status/evidence/repair history in this plan and commit only validated scoped work. No push, merge or deployment is implied.
 
-**Exit:** Browser and CLI flows succeed for authorized users, refuse unauthorized/invalid requests, and present accurate readiness and cleanup scope. Small sites remain on options without unnecessary prompts.
+## Validation and environment safety
 
-### S8 — Single-site acceptance on immutable source and package
-
-- Finish the entire test discovery with no unexplained failures/timeouts; rerun standalone regressions and affected native integrations. Record source commit and ZIP digest for all acceptance evidence.
-- Test the actual production ZIP without dev dependencies: activate, options upgrade/resume, provision, switch, gallery/album/content/log/tag flows, recover, reverse, clear/reset/remove-all, deactivate/reactivate and uninstall. Verify no source/output deletion or stale-state resurrection.
-- Exercise persistent cache and real InnoDB, minimum supported runtime pairs and current runtime. Preserve existing PHP 5.4 / runtime WP 5.0 declarations and the separate readme WP 6.0 declaration; changing floors is not an implicit fix. Limited scope smoke passes are not full compatibility acceptance.
-- Benchmark 1K/5K/20K flat and nested state with a fixed page/tree, then largest single gallery/album. Record peak memory, elapsed time, queries/bytes and changed rows for normal requests and conversion separately. Show how each scales as unrelated records grow; publish limitations.
-- Review admin behavior in a browser, not just receiver tests. Tune advisor thresholds/indexes/batches only from evidence, then rerun affected acceptance and regenerate digest-bound policy if needed.
-- Update this plan and user-facing storage/recovery/cleanup guidance. Confirm the table-mode gate cannot bypass unqualified states.
-
-**Exit:** Independent QA accepts the full single-site milestone at an identified source commit and matching ZIP. This is readiness evidence, not permission to push, merge or release. Full design completion still requires S9.
-
-### S9 — Multisite as a separately gated milestone
-
-- Retain table refusal until network-active prerequisites, strict blog scoping and the one installation-wide schema lock are proven.
-- Add a bounded registry, site-deletion hooks including the WP 5.0 fallback, orphan audit, per-site/network/global cleanup scopes and storage-only CLI preparation/recovery.
-- Replace unbounded site enumeration. Benchmark a supported synchronous uninstall bound; above it, complete batched zero-remnant preparation before file removal. Verify final removal of exact shared tables/schema resources without touching other networks during network-scoped actions.
-- Test site-only vs network activation, network deactivation, missing/deleted sites, second-network isolation, interrupted purge, corrupt/missing registry, persistent caches, insufficient capabilities and uninstall after preparation.
-- Repeat affected runtime/package and large-network acceptance; document limits and support procedures before enabling multisite table mode.
-
-**Exit:** All multisite requirements in the storage design are accepted and committed, and no network/site action can remove another network's data. No silent downgrade to stale options when a table authority is unsupported or damaged.
-
-## Validation commands and environment safety
-
-At kickoff, verify installed dependencies and binaries before using these commands. Record exact commands, exit status and relevant failures in the task evidence; do not replace them with an unqualified “tests pass.”
+At development kickoff verify binaries/dependencies. Baseline and release commands include:
 
 ```sh
 git status --short --branch
@@ -191,29 +185,26 @@ python3 tests/production-package-regression.py dist/foogallery-migrate.v1.16.zip
 git diff --check
 ```
 
-Run focused test files for each task as well as complete discovery before acceptance. `runtime-cleanup-regression.php` and the store benchmark use doubles; they cannot certify native uninstall or table scaling. `npm run build` may update generated translation/package files: inspect and retain only authorized changes. Verify the actual versioned ZIP path if the version changes; do not bump versions solely to run tests.
+256M is an explicit diagnostic invocation, not a new minimum or universal customer limit. Record effective memory and runtime. If R0 classifies/splits the suite, record exact maintained release and diagnostic commands here; never silently substitute a narrower suite.
 
-Native fixture entry points include `tests/integration/storage-release-journey.php`, `storage-single-site-scope.php`, `storage-native-recovery.php`, and the existing source/content integration scripts. Read their guards and required phase/fixture parameters first. Build a deliberately owned disposable WordPress/database environment, back up relevant fixtures, and record setup/teardown boundaries. **Do not run a bare `wp eval-file` against Brad's working Local site.** Do not assume historical task-specific fixture paths or credentials are available, and never weaken safety guards to use an unrelated database.
+Read guards and phase parameters before using `tests/integration/storage-release-journey.php`, `storage-single-site-scope.php`, `storage-native-recovery.php` and existing source/content runners. Do not run bare `wp eval-file` on Brad's working Local site. Test doubles do not certify native SQL, uninstall or performance. Builds may change generated files; inspect and keep only authorized changes. Verify the actual ZIP version/path without bumping versions just to test.
 
-Use production ZIP checks for package contents/source parity, then separately run package activation/uninstall and user flows inside the disposable site. PHP lint and fixture assertions do not replace those runtime checks. Read the applicable validation/release skills when executing that work; this plan does not authorize a release.
+## Tracking, deferred work and handoff
 
-## Execution tracking and handoff
-
-This file is the sole forward workflow tracker. Keep historical checkpoint documents unchanged unless correcting a factual error. Do not create per-worker plans or duplicate acceptance ledgers.
-
-- **Next ready task:** S0, after development is explicitly started and its usage allowance is captured.
-- **Current change:** Documentation reconciliation and this ordered plan only; no runtime/source/test changes.
-- **Preparation validation:** Local Markdown file/heading links and code-fence balance checked across the three changed documents; `git diff --check` passed. No runtime test success is claimed for this documentation commit.
-- **Shared-file conflicts:** S2–S5 touch the same engine/settings/repository contracts; execute serially. S1/S6/S7 share authority/admin lifecycle boundaries. No parallel work is scheduled; any future independent read-only QA/fixture work must have explicit ownership and immutable inputs.
-- **Statuses:** `pending → developing → qa → validating → done`, with `blocked` / `budget-stopped` when appropriate. Accepted work must be committed before marking done.
-- **Per-task updates:** Record developer model/reason and agent ID, separate QA agent ID (Sol Medium), repair count and reassignment history, commands/results, unresolved findings and implementation commit beneath the relevant task. Defaults for every row are currently unassigned / 0 repairs / not run / no commit.
-- **Supervisor:** Current planning session; model/effort not independently verified. Verify/disclose at development kickoff; do not silently claim a model switch.
-- **Active workers / scheduled wakeups:** None created for this plan. No automatic continuation is scheduled.
-- **Commit policy:** Scoped local commits after validation. This request does not authorize pushing, merging or implementation. Explicit Brad confirmation is always required before making a WordPress.org tag live or changing its stable tag.
+- **Next ready task:** R0 after explicit development kickoff and usage allowance; not now.
+- **Current authorization:** Documentation update and local commit only. No implementation, agents, database work, automation or release started.
+- **Documentation validation:** File/heading links, code-fence balance, active task IDs and whitespace checked across the three changed documents. No runtime tests were run or runtime pass claimed for this update.
+- **Statuses:** `pending → developing → qa → validating → done`; use `blocked` / `budget-stopped` with a precise reason.
+- **Per-task ledger:** Record developer model/reason and agent ID, separate Sol Medium QA ID, repair/reassignment history, commands/results, milestone gaps and accepted commit. Currently all unassigned, repairs 0, runtime checks not run, no implementation commits.
+- **Shared files:** R1/R2 share engine/settings/repository/lifecycle code. R3 consumes their services. Default is serial ownership and integration; no parallel work scheduled.
+- **Supervisor:** Planning session model/effort not independently verified; disclose actual setting at kickoff. A skill does not silently switch it.
+- **Active workers / wakeups:** None created for this plan.
+- **Deferred backlog, not follow-on authorized tasks:** Multisite table support/network lifecycle; advanced recommendation tiers/re-notification; convenience reset/stale-copy UI; broader diagnostic/host qualification polish. A future scope decision is required to schedule these. Do not label the first release incomplete merely because this backlog remains.
+- **Never implied:** New engine/config work, pushing, merging, deployment. Brad must explicitly confirm any WordPress.org live tag or stable-tag change.
 
 ### Usage ledger for a future development run
 
-No development usage allowance has been supplied for this plan and no budgeted run has started. On an explicit kickoff, apply the `budget-dev` workflow and capture its account-wide monitored baseline before implementation/delegation; do not infer permission from this preparation request.
+No development allowance has been supplied and no budgeted run has started. Apply the `budget-dev` workflow on an explicit kickoff, capturing its account-wide monitored baseline before implementation/delegation. Do not infer a budget from this documentation request.
 
 | Item | Current value |
 |---|---|
@@ -221,6 +212,6 @@ No development usage allowance has been supplied for this plan and no budgeted r
 | Original baseline and window history | Not captured |
 | Cumulative observed development usage | Not measured; no development run started |
 | Advisory reserve / remaining allowance | Not set / unknown |
-| Checkpoint | 2026-10-22: documentation-only reconciliation at PR head `206655cb` |
+| Checkpoint | 2026-10-22: five cuts approved, first-release plan documented; implementation remains stopped |
 
-Retain this ledger on resume; do not reset allowance or repair counts. Keep raw account responses and account identifiers out of Git. A future budget authorization does not itself authorize a new engine, unapproved architecture assignment, push, merge or public release.
+Retain baseline, allowance and repair history on resume. Keep account identifiers/raw usage responses out of Git. Budget approval does not authorize scope expansion or controlled release actions.
