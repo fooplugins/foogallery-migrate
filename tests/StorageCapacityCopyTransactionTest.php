@@ -5,13 +5,16 @@ use FooPlugins\FooGalleryMigrate\StorageControl;
 use FooPlugins\FooGalleryMigrate\StorageCopyCursor;
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
 use FooPlugins\FooGalleryMigrate\LegacyCollectionEnvelope;
+use FooPlugins\FooGalleryMigrate\MigratorSettings;
+use FooPlugins\FooGalleryMigrate\ImageTagQueueRepository;
+use FooPlugins\FooGalleryMigrate\ContentScanRepository;
 use PHPUnit\Framework\TestCase;
 
 /** Query/failure contract only. NOT native SQL atomicity or public acceptance. */
 class StorageCapacityCopyTransactionTest extends TestCase {
-	private function setup_copy( $fault = '' ) {
+	private function setup_copy( $fault = '', $value = null ) {
 		$h = new StorageCapacityConversionTest( 'unused' ); $scale = $h->scale( 2 );
-		$value = array( 'tree' => array( array( 'id' => 1, 'children' => array( false, 'x', null, 7, array( 'id' => 2 ) ) ) ) );
+		if ( null === $value ) { $value = array( 'tree' => array( array( 'id' => 1, 'children' => array( false, 'x', null, 7, array( 'id' => 2 ) ) ) ) ); }
 		$codec = new LegacyStateCodec(); $hash = hash( 'sha256', serialize( $value ) );
 		$r = array( 'version' => 4, 'blog_id' => 1, 'backend' => 'option', 'epoch' => 0, 'switch_id' => str_repeat( 'a', 32 ), 'from' => 'option', 'to' => 'table', 'phase' => 'copying', 'table_id' => str_repeat( 'a', 32 ), 'source_digest' => hash( 'sha256', 'present:' . $hash ), 'logical_digest' => $codec->snapshot_digest( $value ), 'schema' => 1, 'codec' => 1, 'created' => 1, 'updated' => 1, 'retained_digest' => null );
 		$r['copy_cursor'] = StorageCopyCursor::initial( $r ); $db = new CapacityCopyDb(); $db->raw_hash = $hash; $db->control = json_encode( $r ); $db->fault = $fault;
@@ -116,6 +119,132 @@ class StorageCapacityCopyTransactionTest extends TestCase {
 		$done = $this->batch( $db, $value, $r, $scale );
 		$this->assertTrue( $done['complete'] ); $this->assertSame( $r['logical_digest'], $done['proved_logical_digest'] ); $this->assertCount( 6, $db->records );
 	}
+	public function test_resumed_collection_then_scalar_head_advances_without_physical_rows_and_is_verified(): void {
+		$value = array( 'tree' => array( array( 'id' => 1, 'children' => array( false, 'x', null, 7, array( 'id' => 2 ) ) ) ), 'migrated-revision' => 7 );
+		list( $db, $value, $r, $scale ) = $this->setup_copy( '', $value );
+		for ( $i = 0; $i < 3; ++$i ) { $r = $this->batch( $db, $value, $r, $scale )['record']; }
+		$this->assertSame( 1, $r['copy_cursor']['state_order'] );
+		$this->assertSame( 6, $r['copy_cursor']['committed_rows'] );
+		$b = $this->batch( $db, $value, $r, $scale ); $r = $b['record'];
+		$this->assertTrue( $b['complete'] );
+		$this->assertSame( 2, $r['copy_cursor']['state_order'] );
+		$this->assertSame( 6, $r['copy_cursor']['committed_rows'] );
+		$this->assertCount( 2, $db->heads ); $this->assertCount( 6, $db->records );
+		$this->assertSame( 'scalar', $db->heads[1]['state_kind'] );
+		$this->assertSame( 0, $db->heads[1]['record_count'] );
+		$this->assertSame( array( 'version' => 1, 'kind' => 'scalar', 'value' => 7 ), ( new LegacyStateCodec() )->decode( $db->heads[1]['root_payload'] ) );
+		$this->assertSame( ( new LegacyStateCodec() )->snapshot_digest( 7 ), bin2hex( $db->heads[1]['snapshot_digest'] ) );
+		$this->assertTrue( $this->batch( $db, $value, $r, $scale )['complete'] );
+		$r['phase'] = 'verified'; $r['copy_cursor'] = null; $db->control = json_encode( $r );
+		for ( $i = 0; $i < 3; ++$i ) { $r = $this->verify_batch( $db, $value, $r, $scale )['record']; }
+		$this->assertSame( 2, $r['verify_cursor']['state_order'] );
+		$this->assertSame( 6, $r['verify_cursor']['verified_rows'] );
+		$this->assertTrue( $this->verify_batch( $db, $value, $r, $scale )['already_complete'] );
+	}
+	public function test_scalar_only_and_leading_scalar_preserve_native_types_and_zero_row_proof(): void {
+		foreach ( array( null, false, 0, '', "a\0b" ) as $scalar ) {
+			foreach ( array( false, true ) as $leading ) {
+				$value = $leading ? array( 'revision' => $scalar, 'tree' => array() ) : array( 'revision' => $scalar );
+				list( $db, $value, $r, $scale ) = $this->setup_copy( '', $value );
+				for ( $i = 0; $i < count( $value ); ++$i ) { $r = $this->batch( $db, $value, $r, $scale )['record']; }
+				$this->assertSame( count( $value ), $r['copy_cursor']['state_order'] );
+				$this->assertSame( 0, $r['copy_cursor']['committed_rows'] );
+				$this->assertSame( $scalar, ( new LegacyStateCodec() )->decode( $db->heads[0]['root_payload'] )['value'] );
+				$this->assertSame( 0, $db->heads[0]['record_count'] );
+				$r['phase'] = 'verified'; $r['copy_cursor'] = null; $db->control = json_encode( $r );
+				for ( $i = 0; $i < count( $value ); ++$i ) { $r = $this->verify_batch( $db, $value, $r, $scale )['record']; }
+				$this->assertSame( count( $value ), $r['verify_cursor']['state_order'] );
+				$this->assertTrue( $this->verify_batch( $db, $value, $r, $scale )['already_complete'] );
+			}
+		}
+	}
+	public function test_array_checkpoints_are_scalar_heads_with_exact_zero_row_copy_and_verification(): void {
+		foreach ( array( MigratorSettings::KEY_GALLERIES . '-state', MigratorSettings::KEY_ALBUMS . '-state', ImageTagQueueRepository::STATE_KEY ) as $key ) {
+			$checkpoint = array( 'queued' => 1, 'completed' => 0, 'progress' => 0 );
+			$value = array( 'galleries' => array( array( 'id' => 1 ) ), $key => $checkpoint );
+			list( $db, $value, $r, $scale ) = $this->setup_copy( '', $value );
+			$r = $this->batch( $db, $value, $r, $scale )['record'];
+			$this->assertSame( 1, $r['copy_cursor']['state_order'] );
+			$r = $this->batch( $db, $value, $r, $scale )['record'];
+			$this->assertSame( 2, $r['copy_cursor']['state_order'] );
+			$this->assertSame( 1, $r['copy_cursor']['committed_rows'] );
+			$this->assertSame( 'scalar', $db->heads[1]['state_kind'] );
+			$this->assertSame( 0, $db->heads[1]['record_count'] );
+			$this->assertSame( strlen( $db->heads[1]['root_payload'] ), $db->heads[1]['payload_bytes'] );
+			$this->assertSame( array( 'version' => 1, 'kind' => 'scalar', 'value' => $checkpoint ),
+				( new LegacyStateCodec() )->decode( $db->heads[1]['root_payload'] ) );
+			$this->assertSame( ( new LegacyStateCodec() )->snapshot_digest( $checkpoint ), bin2hex( $db->heads[1]['snapshot_digest'] ) );
+			$r['phase'] = 'verified'; $r['copy_cursor'] = null; $db->control = json_encode( $r );
+			$r = $this->verify_batch( $db, $value, $r, $scale )['record'];
+			$this->assertSame( 2, $r['verify_cursor']['state_order'] );
+			$this->assertSame( 1, $r['verify_cursor']['verified_rows'] );
+			$this->assertTrue( $this->verify_batch( $db, $value, $r, $scale )['already_complete'] );
+		}
+	}
+	public function test_content_scan_array_and_false_sentinel_keep_distinct_existing_shapes(): void {
+		list( $db, $value, $r, $scale ) = $this->setup_copy();
+		$repo = new LegacyTableSnapshot( $db, 1, 24576, 16777216, null, null, $scale );
+		$method = new \ReflectionMethod( $repo, 'conversion_shape' ); $method->setAccessible( true );
+		$this->assertSame( 'map', $method->invoke( $repo, ContentScanRepository::STATE_KEY,
+			array( 'items' => array(), 'progress' => array() ) )['kind'] );
+		$this->assertSame( 'scalar', $method->invoke( $repo, ContentScanRepository::STATE_KEY, false )['kind'] );
+	}
+	public function test_scalar_head_root_digest_and_extra_row_corruption_refuse_without_cursor_advance(): void {
+		foreach ( array( 'root', 'digest', 'row', 'row-and-head' ) as $fault ) {
+			$value = array( 'tree' => array( 'item' => array( 'id' => 1 ) ), 'galleries-state' => array( 'queued' => 1 ) );
+			list( $db, $value, $r, $scale ) = $this->setup_copy( '', $value );
+			for ( $i = 0; $i < 2; ++$i ) { $r = $this->batch( $db, $value, $r, $scale )['record']; }
+			$this->assertSame( 2, $r['copy_cursor']['state_order'] );
+			if ( 'root' === $fault ) { $db->heads[1]['root_payload'] .= 'X'; }
+			elseif ( 'digest' === $fault ) { $db->heads[1]['snapshot_digest'] = str_repeat( 'x', 32 ); }
+			else {
+				$extra = $db->records[0]; $extra['state_id'] = $db->heads[1]['id']; $db->records[] = $extra;
+				if ( 'row-and-head' === $fault ) { $db->heads[1]['record_count'] = 1; $db->heads[1]['payload_bytes'] += $extra['payload_bytes']; }
+			}
+			$before = $db->control;
+			try { $this->batch( $db, $value, $r, $scale ); $this->fail( 'Corrupt scalar destination accepted.' ); }
+			catch ( \RuntimeException $e ) { $this->assertNotEmpty( $e->getMessage() ); }
+			$this->assertSame( $before, $db->control );
+		}
+	}
+	public function test_verified_scalar_head_refuses_changed_root_digest_or_extra_physical_row(): void {
+		foreach ( array( 'root', 'digest', 'row', 'row-and-head' ) as $fault ) {
+			$value = array( 'tree' => array( 'item' => array( 'id' => 1 ) ), 'albums-state' => array( 'queued' => 1 ) );
+			list( $db, $value, $r, $scale ) = $this->setup_copy( '', $value );
+			for ( $i = 0; $i < 2; ++$i ) { $r = $this->batch( $db, $value, $r, $scale )['record']; }
+			$r['phase'] = 'verified'; $r['copy_cursor'] = null; $db->control = json_encode( $r );
+			if ( 'root' === $fault ) { $db->heads[1]['root_payload'] .= 'X'; }
+			elseif ( 'digest' === $fault ) { $db->heads[1]['snapshot_digest'] = str_repeat( 'x', 32 ); }
+			else {
+				$extra = $db->records[0]; $extra['state_id'] = $db->heads[1]['id']; $db->records[] = $extra;
+				if ( 'row-and-head' === $fault ) { $db->heads[1]['record_count'] = 1; $db->heads[1]['payload_bytes'] += $extra['payload_bytes']; }
+			}
+			$before = $db->control;
+			try { $this->verify_batch( $db, $value, $r, $scale ); $this->fail( 'Corrupt scalar head was verified.' ); }
+			catch ( \RuntimeException $e ) { $this->assertNotEmpty( $e->getMessage() ); }
+			$this->assertSame( $before, $db->control );
+		}
+	}
+	public function test_object_scalar_is_not_converted(): void {
+		list( $db, $value, $r, $scale ) = $this->setup_copy();
+		$repo = new LegacyTableSnapshot( $db, 1, 24576, 16777216, null, null, $scale );
+		$method = new \ReflectionMethod( $repo, 'conversion_shape' ); $method->setAccessible( true );
+		try { $method->invoke( $repo, 'revision', new \stdClass() ); $this->fail( 'Object state accepted.' ); }
+		catch ( \RuntimeException $e ) { $this->assertNotEmpty( $e->getMessage() ); }
+	}
+	public function test_scalar_verification_refuses_a_child_cursor_without_advancing(): void {
+		$value = array( 'revision' => 0 );
+		list( $db, $value, $r, $scale ) = $this->setup_copy( '', $value );
+		$r = $this->batch( $db, $value, $r, $scale )['record'];
+		$r['phase'] = 'verified'; $r['copy_cursor'] = null; $db->control = json_encode( $r );
+		$r = $this->verify_batch( $db, $value, $r, $scale )['record'];
+		$r['verify_cursor']['state_order'] = 0;
+		$r['verify_cursor']['next_node_ordinal'] = 1;
+		$db->control = json_encode( $r ); $before = $db->control;
+		try { $this->verify_batch( $db, $value, $r, $scale ); $this->fail( 'Scalar child cursor accepted.' ); }
+		catch ( \RuntimeException $e ) { $this->assertNotEmpty( $e->getMessage() ); }
+		$this->assertSame( $before, $db->control );
+	}
 	public function test_resume_walks_only_committed_prefix_and_new_batch_not_uncommitted_tail_or_append_replay(): void {
 		list( $db, $unused, $r, $scale ) = $this->setup_copy();
 		$value = array( 'tree' => array_fill( 0, 128, array( 'id' => 1 ) ) );
@@ -217,7 +346,9 @@ class CapacityCopyDb extends SnapshotTestWpdb {
 		if ( strpos( $q, 'DELETE FROM' ) === 0 ) { if ( false !== strpos( $q, 'records' ) ) { $n = count( $this->records ); $this->records = array(); return $n; } $this->heads = array(); return 1; }
 		if ( strpos( $q, 'UPDATE' ) === 0 ) {
 			if ( 'head' === $this->fault ) { return false; }
-			$h = &$this->heads[0]; $h['state_kind'] = $a[0]; $h['record_count'] = $a[1]; $h['payload_bytes'] = $a[2]; $h['snapshot_digest'] = hex2bin( $a[3] );
+			$index = null; foreach ( $this->heads as $n => $head ) { if ( $head['id'] === $a[6] ) { $index = $n; break; } }
+			if ( null === $index ) { return 0; }
+			$h = &$this->heads[$index]; $h['state_kind'] = $a[0]; $h['record_count'] = $a[1]; $h['payload_bytes'] = $a[2]; $h['snapshot_digest'] = hex2bin( $a[3] );
 			$h['active_generation'] = 1; $h['revision'] = 1; $h['digest_revision'] = 1; $h['digest_status'] = 'current'; return 1;
 		}
 		return 0;
@@ -242,7 +373,10 @@ class CapacityCopyDb extends SnapshotTestWpdb {
 			foreach ( $this->records as $row ) { if ( $row['state_id'] !== $a[1] ) { continue; } ++$n; $payload += $row['payload_bytes']; foreach ( array( 'payload', 'mutable_payload', 'key_value', 'legacy_identifier_value', 'source_plugin_value', 'source_id_value' ) as $key ) { $bytes += null === $row[$key] ? 0 : strlen( $row[$key] ); } }
 			return array( array( 'record_count' => (string) $n, 'payload_bytes' => (string) $payload, 'encoded_bytes' => (string) $bytes ) );
 		}
-		if ( strpos( $q, 'SELECT root_payload FROM' ) === 0 ) { return array( array( 'root_payload' => $this->heads[0]['root_payload'] ) ); }
+		if ( strpos( $q, 'SELECT root_payload FROM' ) === 0 ) {
+			foreach ( $this->heads as $head ) { if ( $head['id'] === $a[1] ) { return array( array( 'root_payload' => $head['root_payload'] ) ); } }
+			return array();
+		}
 		if ( strpos( $q, 'SELECT * FROM' ) === 0 ) {
 			if ( 'verify-select' === $this->fault ) { throw new \RuntimeException( 'Injected exact-row read failure.' ); }
 			return array_values( array_filter( $this->records, function ( $row ) use ( $a ) { return $row['state_id'] === $a[1] && bin2hex( $row['node_hash'] ) === $a[2]; } ) );

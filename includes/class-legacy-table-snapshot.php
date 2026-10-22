@@ -118,10 +118,11 @@ class LegacyTableSnapshot {
 			$start = $c; $batch_rows = 0; $batch_bytes = 0; $ordinal = 0;
 			foreach ( $value as $key => $state ) {
 				if ( $ordinal < $start['state_order'] ) { ++$ordinal; continue; }
-				$kind = is_array( $state ) ? ( $this->is_list( $state ) ? 'list' : 'map' ) : 'scalar';
-				$split = ( new LegacyCollectionEnvelope() )->split( $key, $kind, $state );
+				$shape = $this->conversion_shape( $key, $state );
+				if ( 'scalar' === $shape['kind'] && $ordinal === $start['state_order'] &&
+					( $start['next_root_ordinal'] || $start['next_node_ordinal'] ) ) { $this->fail( 'Scalar verification cursor has child position.' ); }
 				$root_order = 0; $finished = true;
-				foreach ( $split['items'] as $item_key => $item ) {
+				foreach ( $shape['items'] as $item_key => $item ) {
 					if ( $ordinal === $start['state_order'] && $root_order < $start['next_root_ordinal'] ) { ++$root_order; continue; }
 					$visited = 0; $repo = $this; $current_root = $root_order;
 					$skip = $ordinal === $start['state_order'] && $root_order === $start['next_root_ordinal'] ? $start['next_node_ordinal'] : 0;
@@ -233,9 +234,9 @@ class LegacyTableSnapshot {
 			}
 			$ordinal = 0; $key = null; $state = null;
 			foreach ( $value as $candidate_key => $candidate ) { if ( $ordinal++ === $c['state_order'] ) { $key = $candidate_key; $state = $candidate; break; } }
-			$kind = is_array( $state ) ? ( $this->is_list( $state ) ? 'list' : 'map' ) : 'scalar';
-			$split = ( new LegacyCollectionEnvelope() )->split( $key, $kind, $state );
-			$root = $this->codec->encode_collection_root( $split['root'] );
+			$shape = $this->conversion_shape( $key, $state );
+			$kind = $shape['kind']; $root = $shape['root'];
+			if ( 'scalar' === $kind && ( $c['next_root_ordinal'] || $c['next_node_ordinal'] ) ) { $this->fail( 'Scalar copy cursor has child position.' ); }
 			if ( strlen( $root ) > $capacity->limit( 'max_row_bytes' ) ) { $this->fail( 'Copy root metadata exceeds row cap.' ); }
 			if ( 0 === $c['state_id'] ) {
 				$c['state_id'] = $this->insert( $this->state_table, array( 'blog_id' => $this->blog_id, 'state_key_hash' => $this->codec->key_hash( $key ),
@@ -243,7 +244,7 @@ class LegacyTableSnapshot {
 					'active_generation' => 0, 'revision' => 0, 'codec_version' => LegacyStateCodec::VERSION, 'digest_status' => 'dirty', 'root_payload' => $root, 'created_gmt' => $this->copy_created_gmt, 'updated_gmt' => $this->copy_created_gmt ) );
 			}
 			$root_ordinal = 0; $batch_rows = 0; $batch_bytes = 0; $finished = true; $start = $c;
-			foreach ( $split['items'] as $item_key => $item ) {
+			foreach ( $shape['items'] as $item_key => $item ) {
 				// The cursor, totals, head metadata and bounded tail were proved
 				// above. The full destination is proved before authority selection.
 				// Skip whole roots BEFORE encoding, not in the row callback after
@@ -299,9 +300,29 @@ class LegacyTableSnapshot {
 			$head['key_hash'] = strtolower( $head['key_hash'] ); $head['logical_digest'] = null === $head['logical_digest'] ? null : strtolower( $head['logical_digest'] );
 		} unset( $head ); return $heads;
 	}
+	/** The existing scalar snapshot envelope has no record rows or collection root. */
+	private function conversion_shape( $key, $state ) {
+		// Existing runtime checkpoints/queues are scalar heads even when their
+		// logical value is an array. Match the earlier conversion path and the
+		// ordinary scalar/companion writers without changing their wire format.
+		$checkpoint = in_array( $key, array( MigratorSettings::KEY_GALLERIES . '-state',
+			MigratorSettings::KEY_ALBUMS . '-state', ImageTagQueueRepository::STATE_KEY ), true );
+		if ( is_array( $state ) && ! $checkpoint ) {
+			$kind = $this->is_list( $state ) ? 'list' : 'map';
+			$split = ( new LegacyCollectionEnvelope( $this->codec ) )->split( $key, $kind, $state );
+			return array( 'kind' => $kind, 'root' => $this->codec->encode_collection_root( $split['root'] ),
+				'items' => $split['items'] );
+		}
+		if ( ! is_scalar( $state ) && null !== $state && ! is_array( $state ) ) { $this->fail( 'Unsupported conversion state.' ); }
+		return array( 'kind' => 'scalar', 'root' => $this->codec->encode( array( 'version' => 1, 'kind' => 'scalar', 'value' => $state ) ),
+			'items' => array() );
+	}
 	private function copy_prove_head( $head, $key, $state, $ordinal, $complete, $cursor, &$totals, $proof_start, $fast, $prove_logical = true ) {
-		$kind = is_array( $state ) ? ( $this->is_list( $state ) ? 'list' : 'map' ) : 'scalar';
-		$split = ( new LegacyCollectionEnvelope() )->split( $key, $kind, $state ); $root = $this->codec->encode_collection_root( $split['root'] );
+		$shape = $this->conversion_shape( $key, $state );
+		$kind = $shape['kind']; $root = $shape['root'];
+		// A scalar is committed with its empty generation in one transaction;
+		// there is no legitimate staged scalar cursor to resume.
+		if ( 'scalar' === $kind && ! $complete ) { $this->fail( 'Scalar conversion head cannot be staged.' ); }
 		if ( $head['id'] < 1 || $head['state_order'] !== $ordinal || $head['key_hash'] !== $this->codec->key_hash( $key ) ||
 			$head['key_digest'] !== hash( 'sha256', $this->codec->key_value( $key ) ) || $head['root_digest'] !== hash( 'sha256', $root ) ||
 			$head['codec_version'] !== LegacyStateCodec::VERSION || $head['active_generation'] !== ( $complete ? 1 : 0 ) || $head['revision'] !== ( $complete ? 1 : 0 ) ||
@@ -309,15 +330,16 @@ class LegacyTableSnapshot {
 			( ! $complete && ( $head['id'] !== $cursor['state_id'] || $head['record_count'] !== 0 || $head['payload_bytes'] !== 0 || $head['digest_revision'] !== 0 || null !== $head['logical_digest'] ) ) ) { $this->fail( 'Committed conversion head changed.' ); }
 		if ( $fast ) {
 			$stats = $this->generation_stats( $head['id'], 1 );
+			if ( 'scalar' === $kind && ( $head['record_count'] !== 0 || $stats['record_count'] !== 0 ) ) { $this->fail( 'Scalar conversion head has physical rows.' ); }
 			$totals['rows'] += $stats['record_count']; $totals['bytes'] += $stats['encoded_bytes'];
 			if ( $complete ) {
 				if ( $head['record_count'] !== $stats['record_count'] || $head['payload_bytes'] !== $stats['payload_bytes'] + strlen( $root ) ||
 					$head['digest_revision'] !== 1 || ( $prove_logical && $head['logical_digest'] !== $this->codec->snapshot_digest( $state ) ) ) { $this->fail( 'Completed conversion head changed.' ); }
-			} else { $this->copy_prove_tail( $head['id'], $key, $split['items'], $cursor ); }
+			} else { $this->copy_prove_tail( $head['id'], $key, $shape['items'], $cursor ); }
 			return;
 		}
-		$rows = 0; $payload = 0; $bytes = 0; $root_order = 0; $position_seen = $complete || ( $cursor['next_root_ordinal'] === count( $split['items'] ) && 0 === $cursor['next_node_ordinal'] );
-		foreach ( $split['items'] as $item_key => $item ) {
+		$rows = 0; $payload = 0; $bytes = 0; $root_order = 0; $position_seen = $complete || ( $cursor['next_root_ordinal'] === count( $shape['items'] ) && 0 === $cursor['next_node_ordinal'] );
+		foreach ( $shape['items'] as $item_key => $item ) {
 			// Uncommitted roots are not part of this proof. A zero node cursor
 			// at a real root boundary is proved without encoding that future root.
 			if ( ! $complete && $root_order > $cursor['next_root_ordinal'] ) { break; }
