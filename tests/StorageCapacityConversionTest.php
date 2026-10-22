@@ -7,9 +7,24 @@ use FooPlugins\FooGalleryMigrate\StorageControl;
 use FooPlugins\FooGalleryMigrate\LegacyOptionDecoder;
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
 use FooPlugins\FooGalleryMigrate\LegacyRecordCodec;
+use FooPlugins\FooGalleryMigrate\StorageConversion;
 use PHPUnit\Framework\TestCase;
 
 class StorageCapacityConversionTest extends TestCase {
+	public function test_raw_fetch_requires_an_owned_capacity_phase_before_sql(): void {
+		$old = isset( $GLOBALS['wpdb'] ) ? $GLOBALS['wpdb'] : null;
+		$GLOBALS['wpdb'] = new class {
+			public $prefix = 'wp_'; public $base_prefix = 'wp_'; public $reads = 0;
+			public function __call( $name, $args ) { ++$this->reads; throw new \RuntimeException( 'Unexpected SQL.' ); }
+		};
+		try {
+			$conversion = new StorageConversion( null, null, $this->scale() );
+			$method = new \ReflectionMethod( $conversion, 'option_raw' ); $method->setAccessible( true );
+			try { $method->invoke( $conversion ); $this->fail( 'Naked raw fetch admitted.' ); }
+			catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'Retain recorded authority', $error->getMessage() ); }
+			$this->assertSame( 0, $GLOBALS['wpdb']->reads );
+		} finally { $GLOBALS['wpdb'] = $old; }
+	}
 	public function scale( $batch_rows = 1024 ) {
 		$class = StorageCapacityPolicyTest::capacity_class(); $class['limits']['copy_batch_rows'] = $batch_rows;
 		$clock = function () { return microtime( true ); };
@@ -52,6 +67,14 @@ class StorageCapacityConversionTest extends TestCase {
 		try { StorageControl::decode( json_encode( $r ), 1 ); $this->fail( 'Live cursor escaped copying.' ); }
 		catch ( \RuntimeException $e ) { $this->assertNotEmpty( $e->getMessage() ); }
 		$r['copy_cursor'] = null; $this->assertSame( $r, StorageControl::decode( json_encode( $r ), 1 ) );
+		$r['verify_cursor'] = StorageCopyCursor::initial_verify();
+		$this->assertSame( $r, StorageControl::decode( json_encode( $r ), 1 ) );
+		$wrong = $r; $wrong['phase'] = 'copying';
+		try { StorageControl::decode( json_encode( $wrong ), 1 ); $this->fail( 'Proof position escaped verified phase.' ); }
+		catch ( \RuntimeException $e ) { $this->assertNotEmpty( $e->getMessage() ); }
+		$wrong = $r; $wrong['verify_cursor']['next_node_ordinal'] = 1;
+		try { StorageControl::decode( json_encode( $wrong ), 1 ); $this->fail( 'Unbound proof advanced.' ); }
+		catch ( \RuntimeException $e ) { $this->assertNotEmpty( $e->getMessage() ); }
 	}
 	public function test_conversion_walk_yields_inside_one_over_10k_root_without_emitting_a_complete_root_array(): void {
 		$scale = $this->scale(); $codec = new LegacyStateCodec( 1048576, 64, 10000, $scale ); $records = new LegacyRecordCodec( $codec, 24576, 16777216, $scale );
@@ -59,13 +82,13 @@ class StorageCapacityConversionTest extends TestCase {
 		for ( $i = 0; $i < 12000; ++$i ) { $root['children'][$i] = $i; }
 		$committed = 0; $passes = 0; $digest = hash_init( 'sha256' );
 		do {
-			$seen = 0; $batch = 0; $start = $committed;
-			$done = $records->walk_conversion_tree( 'active', 0, $root, 0, function ( $row, $tokens, $bytes ) use ( &$seen, &$batch, &$committed, $start, $digest ) {
-				if ( $seen++ < $start ) { return true; }
+			$visited = 0; $batch = 0;
+			$done = $records->walk_conversion_tree_from( 'active', 0, $root, 0, $committed, $visited, function ( $row, $tokens, $bytes ) use ( &$batch, &$committed, $digest ) {
 				if ( $batch >= 1024 ) { return false; }
 				$this->assertGreaterThan( 0, $tokens ); $this->assertGreaterThan( 0, $bytes );
 				hash_update( $digest, $row['node_hash'] . $row['logical_hash'] ); ++$batch; ++$committed; return true;
 			} ); ++$passes;
+			$this->assertGreaterThanOrEqual( $committed, $visited );
 			$this->assertLessThanOrEqual( 1024, $batch ); $this->assertLessThan( 14, $passes );
 		} while ( ! $done );
 		$this->assertSame( 12001, $committed ); $this->assertSame( 12, $passes );

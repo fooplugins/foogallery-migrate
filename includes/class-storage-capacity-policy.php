@@ -46,6 +46,10 @@ final class StorageCapacityPolicy {
 		$limits = self::ceilings();
 		$limits['max_raw_bytes'] = $p['max_raw_bytes'];
 		$limits['memory_ceiling_bytes'] = 536870912;
+		// The native 20K SQL fixture showed a 512-row turn at 9.898 seconds
+		// with fixed query work. Yield at 256 for commit margin; source, byte,
+		// structural and total row caps remain unchanged.
+		$limits['copy_batch_rows'] = 256;
 		return array( 'release_version' => 1, 'limits' => $limits, 'reserve_bytes' => $p['reserve_bytes'],
 			'amplification' => $p['decode_amplification'], 'phase_headroom_bytes' => $p['phase_headroom_bytes'] );
 	}

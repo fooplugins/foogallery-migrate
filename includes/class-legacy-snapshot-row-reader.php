@@ -13,10 +13,13 @@ final class LegacySnapshotRowReader {
 	private $window_bytes;
 	private $admit;
 	private $witness;
+	private $window_rows;
 
-	public function __construct( $db, $table, $columns, $bytes_sql, $scope, $max_bytes, $admit, $witness = null ) {
+	public function __construct( $db, $table, $columns, $bytes_sql, $scope, $max_bytes, $admit, $witness = null, $window_rows = self::WINDOW_ROWS ) {
 		$this->db = $db; $this->table = $table; $this->columns = $columns;
 		$this->bytes_sql = $bytes_sql; $this->scope = $scope;
+		if ( ! is_int( $window_rows ) || $window_rows < 1 || $window_rows > 256 ) { $this->fail( 'Invalid finite window size.' ); }
+		$this->window_rows = $window_rows;
 		$this->window_bytes = min( LegacyTableReader::MAX_RECORD_BYTES, $max_bytes );
 		$this->admit = $admit; $this->witness = $witness;
 		if ( null !== $witness && ( ! $witness instanceof SnapshotPageWitness || ! $witness->scope_matches( $scope ) ) ) { $this->fail( 'Wrong producer witness scope.' ); }
@@ -37,7 +40,7 @@ final class LegacySnapshotRowReader {
 		$args[] = $order; $args[] = $order; $args[] = $id;
 		$tail = ' FROM `' . $this->table . '` WHERE ' . $where;
 		$seek = ' ORDER BY item_order ASC, id ASC LIMIT %d';
-		$metadata = $this->read( $this->db->prepare( 'SELECT id, item_order, (' . $this->bytes_sql . ') AS window_bytes' . $tail . $seek, array_merge( $args, array( self::WINDOW_ROWS ) ) ) );
+		$metadata = $this->read( $this->db->prepare( 'SELECT id, item_order, (' . $this->bytes_sql . ') AS window_bytes' . $tail . $seek, array_merge( $args, array( $this->window_rows ) ) ) );
 		$maximum = 0;
 		foreach ( $metadata as $m ) {
 			$size = $this->number( $m['window_bytes'] );
@@ -74,7 +77,7 @@ final class LegacySnapshotRowReader {
 
 	private function read( $sql ) {
 		$rows = $this->db->get_results( $sql, ARRAY_A );
-		if ( ! is_array( $rows ) || ! empty( $this->db->last_error ) || count( $rows ) > self::WINDOW_ROWS ) { $this->fail( 'Window read failed.' ); }
+		if ( ! is_array( $rows ) || ! empty( $this->db->last_error ) || count( $rows ) > $this->window_rows ) { $this->fail( 'Window read failed.' ); }
 		return $rows;
 	}
 	private function number( $v ) {

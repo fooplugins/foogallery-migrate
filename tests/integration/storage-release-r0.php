@@ -1,10 +1,10 @@
 <?php
 /**
  * Owned, disposable modern-runtime start of the production storage journey.
- * Usage: php storage-release-r0.php /tmp/foogallery-migrate-r0.XXXXXX seed|preflight|preflight-low-memory|provision|switch|recover|status
+ * Usage: php storage-release-r0.php /tmp/foogallery-migrate-r0.XXXXXX seed|preflight|preflight-low-memory|provision|switch|recover|verify-table|simulate-post-delete-interruption|status
  * Keep the site and SQL container after RED so the exact state can be inspected.
  */
-if ( 'cli' !== PHP_SAPI || 3 !== $argc || ! in_array( $argv[2], array( 'seed', 'preflight', 'preflight-low-memory', 'provision', 'switch', 'recover', 'status' ), true ) ) {
+if ( 'cli' !== PHP_SAPI || 3 !== $argc || ! in_array( $argv[2], array( 'seed', 'preflight', 'preflight-low-memory', 'provision', 'switch', 'recover', 'verify-table', 'simulate-post-delete-interruption', 'status' ), true ) ) {
 	throw new RuntimeException( 'An owned site path and one explicit journey step are required.' );
 }
 $site = realpath( $argv[1] );
@@ -39,7 +39,10 @@ use FooPlugins\FooGalleryMigrate\StorageCapacityPolicy;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\StorageAdmin;
 use FooPlugins\FooGalleryMigrate\StorageControl;
+use FooPlugins\FooGalleryMigrate\StorageCopyCursor;
 use FooPlugins\FooGalleryMigrate\StorageScalarObserver;
+use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
+use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
 
 global $wpdb, $wp_version;
 Journey::check( ! is_multisite() && DB_NAME === $manifest['database'] && DB_HOST === $manifest['host'] &&
@@ -52,6 +55,13 @@ $raw = function ( $name ) use ( $wpdb ) {
 	$value = $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM `' . $wpdb->options . '` WHERE option_name=%s', $name ) );
 	Journey::check( ! $wpdb->last_error, 'Option SQL read failed.' );
 	return $value;
+};
+$questions = function () use ( $wpdb ) {
+	$rows = $wpdb->dbh->query( "SHOW SESSION STATUS LIKE 'Questions'" );
+	Journey::check( $rows instanceof mysqli_result, 'Owned session query counter unavailable.' );
+	$row = $rows->fetch_assoc(); $rows->free();
+	Journey::check( is_array( $row ) && isset( $row['Value'] ) && ctype_digit( $row['Value'] ), 'Invalid owned session query counter.' );
+	return (int) $row['Value'];
 };
 $journal_name = 'fgm_r0_owned_journey_v1';
 $journal = get_option( $journal_name, null );
@@ -123,8 +133,10 @@ if ( in_array( $step, array( 'provision', 'switch', 'recover' ), true ) ) {
 	$milestones = new ReflectionProperty( 'FooPlugins\\FooGalleryMigrate\\StorageScalarObserver', 'milestones' );
 	$refusal = new ReflectionProperty( 'FooPlugins\\FooGalleryMigrate\\StorageScalarObserver', 'refusal' );
 	$enabled->setValue( null, true ); $milestones->setValue( null, array() ); $refusal->setValue( null, null );
+	$before_questions = $questions();
 	try { $result['result'] = Journey::request( 'switch' === $step ? 'switch' : ( 'recover' === $step ? 'recover' : 'provision' ), 'table' ); }
 	catch ( RuntimeException $error ) { $result['failure'] = $error->getMessage(); }
+	$result['session_questions_delta'] = $questions() - $before_questions;
 	$result['milestones'] = array();
 	foreach ( $milestones->getValue() as $event ) {
 		$result['milestones'][] = array( 'name' => $event['name'], 'elapsed_seconds' => round( $event['time'] - $milestones->getValue()[0]['time'], 3 ),
@@ -132,6 +144,12 @@ if ( in_array( $step, array( 'provision', 'switch', 'recover' ), true ) ) {
 	}
 	$result['refusal'] = $refusal->getValue();
 	$result['status'] = StorageAdmin::status();
+	$after_control = $raw( StorageAuthority::CONTROL_OPTION );
+	if ( null !== $after_control ) {
+		$after_record = StorageControl::decode( $after_control, get_current_blog_id() );
+		if ( isset( $after_record['copy_cursor'] ) && is_array( $after_record['copy_cursor'] ) ) { $result['copy_cursor'] = $after_record['copy_cursor']; }
+		if ( isset( $after_record['verify_cursor'] ) ) { $result['verify_cursor'] = $after_record['verify_cursor']; }
+	}
 	$source = $raw( FOOGALLERY_MIGRATE_OPTION_DATA );
 	$backup = $raw( StorageAuthority::STORAGE_BACKUP_OPTION );
 	Journey::check( ( is_string( $source ) && hash( 'sha256', $source ) === Native::RAW_SHA256 ) ||
@@ -139,5 +157,49 @@ if ( in_array( $step, array( 'provision', 'switch', 'recover' ), true ) ) {
 	echo json_encode( $result, JSON_UNESCAPED_SLASHES ) . "\n";
 	exit( isset( $result['failure'] ) ? 1 : 0 );
 }
-if ( 'status' === $step ) { $result['status'] = StorageAdmin::status(); }
+if ( 'verify-table' === $step ) {
+	$record = StorageControl::decode( $raw( StorageAuthority::CONTROL_OPTION ), get_current_blog_id() );
+	Journey::check( is_array( $record ) && 'table' === $record['backend'] &&
+		in_array( $record['phase'], array( 'flipped', 'stable' ), true ) &&
+		( new LegacyStorageSchema( $wpdb ) )->verify(), 'Selected owned table authority is required.' );
+	$expected = Native::value();
+	$snapshot = new LegacyTableSnapshot( new LegacyTransactionConnection( $wpdb ), get_current_blog_id(), 24576, 16777216 );
+	$actual = array( 'galleries' => $snapshot->read_bounded( 'galleries' ) );
+	Journey::check( serialize( $actual ) === serialize( $expected ), 'Table snapshot differs from exact native fixture.' );
+	Native::verify( $actual );
+	$result['table_exact_native_bytes'] = strlen( serialize( $actual ) );
+	$result['table_exact_native_sha256'] = hash( 'sha256', serialize( $actual ) );
+	$result['status'] = StorageAdmin::status();
+}
+if ( 'simulate-post-delete-interruption' === $step ) {
+	$control = $raw( StorageAuthority::CONTROL_OPTION );
+	$record = StorageControl::decode( $control, get_current_blog_id() );
+	Journey::check( 'flipped' === $record['phase'] && 'table' === $record['backend'] && 'option' === $record['from'] &&
+		'table' === $record['to'] && isset( $record['verify_cursor'] ) &&
+		StorageCopyCursor::validate_verify( $record['verify_cursor'] ) === $record['verify_cursor'], 'Completed owned flipped proof is required.' );
+	$cursor = $record['verify_cursor'];
+	Journey::check( 1 === $cursor['state_order'] && 20208 === $cursor['verified_rows'] &&
+		0 === $cursor['next_root_ordinal'] && 0 === $cursor['next_node_ordinal'] &&
+		is_string( $cursor['heads_digest'] ), 'Native fixture proof is not complete.' );
+	$source = $raw( FOOGALLERY_MIGRATE_OPTION_DATA ); $backup = $raw( StorageAuthority::STORAGE_BACKUP_OPTION );
+	Journey::check( is_string( $source ) && is_string( $backup ) && $source === $backup &&
+		hash( 'sha256', $source ) === Native::RAW_SHA256 &&
+		$record['source_digest'] === hash( 'sha256', 'present:' . Native::RAW_SHA256 ), 'Exact owned source/backup parity is required.' );
+	$deleted = $wpdb->query( $wpdb->prepare( 'DELETE FROM `' . $wpdb->options . '` WHERE option_name=%s AND BINARY option_value=BINARY %s',
+		array( FOOGALLERY_MIGRATE_OPTION_DATA, $source ) ) );
+	Journey::check( 1 === $deleted && ! $wpdb->last_error && null === $raw( FOOGALLERY_MIGRATE_OPTION_DATA ) &&
+		$control === $raw( StorageAuthority::CONTROL_OPTION ), 'Post-delete interruption simulation failed.' );
+	wp_cache_delete( FOOGALLERY_MIGRATE_OPTION_DATA, 'options' );
+	$result['simulated_after_exact_source_delete_before_stable_cas'] = true;
+	$result['status'] = StorageAdmin::status();
+}
+if ( 'status' === $step ) {
+	$result['status'] = StorageAdmin::status();
+	$control = $raw( StorageAuthority::CONTROL_OPTION );
+	if ( null !== $control ) {
+		$record = StorageControl::decode( $control, get_current_blog_id() );
+		if ( isset( $record['copy_cursor'] ) && is_array( $record['copy_cursor'] ) ) { $result['copy_cursor'] = $record['copy_cursor']; }
+		if ( isset( $record['verify_cursor'] ) ) { $result['verify_cursor'] = $record['verify_cursor']; }
+	}
+}
 echo json_encode( $result, JSON_UNESCAPED_SLASHES ) . "\n";

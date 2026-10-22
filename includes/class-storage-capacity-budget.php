@@ -107,7 +107,7 @@ final class StorageCapacityBudget {
 		if ( ! is_array( $class ) || array_keys( $class ) !== array( 'release_version', 'limits', 'reserve_bytes', 'amplification', 'phase_headroom_bytes' ) ||
 			1 !== $class['release_version'] || ! is_array( $class['limits'] ) || ! isset( $class['limits']['max_raw_bytes'] ) ||
 			$class['limits'] !== array_replace( StorageCapacityPolicy::ceilings(), array(
-				'max_raw_bytes' => $class['limits']['max_raw_bytes'], 'memory_ceiling_bytes' => 536870912 ) ) ||
+				'max_raw_bytes' => $class['limits']['max_raw_bytes'], 'memory_ceiling_bytes' => 536870912, 'copy_batch_rows' => 256 ) ) ||
 			! is_int( $class['reserve_bytes'] ) || $class['reserve_bytes'] < 134217728 || $class['reserve_bytes'] > 268435456 ||
 			! is_int( $class['amplification'] ) || $class['amplification'] < 16 || $class['amplification'] > 64 ||
 			! is_int( $class['phase_headroom_bytes'] ) || $class['phase_headroom_bytes'] < 33554432 || $class['phase_headroom_bytes'] > 67108864 ||

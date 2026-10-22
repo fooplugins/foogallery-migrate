@@ -580,29 +580,41 @@ class LegacyRecordCodec {
 	/** Conversion-only preorder producer: false is a handled row-boundary yield.
 	 * No complete-root row array or PHP continuation is retained. */
 	public function walk_conversion_tree( $state_key, $key, $record, $order, $emit ) {
-		if ( null === $this->scale || null === $this->scale->capacity() || ! is_callable( $emit ) ) { $this->fail( 'Conversion row walk requires an operation budget.' ); }
-		$stats = array( 'record_count' => 0, 'encoded_bytes' => 0 );
-		return $this->walk_conversion_node( $this->codec->key_hash( $state_key ), null, $key, $record, $order, 0, $emit, $stats );
+		$visited = 0;
+		return $this->walk_conversion_tree_from( $state_key, $key, $record, $order, 0, $visited, $emit );
 	}
-	private function walk_conversion_node( $state, $parent, $key, $record, $order, $depth, $emit, &$stats ) {
+	/** Resume from a preorder ordinal without re-encoding committed nodes.
+	 * Skipped topology is still visited and bounded; the durable cursor and SQL
+	 * generation statistics own prior byte/token counts. */
+	public function walk_conversion_tree_from( $state_key, $key, $record, $order, $skip, &$visited, $emit ) {
+		if ( null === $this->scale || null === $this->scale->capacity() || ! is_callable( $emit ) ) { $this->fail( 'Conversion row walk requires an operation budget.' ); }
+		if ( ! is_int( $skip ) || $skip < 0 || $skip > $this->max_records ) { $this->fail( 'Invalid conversion skip.' ); }
+		$stats = array( 'record_count' => 0, 'encoded_bytes' => 0 );
+		$done = $this->walk_conversion_node( $this->codec->key_hash( $state_key ), null, $key, $record, $order, 0, $emit, $stats, $skip );
+		$visited = $stats['record_count']; return $done;
+	}
+	private function walk_conversion_node( $state, $parent, $key, $record, $order, $depth, $emit, &$stats, $skip ) {
 		$this->tick(); $this->admit( 0 );
 		if ( $depth > $this->max_depth || $stats['record_count'] >= $this->max_records ) { $this->fail( 'Conversion tree exceeds finite shape.' ); }
-		$row = $this->make_row( $state, $parent, $key, $record, $order, $depth );
-		$row['logical_hash'] = $this->codec->snapshot_digest( $record );
-		if ( null === $parent && $state === $this->codec->key_hash( 'migrated' ) ) { $row['legacy_identifier_value'] = $this->codec->key_value( $key ); $row['legacy_identifier_hash'] = $this->codec->key_hash( $key ); }
-		$bytes = $this->encoded_bytes( $row );
-		if ( $bytes > $this->scale->capacity()->limit( 'max_row_bytes' ) || $bytes > $this->max_tree_bytes - $stats['encoded_bytes'] ) { $this->fail( 'Conversion row/tree exceeds finite bytes.' ); }
-		++$stats['record_count']; $stats['encoded_bytes'] += $bytes;
-		// Row-subgraph logical tokens, excluding already-emitted child subtrees.
-		$own = $record; $children = is_array( $record ) && isset( $record['children'] ) && is_array( $record['children'] );
-		if ( $children ) { unset( $own['children'] ); }
-		$footprint = $this->codec->snapshot_footprint( $own ); $tokens = $footprint['tokens'] + 1 + ( $children ? 2 : 0 ); unset( $own, $footprint );
-		if ( false === call_user_func( $emit, $row, $tokens, $bytes ) ) { return false; }
-		$node = $row['node_hash']; unset( $row );
+		$at = $stats['record_count']++;
+		$children = is_array( $record ) && isset( $record['children'] ) && is_array( $record['children'] );
+		if ( $at >= $skip ) {
+			$row = $this->make_row( $state, $parent, $key, $record, $order, $depth );
+			$row['logical_hash'] = $this->codec->snapshot_digest( $record );
+			if ( null === $parent && $state === $this->codec->key_hash( 'migrated' ) ) { $row['legacy_identifier_value'] = $this->codec->key_value( $key ); $row['legacy_identifier_hash'] = $this->codec->key_hash( $key ); }
+			$bytes = $this->encoded_bytes( $row );
+			if ( $bytes > $this->scale->capacity()->limit( 'max_row_bytes' ) || $bytes > $this->max_tree_bytes - $stats['encoded_bytes'] ) { $this->fail( 'Conversion row/tree exceeds finite bytes.' ); }
+			$stats['encoded_bytes'] += $bytes;
+			// Row-subgraph logical tokens, excluding already-emitted child subtrees.
+			$own = $record; if ( $children ) { unset( $own['children'] ); }
+			$footprint = $this->codec->snapshot_footprint( $own ); $tokens = $footprint['tokens'] + 1 + ( $children ? 2 : 0 ); unset( $own, $footprint );
+			if ( false === call_user_func( $emit, $row, $tokens, $bytes, $at ) ) { return false; }
+			$node = $row['node_hash']; unset( $row );
+		} else { $node = $children ? $this->codec->node_hash( $state, $parent, $key ) : null; }
 		if ( $children ) {
 			$ordinal = 0;
 			foreach ( $record['children'] as $child_key => $child ) {
-				if ( ! $this->walk_conversion_node( $state, $node, $child_key, $child, $ordinal++, $depth + 1, $emit, $stats ) ) { return false; }
+				if ( ! $this->walk_conversion_node( $state, $node, $child_key, $child, $ordinal++, $depth + 1, $emit, $stats, $skip ) ) { return false; }
 			}
 		}
 		return true;

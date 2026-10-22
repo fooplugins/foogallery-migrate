@@ -20,6 +20,89 @@ class StorageCapacityCopyTransactionTest extends TestCase {
 	private function batch( $db, $value, $r, $scale, $discard = false ) {
 		return ( new LegacyTableSnapshot( $db, 1, 24576, 16777216, null, null, $scale ) )->conversion_batch( $r, $value, new StorageControl( $db, 1 ), json_encode( array( 'version' => 1, 'blog_id' => 1, 'token' => str_repeat( 'a', 32 ), 'expires' => time() + 300 ) ), $discard );
 	}
+	private function completed_copy() {
+		list( $db, $value, $r, $scale ) = $this->setup_copy();
+		for ( $i = 0; $i < 3; ++$i ) { $r = $this->batch( $db, $value, $r, $scale )['record']; }
+		$r['phase'] = 'verified'; $r['copy_cursor'] = null; $db->control = json_encode( $r );
+		return array( $db, $value, $r, $scale );
+	}
+	private function verify_batch( $db, $value, $r, $scale ) {
+		return ( new LegacyTableSnapshot( $db, 1, 24576, 16777216, null, null, $scale ) )->conversion_verify_batch( $r, $value,
+			new StorageControl( $db, 1 ), json_encode( array( 'version' => 1, 'blog_id' => 1, 'token' => str_repeat( 'a', 32 ), 'expires' => time() + 300 ) ) );
+	}
+	public function test_verified_cursor_requires_every_exact_page_and_old_v4_layout_resumes(): void {
+		list( $db, $value, $r, $scale ) = $this->completed_copy();
+		$this->assertArrayNotHasKey( 'verify_cursor', $r, 'Old persisted verified v4 controls remain readable.' );
+		for ( $i = 1; $i <= 3; ++$i ) {
+			$proof = $this->verify_batch( $db, $value, $r, $scale ); $r = $proof['record'];
+			$this->assertFalse( $proof['already_complete'] );
+			$this->assertSame( $i * 2, $r['verify_cursor']['verified_rows'] );
+			$this->assertSame( 'verified', $r['phase'] ); $this->assertSame( $r, StorageControl::decode( $db->control, 1 ) );
+		}
+		$this->assertCount( 6, $db->records );
+		$this->assertTrue( $this->verify_batch( $db, $value, $r, $scale )['already_complete'] );
+	}
+	public function test_older_copied_prefix_corruption_and_failed_page_never_advance_proof(): void {
+		list( $db, $value, $r, $scale ) = $this->completed_copy();
+		$original = $db->records[0]['payload']; $db->records[0]['payload'][0] = 'X';
+		try { $this->verify_batch( $db, $value, $r, $scale ); $this->fail( 'Old copied row damage was selected.' ); }
+		catch ( \RuntimeException $e ) { $this->assertNotEmpty( $e->getMessage() ); }
+		$this->assertSame( json_encode( $r ), $db->control );
+		$db->records[0]['payload'] = $original;
+		$r = $this->verify_batch( $db, $value, $r, $scale )['record'];
+		$db->fault = 'verify-select'; $before = $db->control;
+		try { $this->verify_batch( $db, $value, $r, $scale ); $this->fail( 'Interrupted proof advanced.' ); }
+		catch ( \RuntimeException $e ) { $this->assertNotEmpty( $e->getMessage() ); }
+		$this->assertSame( $before, $db->control );
+		$db->fault = ''; $next = $this->verify_batch( $db, $value, $r, $scale );
+		$this->assertSame( 4, $next['record']['verify_cursor']['verified_rows'] );
+	}
+	public function test_verification_refuses_malformed_cursor_changed_source_and_head_before_progress(): void {
+		list( $db, $value, $r, $scale ) = $this->completed_copy();
+		$bad = $r; $bad['verify_cursor'] = StorageCopyCursor::initial_verify(); $bad['verify_cursor']['verified_rows'] = -1;
+		try { StorageControl::decode( json_encode( $bad ), 1 ); $this->fail( 'Malformed verification cursor accepted.' ); }
+		catch ( \RuntimeException $e ) { $this->assertNotEmpty( $e->getMessage() ); }
+		$db->raw_hash = str_repeat( '0', 64 );
+		try { $this->verify_batch( $db, $value, $r, $scale ); $this->fail( 'Changed source accepted.' ); }
+		catch ( \RuntimeException $e ) { $this->assertNotEmpty( $e->getMessage() ); }
+		$this->assertSame( json_encode( $r ), $db->control );
+		$db->raw_hash = hash( 'sha256', serialize( $value ) ); $db->heads[0]['revision'] = 2;
+		try { $this->verify_batch( $db, $value, $r, $scale ); $this->fail( 'Changed head accepted.' ); }
+		catch ( \RuntimeException $e ) { $this->assertNotEmpty( $e->getMessage() ); }
+		$this->assertSame( json_encode( $r ), $db->control );
+	}
+	public function test_completed_proof_metadata_can_resume_after_exact_source_delete_but_not_changed_head(): void {
+		list( $db, $value, $r, $scale ) = $this->completed_copy();
+		for ( $i = 0; $i < 3; ++$i ) { $r = $this->verify_batch( $db, $value, $r, $scale )['record']; }
+		$r['phase'] = 'flipped'; $r['backend'] = 'table'; $r['epoch'] = 1; $db->control = json_encode( $r );
+		$repo = new LegacyTableSnapshot( $db, 1, 24576, 16777216, null, null, $scale );
+		$this->assertTrue( $repo->conversion_verified_metadata( $r ) );
+		$db->heads[0]['revision'] = 2;
+		try { $repo->conversion_verified_metadata( $r ); $this->fail( 'Changed head reused a completed proof.' ); }
+		catch ( \RuntimeException $e ) { $this->assertNotEmpty( $e->getMessage() ); }
+	}
+	public function test_stale_bound_proof_cursor_and_post_page_head_change_refuse_without_advancing(): void {
+		list( $db, $value, $r, $scale ) = $this->completed_copy();
+		$r = $this->verify_batch( $db, $value, $r, $scale )['record'];
+		$stale = $r; $stale['verify_cursor']['heads_digest'] = str_repeat( '0', 64 ); $db->control = json_encode( $stale );
+		try { $this->verify_batch( $db, $value, $stale, $scale ); $this->fail( 'Stale bound proof accepted.' ); }
+		catch ( \RuntimeException $e ) { $this->assertNotEmpty( $e->getMessage() ); }
+		$this->assertSame( json_encode( $stale ), $db->control );
+		$db->control = json_encode( $r ); $db->heads[0]['revision'] = 2;
+		try { $this->verify_batch( $db, $value, $r, $scale ); $this->fail( 'Post-page head mutation accepted.' ); }
+		catch ( \RuntimeException $e ) { $this->assertNotEmpty( $e->getMessage() ); }
+		$this->assertSame( json_encode( $r ), $db->control );
+	}
+	public function test_uncertain_verification_commit_requires_fresh_cursor_reconciliation_not_replay(): void {
+		list( $db, $value, $r, $scale ) = $this->completed_copy(); $db->fault = 'commit';
+		try { $this->verify_batch( $db, $value, $r, $scale ); $this->fail( 'Uncertain verification commit was reported safe.' ); }
+		catch ( \RuntimeException $e ) { $this->assertStringContainsString( 'uncertain', $e->getMessage() ); }
+		$this->assertNotContains( 'ROLLBACK', array_slice( $db->queries, -2 ) );
+		$durable = StorageControl::decode( $db->control, 1 ); $this->assertSame( 2, $durable['verify_cursor']['verified_rows'] );
+		$fresh = clone $db; $fresh->fault = ''; $fresh->queries = array();
+		$next = $this->verify_batch( $fresh, $value, $durable, $scale );
+		$this->assertSame( 4, $next['record']['verify_cursor']['verified_rows'] );
+	}
 	public function test_row_boundary_cursor_and_head_are_committed_in_the_same_transaction_and_resume_exactly(): void {
 		list( $db, $value, $r, $scale ) = $this->setup_copy();
 		for ( $i = 0; $i < 3; ++$i ) {
@@ -46,8 +129,9 @@ class StorageCapacityCopyTransactionTest extends TestCase {
 		$p = new \ReflectionProperty( $repo, 'records' ); $p->setAccessible( true ); $p->setValue( $repo, $walks );
 		$b = $repo->conversion_batch( $r, $value, new StorageControl( $db, 1 ), json_encode( array( 'version' => 1, 'blog_id' => 1, 'token' => str_repeat( 'a', 32 ), 'expires' => time() + 300 ) ) );
 		$this->assertSame( 4, $b['record']['copy_cursor']['committed_rows'] );
-		// Two committed roots proved, two appended, one row-boundary lookahead.
-		$this->assertSame( array( 0, 1, 2, 3, 4 ), $walks->orders );
+		// Only the prior root's tail is proved; root zero is never re-encoded.
+		$this->assertSame( array( 1, 1, 2, 3, 4 ), $walks->orders );
+		$this->assertSame( array( 24576, 0, 0, 0, 0 ), $walks->skips );
 	}
 	public function test_prefix_corruption_and_foreign_rows_refuse_before_any_new_insert(): void {
 		foreach ( array( 'payload', 'foreign', 'source', 'generation', 'revision', 'blog', 'stale-control', 'cursor-root', 'cursor-node' ) as $fault ) {
@@ -101,10 +185,10 @@ class StorageCapacityCopyTransactionTest extends TestCase {
 }
 
 class CopyWalkCounter extends \FooPlugins\FooGalleryMigrate\LegacyRecordCodec {
-	public $orders = array();
-	public function walk_conversion_tree( $state_key, $key, $record, $order, $emit ) {
-		$this->orders[] = $order;
-		return parent::walk_conversion_tree( $state_key, $key, $record, $order, $emit );
+	public $skips = array(); public $orders = array();
+	public function walk_conversion_tree_from( $state_key, $key, $record, $order, $skip, &$visited, $emit ) {
+		$this->skips[] = $skip; $this->orders[] = $order;
+		return parent::walk_conversion_tree_from( $state_key, $key, $record, $order, $skip, $visited, $emit );
 	}
 }
 
@@ -158,7 +242,11 @@ class CapacityCopyDb extends SnapshotTestWpdb {
 			foreach ( $this->records as $row ) { if ( $row['state_id'] !== $a[1] ) { continue; } ++$n; $payload += $row['payload_bytes']; foreach ( array( 'payload', 'mutable_payload', 'key_value', 'legacy_identifier_value', 'source_plugin_value', 'source_id_value' ) as $key ) { $bytes += null === $row[$key] ? 0 : strlen( $row[$key] ); } }
 			return array( array( 'record_count' => (string) $n, 'payload_bytes' => (string) $payload, 'encoded_bytes' => (string) $bytes ) );
 		}
-		if ( strpos( $q, 'SELECT * FROM' ) === 0 ) { return array_values( array_filter( $this->records, function ( $row ) use ( $a ) { return $row['state_id'] === $a[1] && bin2hex( $row['node_hash'] ) === $a[2]; } ) ); }
+		if ( strpos( $q, 'SELECT root_payload FROM' ) === 0 ) { return array( array( 'root_payload' => $this->heads[0]['root_payload'] ) ); }
+		if ( strpos( $q, 'SELECT * FROM' ) === 0 ) {
+			if ( 'verify-select' === $this->fault ) { throw new \RuntimeException( 'Injected exact-row read failure.' ); }
+			return array_values( array_filter( $this->records, function ( $row ) use ( $a ) { return $row['state_id'] === $a[1] && bin2hex( $row['node_hash'] ) === $a[2]; } ) );
+		}
 		return parent::get_results( $q, $format );
 	}
 }

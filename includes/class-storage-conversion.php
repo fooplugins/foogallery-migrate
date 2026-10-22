@@ -25,6 +25,7 @@ class StorageConversion {
 	private $memory;
 	private $scale;
 	private $scale_started = false;
+	private $capacity_phase_depth = 0;
 
 	/** Policy must come from trusted runtime calibration, never request fields. */
 	public function __construct( $policy = null, $memory = null, $scale = null ) {
@@ -155,7 +156,7 @@ class StorageConversion {
 	}
 	private function discard_source_owned( $r ) {
 		$source = $this->option_snapshot();
-		$this->require_true( $source['physical'] === $r['source_digest'] && $this->codec->snapshot_digest( $source['value'] ) === $r['logical_digest'] );
+		$this->require_true( $source['physical'] === $r['source_digest'] && $source['logical'] === $r['logical_digest'] );
 		$this->snapshot->conversion_batch( $r, $source['value'], $this->controls, $this->gate->maintenance_identity(), true );
 	}
 
@@ -222,27 +223,58 @@ class StorageConversion {
 			$target = null !== $this->copy_proved_logical ? array( 'physical' => $this->table_physical_digest(), 'logical' => $this->copy_proved_logical ) : $this->source_metadata( $r['to'], false );
 			$this->require_true( $target['logical'] === $r['logical_digest'] );
 			$this->unchanged_source( $r ); $r = $this->phase( $r, 'verified' );
-			// The copying transaction already compared every destination column to
-			// the exact source. Independently reconstruct/verify it before the flip,
-			// but on a fresh lifetime, not on top of the growing prefix proof.
+			// The copying transaction compared each destination row to its exact
+			// source. Independently prove all rows in fresh bounded verified turns,
+			// not on top of the final copy transaction's lifetime.
 			if ( null !== $this->capacity() ) { return $r; }
 		}
 		if ( 'verified' === $r['phase'] ) {
 			$this->ready(); $this->unchanged_source( $r );
-			$target = $this->source_metadata( $r['to'], false );
+			if ( 4 === $r['version'] && 'option' === $r['from'] && 'table' === $r['to'] ) {
+				$proof = $this->verify_forward( $r ); $r = $proof['record'];
+				if ( ! $proof['already_complete'] ) { return $r; }
+				$target = array( 'physical' => $this->table_physical_digest(), 'logical' => $r['logical_digest'] );
+			} else { $target = $this->source_metadata( $r['to'], false ); }
 			$this->require_true( $target['logical'] === $r['logical_digest'] );
 			$this->retain_and_select( $r );
 			$this->unchanged_source( $r ); $this->ready(); $r = $this->phase( $r, 'flipped', $target );
 			if ( null !== $this->capacity() ) { return $r; }
 		}
 		if ( 'flipped' === $r['phase'] ) {
-			$this->ready(); $active = $this->source_metadata( $r['backend'], false );
+			$this->ready();
+			if ( 4 === $r['version'] && 'option' === $r['from'] && 'table' === $r['to'] &&
+				( isset( $r['verify_cursor'] ) || $this->option_present( FOOGALLERY_MIGRATE_OPTION_DATA ) ) ) {
+				$proof = $this->verify_forward( $r ); $r = $proof['record'];
+				if ( ! $proof['already_complete'] ) { return $r; }
+				$active = array( 'physical' => $this->table_physical_digest(), 'logical' => $r['logical_digest'] );
+			} else { $active = $this->source_metadata( $r['backend'], false ); }
 			$this->require_true( $active['logical'] === $r['logical_digest'] );
 			$this->cleanup_source( $r );
 			$this->ready(); $r = $this->phase( $r, 'stable', $active );
 		}
 		$this->require_true( StorageControl::runtime_ready( $r, $this->controls->read( StorageAuthority::AUTHORITY_OPTION ) ) );
 		return $r;
+	}
+	private function verify_forward( $r ) {
+		$token = $this->open_capacity( 'stage' );
+		try {
+			if ( 'flipped' === $r['phase'] && ! $this->option_present( FOOGALLERY_MIGRATE_OPTION_DATA ) ) {
+				// Cleanup's exact-byte DELETE can succeed before stable control CAS.
+				// The retained backup replaces absent source bytes, but only a fully
+				// completed prior proof may be reused in this narrow recovery state.
+				$expected_backup = hash( 'sha256', 'absent' ) === $r['source_digest'] ?
+					hash( 'sha256', 'present:' . hash( 'sha256', serialize( array() ) ) ) : $r['source_digest'];
+				$this->require_true( $this->raw_option_digest( StorageAuthority::STORAGE_BACKUP_OPTION ) === $expected_backup );
+				$this->snapshot->conversion_verified_metadata( $r );
+				$result = array( 'record' => $r, 'already_complete' => true );
+			} else {
+				$source = $this->option_snapshot();
+				$this->require_true( $source['physical'] === $r['source_digest'] && $source['logical'] === $r['logical_digest'] );
+				$result = $this->snapshot->conversion_verify_batch( $r, $source['value'], $this->controls, $this->gate->maintenance_identity() );
+			}
+		} catch ( \Exception $error ) { $this->abort_capacity(); throw $error; }
+		catch ( \Throwable $error ) { $this->abort_capacity(); throw $error; }
+		$this->close_capacity( $token ); return $result;
 	}
 
 	/** This helper must UNWIND before independent destination verification. */
@@ -256,7 +288,8 @@ class StorageConversion {
 	}
 	private function copy_source_owned( $r ) {
 		$source = 'option' === $r['from'] ? $this->option_snapshot() : $this->table_snapshot( false );
-		$this->require_true( $source['physical'] === $r['source_digest'] && $this->codec->snapshot_digest( $source['value'] ) === $r['logical_digest'] );
+		$logical = isset( $source['logical'] ) ? $source['logical'] : $this->codec->snapshot_digest( $source['value'] );
+		$this->require_true( $source['physical'] === $r['source_digest'] && $logical === $r['logical_digest'] );
 		if ( 'table' === $r['to'] ) {
 			if ( 4 === $r['version'] ) {
 				$batch = $this->snapshot->conversion_batch( $r, $source['value'], $this->controls, $this->gate->maintenance_identity() );
@@ -346,7 +379,12 @@ class StorageConversion {
 		$token = $this->open_capacity( 'commit_cleanup_response' );
 		$old = json_encode( $r );
 		$source_sentinel = 'table' === $r['from'] ? json_encode( StorageControl::sentinel( $r ) ) : null;
-		$r['phase'] = $phase; if ( 4 === $r['version'] && 'copying' !== $phase ) { $r['copy_cursor'] = null; } $r['updated'] = max( $r['updated'], time() );
+		$r['phase'] = $phase; if ( 4 === $r['version'] && 'copying' !== $phase ) { $r['copy_cursor'] = null; }
+		if ( 4 === $r['version'] && 'option' === $r['from'] && 'table' === $r['to'] ) {
+			if ( 'verified' === $phase ) { $r['verify_cursor'] = StorageCopyCursor::initial_verify(); }
+			if ( 'stable' === $phase ) { unset( $r['verify_cursor'] ); }
+		}
+		$r['updated'] = max( $r['updated'], time() );
 		if ( 'flipped' === $phase ) { $this->require_true( $r['epoch'] < PHP_INT_MAX ); ++$r['epoch']; $r['backend'] = $r['to']; }
 		$new = json_encode( $r ); StorageControl::decode( $new, $this->blog );
 		$guard = null;
@@ -396,20 +434,21 @@ class StorageConversion {
 			StorageScalarObserver::milestone( 'source-decoded' );
 		}
 		$this->require_true( count( $value ) <= $this->limit( 'max_heads', 100 ) );
-		$this->codec->snapshot_digest( $value ); // Reject objects, depth overflow and unsupported scalars.
+		$logical = $this->codec->snapshot_digest( $value ); // Reject objects, depth overflow and unsupported scalars once.
 		$this->require_true( $before === $this->raw_option_digest( FOOGALLERY_MIGRATE_OPTION_DATA ) );
-		return array( 'physical' => $before, 'value' => $value );
+		return array( 'physical' => $before, 'logical' => $logical, 'value' => $value );
 	}
 
 	private function capacity() { return null === $this->scale ? null : $this->scale->capacity(); }
 	private function open_capacity( $phase ) {
 		$c = $this->capacity(); if ( null === $c ) { return null; }
-		return $c->open( $this, $phase, array( 'R' => $c->limit( 'max_raw_bytes' ), 'T' => $c->limit( 'max_tokens' ),
+		$token = $c->open( $this, $phase, array( 'R' => $c->limit( 'max_raw_bytes' ), 'T' => $c->limit( 'max_tokens' ),
 			'N' => $c->limit( 'max_rows' ), 'E' => $c->limit( 'max_bytes' ), 'S' => $c->limit( 'max_scalar_bytes' ),
 			'M' => $c->limit( 'max_row_bytes' ), 'H' => $c->limit( 'max_heads' ), 'D' => $c->limit( 'max_depth' ), 'W' => $c->limit( 'copy_batch_bytes' ) ) );
+		++$this->capacity_phase_depth; return $token;
 	}
-	private function close_capacity( $token ) { if ( null !== $token ) { $this->capacity()->close( $this, $token ); } }
-	private function abort_capacity() { if ( null !== $this->capacity() ) { $this->capacity()->abort(); } }
+	private function close_capacity( $token ) { if ( null !== $token ) { $this->capacity()->close( $this, $token ); --$this->capacity_phase_depth; } }
+	private function abort_capacity() { if ( null !== $this->capacity() ) { $this->capacity()->abort(); $this->capacity_phase_depth = 0; } }
 	private function source_metadata( $backend, $refresh ) {
 		$token = $this->open_capacity( 'table' === $backend ? 'table_verify' : 'option_verify' );
 		try { $result = $this->source_metadata_owned( $backend, $refresh ); }
@@ -420,7 +459,7 @@ class StorageConversion {
 	private function source_metadata_owned( $backend, $refresh ) {
 		if ( 'option' === $backend ) {
 			$s = $this->option_snapshot();
-			return array( 'physical' => $s['physical'], 'logical' => $this->codec->snapshot_digest( $s['value'] ) );
+			return array( 'physical' => $s['physical'], 'logical' => $s['logical'] );
 		}
 		$heads = $this->table_heads( $refresh ); $physical = hash( 'sha256', json_encode( $heads ) ); $seen = array();
 		$logical = $this->codec->snapshot_digest_reader( count( $heads ), function ( $i ) use ( $heads, &$seen ) {
@@ -435,15 +474,18 @@ class StorageConversion {
 	}
 
 	private function option_raw() {
+		$this->require_true( null === $this->capacity() || $this->capacity_phase_depth > 0 );
 		$bytes = $this->connection->get_var( $this->connection->prepare( 'SELECT LENGTH(option_value) FROM `' . $this->prefix . 'options` WHERE option_name = %s LIMIT 1', array( FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
 		$this->require_true( empty( $this->connection->last_error ) );
 		if ( null === $bytes ) { $this->budget( 0 ); return null; }
 		$this->require_true( is_numeric( $bytes ) && (string) (int) $bytes === (string) $bytes && (int) $bytes >= 0 );
 		$bytes = (int) $bytes; $this->budget( $bytes );
-		$token = null === $this->capacity() ? null : $this->capacity()->open( $this, 'fetch_scan', array( 'R' => $bytes ) );
+		// Every production caller is already inside stage, option_verify or
+		// commit_cleanup_response. That phase owns the raw SQL buffer; opening
+		// another identical fixed headroom here double-charges the same lifetime.
 		$raw = $this->connection->get_var( $this->connection->prepare( "SELECT CONCAT('v:', option_value) FROM `" . $this->prefix . 'options` WHERE option_name = %s AND LENGTH(option_value) = %d LIMIT 1', array( FOOGALLERY_MIGRATE_OPTION_DATA, $bytes ) ) );
 		$this->require_true( empty( $this->connection->last_error ) && is_string( $raw ) && 0 === strpos( $raw, 'v:' ) && strlen( $raw ) === $bytes + 2 );
-		$result = substr( $raw, 2 ); unset( $raw ); $this->close_capacity( $token ); return $result;
+		$result = substr( $raw, 2 ); unset( $raw ); return $result;
 	}
 
 	private function limit( $name, $unscaled ) { return null === $this->scale ? $unscaled : $this->scale->limit( $name ); }

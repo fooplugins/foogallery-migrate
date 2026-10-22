@@ -70,6 +70,115 @@ class LegacyTableSnapshot {
 	/** Conversion-only transaction: rows, head and scalar cursor commit together.
 	 * Ordinary replace_many remains unchanged and all-or-nothing. */
 	private $copy_created_gmt;
+	/** Complete exact-column verification is deliberately spread over public
+	 * recovery turns. Each successful page advances only its owned control CAS;
+	 * a failed page leaves both authority and proof position unchanged. */
+	public function conversion_verify_batch( $r, $value, $controls, $owner ) {
+		$this->admit();
+		if ( null === $this->scale || null === $this->scale->capacity() || 4 !== $r['version'] ||
+			! in_array( $r['phase'], array( 'verified', 'flipped' ), true ) || 'option' !== $r['from'] || 'table' !== $r['to'] || ! is_array( $value ) ) { $this->fail( 'Invalid conversion proof domain.' ); }
+		$c = isset( $r['verify_cursor'] ) ? StorageCopyCursor::validate_verify( $r['verify_cursor'] ) : StorageCopyCursor::initial_verify();
+		$unbound_proof = null === $c['heads_digest'];
+		$capacity = $this->scale->capacity();
+		if ( count( $value ) > $capacity->limit( 'max_heads' ) || $c['state_order'] > count( $value ) ) { $this->fail( 'Verification cursor exceeds source heads.' ); }
+		$this->copy_created_gmt = gmdate( 'Y-m-d H:i:s', $r['created'] );
+		( new LegacyStorageSchema( $this->wpdb ) )->verify();
+		$mode = $this->read( 'SELECT @@SESSION.autocommit AS autocommit' );
+		if ( count( $mode ) !== 1 || 1 !== $this->number( $mode[0]['autocommit'] ) ) { $this->fail( 'Verification requires idle autocommit connection.' ); }
+		$this->write( 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ' ); $this->busy = true;
+		try { $this->write( 'START TRANSACTION' ); }
+		catch ( \Exception $error ) { $this->busy = false; $this->tainted = true; throw $error; }
+		try {
+			$options = $this->wpdb->prefix . 'options';
+			$this->read( $this->wpdb->prepare( 'SELECT option_name FROM `' . $options . '` WHERE option_name IN (%s,%s,%s) ORDER BY option_name FOR UPDATE', array( StorageAuthority::CONTROL_OPTION, StorageAuthority::MAINTENANCE_OPTION, FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
+			$old = json_encode( $r );
+			if ( $controls->read( StorageAuthority::CONTROL_OPTION ) !== $old ) { $this->fail( 'Verification control changed.' ); }
+			$raw_hash = $this->wpdb->get_var( $this->wpdb->prepare( 'SELECT SHA2(option_value,256) FROM `' . $options . '` WHERE option_name=%s LIMIT 1', array( FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
+			if ( ! empty( $this->wpdb->last_error ) || hash( 'sha256', null === $raw_hash ? 'absent' : 'present:' . $raw_hash ) !== $r['source_digest'] ) { $this->fail( 'Verification source changed.' ); }
+			$heads = $this->copy_heads();
+			if ( count( $heads ) !== count( $value ) ) { $this->fail( 'Foreign or missing conversion head.' ); }
+			$heads_digest = hash( 'sha256', json_encode( $heads ) );
+			if ( null !== $c['heads_digest'] && $c['heads_digest'] !== $heads_digest ) { $this->fail( 'Verified destination heads changed.' ); }
+			$c['heads_digest'] = $heads_digest;
+			$totals = array( 'rows' => 0, 'bytes' => 0, 'tokens' => 0 ); $ordinal = 0;
+			// The first page checks every head's source logical digest. Later
+			// pages pin those exact heads and the source's raw+logical digest,
+			// avoiding a second whole-tree logical pass each recovery turn.
+			foreach ( $value as $key => $state ) { $this->copy_prove_head( $heads[$ordinal], $key, $state, $ordinal, true, $c, $totals, PHP_INT_MAX, true, $unbound_proof ); ++$ordinal; }
+			$scope = $this->read( $this->wpdb->prepare( 'SELECT COUNT(*) AS n FROM `' . $this->record_table . '` WHERE blog_id=%d', array( $this->blog_id ) ) );
+			if ( count( $scope ) !== 1 || $this->number( $scope[0]['n'] ) !== $totals['rows'] ||
+				$c['verified_rows'] > $totals['rows'] || $c['verified_bytes'] > $totals['bytes'] ) { $this->fail( 'Verification generation scope changed.' ); }
+			$already_complete = $c['state_order'] === count( $value ) && ! $unbound_proof;
+			if ( $already_complete ) {
+				if ( $c['verified_rows'] !== $totals['rows'] || $c['verified_bytes'] !== $totals['bytes'] ||
+					$c['next_root_ordinal'] || $c['next_node_ordinal'] ) { $this->fail( 'Incomplete exact destination proof.' ); }
+				$this->write( 'ROLLBACK' ); $this->busy = false;
+				return array( 'record' => $r, 'already_complete' => true );
+			}
+			$start = $c; $batch_rows = 0; $batch_bytes = 0; $ordinal = 0;
+			foreach ( $value as $key => $state ) {
+				if ( $ordinal < $start['state_order'] ) { ++$ordinal; continue; }
+				$kind = is_array( $state ) ? ( $this->is_list( $state ) ? 'list' : 'map' ) : 'scalar';
+				$split = ( new LegacyCollectionEnvelope() )->split( $key, $kind, $state );
+				$root_order = 0; $finished = true;
+				foreach ( $split['items'] as $item_key => $item ) {
+					if ( $ordinal === $start['state_order'] && $root_order < $start['next_root_ordinal'] ) { ++$root_order; continue; }
+					$visited = 0; $repo = $this; $current_root = $root_order;
+					$skip = $ordinal === $start['state_order'] && $root_order === $start['next_root_ordinal'] ? $start['next_node_ordinal'] : 0;
+					$finished = $this->records->walk_conversion_tree_from( $key, $item_key, $item, $root_order, $skip, $visited,
+						function ( $row, $tokens, $encoded_bytes, $at ) use ( $repo, $heads, $ordinal, $key, $current_root, &$c, &$batch_rows, &$batch_bytes, $capacity ) {
+							if ( $batch_rows >= $capacity->limit( 'copy_batch_rows' ) || $encoded_bytes > $capacity->limit( 'copy_batch_bytes' ) - $batch_bytes ) {
+								if ( 0 === $batch_rows ) { $repo->fail( 'One verification row exceeds page bytes.' ); } return false;
+							}
+							$row['created_gmt'] = $repo->copy_created_gmt; $row['updated_gmt'] = $repo->copy_created_gmt;
+							$repo->copy_prove_row( $heads[$ordinal]['id'], $row, $key );
+							++$batch_rows; $batch_bytes += $encoded_bytes;
+							$c['verified_rows'] = StorageCapacityBudget::add( $c['verified_rows'], 1 );
+							$c['verified_bytes'] = StorageCapacityBudget::add( $c['verified_bytes'], $encoded_bytes );
+							$c['next_root_ordinal'] = $current_root; $c['next_node_ordinal'] = $at + 1; return true;
+						} );
+					if ( $visited < $skip ) { $this->fail( 'Verification cursor skipped beyond source tree.' ); }
+					if ( ! $finished ) { break; }
+					++$root_order; $c['next_root_ordinal'] = $root_order; $c['next_node_ordinal'] = 0;
+				}
+				if ( ! $finished ) { break; }
+				++$ordinal; $c['state_order'] = $ordinal; $c['next_root_ordinal'] = 0; $c['next_node_ordinal'] = 0;
+			}
+			if ( $c['verified_rows'] === $start['verified_rows'] && $c['state_order'] === $start['state_order'] && ! $unbound_proof ) { $this->fail( 'Verification did not progress.' ); }
+			$r['verify_cursor'] = StorageCopyCursor::validate_verify( $c ); $r['updated'] = max( $r['updated'], time() );
+			$new = json_encode( $r ); StorageControl::decode( $new, $this->blog_id );
+			$controls->cas( StorageAuthority::CONTROL_OPTION, $old, $new, array( 'kind' => 'option', 'value' => $raw_hash ), $owner, $this->deadline );
+			$commit = $this->wpdb->query( 'COMMIT' ); $this->busy = false;
+			if ( false === $commit || ! empty( $this->wpdb->last_error ) ) { $this->tainted = true; $this->fail( 'Verification COMMIT uncertain; reconcile fresh cursor before retry.' ); }
+			$this->tick(); return array( 'record' => $r, 'already_complete' => false );
+		} catch ( \Exception $error ) { if ( $this->busy ) { $this->rollback( $error ); } throw $error; }
+		catch ( \Throwable $error ) { if ( $this->busy ) { $this->rollback( $error ); } throw $error; }
+	}
+	/** A flipped forward cleanup may have deleted the option immediately before
+	 * an interrupted stable CAS. Reuse only a COMPLETE prior proof, the same
+	 * heads and physical generation statistics; the caller checks exact backup
+	 * bytes in place of the now-absent source option. */
+	public function conversion_verified_metadata( $r ) {
+		$this->admit();
+		if ( null === $this->scale || null === $this->scale->capacity() || 4 !== $r['version'] ||
+			'flipped' !== $r['phase'] || 'table' !== $r['backend'] || ! isset( $r['verify_cursor'] ) ) { $this->fail( 'No completed forward proof.' ); }
+		$c = StorageCopyCursor::validate_verify( $r['verify_cursor'] );
+		if ( null === $c['heads_digest'] || $c['next_root_ordinal'] || $c['next_node_ordinal'] ) { $this->fail( 'Forward proof is incomplete.' ); }
+		$heads = $this->copy_heads();
+		if ( $c['state_order'] !== count( $heads ) || $c['heads_digest'] !== hash( 'sha256', json_encode( $heads ) ) ) { $this->fail( 'Proved heads changed before cleanup.' ); }
+		$rows = 0; $bytes = 0;
+		foreach ( $heads as $head ) {
+			$this->tick();
+			if ( 1 !== $head['active_generation'] || 1 !== $head['revision'] || 'current' !== $head['digest_status'] ) { $this->fail( 'Proved generation changed.' ); }
+			$stats = $this->generation_stats( $head['id'], 1 ); $root = $this->root_payload( $head['id'] );
+			if ( $stats['record_count'] !== $head['record_count'] || $stats['payload_bytes'] + strlen( $root ) !== $head['payload_bytes'] ||
+				hash( 'sha256', $root ) !== $head['root_digest'] ) { $this->fail( 'Proved generation statistics changed.' ); }
+			$rows += $stats['record_count']; $bytes += $stats['encoded_bytes'];
+		}
+		$scope = $this->read( $this->wpdb->prepare( 'SELECT COUNT(*) AS n FROM `' . $this->record_table . '` WHERE blog_id=%d', array( $this->blog_id ) ) );
+		if ( count( $scope ) !== 1 || $this->number( $scope[0]['n'] ) !== $rows || $rows !== $c['verified_rows'] || $bytes !== $c['verified_bytes'] ) { $this->fail( 'Completed proof totals changed.' ); }
+		return true;
+	}
 	public function conversion_batch( $r, $value, $controls, $owner, $discard = false ) {
 		$this->admit();
 		$this->copy_created_gmt = gmdate( 'Y-m-d H:i:s', $r['created'] );
@@ -92,17 +201,22 @@ class LegacyTableSnapshot {
 			$heads = $this->copy_heads(); $expected_heads = $c['state_order'] + ( $c['state_id'] > 0 ? 1 : 0 );
 			if ( count( $heads ) !== $expected_heads ) { $this->fail( 'Foreign or missing conversion head.' ); }
 			$totals = array( 'rows' => 0, 'bytes' => 0, 'tokens' => 0 ); $digest = hash( 'sha256', "conversion-heads-v1\0" ); $ordinal = 0;
+			// A bounded tail is read back on each resume. The independent exact
+			// destination proof advances in verified recovery turns before table
+			// authority can be selected. Discard still proves every row.
+			$proof_start = $discard ? 0 : max( 0, $c['committed_rows'] - 64 );
 			foreach ( $value as $key => $state ) {
 				if ( $ordinal > $c['state_order'] ) { break; }
 				if ( $ordinal < $c['state_order'] || $c['state_id'] > 0 ) {
 					$head = $heads[$ordinal];
-					$this->copy_prove_head( $head, $key, $state, $ordinal, $ordinal < $c['state_order'], $c, $totals );
+					$this->copy_prove_head( $head, $key, $state, $ordinal, $ordinal < $c['state_order'], $c, $totals, $proof_start, ! $discard );
 					if ( $ordinal < $c['state_order'] ) { $digest = hash( 'sha256', $digest . json_encode( $head ) ); }
 				}
 				++$ordinal;
 			}
 			$scope = $this->read( $this->wpdb->prepare( 'SELECT COUNT(*) AS n FROM `' . $this->record_table . '` WHERE blog_id=%d', array( $this->blog_id ) ) );
-			if ( $this->number( $scope[0]['n'] ) !== $c['committed_rows'] || $totals['rows'] !== $c['committed_rows'] || $totals['bytes'] !== $c['committed_bytes'] || $totals['tokens'] !== $c['committed_tokens'] || $digest !== $c['completed_heads_digest'] ) { $this->fail( 'Committed prefix counters/digest changed; no replay.' ); }
+			if ( $this->number( $scope[0]['n'] ) !== $c['committed_rows'] || $totals['rows'] !== $c['committed_rows'] || $totals['bytes'] !== $c['committed_bytes'] ||
+				( $discard && $totals['tokens'] !== $c['committed_tokens'] ) || $digest !== $c['completed_heads_digest'] ) { $this->fail( 'Committed prefix counters/digest changed; no replay.' ); }
 			if ( $discard ) {
 				if ( null !== $controls->read( StorageAuthority::AUTHORITY_OPTION ) ) { $this->fail( 'Discard cannot remove selected table authority.' ); }
 				foreach ( $heads as $head ) {
@@ -130,14 +244,14 @@ class LegacyTableSnapshot {
 			}
 			$root_ordinal = 0; $batch_rows = 0; $batch_bytes = 0; $finished = true; $start = $c;
 			foreach ( $split['items'] as $item_key => $item ) {
-				// The exact committed prefix was proved above in this transaction.
+				// The cursor, totals, head metadata and bounded tail were proved
+				// above. The full destination is proved before authority selection.
 				// Skip whole roots BEFORE encoding, not in the row callback after
 				// their full payload, projections and logical hash have been rebuilt.
 				if ( $root_ordinal < $start['next_root_ordinal'] ) { ++$root_ordinal; continue; }
-				$node = 0; $repo = $this; $current_root = $root_ordinal;
-				$finished = $this->records->walk_conversion_tree( $key, $item_key, $item, $root_ordinal, function ( $row, $tokens, $encoded_bytes ) use ( $repo, $key, $current_root, &$node, &$c, &$batch_rows, &$batch_bytes, $capacity, $start ) {
-					$at = $node++;
-					if ( $current_root < $start['next_root_ordinal'] || ( $current_root === $start['next_root_ordinal'] && $at < $start['next_node_ordinal'] ) ) { return true; }
+				$visited = 0; $repo = $this; $current_root = $root_ordinal;
+				$skip = $current_root === $start['next_root_ordinal'] ? $start['next_node_ordinal'] : 0;
+				$finished = $this->records->walk_conversion_tree_from( $key, $item_key, $item, $root_ordinal, $skip, $visited, function ( $row, $tokens, $encoded_bytes, $at ) use ( $repo, $key, $current_root, &$c, &$batch_rows, &$batch_bytes, $capacity ) {
 					$bytes = $encoded_bytes;
 					if ( $batch_rows >= $capacity->limit( 'copy_batch_rows' ) || $bytes > $capacity->limit( 'copy_batch_bytes' ) - $batch_bytes ) {
 						if ( 0 === $batch_rows ) { $repo->fail( 'One row exceeds copy byte batch; cannot yield without progress.' ); } return false;
@@ -151,6 +265,7 @@ class LegacyTableSnapshot {
 					if ( $c['committed_rows'] > $capacity->limit( 'max_rows' ) || $c['committed_bytes'] > $capacity->limit( 'max_bytes' ) || $c['committed_tokens'] > $capacity->limit( 'max_tokens' ) ) { $repo->fail( 'Copy counters exceed operation bounds.' ); }
 					$c['next_root_ordinal'] = $current_root; $c['next_node_ordinal'] = $at + 1; return true;
 				} );
+				if ( $visited < $skip ) { $this->fail( 'Copy cursor skipped beyond source tree.' ); }
 				if ( ! $finished ) { break; }
 				++$root_ordinal; if ( $current_root >= $start['next_root_ordinal'] ) { $c['next_root_ordinal'] = $root_ordinal; $c['next_node_ordinal'] = 0; }
 			}
@@ -166,9 +281,9 @@ class LegacyTableSnapshot {
 			$controls->cas( StorageAuthority::CONTROL_OPTION, $old, $new, array( 'kind' => 'option', 'value' => $raw_hash ), $owner, $this->deadline );
 			$commit = $this->wpdb->query( 'COMMIT' ); $this->busy = false;
 			if ( false === $commit || ! empty( $this->wpdb->last_error ) ) { $this->tainted = true; $this->fail( 'Copy COMMIT uncertain; fresh pinned exact-prefix reconciliation required. No replay.' ); }
-			// Ephemeral completion proof, never a persisted/unverified cursor claim:
-			// every old row was compared to the bound source above, and every new
-			// row was SQL-read back before the same control/head transaction committed.
+			// The source remains byte-pinned; every newly inserted row was SQL-read
+			// back before its control/head transaction committed. Independent exact
+			// proof pages are separate recovery lifetimes before authority selection.
 			$complete = $c['state_order'] === count( $value );
 			$this->tick(); return array( 'record' => $r, 'complete' => $complete, 'proved_logical_digest' => $complete ? $r['logical_digest'] : null );
 		} catch ( \Exception $error ) { if ( $this->busy ) { $this->rollback( $error ); } throw $error; }
@@ -184,7 +299,7 @@ class LegacyTableSnapshot {
 			$head['key_hash'] = strtolower( $head['key_hash'] ); $head['logical_digest'] = null === $head['logical_digest'] ? null : strtolower( $head['logical_digest'] );
 		} unset( $head ); return $heads;
 	}
-	private function copy_prove_head( $head, $key, $state, $ordinal, $complete, $cursor, &$totals ) {
+	private function copy_prove_head( $head, $key, $state, $ordinal, $complete, $cursor, &$totals, $proof_start, $fast, $prove_logical = true ) {
 		$kind = is_array( $state ) ? ( $this->is_list( $state ) ? 'list' : 'map' ) : 'scalar';
 		$split = ( new LegacyCollectionEnvelope() )->split( $key, $kind, $state ); $root = $this->codec->encode_collection_root( $split['root'] );
 		if ( $head['id'] < 1 || $head['state_order'] !== $ordinal || $head['key_hash'] !== $this->codec->key_hash( $key ) ||
@@ -192,6 +307,15 @@ class LegacyTableSnapshot {
 			$head['codec_version'] !== LegacyStateCodec::VERSION || $head['active_generation'] !== ( $complete ? 1 : 0 ) || $head['revision'] !== ( $complete ? 1 : 0 ) ||
 			$head['state_kind'] !== ( $complete ? $kind : 'staging' ) || $head['digest_status'] !== ( $complete ? 'current' : 'dirty' ) ||
 			( ! $complete && ( $head['id'] !== $cursor['state_id'] || $head['record_count'] !== 0 || $head['payload_bytes'] !== 0 || $head['digest_revision'] !== 0 || null !== $head['logical_digest'] ) ) ) { $this->fail( 'Committed conversion head changed.' ); }
+		if ( $fast ) {
+			$stats = $this->generation_stats( $head['id'], 1 );
+			$totals['rows'] += $stats['record_count']; $totals['bytes'] += $stats['encoded_bytes'];
+			if ( $complete ) {
+				if ( $head['record_count'] !== $stats['record_count'] || $head['payload_bytes'] !== $stats['payload_bytes'] + strlen( $root ) ||
+					$head['digest_revision'] !== 1 || ( $prove_logical && $head['logical_digest'] !== $this->codec->snapshot_digest( $state ) ) ) { $this->fail( 'Completed conversion head changed.' ); }
+			} else { $this->copy_prove_tail( $head['id'], $key, $split['items'], $cursor ); }
+			return;
+		}
 		$rows = 0; $payload = 0; $bytes = 0; $root_order = 0; $position_seen = $complete || ( $cursor['next_root_ordinal'] === count( $split['items'] ) && 0 === $cursor['next_node_ordinal'] );
 		foreach ( $split['items'] as $item_key => $item ) {
 			// Uncommitted roots are not part of this proof. A zero node cursor
@@ -199,11 +323,12 @@ class LegacyTableSnapshot {
 			if ( ! $complete && $root_order > $cursor['next_root_ordinal'] ) { break; }
 			if ( ! $complete && $root_order === $cursor['next_root_ordinal'] && 0 === $cursor['next_node_ordinal'] ) { $position_seen = true; break; }
 			$node = 0; $repo = $this; $order = $root_order;
-			$this->records->walk_conversion_tree( $key, $item_key, $item, $root_order++, function ( $row, $tokens, $encoded_bytes ) use ( $repo, $key, $head, $complete, $cursor, $order, &$node, &$rows, &$payload, &$bytes, &$totals, &$position_seen ) {
+			$this->records->walk_conversion_tree( $key, $item_key, $item, $root_order++, function ( $row, $tokens, $encoded_bytes ) use ( $repo, $key, $head, $complete, $cursor, $order, $proof_start, &$node, &$rows, &$payload, &$bytes, &$totals, &$position_seen ) {
 				$at = $node++;
 				if ( ! $complete && $order === $cursor['next_root_ordinal'] && $at === $cursor['next_node_ordinal'] ) { $position_seen = true; }
 				if ( ! $complete && ( $order > $cursor['next_root_ordinal'] || ( $order === $cursor['next_root_ordinal'] && $at >= $cursor['next_node_ordinal'] ) ) ) { return false; }
-				$repo->copy_prove_row( $head['id'], $row, $key ); ++$rows; $payload += $row['payload_bytes']; $n = $encoded_bytes; $bytes += $n;
+				if ( $totals['rows'] >= $proof_start ) { $repo->copy_prove_row( $head['id'], $row, $key ); }
+				++$rows; $payload += $row['payload_bytes']; $n = $encoded_bytes; $bytes += $n;
 				++$totals['rows']; $totals['bytes'] += $n; $totals['tokens'] += $tokens; return true;
 			} );
 			if ( ! $complete && $order === $cursor['next_root_ordinal'] && $node === $cursor['next_node_ordinal'] ) { $position_seen = true; }
@@ -211,6 +336,32 @@ class LegacyTableSnapshot {
 		$stats = $this->generation_stats( $head['id'], 1 );
 		if ( ! $position_seen || $stats !== array( 'record_count' => $rows, 'payload_bytes' => $payload, 'encoded_bytes' => $bytes ) ||
 			( $complete && ( $head['record_count'] !== $rows || $head['payload_bytes'] !== $payload + strlen( $root ) || $head['digest_revision'] !== 1 || $head['logical_digest'] !== $this->codec->snapshot_digest( $state ) ) ) ) { $this->fail( 'Exact committed prefix/head statistics mismatch.' ); }
+	}
+	/** Exact deterministic source comparison for the cursor-adjacent affected
+	 * tree page; the complete independent reader still gates authority selection. */
+	private function copy_prove_tail( $id, $key, $items, $cursor ) {
+		$root_order = $cursor['next_root_ordinal']; $limit = $cursor['next_node_ordinal'];
+		if ( $root_order > count( $items ) ) { $this->fail( 'Copy cursor root exceeds source.' ); }
+		if ( 0 === $limit ) {
+			if ( 0 === $root_order ) { return; }
+			--$root_order; $limit = null;
+		}
+		$ordinal = 0; $item_key = null; $item = null;
+		foreach ( $items as $candidate_key => $candidate ) { if ( $ordinal++ === $root_order ) { $item_key = $candidate_key; $item = $candidate; break; } }
+		if ( null === $item_key ) { $this->fail( 'Copy cursor root is absent.' ); }
+		$visited = 0;
+		if ( null === $limit ) {
+			$this->records->walk_conversion_tree_from( $key, $item_key, $item, $root_order, $this->max_rows, $visited, function () { return true; } );
+			$limit = $visited;
+		}
+		if ( $limit < 1 || $limit > $this->max_rows ) { $this->fail( 'Copy cursor node exceeds source.' ); }
+		$start = max( 0, $limit - 64 ); $proved = 0; $repo = $this;
+		$this->records->walk_conversion_tree_from( $key, $item_key, $item, $root_order, $start, $visited,
+			function ( $row, $tokens, $bytes, $at ) use ( $repo, $id, $key, $limit, &$proved ) {
+				if ( $at >= $limit ) { return false; }
+				$repo->copy_prove_row( $id, $row, $key ); ++$proved; return true;
+			} );
+		if ( $visited < $limit || $proved !== $limit - $start ) { $this->fail( 'Copy cursor tail differs from source.' ); }
 	}
 	private function copy_prove_row( $id, $row, $state_key ) {
 		if ( 'migrated' === $state_key && null === $row['parent_node_hash'] ) {
@@ -674,7 +825,10 @@ class LegacyTableSnapshot {
 			if ( $this->snapshot_witnesses[$hash]->matches( $binding, $this->snapshot_plans[$hash]['complete'] ) ) { $witness = $this->snapshot_witnesses[$hash]; }
 		}
 		if ( null !== $this->snapshot_read_phase && null === $witness ) { $this->fail( 'Active authenticated read lost producer authority.' ); }
-		$source = new LegacySnapshotRowReader( $this->wpdb, $this->record_table, implode( ', ', $columns ), $this->record_bytes(), array( $this->blog_id, $id, $generation ), $this->max_bytes, $admit, $witness );
+		// Release conversion can amortize seek metadata over more small rows;
+		// the existing byte window still caps the actual payload page.
+		$window_rows = null !== $this->scale && null !== $this->scale->capacity() ? 256 : LegacySnapshotRowReader::WINDOW_ROWS;
+		$source = new LegacySnapshotRowReader( $this->wpdb, $this->record_table, implode( ', ', $columns ), $this->record_bytes(), array( $this->blog_id, $id, $generation ), $this->max_bytes, $admit, $witness, $window_rows );
 		// Immutable source descriptors do not carry an event balance. Each read
 		// binds a NEW owner to this exact reader and concrete database identity.
 		if ( $this->snapshot_events_enabled && isset( $this->snapshot_plans[$hash] ) ) {
