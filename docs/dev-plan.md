@@ -2,7 +2,7 @@
 
 **Updated:** 2026-10-22
 
-**Status:** R0 committed; R1a capacity-policy repair validated for commit; growing-prefix copy deadline repair R1b next.
+**Status:** R0 and R1a committed; R1b growing-prefix copy deadline repair developing.
 
 **Branch:** `feature/migrated-store-scalability`
 
@@ -67,7 +67,7 @@ Historical receipts: [October 20 review](pr15-review-checkpoint-2026-10-20.md), 
 
 ## Ordered work
 
-R0–R4 replace the previous S0–S9 sequence. R0 is done in `c7eda75`; R1a is developing and R2–R4 remain pending. Independent QA is GPT-6 Sol Medium, separate from the developer.
+R0–R4 replace the previous S0–S9 sequence. R0 is done in `c7eda75`; R1a is done in `fb65305`; R1b is developing and R2–R4 remain pending. Independent QA is GPT-6 Sol Medium, separate from the developer.
 
 | ID | Deliverable / exit | Depends on | Owned areas | Proposed developer and reason |
 |---|---|---|---|---|
@@ -191,14 +191,14 @@ Read guards and phase parameters before using `tests/integration/storage-release
 
 ## Tracking, deferred work and handoff
 
-- **Active task:** R1a — release-owned capacity policy and production preflight; independent floor-runtime setup proceeds alongside it.
+- **Active task:** R1b — remove repeated growing-prefix work from forward copy/verification; independent floor-runtime setup proceeds alongside it.
 - **Current authorization:** Development, delegated QA, disposable test setup and scoped local commits. No push/merge/release requested.
 - **Documentation validation:** File/heading links, code-fence balance, active task IDs and whitespace checked across the three changed documents. No runtime tests were run or runtime pass claimed for this update.
 - **Statuses:** `pending → developing → qa → validating → done`; use `blocked` / `budget-stopped` with a precise reason.
 - **Per-task ledger:** R0 developer `/root/r0_journey`, GPT-6 Sol High (environment/isolation and failure attribution); independent QA `/root/r0_qa`, GPT-6 Sol Medium. Repairs 0; QA passed and supervisor reproduced the public refusal. Kickoff plan committed as `54f7ae2`; R0 accepted as `c7eda75`. R1a reuses `/root/r0_journey`, Sol High, because admission spans receiver, decoder and conversion safety; repairs 0, QA not assigned yet. `/root/r1_floor`, Sol High, owns independent disposable floor-environment preparation only; no production/shared-runner writes.
 - **Shared files:** R1/R2 share engine/settings/repository/lifecycle code. R3 consumes their services. Default is serial ownership and integration; no parallel work scheduled.
 - **Supervisor:** Current session's exact model/effort cannot be independently verified. Developer routing remains explicit Sol High for R0 and Sol Medium for independent QA.
-- **Active workers / wakeups:** `/root/r0_journey` on R1a; `/root/r1_floor` on runtime preparation. No scheduled wakeups.
+- **Active workers / wakeups:** `/root/r0_journey` (Sol High) on R1b, repairs 0. `/root/r1_floor` (Sol High) finished runtime preparation; independent `/root/r0_qa` (Sol Medium) accepted its first seed-guard repair for this checkpoint. R1a accepted in `fb65305` after the same independent QA and one test-fixture repair. No scheduled wakeups.
 - **Deferred backlog, not follow-on authorized tasks:** Multisite table support/network lifecycle; advanced recommendation tiers/re-notification; convenience reset/stale-copy UI; broader diagnostic/host qualification polish. A future scope decision is required to schedule these. Do not label the first release incomplete merely because this backlog remains.
 - **Never implied:** New engine/config work, pushing, merging, deployment. Brad must explicitly confirm any WordPress.org live tag or stable-tag change.
 
@@ -225,6 +225,15 @@ Targeted attribution (`--filter 'test_real_selected_reset_publishes_empty_map_be
 - Explicit provision/switch and 11 bounded recover turns copied **11,264 of 20,208 rows**, peak allocated about 66.5 MiB (earlier process RSS samples ~97–110 MiB). Options remain authoritative. The next recover repeatedly hits the existing 10-second deadline after `source-decoded`; the last successful request took 9.875 seconds. Failed requests leave seed and cursor unchanged. Reproduce with `php tests/integration/storage-release-r0.php /tmp/foogallery-migrate-r0.S1gKqR recover`. **R1b must repair growing-prefix copy/verification work; do not simply inflate the deadline.**
 - Supervisor PHP lint and whitespace checks pass. Focused validation at the plan's 256M invocation found a new test assuming 128M without setting it (`StorageCoordinatorScaleTest`); test-fixture repair 1 now scopes/restores its limit explicitly. Developer and independent QA then ran `php -d memory_limit=256M vendor/bin/phpunit --colors=never --do-not-cache-result --filter 'Storage(CapacityPolicy|Operations|CoordinatorScale|Preflight|SingleSitePolicy)Test'`: **40 tests, 676 assertions pass**. QA reviewed the exact production diff and found no blocker; R1a is accepted in this checkpoint commit, not M1.
 - Directly amended absent-calibration assertions are replaced with release-policy parsing/bounds and low-memory-before-SQL checks; request authorization remains covered. QA also identified two old `StorageBaselineCompositionTest` allocation-release assumptions tied to the removed calibration filter. Reviewer `/root/r0_qa` confirmed their preceding entry-baseline-retention assertions and the direct high-water test pass; unchanged `sample()` retains max(real-size memory). The obsolete allocation-release assertions are classified for explicit release-path composition replacement at R4. The broader maintained suite remains red, not waived or green.
+
+### R1 floor environment — accepted checkpoint
+
+- Developer `/root/r1_floor`, Sol High; independent QA `/root/r0_qa`, Sol Medium. Retained owned fixture `/tmp/foogallery-migrate-floor.WDmNT3`; database `fgm_floor_wdmnt3`, container `fgm-floor-WDmNT3-db`, isolated Docker network. No Local-site data or sibling plugin checkout changes.
+- PHP **5.4.45**, WordPress **5.0**, MariaDB **11.4.13 InnoDB**, FooGallery **1.8.8**, migration plugin **1.16** activate successfully. Normal plugin loading also passed with Composer `vendor` masked. Source-runtime evidence, not yet ZIP/uninstall/M1 acceptance.
+- Reproducible runtime build: checksum-pinned upstream PHP source in an official PHP 5.6 toolchain, refreshed `config.guess`/`config.sub` for ARM64 and an explicit refusal for obsolete SSLv3 methods missing from the archived OpenSSL headers; TLS retained. This is the documented compatibility build, not an unmodified historical binary or allocator certificate. Image ID `sha256:fe464d50acc3d1f8891902b3ed212ebb0dd2677ca7b81d0b7a4e74795d98d9d0`.
+- Floor native20K seed: **2,998,086 bytes**, SHA-256 `b367943d00ec52ca5fe2a46fdf2b40bd8c15218a83eafc7e1be026becd6e2677`. PHP 5.4 serializes 207 negative-zero values as `d:0;` versus the modern fixture's `d:-0;`; the floor fixture pins its own native persisted bytes, without production normalization or an arbitrary-byte codec waiver.
+- Independent QA reproduced `bash tests/integration/run-storage-release-floor.sh /tmp/foogallery-migrate-floor.WDmNT3 eval-file /repo/tests/integration/storage-release-floor-preflight.php --user=1`: preflight passes at **256M**, `conversion_ready=false`, seed/markers/schema unchanged. WP-CLI 2.1 changes its initial memory limit to unlimited, so the script explicitly sets 256M before invoking the public service; the unlimited CLI invocation is not the bounded receipt.
+- Setup/run/teardown and seed/preflight scripts are under `tests/integration`. Developer exercised a second clean setup/activation/teardown cycle. The wrapper checks manifest/labels/container IDs/plugin path and reads `DB_NAME`/`DB_HOST` with networking disabled before executing requested WP commands. QA repair 1 now rejects existing storage markers/tables before seed construction/write; a separate disposable site proved both refusals leave the option absent and was removed. `/root/r0_qa` independently accepted the repaired guards, public floor preflight, syntax and setup instructions. Supervisor reviewed the exact files and whitespace check. Preserved fixture remains option-backed and unprovisioned. Accepted environment support belongs to this checkpoint commit; full floor conversion/migration remains pending.
 
 ### Usage policy for this development run
 
