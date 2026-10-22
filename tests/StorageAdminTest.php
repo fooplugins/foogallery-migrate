@@ -9,17 +9,17 @@ class StorageAdminTest extends TestCase {
 	public function test_site_scoped_controls_use_distinct_existing_receiver_purposes(): void {
 		$base = array( 'backend' => 'option', 'phase' => 'stable', 'target' => 'option', 'retained' => false );
 		$a = StorageAdmin::actions( $base );
-		$this->assertSame( array( 'switch' ), array_column( $a, 'operation' ) );
+		$this->assertSame( array( 'switch', 'remove_all' ), array_column( $a, 'operation' ) );
 		$this->assertSame( 'option_import', $a[0]['purpose'] ); $this->assertSame( 'switch-to-table', $a[0]['confirmation'] );
 		$base['retained'] = true; $a = StorageAdmin::actions( $base );
-		$this->assertSame( array( 'replace' ), array_column( $a, 'operation' ) );
+		$this->assertSame( array( 'replace', 'remove_all' ), array_column( $a, 'operation' ) );
 		$this->assertSame( 'option_reimport', $a[0]['purpose'] ); $this->assertSame( 'replace-retained-with-table', $a[0]['confirmation'] );
 		$base['backend'] = 'table'; $base['target'] = 'table';
 		$a = StorageAdmin::actions( $base ); $this->assertSame( 'table_export', $a[0]['purpose'] ); $this->assertSame( 'switch-to-option', $a[0]['confirmation'] );
 		$base['phase'] = 'flipped'; $base['target'] = 'option';
 		$a = StorageAdmin::actions( $base ); $this->assertSame( 'recover', $a[0]['operation'] ); $this->assertSame( 'recover', $a[0]['purpose'] ); $this->assertSame( 'recover-storage', $a[0]['confirmation'] );
 		$this->assertSame( 'option', $a[0]['target'] );
-		$base['backend'] = 'unavailable'; $this->assertSame( array(), StorageAdmin::actions( $base ) );
+		$base['backend'] = 'unavailable'; $this->assertSame( array( 'remove_all' ), array_column( StorageAdmin::actions( $base ), 'operation' ) );
 	}
 	public function test_read_only_view_escapes_status_and_emits_exact_site_scoped_post_controls(): void {
 		ob_start(); StorageAdmin::render( array( 'backend' => 'option', 'phase' => 'stable', 'target' => 'option', 'retained' => false, 'option_bytes' => '123', 'records' => null, 'schema' => 'not provisioned', 'problem' => '<script>bad</script>', 'calibrated' => false ) ); $html = ob_get_clean();

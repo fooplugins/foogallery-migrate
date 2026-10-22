@@ -195,6 +195,12 @@ function wp_cache_delete( $key, $group = '' ) {
 	return true;
 }
 
+function delete_transient( $key ) {
+	$GLOBALS['foogallery_migrate_test_deleted_transients'][] = $key;
+	unset( $GLOBALS['foogallery_migrate_test_transients'][ $key ] );
+	return true;
+}
+
 function dbDelta( $sql ) {
 	$GLOBALS['foogallery_migrate_test_dbdelta'][] = $sql;
 	return array( 'created' );

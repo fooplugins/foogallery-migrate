@@ -16,6 +16,7 @@ class StorageAuthority {
 	const CONTROL_OPTION = 'foogallery_migrate_storage_control';
 	const AUTHORITY_OPTION = 'foogallery_migrate_storage_authority';
 	const MAINTENANCE_OPTION = 'foogallery_migrate_storage_maintenance';
+	const CLEANUP_OPTION = 'foogallery_migrate_storage_cleanup';
 	const STORAGE_BACKUP_OPTION = 'foogallery-migrate-data-storage-backup';
 	const STATE_TABLE_SUFFIX = 'foogallery_migrate_state';
 	const SHARED_STATE_TABLE_SUFFIX = 'foogallery_migrate_legacy_state';
@@ -48,7 +49,7 @@ class StorageAuthority {
 			return self::recovery_error();
 		}
 		// Existence only: do not hydrate arbitrary controls or trust option caches.
-		$markers = array( self::CONTROL_OPTION, self::AUTHORITY_OPTION,
+		$markers = array( self::CONTROL_OPTION, self::AUTHORITY_OPTION, self::CLEANUP_OPTION,
 			'foogallery_migrate_storage', MigratedStore::SCHEMA_OPTION, MigratedStore::MIGRATION_OPTION );
 		// An already-admitted request may finish behind a newly acquired gate.
 		$owned_maintenance = true === $maintenance && $writer instanceof StorageMaintenanceGate &&
@@ -115,7 +116,7 @@ class StorageAuthority {
 			// back to stale options when table mode is outside this release scope.
 			if ( 'table' === $r['backend'] && is_wp_error( self::table_mode_error() ) ) { return self::table_mode_error(); }
 			if ( ! StorageControl::runtime_ready( $r, $control->read( self::AUTHORITY_OPTION ) ) ) { return self::recovery_error(); }
-			$markers = array( 'foogallery_migrate_storage', MigratedStore::SCHEMA_OPTION, MigratedStore::MIGRATION_OPTION );
+			$markers = array( 'foogallery_migrate_storage', self::CLEANUP_OPTION, MigratedStore::SCHEMA_OPTION, MigratedStore::MIGRATION_OPTION );
 			if ( ! $writer instanceof StorageMaintenanceGate || true !== $writer->assert_writer() ) { $markers[] = self::MAINTENANCE_OPTION; }
 			$found = $db->get_var( $db->prepare( 'SELECT 1 AS present FROM `' . $db->prefix . 'options` WHERE option_name IN (' . implode( ', ', array_fill( 0, count( $markers ), '%s' ) ) . ') LIMIT 1', $markers ) );
 			if ( ! empty( $db->last_error ) || null !== $found ) { return self::recovery_error(); }

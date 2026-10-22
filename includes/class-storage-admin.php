@@ -52,15 +52,20 @@ class StorageAdmin {
 	/** Display choices never authorize a mutation; the receiver revalidates all. */
 	public static function actions( $s ) {
 		if ( is_multisite() ) { return array(); }
-		if ( ! in_array( $s['backend'], array( 'option', 'table' ), true ) ) { return array(); }
+		$remove_all = array( 'operation' => 'remove_all', 'target' => 'all', 'confirmation' => 'remove-all-internal-data',
+			'purpose' => 'remove_all', 'label' => __( 'Remove all FooGallery Migrate internal data (keep galleries and media)', 'foogallery-migrate' ) );
+		if ( 'remove_all' === StorageCleanup::pending_scope() ) { return array( $remove_all ); }
+		if ( 'clear' === StorageCleanup::pending_scope() ) { return array(); }
+		if ( ! in_array( $s['backend'], array( 'option', 'table' ), true ) ) { return array( $remove_all ); }
 		if ( 'stable' !== $s['phase'] ) {
 			$a = array( array( 'operation' => 'recover', 'target' => $s['target'], 'confirmation' => 'recover-storage', 'purpose' => 'recover', 'label' => __( 'Recover recorded switch', 'foogallery-migrate' ) ) );
 			if ( ! empty( $s['discardable'] ) ) { $a[] = array( 'operation' => 'discard', 'target' => 'table', 'confirmation' => 'discard-copy', 'purpose' => 'discard', 'label' => __( 'Discard this incomplete table copy (keep current options)', 'foogallery-migrate' ) ); }
+			$a[] = $remove_all;
 			return $a;
 		}
-		if ( 'table' === $s['backend'] ) { return array( array( 'operation' => 'switch', 'target' => 'option', 'confirmation' => 'switch-to-option', 'purpose' => 'table_export', 'label' => __( 'Switch this site to options', 'foogallery-migrate' ) ) ); }
-		if ( $s['retained'] ) { return array( array( 'operation' => 'replace', 'target' => 'table', 'confirmation' => 'replace-retained-with-table', 'purpose' => 'option_reimport', 'label' => __( 'Replace retained table copy and switch this site to tables', 'foogallery-migrate' ) ) ); }
-		return array( array( 'operation' => 'switch', 'target' => 'table', 'confirmation' => 'switch-to-table', 'purpose' => 'option_import', 'label' => __( 'Switch this site to tables', 'foogallery-migrate' ) ) );
+		if ( 'table' === $s['backend'] ) { return array( array( 'operation' => 'switch', 'target' => 'option', 'confirmation' => 'switch-to-option', 'purpose' => 'table_export', 'label' => __( 'Switch this site to options', 'foogallery-migrate' ) ), $remove_all ); }
+		if ( $s['retained'] ) { return array( array( 'operation' => 'replace', 'target' => 'table', 'confirmation' => 'replace-retained-with-table', 'purpose' => 'option_reimport', 'label' => __( 'Replace retained table copy and switch this site to tables', 'foogallery-migrate' ) ), $remove_all ); }
+		return array( array( 'operation' => 'switch', 'target' => 'table', 'confirmation' => 'switch-to-table', 'purpose' => 'option_import', 'label' => __( 'Switch this site to tables', 'foogallery-migrate' ) ), $remove_all );
 	}
 
 	public static function render( $status = null ) {
@@ -96,7 +101,7 @@ class StorageAdmin {
 				event.preventDefault(); var form = this, button = form.querySelector('button'), xhr = new XMLHttpRequest();
 				button.disabled = true; result.textContent = '';
 				xhr.open('POST', form.getAttribute('action')); xhr.timeout = 30000;
-				xhr.onload = function () { button.disabled = false; try { var data = JSON.parse(xhr.responseText); result.textContent = data.data.message; if (data.success) { window.location.reload(); } } catch (error) { result.textContent = <?php echo wp_json_encode( __( 'The response could not be read. Reload to inspect the recorded phase before retrying; no automatic retry was sent.', 'foogallery-migrate' ) ); ?>; } };
+				xhr.onload = function () { button.disabled = false; try { var data = JSON.parse(xhr.responseText), detail = data.data || {}; result.textContent = (detail.message || '') + (detail.failed && detail.failed.length ? ' Failed: ' + detail.failed.join(', ') : '') + (detail.residual && detail.residual.length ? ' Still present: ' + detail.residual.join(', ') : ''); if (data.success && detail.complete !== false) { window.location.reload(); } } catch (error) { result.textContent = <?php echo wp_json_encode( __( 'The response could not be read. Reload to inspect the recorded phase before retrying; no automatic retry was sent.', 'foogallery-migrate' ) ); ?>; } };
 				xhr.onerror = xhr.ontimeout = function () { button.disabled = false; result.textContent = <?php echo wp_json_encode( __( 'The connection ended. Reload to inspect the recorded phase before retrying; the operation may have persisted.', 'foogallery-migrate' ) ); ?>; };
 				xhr.send(new FormData(form));
 			}); }

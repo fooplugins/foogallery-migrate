@@ -64,7 +64,8 @@ class StorageMaintenanceGate {
 				$this->writer_depth++;
 				return true;
 			}
-			if ( null !== $this->read( StorageAuthority::MAINTENANCE_OPTION ) ) { return self::busy(); }
+			if ( null !== $this->read( StorageAuthority::MAINTENANCE_OPTION ) ||
+				null !== $this->read( StorageAuthority::CLEANUP_OPTION ) ) { return self::busy(); }
 			$record = $this->record();
 			$name = self::WRITER_PREFIX . $record['token'];
 			$raw = wp_json_encode( $record );

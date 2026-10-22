@@ -16,10 +16,21 @@ if ( ! defined( 'FOOGM_NAMESPACE' ) ) {
 }
 
 require_once FOOGM_PATH . 'includes/constants.php';
-require_once FOOGM_PATH . 'includes/functions.php';
-require_once FOOGM_PATH . 'vendor/autoload.php';
+// Uninstall runs after the normal plugin bootstrap has been removed. Keep this
+// dependency list direct and independent of Composer and the admin engine.
+require_once FOOGM_PATH . 'includes/class-storage-scalar-observer.php';
+require_once FOOGM_PATH . 'includes/class-legacy-transaction-connection.php';
+require_once FOOGM_PATH . 'includes/class-legacy-option-backend.php';
+require_once FOOGM_PATH . 'includes/class-migrator-settings.php';
+require_once FOOGM_PATH . 'includes/class-migrated-store.php';
+require_once FOOGM_PATH . 'includes/class-storage-authority.php';
+require_once FOOGM_PATH . 'includes/class-storage-maintenance-gate.php';
+require_once FOOGM_PATH . 'includes/class-legacy-storage-schema.php';
+require_once FOOGM_PATH . 'includes/class-storage-cleanup.php';
 
-spl_autoload_register( 'foogallery_migrate_autoloader' );
-
-$all_sites = function_exists( 'is_multisite' ) && is_multisite();
-foogallery_migrate_uninstall( $all_sites );
+if ( function_exists( 'is_multisite' ) && is_multisite() ) {
+	// First-release multisite remains on the existing option-storage behavior.
+	\FooPlugins\FooGalleryMigrate\MigratedStore::uninstall( true );
+} else {
+	\FooPlugins\FooGalleryMigrate\StorageCleanup::uninstall();
+}

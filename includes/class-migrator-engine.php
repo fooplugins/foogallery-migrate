@@ -312,6 +312,16 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return void
          */
         public function clear_migrator_setting() {
+            if ( $this->storage_guarded && ! is_multisite() ) {
+                $blog = get_current_blog_id();
+                $result = ( new StorageOperations() )->dispatch( 'clear', array(
+                    'blog_id' => $blog, 'scope' => 'site', 'target' => 'state',
+                    'confirmation' => 'clear-current-state',
+                    'nonce' => wp_create_nonce( 'foogallery_migrate_storage_clear_' . $blog )
+                ) );
+                if ( is_wp_error( $result ) ) { throw new \RuntimeException( $result->get_error_message() ); }
+                return ! empty( $result['complete'] );
+            }
             return $this->storage_operation( 'clear_migrator_setting_admitted' );
         }
 

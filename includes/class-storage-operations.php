@@ -17,6 +17,7 @@ class StorageOperations {
 	/** Strict semantic request: exactly the coordinator's five existing fields. */
 	public function dispatch( $operation, $request ) {
 		StorageScalarObserver::refusal_scope();
+		if ( in_array( $operation, array( 'clear', 'remove_all' ), true ) ) { return StorageCleanup::dispatch( $operation, $request ); }
 		// Schema DDL is a separate explicit operation: no state decode, capacity
 		// profile, conversion or authority selection is involved.
 		if ( 'provision' === $operation ) { return StorageProvisioning::provision( $request ); }
@@ -99,6 +100,10 @@ class StorageOperations {
 			if ( 'foogallery_migrate_storage_forbidden' === $code || 'foogallery_migrate_storage_invalid_nonce' === $code ) { $status = 403; }
 			else if ( 'foogallery_migrate_storage_invalid_request' === $code ) { $status = 400; }
 			wp_send_json_error( array( 'code' => $code, 'message' => $result->get_error_message() ), $status );
+			return;
+		}
+		if ( is_array( $result ) && isset( $result['complete'] ) && false === $result['complete'] ) {
+			wp_send_json_error( $result, 409 );
 			return;
 		}
 		wp_send_json_success( $result );
