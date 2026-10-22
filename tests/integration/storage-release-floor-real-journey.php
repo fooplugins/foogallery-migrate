@@ -22,11 +22,15 @@ ini_set( 'memory_limit', '256M' );
 if ( ini_get( 'memory_limit' ) !== '256M' ) {
 	throw new RuntimeException( 'The source fixture requires an explicit 256M request limit.' );
 }
-if ( ! isset( $args[0] ) || ! in_array( $args[0], array( 'seed', 'verify-source', 'status',
-	'preflight', 'provision', 'switch', 'recover', 'turn', 'settings100' ), true ) || count( $args ) !== 1 ) {
+if ( ! isset( $args[0] ) || ! in_array( $args[0], array( 'seed', 'verify-source',
+	'verify-destination', 'verify-reversed', 'status', 'preflight', 'provision', 'switch', 'recover',
+	'turn', 'settings100', 'edit', 'reverse' ), true ) ||
+	! ( count( $args ) === 1 ||
+		( count( $args ) === 2 && $args[0] === 'seed' && $args[1] === '1000' ) ) ) {
 	throw new RuntimeException( 'Exactly one owned floor journey step is required.' );
 }
 $step = $args[0];
+$requested_total = count( $args ) === 2 ? 1000 : null;
 $manifest = json_decode( file_get_contents( '/fixture-owner.json' ), true );
 $repo = realpath( dirname( dirname( __DIR__ ) ) );
 if ( ! is_array( $manifest ) || ! isset( $manifest['kind'], $manifest['fixture'], $manifest['site'],
@@ -62,7 +66,6 @@ $owner = 'fgm-floor-real-' . $suffix;
 $owner_key = '_fgm_floor_real_fixture_owner';
 $journal_key = 'fgm_floor_real_owned_journey_v1';
 $identity = hash( 'sha256', $manifest['fixture'] . '|' . $manifest['database'] . '|' . $manifest['container_id'] );
-$total = 10000;
 $batch = 256;
 $png = base64_decode( 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=' );
 $png_hash = hash( 'sha256', $png );
@@ -71,9 +74,23 @@ floor_real_check( empty( $upload['error'] ) && isset( $upload['basedir'], $uploa
 	is_dir( $upload['basedir'] ), 'Owned uploads are unavailable.' );
 $media_dir = $upload['basedir'] . '/' . $owner;
 $journal = get_option( $journal_key, null );
-$save = function ( $value ) use ( $journal_key ) {
-	floor_real_check( update_option( $journal_key, $value, false ) &&
-		get_option( $journal_key, null ) === $value, 'Owned seed journal write/readback failed.' );
+if ( $journal === null ) {
+	$total = $requested_total === null ? 10000 : $requested_total;
+} else {
+	$total = is_array( $journal ) && isset( $journal['total'] ) ? $journal['total'] : 10000;
+	floor_real_check( is_int( $total ) && in_array( $total, array( 1000, 10000 ), true ) &&
+		$requested_total === null, 'Existing owned journal fixes size; requested size change refused.' );
+}
+$save = function ( $value ) use ( $journal_key, $wpdb ) {
+	// WordPress returns false for an unchanged value on a later recovery turn.
+	// Accept that case only after durable raw SQL and Options API readback agree.
+	update_option( $journal_key, $value, false );
+	$raw = $wpdb->get_var( $wpdb->prepare(
+		"SELECT option_value FROM `{$wpdb->options}` WHERE option_name=%s", $journal_key
+	) );
+	floor_real_check( ! $wpdb->last_error && is_string( $raw ) &&
+		maybe_unserialize( $raw ) === $value && get_option( $journal_key, null ) === $value,
+		'Owned seed journal write/readback failed.' );
 };
 $owned_count = function ( $post_type ) use ( $wpdb, $owner_key, $owner ) {
 	$count = $wpdb->get_var( $wpdb->prepare(
@@ -108,7 +125,8 @@ $assert_pristine = function () use ( $raw_option, $wpdb ) {
 };
 $verify_source = function ( $state, $full ) use ( $total, $owner, $owner_key, $media_dir,
 	$png_hash, $owned_count ) {
-	floor_real_check( in_array( $state['phase'], array( 'ready', 'migrating', 'complete' ), true ) &&
+	floor_real_check( in_array( $state['phase'], array( 'ready', 'migrating', 'complete',
+		'edited', 'reversing', 'reversed' ), true ) &&
 		isset( $state['ids_sha256'], $state['source'],
 		$state['content'], $state['content_sha256'] ) && count( $state['ids'] ) === $total &&
 		count( array_unique( $state['ids'] ) ) === $total &&
@@ -156,6 +174,26 @@ $verify_source = function ( $state, $full ) use ( $total, $owner, $owner_key, $m
 		'content_sha256' => $state['content_sha256'], 'png_sha256' => $png_hash,
 		'files_checked' => $full ? $total : 0 );
 };
+$verify_destination = function ( $state ) use ( $total ) {
+	floor_real_check( in_array( $state['phase'], array( 'complete', 'edited', 'reversing',
+		'reversed' ), true ) && isset( $state['uid'], $state['destination'], $state['completed'] ) &&
+		(int) $state['completed'] === $total, 'Completed owned migration required for destination proof.' );
+	$destination = get_post( $state['destination'] );
+	floor_real_check( $destination && $destination->post_type === FOOGALLERY_CPT_GALLERY &&
+		get_post_meta( $destination->ID, FOOGALLERY_META_ATTACHMENTS, true ) === $state['ids'],
+		'Actual destination gallery or exact attachment order differs.' );
+	$matches = get_posts( array( 'post_type' => FOOGALLERY_CPT_GALLERY,
+		'post_status' => 'any', 'posts_per_page' => 2, 'fields' => 'ids',
+		'meta_key' => Migratable::META_SOURCE_KEY, 'meta_value' => $state['uid'] ) );
+	floor_real_check( count( $matches ) === 1 && (int) $matches[0] === (int) $destination->ID,
+		'Actual destination source identity or uniqueness differs.' );
+	$output = do_shortcode( '[foogallery id="' . $destination->ID . '"]' );
+	floor_real_check( is_string( $output ) && strpos( $output, 'foogallery' ) !== false,
+		'Actual FooGallery output failed.' );
+	return array( 'post' => (int) $destination->ID, 'attachments' => $total,
+		'ordered_ids_sha256' => hash( 'sha256', implode( ',', $state['ids'] ) ),
+		'output_bytes' => strlen( $output ) );
+};
 
 if ( $step === 'seed' || $step === 'preflight' || $step === 'provision' ) {
 	$assert_pristine();
@@ -165,14 +203,16 @@ if ( $step === 'seed' && $journal === null ) {
 		$owned_count( Aigpl::POST_TYPE ) === 0 && $owned_count( 'page' ) === 0 &&
 		! file_exists( $media_dir ), 'Owned source exists without its journal.' );
 	$journal = array( 'identity' => $identity, 'owner' => $owner,
-		'phase' => 'seeding', 'ids' => array() );
+		'total' => $total, 'phase' => 'seeding', 'ids' => array() );
 	floor_real_check( add_option( $journal_key, $journal, '', false ),
 		'Owned source journal could not be created.' );
 }
 floor_real_check( is_array( $journal ) && isset( $journal['identity'], $journal['owner'],
 	$journal['phase'], $journal['ids'] ) && $journal['identity'] === $identity &&
 	$journal['owner'] === $owner && is_array( $journal['ids'] ) &&
-	count( $journal['ids'] ) <= $total, 'Owned source journal missing or mismatched.' );
+	count( $journal['ids'] ) <= $total &&
+	( ! isset( $journal['total'] ) || $journal['total'] === $total ),
+	'Owned source journal missing or mismatched.' );
 
 if ( $step === 'seed' ) {
 	floor_real_check( $journal['phase'] === 'seeding', 'Ready source refuses reseed.' );
@@ -232,7 +272,8 @@ $result = array( 'step' => $step, 'fixture' => $manifest['fixture'],
 	'database' => $manifest['database'], 'container_id' => $manifest['container_id'],
 	'php' => PHP_VERSION, 'wordpress' => $GLOBALS['wp_version'], 'owner' => $owner,
 	'memory_limit' => ini_get( 'memory_limit' ),
-	'phase' => $journal['phase'], 'seeded' => count( $journal['ids'] ),
+	'fixture_total' => $total, 'phase' => $journal['phase'],
+	'seeded' => count( $journal['ids'] ),
 	'turns' => isset( $journal['turns'] ) ? (int) $journal['turns'] : 0,
 	'completed' => isset( $journal['completed'] ) ? (int) $journal['completed'] : 0,
 	'destination' => isset( $journal['destination'] ) ? (int) $journal['destination'] : null,
@@ -242,6 +283,37 @@ if ( $step === 'verify-source' ) {
 	$result['source'] = $verify_source( $journal, true );
 	$result['elapsed_seconds'] = round( microtime( true ) - $started, 3 );
 	$result['peak_allocated_bytes'] = memory_get_peak_usage( true );
+} elseif ( $step === 'verify-destination' ) {
+	$result['source'] = $verify_source( $journal, false );
+	$result['destination_proof'] = $verify_destination( $journal );
+} elseif ( $step === 'verify-reversed' ) {
+	$storage = StorageAdmin::status();
+	floor_real_check( $journal['phase'] === 'reversed' && isset( $journal['edit'] ) &&
+		$storage['backend'] === 'option' && $storage['phase'] === 'stable' &&
+		$storage['schema'] === 'verified' && $storage['problem'] === '' &&
+		! empty( $storage['retained'] ),
+		'Stable retained current-option reversal required for proof.' );
+	$result['source'] = $verify_source( $journal, true );
+	$result['destination_proof'] = $verify_destination( $journal );
+	$current = $raw_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+	$backup = $raw_option( StorageAuthority::STORAGE_BACKUP_OPTION );
+	floor_real_check( is_string( $current ) && is_string( $backup ) &&
+		$current !== $backup, 'CURRENT option must differ from retained old backup.' );
+	$decoded = maybe_unserialize( $current );
+	floor_real_check( is_array( $decoded ) && array_key_exists( $owner, $decoded ) &&
+		$decoded[$owner] === $journal['edit'],
+		'Raw CURRENT option lost the exact typed table edit.' );
+	unset( $decoded );
+	$control_raw = $raw_option( StorageAuthority::CONTROL_OPTION );
+	$control = is_string( $control_raw ) ?
+		StorageControl::decode( $control_raw, get_current_blog_id() ) : null;
+	floor_real_check( is_array( $control ) && $control['backend'] === 'option' &&
+		$control['phase'] === 'stable' && StorageControl::runtime_ready( $control,
+			$raw_option( StorageAuthority::AUTHORITY_OPTION ) ),
+		'Stable current-option authority differs.' );
+	$result['current_option_bytes'] = strlen( $current );
+	$result['current_option_sha256'] = hash( 'sha256', $current );
+	$result['edit_sha256'] = hash( 'sha256', serialize( $journal['edit'] ) );
 } elseif ( $step === 'status' && $journal['phase'] !== 'seeding' ) {
 	$result['source'] = $verify_source( $journal, false );
 }
@@ -345,7 +417,7 @@ if ( $step === 'turn' || $step === 'settings100' ) {
 			$objects = $migrator->get_objects_to_migrate( true );
 			floor_real_check( count( $objects ) === 1 &&
 				(int) $objects[0]->children_count === $total,
-				'Actual AIGPL detection did not find one 10K gallery.' );
+				'Actual AIGPL detection did not find one owned-size gallery.' );
 			$journal['uid'] = $objects[0]->unique_identifier();
 			floor_real_check( $migrator->queue_objects_for_migration(
 				array( $journal['uid'] => array( 'title' => $owner ) ) ),
@@ -395,6 +467,107 @@ if ( $step === 'turn' || $step === 'settings100' ) {
 		$result['source_after'] = $verify_source( $journal, false );
 	}
 	$result['operation_seconds'] = round( microtime( true ) - $operation_started, 3 );
+}
+if ( $step === 'edit' ) {
+	$storage = StorageAdmin::status();
+	floor_real_check( $journal['phase'] === 'complete' && isset( $journal['completed'] ) &&
+		(int) $journal['completed'] === $total && $storage['backend'] === 'table' &&
+		$storage['phase'] === 'stable' && $storage['schema'] === 'verified' &&
+		$storage['problem'] === '', 'Completed stable table migration required for edit.' );
+	$result['source'] = $verify_source( $journal, false );
+	$result['destination_proof'] = $verify_destination( $journal );
+	$engine = foogallery_migrate_migrator_instance();
+	$edit = array( 'current' => true, '09' => null, 9 => false, 'bytes' => "x\0" );
+	$operation_started = microtime( true );
+	floor_real_check( $engine->set_migrator_setting( $owner, $edit ) &&
+		$engine->get_migrator_setting( $owner ) === $edit,
+		'Normal table edit/readback failed.' );
+	$journal['edit'] = $edit;
+	$journal['phase'] = 'edited';
+	$save( $journal );
+	$result['phase'] = $journal['phase'];
+	$result['edit_sha256'] = hash( 'sha256', serialize( $edit ) );
+	$result['operation_seconds'] = round( microtime( true ) - $operation_started, 3 );
+}
+if ( $step === 'reverse' ) {
+	floor_real_check( in_array( $journal['phase'], array( 'edited', 'reversing' ), true ) &&
+		isset( $journal['edit'], $journal['uid'], $journal['destination'], $journal['completed'] ) &&
+		(int) $journal['completed'] === $total,
+		'Only completed, edited owned migration may reverse.' );
+	$result['source'] = $verify_source( $journal, false );
+	$result['destination_proof'] = $verify_destination( $journal );
+	$before = StorageAdmin::status();
+	floor_real_check( $before['schema'] === 'verified' && $before['problem'] === '' &&
+		( ( $before['phase'] === 'stable' &&
+			in_array( $before['backend'], array( 'table', 'option' ), true ) ) ||
+			( $before['phase'] !== 'stable' && $before['target'] === 'option' &&
+				in_array( $before['backend'], array( 'table', 'option' ), true ) ) ),
+		'Owned verified table-to-option transition required.' );
+	if ( $before['phase'] === 'stable' ) {
+		floor_real_check( $journal['edit'] ===
+			foogallery_migrate_migrator_instance()->get_migrator_setting( $owner ),
+			'Current edited setting differs before reversal.' );
+	}
+	$tables = array_keys( ( new LegacyStorageSchema( $wpdb ) )->definitions() );
+	$heads = $wpdb->get_row( $wpdb->prepare( 'SELECT COUNT(*) AS n, COALESCE(SUM(payload_bytes),0) AS bytes FROM `' .
+		$tables[0] . '` WHERE blog_id=%d', get_current_blog_id() ), ARRAY_A );
+	$rows = $wpdb->get_row( $wpdb->prepare( 'SELECT COUNT(*) AS n, COALESCE(SUM(payload_bytes),0) AS bytes, COALESCE(MAX(payload_bytes),0) AS largest FROM `' .
+		$tables[1] . '` WHERE blog_id=%d', get_current_blog_id() ), ARRAY_A );
+	floor_real_check( ! $wpdb->last_error && is_array( $heads ) && is_array( $rows ),
+		'Current table dimensions unavailable.' );
+	$result['table_dimensions'] = array( 'heads' => (int) $heads['n'],
+		'head_payload_bytes' => (int) $heads['bytes'], 'rows' => (int) $rows['n'],
+		'row_payload_bytes' => (int) $rows['bytes'],
+		'largest_row_bytes' => (int) $rows['largest'] );
+	$operation = $before['phase'] === 'stable' ?
+		( $before['backend'] === 'table' ? 'switch' : null ) : 'recover';
+	$operation_started = microtime( true );
+	$storage_result = $operation === null ? null : StorageCli::execute( $operation,
+		array( 'target' => 'option', 'confirm' => $operation === 'switch' ?
+			'switch-to-option' : 'recover-storage' ) );
+	$result['operation_seconds'] = round( microtime( true ) - $operation_started, 3 );
+	$result['storage'] = StorageAdmin::status();
+	if ( is_wp_error( $storage_result ) ) {
+		$result['failure'] = array( 'code' => $storage_result->get_error_code(),
+			'message' => $storage_result->get_error_message() );
+	} else {
+		if ( $storage_result !== null ) { $result['storage_result'] = $storage_result; }
+		if ( $result['storage']['phase'] === 'stable' &&
+			$result['storage']['backend'] === 'option' ) {
+			$current = $raw_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+			$backup = $raw_option( StorageAuthority::STORAGE_BACKUP_OPTION );
+			floor_real_check( is_string( $current ) && is_string( $backup ) &&
+				$current !== $backup,
+				'Reversal did not publish CURRENT option bytes distinct from old backup.' );
+			$decoded = maybe_unserialize( $current );
+			floor_real_check( is_array( $decoded ) && array_key_exists( $owner, $decoded ) &&
+				$decoded[$owner] === $journal['edit'],
+				'Raw CURRENT option bytes lost the exact typed table edit.' );
+			unset( $decoded );
+			$control_raw = $raw_option( StorageAuthority::CONTROL_OPTION );
+			$control = is_string( $control_raw ) ?
+				StorageControl::decode( $control_raw, get_current_blog_id() ) : null;
+			floor_real_check( is_array( $control ) && $control['backend'] === 'option' &&
+				$control['phase'] === 'stable' &&
+				StorageControl::runtime_ready( $control,
+					$raw_option( StorageAuthority::AUTHORITY_OPTION ) ),
+				'Current option authority is not stable after reversal.' );
+			$result['current_option_bytes'] = strlen( $current );
+			$result['current_option_sha256'] = hash( 'sha256', $current );
+			$journal['phase'] = 'reversed';
+			$save( $journal );
+		} else {
+			floor_real_check( $result['storage']['target'] === 'option' &&
+				$result['storage']['phase'] !== 'stable' &&
+				in_array( $result['storage']['backend'], array( 'table', 'option' ), true ),
+				'Reverse transition changed authority unexpectedly.' );
+			$journal['phase'] = 'reversing';
+			$save( $journal );
+		}
+		$result['phase'] = $journal['phase'];
+		$result['source_after'] = $verify_source( $journal, false );
+		$result['destination_after'] = $verify_destination( $journal );
+	}
 }
 $result['elapsed_seconds'] = round( microtime( true ) - $started, 3 );
 $result['peak_allocated_bytes'] = memory_get_peak_usage( true );
