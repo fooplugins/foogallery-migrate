@@ -100,12 +100,7 @@ class LegacyTableRepository {
 					$result = $this->history_source_identity( $request['type'], $request['plugin'], $request['id'] ); break;
 				case 'children':
 					if ( array_keys( $request ) !== array( 'parent', 'keys' ) || ! is_array( $request['keys'] ) || count( $request['keys'] ) > $this->max_rows ) { $this->fail( 'Malformed child request.' ); }
-					$this->typed_key( $request['parent'] ); $this->consume( 0, strlen( $this->codec->key_value( $request['parent'] ) ) ); $result = array();
-					foreach ( array_chunk( $request['keys'], 100 ) as $batch_keys ) {
-						foreach ( $this->identifiers( 'migrated', $batch_keys ) as $row ) {
-							if ( $row['found'] && is_array( $row['value'] ) && isset( $row['value']['migration_parent_key'] ) && $request['parent'] === $row['value']['migration_parent_key'] ) { $result[] = $row; }
-						}
-					}
+					$result = $this->history_children( $request['parent'], $request['keys'] );
 					break;
 				case 'page':
 				case 'export':
@@ -889,6 +884,64 @@ class LegacyTableRepository {
 			$result[] = array( 'found' => false !== $tree, 'key' => $key, 'value' => false === $tree ? null : $tree['value'] );
 		}
 		$this->unchanged( $state_key, $head ); return $result;
+	}
+
+	/** Loaded-parent history lookup. Selector work is fixed per 100 requested keys,
+	 * including proof that a missing identifier has no unprojected exact root.
+	 * Only selected trees are hydrated; the complete history is never read.
+	 */
+	private function history_children( $parent, $keys ) {
+		$this->typed_key( $parent ); $this->consume( 0, strlen( $this->codec->key_value( $parent ) ) );
+		$this->consume( 0, strlen( $this->codec->key_value( 'migrated' ) ) );
+		$seen = array(); $result = array();
+		foreach ( $keys as $key ) {
+			$this->typed_key( $key ); $hash = $this->codec->key_hash( $key );
+			if ( isset( $seen[$hash] ) ) { $this->fail( 'Duplicate history child identifier.' ); }
+			$seen[$hash] = true; $this->consume( 0, strlen( $this->codec->key_value( $key ) ) );
+		}
+		if ( ! count( $keys ) ) { return $result; }
+		$head = $this->head( 'migrated' ); $this->collection( $head ); $state_hash = $this->codec->key_hash( 'migrated' );
+		foreach ( array_chunk( $keys, 100 ) as $batch ) {
+			$hashes = array(); $nodes = array(); $by_hash = array();
+			foreach ( $batch as $key ) {
+				$hash = $this->codec->key_hash( $key ); $node = $this->codec->node_hash( $state_hash, null, $key );
+				$hashes[] = $hash; $nodes[$hash] = $node; $by_hash[$hash] = $key;
+			}
+			$slots = implode( ', ', array_fill( 0, count( $batch ), 'UNHEX(%s)' ) );
+			$sql = 'SELECT HEX(node_hash) AS node_hash, HEX(legacy_identifier_hash) AS identifier_hash '
+				. 'FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d '
+				. 'AND parent_node_hash IS NULL AND legacy_identifier_hash IN (' . $slots . ') LIMIT 101';
+			$rows = $this->read( $this->db->prepare( $sql, array_merge( array( $this->blog,
+				$head['id'], $head['active_generation'] ), $hashes ) ) );
+			if ( count( $rows ) > count( $batch ) ) { $this->fail( 'Duplicate history identifier.' ); }
+			$found = array();
+			foreach ( $rows as $row ) {
+				$hash = $this->hex( $row['identifier_hash'] );
+				if ( ! array_key_exists( $hash, $by_hash ) || isset( $found[$hash] ) ) { $this->fail( 'Identifier metadata collision or corruption.' ); }
+				if ( $this->hex( $row['node_hash'] ) !== $nodes[$hash] ) {
+					$this->fail( 'Identifier metadata collision or corruption.' );
+				}
+				$found[$hash] = true;
+			}
+			$missing = array();
+			foreach ( $hashes as $hash ) { if ( ! isset( $found[$hash] ) ) { $missing[] = $nodes[$hash]; } }
+			if ( count( $missing ) ) {
+				$slots = implode( ', ', array_fill( 0, count( $missing ), 'UNHEX(%s)' ) );
+				$unprojected = $this->read( $this->db->prepare( 'SELECT id FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d '
+					. 'AND parent_node_hash IS NULL AND node_hash IN (' . $slots . ') LIMIT 1',
+					array_merge( array( $this->blog, $head['id'], $head['active_generation'] ), $missing ) ) );
+				if ( count( $unprojected ) ) { $this->fail( 'Missing identifier projection.' ); }
+			}
+			foreach ( $batch as $key ) {
+				$hash = $this->codec->key_hash( $key );
+				if ( ! isset( $found[$hash] ) ) { continue; }
+				$tree = $this->tree_hash( 'migrated', $head, $nodes[$hash] );
+				if ( false === $tree || $tree['key'] !== $key ) { $this->fail( 'Identifier collision or corruption.' ); }
+				if ( is_array( $tree['value'] ) && isset( $tree['value']['migration_parent_key'] ) &&
+					$parent === $tree['value']['migration_parent_key'] ) { $result[] = array( 'found' => true, 'key' => $key, 'value' => $tree['value'] ); }
+			}
+		}
+		$this->unchanged( 'migrated', $head ); return $result;
 	}
 
 	/** First eligible root in legacy insertion order, exact or image absint semantics. */

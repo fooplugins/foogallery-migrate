@@ -2,11 +2,11 @@
 /**
  * Owned, resumable actual AIGPL 10K fixture. One step per fresh CLI process.
  *
- * php storage-release-real-journey.php /tmp/foogallery-migrate-r0.XXXXXX seed|verify-source|status|preflight|provision|switch|recover|turn|edit
+ * php storage-release-real-journey.php /tmp/foogallery-migrate-r0.XXXXXX seed|verify-source|status|preflight|provision|switch|recover|turn|children|settings100|edit
  * Seed and verify-source leave migration storage in its original option mode.
  * Turn/edit are for the later, explicitly table-backed R1c journey only.
  */
-if ( 'cli' !== PHP_SAPI || 3 !== $argc || ! in_array( $argv[2], array( 'seed', 'verify-source', 'status', 'preflight', 'provision', 'switch', 'recover', 'turn', 'edit' ), true ) ) {
+if ( 'cli' !== PHP_SAPI || 3 !== $argc || ! in_array( $argv[2], array( 'seed', 'verify-source', 'status', 'preflight', 'provision', 'switch', 'recover', 'turn', 'children', 'settings100', 'edit' ), true ) ) {
 	throw new RuntimeException( 'An owned site path and one explicit step are required.' );
 }
 $site = realpath( $argv[1] );
@@ -40,6 +40,9 @@ use FooPlugins\FooGalleryMigrate\StorageAdmin;
 use FooPlugins\FooGalleryMigrate\StorageAuthority;
 use FooPlugins\FooGalleryMigrate\StorageCli;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
+use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
+use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
+use FooPlugins\FooGalleryMigrate\MigratorSettings;
 use FooPlugins\FooGalleryMigrate\Plugins\Aigpl;
 use FooPlugins\FooGalleryMigrate\Objects\Migratable;
 global $wpdb, $wp_version;
@@ -209,6 +212,47 @@ if ( 'verify-source' === $step ) {
 if ( 'status' === $step ) {
 	$result['storage'] = StorageAdmin::status();
 	if ( 'seeding' !== $journal['phase'] ) { $result['source'] = $verify_source( $journal, false ); }
+}
+if ( 'children' === $step ) {
+	$storage = StorageAdmin::status();
+	real_check( 'table' === $storage['backend'] && 'stable' === $storage['phase'] && 'verified' === $storage['schema'] &&
+		'' === $storage['problem'] && 'migrating' === $journal['phase'] && $journal['completed'] > 0,
+		'Owned populated stable table history required for child proof.' );
+	$result['source'] = $verify_source( $journal, false );
+	$keys = array(); $number = min( 25, (int) $journal['completed'] );
+	for ( $i = 0; $i < $number; ++$i ) {
+		$key = wp_get_attachment_url( $journal['ids'][$i] );
+		real_check( is_string( $key ) && '' !== $key, 'Owned image URL unavailable.' ); $keys[] = $key;
+	}
+	$keys = array_reverse( $keys );
+	$backend = new LegacyTableBackend( new LegacyTransactionConnection( $wpdb ), (int) get_current_blog_id() );
+	$before_questions = $questions(); $started = microtime( true );
+	$read = $backend->history_read( 'children', array( 'parent' => $journal['uid'], 'keys' => array_merge( $keys, array( 'missing-owned-child' ) ) ) );
+	$result['elapsed_seconds'] = round( microtime( true ) - $started, 3 );
+	$result['session_questions_delta'] = $questions() - $before_questions;
+	$result['peak_allocated_bytes'] = memory_get_peak_usage( true );
+	real_check( $keys === array_column( $read['result'], 'key' ), 'Exact child identity or caller order differs.' );
+	foreach ( $read['result'] as $row ) {
+		real_check( is_array( $row['value'] ) && isset( $row['value']['migration_parent_key'] ) &&
+			$journal['uid'] === $row['value']['migration_parent_key'], 'Actual child parent association differs.' );
+	}
+	$other = $backend->history_read( 'children', array( 'parent' => 'unrelated-owned-parent', 'keys' => $keys ) );
+	real_check( array() === $other['result'], 'Unrelated parent acquired actual children.' );
+	$result['matched_children'] = count( $read['result'] );
+}
+if ( 'settings100' === $step ) {
+	$storage = StorageAdmin::status();
+	real_check( 'table' === $storage['backend'] && 'stable' === $storage['phase'] && 'verified' === $storage['schema'] &&
+		'' === $storage['problem'] && 'migrating' === $journal['phase'] && $journal['turns'] >= 5 &&
+		$journal['completed'] >= 25 && ! isset( $journal['images_per_turn'] ),
+		'Only the owned, default-turn-validated migration may change this setting once.' );
+	$settings = new MigratorSettings();
+	real_check( 5 === $settings->get_images_per_turn(), 'Existing normal setting is not the default five.' );
+	$settings->save_settings( array( MigratorSettings::SETTING_IMAGES_PER_TURN => 100 ) );
+	real_check( 100 === $settings->get_images_per_turn() &&
+		100 === foogallery_migrate_migrator_instance()->get_images_per_turn(), 'Normal setting did not persist as 100.' );
+	$journal['images_per_turn'] = 100; $save( $journal );
+	$result['images_per_turn'] = 100;
 }
 if ( in_array( $step, array( 'preflight', 'provision', 'switch', 'recover' ), true ) ) {
 	real_check( 'ready' === $journal['phase'] && 0 === $journal['turns'] && 0 === $journal['completed'],

@@ -33,6 +33,14 @@ class LegacyHistoryMutationContractTest extends TestCase {
 		$this->assertTrue( $history->manages_revision() );
 	}
 
+	public function test_upsert_retains_existing_parent_fallback_when_no_explicit_parent_is_passed(): void {
+		$backend = new HistoryMutationBackend(); $history = new MigratedHistoryRepository( $backend, new MigratorSettings() );
+		$image = new Image(); $image->source_url = 'https://example.test/Fallback.jpg'; $image->migration_parent_key = 'Prior Parent';
+		$this->assertTrue( $history->upsert( $image ) );
+		$this->assertSame( null, $backend->calls[0][1][0]['parent'] );
+		$this->assertSame( 'Prior Parent', $backend->calls[0][1][0]['fallback_parent'] );
+	}
+
 	public function test_invalid_batches_refuse_before_backend_calls(): void {
 		$backend = new HistoryMutationBackend(); $history = new MigratedHistoryRepository( $backend, new MigratorSettings() );
 		$this->assertSame( 0, $history->upsert_batch( array() ) );
