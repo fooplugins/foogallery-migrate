@@ -1,33 +1,82 @@
 # Legacy storage upgrade for large sites
 
-**Status:** Proposed  
-**Date:** 2026-08-28  
-**Scope:** Storage and storage lifecycle for the existing migration engine  
+**Status:** Partially implemented by PR #15; not release-ready
+
+**Design date:** 2026-08-28
+
+**Implementation reconciliation:** 2026-10-22, PR head `206655cbfd49541b0f957d32028d1e53c17f39a1`
+
+**Scope:** Storage and storage lifecycle for the existing migration engine
+
+**Execution tracker:** [Prioritised completion plan](dev-plan.md)
+
 **Related future work:** [GitHub issue #14](https://github.com/fooplugins/foogallery-migrate/issues/14), which is deliberately not part of this design
 
 ## Decision
 
 Upgrade storage before undertaking any new migration-engine work.
 
-The existing option-backed behavior remains the default. Storage is first extracted behind explicit contracts and proven with an option implementation. A table implementation is then introduced for high-cardinality legacy state, followed by safe switching, a size-based recommendation, cleanup, uninstall, multisite support, and legacy persisted-state hardening.
+The existing option-backed behavior remains the default. Reuse the storage contracts, option/table implementations, and switching infrastructure already introduced by PR #15. Complete safe cleanup/uninstall and bounded production access before qualifying public switching and size recommendations. Multisite table support follows the single-site milestone. Do not restart the extraction or introduce a replacement engine.
 
 This project does **not** create or redesign a migration engine. It preserves the existing engine's sources, object model, identities, queue states, batching, AJAX flow, destination writes, content replacements, and retry behavior. Bounded persistence access may replace a whole-collection read with a page, count, aggregate, or single-record query so that table mode does not reconstruct every stored object. The existing engine continues to own every selection, transition, ordering, retry, title, and completion decision; storage only answers queries and applies engine-supplied patches.
 
 Table mode is an administrator-confirmed storage choice. It is never enabled automatically.
 
-## Why the upgrade is needed
+## PR #15 implementation status
 
-FooGallery Migrate currently stores almost all operational state in one non-autoloaded `foogallery-migrate-data` option, while user preferences live in `foogallery-migrate-settings` ([constants](../includes/constants.php#L9-L14)).
+This section is a source-review snapshot of [PR #15](https://github.com/fooplugins/foogallery-migrate/pull/15) at the revision above, not a claim that its tests or release acceptance pass. The remaining design sections define the intended contract; they are not an inventory of finished features. [dev-plan.md](dev-plan.md) is the single forward task/status tracker. Older checkpoint documents remain historical evidence, not competing plans.
+
+### Already implemented — retain and complete
+
+| Area | Code present at the reviewed revision | Remaining acceptance |
+|---|---|---|
+| Compatibility and option storage | `LegacyStateCodec`, `LegacyRecordCodec`, collection envelopes, `LegacyOptionBackend`, and five domain repositories | Re-establish option parity against the pre-PR engine, including child loading, typed keys, status transitions, retry, and resume. Extraction is not work to start again. |
+| Table schema and access | Two shared legacy tables, typed-key/raw-key checks, generations, revisions, indexed projections, table reader/repository/backend and snapshots | Finish bounded production callers; schema/repository tests alone do not prove request memory is bounded. |
+| Scalar state | `ScalarStateRepository` and table scalar mutation, including creation of missing state and deletion | Preserve unknown scalars and atomic coupling to collection metadata; earlier checkpoints describing scalar creation/deletion as absent are superseded. |
+| Migrated history | Direct/batch/presence/source-identity access, revision-aware writes, cursor pages, summaries, retry/export/clear primitives | Wire all log, migration, content and tag consumers to supported table operations; whole-history methods remain option-only. |
+| Content scans | Window/get-many access, metadata/checkpoints, batch append/patch and atomic reset primitives; partial caller integration | Audit the entire scan/list/count/selection/replacement path and eliminate residual whole-collection work. |
+| Authority and maintenance | Control/authority records, maintenance gate, writer markers, pinned transactions, quiescence checks and authority-selected production backend | Verify actual request lifecycle and recovery. Do not weaken conservative ownership checks to make tests pass. |
+| Provisioning and conversion | Provisioning, preflight, staged copying, verification, recovery and inactive-copy retirement services; admin and CLI entry points | Qualify supported public paths with real finite capacity evidence. Existing primitives are not a completed user journey. |
+| Lifecycle | Activation/deactivation retain existing state without automatic conversion; an uninstall entry point exists | Uninstall still targets an older storage layout and is not sufficient for the current schema; see blockers below. |
+
+Source entry points: [table repository](../includes/class-legacy-table-repository.php), [history repository](../includes/class-migrated-history-repository.php), [content repository](../includes/class-content-scan-repository.php), [schema](../includes/class-legacy-storage-schema.php), [authority](../includes/class-storage-authority.php), and [storage operations](../includes/class-storage-operations.php).
+
+### Release blockers and remaining work, in priority order
+
+1. **Establish a trustworthy current baseline (S0).** Reproduce the full-suite failures/timeouts reported by PR checkpoints, map every production persistence call, and capture pre-PR compatibility fixtures. Old focused passes do not certify the current head.
+2. **Finish cleanup and packaged uninstall (S1).** Implement the resource manifest and scoped clear/reset/purge services. [`uninstall.php`](../uninstall.php) still requires `vendor/autoload.php`, which is excluded from the production package. [`MigratedStore::uninstall_schema()`](../includes/class-migrated-store.php) cleans the older `foogallery_migrate_objects` layout, not the two current legacy tables and all associated control/backup/maintenance resources. Table-backed clear/reset is not yet supported by `MigratorSettings`. Inactive-copy retirement is not a substitute for full cleanup.
+3. **Complete bounded history and content access (S2–S3).** `MigratedHistoryRepository::get_all()`, `log_page()` and `get_by_parent()` remain option-only; valid-URL table lookup is explicitly unsupported by `find_by_source_url()`. The log and image-tag builder still request whole history. Finish existing repository capabilities and wire every caller, preserving URL-based identity and first-match ordering.
+4. **Complete bounded gallery/album access (S4).** `MigratorSettings::get_migrator_setting()` can still load a complete table collection. `LegacyTableRepository::collection_value()` accumulates all export pages, and `replace_collection()` reconstructs old state before diffing. `MigratorBase` still gets complete collections for queue/migration operations. Replace these hot-path dependencies with page, aggregate, selection patch, next-object and affected-tree operations. A fixed admission cap is not page-size memory scaling.
+5. **Finish incremental image-tag storage (S5).** Replace full-history queue construction and snapshot-sized queue updates with bounded construction, indexed resolution and paged execution, preserving tag merge/retry behavior.
+6. **Qualify conversion, capacity and recovery (S6).** The shipped [`storage-capacity-policy.json`](../includes/storage-capacity-policy.json) has empty classes and null evidence/implementation digests. Normal production preflight/switch/recovery/retirement paths therefore refuse admission; test-injected policies do not make the public feature usable. Complete real positive and negative journeys before shipping a supported policy; do not bypass admission or add unmeasured coefficients.
+7. **Deliver actionable recommendations and administration (S7).** Storage status/actions exist, but there is no completed size-threshold advisor/dismissal flow. Add filterable recommendations, explicit confirmation, cleanup controls, and useful unsupported/recovery messaging. Never recommend an unavailable switch as an immediately usable action.
+8. **Pass single-site release acceptance (S8).** Validate source and the actual production ZIP, compatibility floors, real WordPress/SQL/cache behavior, all user flows, and memory scaling. Do not enable public table selection until S0–S8 pass.
+9. **Complete multisite lifecycle before enabling it (S9).** Shared `blog_id` storage exists, but `StorageAuthority::table_mode_error()` rejects multisite table mode and admin actions are suppressed. Network registry, bounded enumeration, site-deletion/orphan cleanup, cross-network scope and uninstall preparation remain a separate gated milestone.
+
+The detailed task order, dependencies, owned areas and acceptance checks are in [the completion plan](dev-plan.md#ordered-work). This ordering supersedes the original greenfield delivery sequence below, without relaxing its requirements.
+
+### Evidence and scope qualifications
+
+- [The October 20 review checkpoint](pr15-review-checkpoint-2026-10-20.md) records a failing/timed-out full PHPUnit run and explicitly incomplete release acceptance. Its focused passes and package checks apply to that checkpoint, not automatically to this reviewed head.
+- [The single-site release scope](storage-single-site-release-scope.md) still records empty-policy admission and outstanding positive native 20K / actual 10K AIGPL journeys. A fixture double or an injected policy is supporting evidence, not a production release pass.
+- Table mode is wired into production backend selection; it is not merely an unused prototype. Nevertheless, supported public conversion and complete table-backed flows are not yet qualified.
+- PR #15 contains structural serialization scanning and native decode/round-trip verification. This is additional storage-admission machinery, not proof of streaming option hydration. The initial design's exclusion of a new streaming PHP serialization decoder remains: measure and simplify existing overhead where necessary, rather than expanding parser architecture as a prerequisite.
+- The capacity-policy JSON is storage admission configuration, **not** the migration-config JSON or v2 engine proposed in issue #14. That engine work remains excluded.
+- Persistence-facing edits to the existing engine are necessary to call bounded repositories. They must not change execution decisions. Existing changes to compaction/child handling and retry paths require golden parity evidence; class names alone do not demonstrate unchanged behavior.
+
+## Why the upgrade is needed — original baseline
+
+The following describes the 2026-08-28/pre-PR option implementation, not the current PR's completed capabilities. The reference source is [the pre-PR develop revision](https://github.com/fooplugins/foogallery-migrate/tree/3bb151465818fbb164edb35866118794563ce12a). It stored almost all operational state in one non-autoloaded `foogallery-migrate-data` option, while user preferences lived in `foogallery-migrate-settings`.
 
 The option is compacted before persistence, but its scaling characteristics remain problematic:
 
-- Every operational read loads the complete option and every mutation rewrites it ([MigratorSettings](../includes/class-migrator-settings.php#L46-L86)).
-- Gallery and album collections recursively embed loaded child objects in the same payload ([compaction](../includes/class-migrator-settings.php#L461-L560)).
-- Discovery, queue selection, cancellation, and every migration turn operate on and persist complete collections ([MigratorBase](../includes/migrators/class-migrator-base.php#L74-L130), [migration turn](../includes/migrators/class-migrator-base.php#L218-L233)).
-- Adding, checking, updating, or deleting one migrated-history record loads and often rewrites the entire migrated map ([MigratorEngine](../includes/class-migrator-engine.php#L776-L891)).
-- Content scanning is time- and keyset-bounded, but all accumulated findings and its checkpoint are rewritten together in the same option ([ContentMigrator](../includes/migrators/class-content-migrator.php#L93-L184), [persistence](../includes/migrators/class-content-migrator.php#L544-L562)).
-- The migration log loads every migrated object, filters in PHP, and only then slices the requested page ([log view](../includes/views/view-migrate-tab-log.php#L5-L90)).
-- The plugin has no table schema lifecycle or uninstall cleanup ([bootstrap](../migrate.php#L30-L47)).
+- Every operational read loaded the complete option and every mutation rewrote it.
+- Gallery and album collections recursively embedded loaded child objects in the same payload.
+- Discovery, queue selection, cancellation, and every migration turn operated on complete collections.
+- Adding, checking, updating, or deleting one migrated-history record loaded and often rewrote the entire migrated map.
+- Content scanning was time- and keyset-bounded, but accumulated findings and its checkpoint were rewritten together in the same option.
+- The migration log loaded every migrated object, filtered in PHP, and only then sliced the requested page.
+- There was no table schema lifecycle or uninstall cleanup.
 
 A development-site measurement on 2026-08-28 found a 402,231-byte operational option containing 507 top-level gallery records, one album embedding 500 galleries, 17 migrated-history records, and six content findings. This is not a release threshold, but it demonstrates how nested duplication and full rewrites appear before a site is exceptionally large.
 
@@ -54,7 +103,7 @@ The separate `foogallery-migrate-settings` option currently contains six user pr
 
 The current transient family is `foogallery_migrate_content_result_{user_id}` with the corresponding timeout rows. The `_foogallery_migrate` post-meta name is declared but unused; this storage project does not begin writing it and cleanup must not delete matching post meta unless a future, separately reviewed feature owns such rows.
 
-Phase 0 must repeat this inventory from all call sites and add a compatibility fixture for every key before extraction begins. Unknown scalar keys remain losslessly accessible through `ScalarStateRepository`.
+S0 must reconcile this original inventory with all PR call sites, metadata and compatibility fixtures before further implementation. The resource manifest must include PR control/authority/schema/backup/writer resources and any older storage artifacts. Unknown scalar keys remain losslessly accessible through `ScalarStateRepository`.
 
 ## Outcomes
 
@@ -305,7 +354,7 @@ Option mode remains the initial and fallback-compatible mode.
 - `update_option()` returning `false` is still treated as success when the requested value is already stored.
 - It reads old un-compacted payloads without a write-time conversion.
 - It does not create per-record or per-run options.
-- It remains appropriate for small sites. All current tests execute through option storage, although they do not yet cover every option semantic or lifecycle behavior.
+- It remains appropriate for small sites. PR #15 tests both option and table storage; S0/S8 must verify complete option semantics and lifecycle coverage rather than assuming extraction proves parity.
 
 The first implementation release must route existing behavior through this backend only. Its pass condition is logical snapshot parity and the complete existing regression suite, not a performance improvement.
 
@@ -673,7 +722,17 @@ On a multi-network installation, a network cleanup may delete only rows and per-
 
 ## Delivery plan
 
-Each phase is independently testable. Public table mode is not enabled until all table-backed hot paths and cleanup behavior are complete.
+These are the original architectural phases and exit criteria, retained for traceability. Execute the [prioritised completion plan](dev-plan.md), not a fresh implementation of every phase. Each phase is independently testable. Public table mode is not enabled until all table-backed hot paths and cleanup behavior are complete.
+
+| Original phase | PR #15 position | Completion tasks |
+|---|---|---|
+| 0: Characterization | Large fixture/test inventory exists; current full baseline and representative positive journeys remain unqualified | S0, S6, S8 |
+| 1: Option extraction | Codec/backend/repository extraction exists; parity remains a release gate | S0, S2–S5, S8 |
+| 2: Bounded callers | Partially implemented; whole-state production paths remain | S2–S5 |
+| 3: Table backend/lifecycle | Backend/schema exist; cleanup/uninstall is incomplete | S1, S8 |
+| 4: Switching/advisor/admin | Switching/control/admin scaffolding exists; capacity policy and advisor are incomplete | S6–S8 |
+| 5: Multisite | Schema isolation work exists; public table mode intentionally rejected | S9 |
+| 6: Performance/rollout | Historical experiments exist; current end-to-end acceptance remains open | S0, S6, S8, then S9 for networks |
 
 ### Phase 0 — Characterize current storage
 
@@ -748,24 +807,25 @@ Run these paths first against the option backend to prove semantic compatibility
 
 **Exit:** Recommendation thresholds and the persisted-state scaling claim are supported by repeatable measurements.
 
-No phase in this plan introduces JSON configuration or a new execution engine.
+No phase in this plan introduces migration-config JSON or a new execution engine. PR #15's storage capacity-policy JSON is a separate admission concern.
 
 ## Test strategy
 
 ### Existing baseline and gaps
 
-The repository audit on 2026-08-28 recorded these exact baseline commands:
+The repository audit on 2026-08-28 recorded these historical baseline commands. These results do not describe PR #15 or validate its current head:
 
 - `composer test` — passed on PHP 8.4.6 with 40 tests and 336 assertions.
 - `php tests/content-scan-regression.php` — passed.
 - `node tests/ajax-js-regression.js` — passed.
 - `wp eval-file tests/integration/core-gallery-migration.php` — mutates a live WordPress database, so it was not run during this documentation-only work and must run only against an isolated disposable site.
 
-- PHPUnit currently discovers only `*Test.php`; the content-scan PHP regression and AJAX JavaScript regression are separate commands and must remain separate required checks unless the test runner is deliberately unified.
-- The PHPUnit bootstrap mocks only the Options API. Its `update_option()` stub always returns success, so new tests must cover same-value `false`, the non-autoload requirement, object-cache invalidation, and raw option bytes in a real WordPress database.
+- PHPUnit discovers `*Test.php`; the content-scan PHP regression and AJAX JavaScript regression are separate commands and must remain separate required checks unless the test runner is deliberately unified.
+- The original PHPUnit bootstrap mocked only the Options API and its `update_option()` stub always returned success. PR #15 adds substantial fixtures and table doubles; those do not replace same-value `false`, non-autoload, object-cache invalidation, and raw option-byte checks in a real WordPress database.
 - The AJAX JavaScript regression is focused on content scanning; it is not evidence for every gallery, album, log, or storage administration flow.
-- The current live integration script protects only `foogallery-migrate-data`; table/control/backup resources need their own isolated setup and teardown.
-- There is no existing coverage for Clear Migration History resource scope, activation/deactivation, schema upgrades, table permissions, switching/gates, cleanup, uninstall, multisite, or persistent object caches. These are new required suites.
+- The original live integration script protected only `foogallery-migrate-data`; current table/control/backup resources require explicit fixture ownership and isolated setup/teardown. Never run these tests against Brad's working site without a separately authorized disposable environment.
+- PR #15 adds codec/repository, table, maintenance, conversion, lifecycle, compatibility and native integration coverage. Audit what each test actually exercises: lifecycle retention is not complete uninstall coverage, fault-free transport recovery is not process-death recovery, and fake-table benchmarks are not native database scaling evidence.
+- S0 must reproduce and record the outstanding full-suite failures/timeouts before attributing new regressions. S8 must provide a successful complete run and production-package validation; focused passes cannot substitute for this.
 
 PHPUnit 9.6 cannot execute on PHP 5.4. In addition to modern PHPUnit/WordPress integration tests, the built production package needs a PHP 5.4 syntax/runtime smoke job with the declared WordPress 5.0 runtime floor. New production code cannot use generators, `finally`, `Throwable`, scalar/return type declarations, null coalescing, or unpolyfilled modern randomness. Repository methods named `iteratePages()` describe repeated bounded page calls/callbacks, not a PHP generator.
 
