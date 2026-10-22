@@ -2,7 +2,7 @@
 
 **Updated:** 2026-10-22
 
-**Status:** Development authorized on 2026-10-22; R0 starting under the approved five cuts.
+**Status:** R0 validated; R1a capacity-policy repair next under the approved five cuts.
 
 **Branch:** `feature/migrated-store-scalability`
 
@@ -67,7 +67,7 @@ Historical receipts: [October 20 review](pr15-review-checkpoint-2026-10-20.md), 
 
 ## Ordered work
 
-R0–R4 replace the previous S0–S9 sequence. R0 is starting; R1–R4 remain pending. Independent QA is GPT-6 Sol Medium, separate from the developer. There are no accepted implementation commits yet.
+R0–R4 replace the previous S0–S9 sequence. R0 is validated for the checkpoint commit; R1a is next and R2–R4 remain pending. Independent QA is GPT-6 Sol Medium, separate from the developer.
 
 | ID | Deliverable / exit | Depends on | Owned areas | Proposed developer and reason |
 |---|---|---|---|---|
@@ -191,16 +191,28 @@ Read guards and phase parameters before using `tests/integration/storage-release
 
 ## Tracking, deferred work and handoff
 
-- **Active task:** R0 — prepare an owned disposable runner and reproduce/classify the first customer-path failure.
+- **Active task:** R1a next — release-owned capacity policy and production preflight.
 - **Current authorization:** Development, delegated QA, disposable test setup and scoped local commits. No push/merge/release requested.
 - **Documentation validation:** File/heading links, code-fence balance, active task IDs and whitespace checked across the three changed documents. No runtime tests were run or runtime pass claimed for this update.
 - **Statuses:** `pending → developing → qa → validating → done`; use `blocked` / `budget-stopped` with a precise reason.
-- **Per-task ledger:** Record developer model/reason and agent ID, separate Sol Medium QA ID, repair/reassignment history, commands/results, milestone gaps and accepted commit. Currently all unassigned, repairs 0, runtime checks not run, no implementation commits.
+- **Per-task ledger:** R0 developer `/root/r0_journey`, GPT-6 Sol High (environment/isolation and failure attribution); independent QA `/root/r0_qa`, GPT-6 Sol Medium. Repairs 0; QA passed and supervisor reproduced the public refusal. Kickoff plan committed as `54f7ae2`; R0 acceptance belongs to this checkpoint commit. R1a reuses Sol High because admission spans receiver, decoder and conversion safety.
 - **Shared files:** R1/R2 share engine/settings/repository/lifecycle code. R3 consumes their services. Default is serial ownership and integration; no parallel work scheduled.
 - **Supervisor:** Current session's exact model/effort cannot be independently verified. Developer routing remains explicit Sol High for R0 and Sol Medium for independent QA.
-- **Active workers / wakeups:** None created for this plan.
+- **Active workers / wakeups:** R0 developer and QA finished; R1a dispatch next. No scheduled wakeups.
 - **Deferred backlog, not follow-on authorized tasks:** Multisite table support/network lifecycle; advanced recommendation tiers/re-notification; convenience reset/stale-copy UI; broader diagnostic/host qualification polish. A future scope decision is required to schedule these. Do not label the first release incomplete merely because this backlog remains.
 - **Never implied:** New engine/config work, pushing, merging, deployment. Brad must explicitly confirm any WordPress.org live tag or stable-tag change.
+
+### R0 evidence — 2026-10-22
+
+Independent QA `/root/r0_qa` passed the runner's isolation, manifest/container binding, syntax, native seed and nonmutating refusal checks. Supervisor reran the same refusal. Setup interrupted before writing its manifest can leave an owned orphan requiring explicitly targeted manual cleanup; this is a known nonblocking fixture limitation. No positive conversion/migration acceptance is inferred.
+
+- Disposable source fixture: `/tmp/foogallery-migrate-r0.S1gKqR`; labelled Docker container `fgm-r0-S1gKqR`; database `fgm_r0_s1gkqr` at `127.0.0.1:32768`. WordPress 7.1.3, PHP 8.4.6, MariaDB 11.4.13, FooGallery 3.3.18. Brad's Local database is not used. Manifest and seed-journal checks bind the runner to this fixture.
+- Reproduction: `php tests/integration/storage-release-r0.php /tmp/foogallery-migrate-r0.S1gKqR preflight`. Native fixture `a7-options-utf8mb4-20k-v1` persists exactly 2,998,293 serialized bytes. Public CLI preflight returns `foogallery_migrate_storage_calibration_required`; seed, markers and schema remain unchanged. **Product failure, not M1 acceptance.**
+- Setup: `bash tests/integration/setup-storage-release-r0.sh`; use its printed path for `seed`, then `preflight`. Teardown: `bash tests/integration/teardown-storage-release-r0.sh <printed-site-path>`. Developer exercised a second complete setup/seed/refusal/teardown cycle successfully; preserve the first fixture for R1. No cached/local PHP 5.4/5.6 runtime was found; obtaining a disposable floor runtime remains R1 work, not a floor waiver.
+- Full PHPUnit baseline was attempted with a 150-second process-group deadline and 256M PHP limit. Its output capture failed on invalid UTF-8 in diagnostic output, so no final totals or pass are claimed. A bounded `--stop-on-failure --stop-on-error` attribution run reported 25 tests, 139 assertions, one failure and six skips. The first failure is `ContentIndependentRecordRegressionTest::test_content_descriptor_matches_all_emitted_columns_and_qualified_path` at the exact-host `GenericRetainingModel::supports` assertion; six `CertifiedPreorderRebuildTest` cases skip for the original host. These are **environment-bound implementation diagnostics**; descriptor equality, byte-cap refusal and ordering remain product requirements. No tests have been removed or silently excluded; later suite classification must separate these checks and retain equivalent product coverage, with independent review.
+- Focused existing safety baseline: `php -d memory_limit=256M vendor/bin/phpunit --colors=never --do-not-cache-result --filter 'Storage(Preflight|Operations|Authority|SingleSitePolicy|Conversion)Test'`: **41 tests, 436 assertions pass**. Existing tests asserting absent customer calibration are expected to require explicit replacement when R1 changes that architecture; authorization and nonmutation assertions stay.
+- `node tests/ajax-js-regression.js` and `php tests/content-scan-regression.php` pass. `php tests/runtime-cleanup-regression.php`: 148 checks pass, explicitly fault-injection connection coverage, **not native cleanup acceptance**. No GitHub Actions workflow exists in this checkout; these direct repository checks are the applicable baseline.
+- Next smallest repair: replace the empty host-qualified production policy with measured, conservative release-owned admission, including portable memory checks (the old budget observer requires Linux `/proc`). Rerun the native preflight immediately; conversion, actual migration, reversal and cleanup remain unproven.
 
 ### Usage policy for this development run
 
