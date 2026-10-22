@@ -2,13 +2,17 @@
 /**
  * Owned PHP 5.4 / WordPress 5.0 actual AIGPL source fixture.
  *
- * One seed batch per fresh WP-CLI process. This file does not convert storage
- * or run the migration engine. A collision is a refusal, not a repair.
+ * One guarded source, public storage, or normal migration step per fresh WP-CLI
+ * process. A seed collision is a refusal, not a repair.
  */
 use FooPlugins\FooGalleryMigrate\StorageAdmin;
 use FooPlugins\FooGalleryMigrate\StorageAuthority;
+use FooPlugins\FooGalleryMigrate\StorageCli;
+use FooPlugins\FooGalleryMigrate\StorageControl;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
+use FooPlugins\FooGalleryMigrate\MigratorSettings;
 use FooPlugins\FooGalleryMigrate\Plugins\Aigpl;
+use FooPlugins\FooGalleryMigrate\Objects\Migratable;
 
 if ( ! defined( 'WP_CLI' ) || ! WP_CLI || ! defined( 'ABSPATH' ) ||
 	! is_file( '/fixture-owner.json' ) ) {
@@ -18,8 +22,9 @@ ini_set( 'memory_limit', '256M' );
 if ( ini_get( 'memory_limit' ) !== '256M' ) {
 	throw new RuntimeException( 'The source fixture requires an explicit 256M request limit.' );
 }
-if ( ! isset( $args[0] ) || ! in_array( $args[0], array( 'seed', 'verify-source', 'status' ), true ) || count( $args ) !== 1 ) {
-	throw new RuntimeException( 'Exactly one source-fixture step is required.' );
+if ( ! isset( $args[0] ) || ! in_array( $args[0], array( 'seed', 'verify-source', 'status',
+	'preflight', 'provision', 'switch', 'recover', 'turn', 'settings100' ), true ) || count( $args ) !== 1 ) {
+	throw new RuntimeException( 'Exactly one owned floor journey step is required.' );
 }
 $step = $args[0];
 $manifest = json_decode( file_get_contents( '/fixture-owner.json' ), true );
@@ -103,7 +108,8 @@ $assert_pristine = function () use ( $raw_option, $wpdb ) {
 };
 $verify_source = function ( $state, $full ) use ( $total, $owner, $owner_key, $media_dir,
 	$png_hash, $owned_count ) {
-	floor_real_check( $state['phase'] === 'ready' && isset( $state['ids_sha256'], $state['source'],
+	floor_real_check( in_array( $state['phase'], array( 'ready', 'migrating', 'complete' ), true ) &&
+		isset( $state['ids_sha256'], $state['source'],
 		$state['content'], $state['content_sha256'] ) && count( $state['ids'] ) === $total &&
 		count( array_unique( $state['ids'] ) ) === $total &&
 		hash( 'sha256', implode( ',', $state['ids'] ) ) === $state['ids_sha256'],
@@ -151,7 +157,9 @@ $verify_source = function ( $state, $full ) use ( $total, $owner, $owner_key, $m
 		'files_checked' => $full ? $total : 0 );
 };
 
-$assert_pristine();
+if ( $step === 'seed' || $step === 'preflight' || $step === 'provision' ) {
+	$assert_pristine();
+}
 if ( $step === 'seed' && $journal === null ) {
 	floor_real_check( $owned_count( 'attachment' ) === 0 &&
 		$owned_count( Aigpl::POST_TYPE ) === 0 && $owned_count( 'page' ) === 0 &&
@@ -225,14 +233,171 @@ $result = array( 'step' => $step, 'fixture' => $manifest['fixture'],
 	'php' => PHP_VERSION, 'wordpress' => $GLOBALS['wp_version'], 'owner' => $owner,
 	'memory_limit' => ini_get( 'memory_limit' ),
 	'phase' => $journal['phase'], 'seeded' => count( $journal['ids'] ),
+	'turns' => isset( $journal['turns'] ) ? (int) $journal['turns'] : 0,
+	'completed' => isset( $journal['completed'] ) ? (int) $journal['completed'] : 0,
+	'destination' => isset( $journal['destination'] ) ? (int) $journal['destination'] : null,
 	'elapsed_seconds' => round( microtime( true ) - $started, 3 ),
 	'peak_allocated_bytes' => memory_get_peak_usage( true ) );
 if ( $step === 'verify-source' ) {
 	$result['source'] = $verify_source( $journal, true );
 	$result['elapsed_seconds'] = round( microtime( true ) - $started, 3 );
 	$result['peak_allocated_bytes'] = memory_get_peak_usage( true );
-} elseif ( $step === 'status' && $journal['phase'] === 'ready' ) {
+} elseif ( $step === 'status' && $journal['phase'] !== 'seeding' ) {
 	$result['source'] = $verify_source( $journal, false );
 }
+if ( in_array( $step, array( 'preflight', 'provision', 'switch', 'recover' ), true ) ) {
+	floor_real_check( $journal['phase'] === 'ready' && ! isset( $journal['uid'] ) &&
+		! isset( $journal['turns'] ) && ! isset( $journal['completed'] ),
+		'Public storage enablement requires unstarted actual source.' );
+	$result['source'] = $verify_source( $journal, false );
+	$before = StorageAdmin::status();
+	$control_raw = $raw_option( StorageAuthority::CONTROL_OPTION );
+	$control = $control_raw === null ? null : StorageControl::decode( $control_raw, get_current_blog_id() );
+	if ( $step === 'switch' ) {
+		floor_real_check( $control === null && $before['backend'] === 'option' &&
+			$before['phase'] === 'stable' && $before['schema'] === 'verified' &&
+			$raw_option( FOOGALLERY_MIGRATE_OPTION_DATA ) === null &&
+			$raw_option( StorageAuthority::STORAGE_BACKUP_OPTION ) === null &&
+			$raw_option( StorageAuthority::MAINTENANCE_OPTION ) === null,
+			'Switch requires provisioned empty option authority.' );
+	} elseif ( $step === 'recover' ) {
+		floor_real_check( is_array( $control ) && $control['phase'] !== 'stable' &&
+			$control['from'] === 'option' && $control['to'] === 'table' &&
+			$before['schema'] === 'verified',
+			'Recover requires recorded in-progress forward conversion.' );
+	} else {
+		floor_real_check( $control === null && $before['backend'] === 'option' &&
+			$before['phase'] === 'stable' && $before['problem'] === '',
+			'Preflight/provision requires untouched option authority.' );
+	}
+	if ( $step === 'switch' || $step === 'recover' ) {
+		( new LegacyStorageSchema( $wpdb ) )->verify();
+	}
+	$confirm = $step === 'recover' ? 'recover-storage' :
+		( $step === 'provision' ? 'provision-shared-schema' : 'switch-to-table' );
+	$operation_started = microtime( true );
+	$operation = StorageCli::execute( $step, array( 'target' => 'table', 'confirm' => $confirm ) );
+	$result['operation_seconds'] = round( microtime( true ) - $operation_started, 3 );
+	$result['storage'] = StorageAdmin::status();
+	$result['source_after'] = $verify_source( $journal, false );
+	$control_raw = $raw_option( StorageAuthority::CONTROL_OPTION );
+	$control = $control_raw === null ? null : StorageControl::decode( $control_raw, get_current_blog_id() );
+	$result['control'] = is_array( $control ) ? array( 'phase' => $control['phase'],
+		'backend' => $control['backend'], 'from' => $control['from'], 'to' => $control['to'] ) : null;
+	if ( is_wp_error( $operation ) ) {
+		$result['failure'] = array( 'code' => $operation->get_error_code(),
+			'message' => $operation->get_error_message() );
+	} else {
+		$result['storage_result'] = $operation;
+		floor_real_check( $result['storage']['problem'] === '' &&
+			( $step !== 'provision' || ( $result['storage']['backend'] === 'option' &&
+				$result['storage']['phase'] === 'stable' && $result['storage']['schema'] === 'verified' &&
+				$control === null ) ) &&
+			( ( $step !== 'switch' && $step !== 'recover' ) ||
+				( is_array( $control ) && $control['from'] === 'option' && $control['to'] === 'table' ) ),
+			'Public storage result or control differs from expected forward path.' );
+	}
+}
+if ( $step === 'turn' || $step === 'settings100' ) {
+	$storage = StorageAdmin::status();
+	$control_raw = $raw_option( StorageAuthority::CONTROL_OPTION );
+	$control = $control_raw === null ? null : StorageControl::decode( $control_raw, get_current_blog_id() );
+	floor_real_check( $storage['backend'] === 'table' && $storage['phase'] === 'stable' &&
+		$storage['schema'] === 'verified' && $storage['problem'] === '' &&
+		is_array( $control ) && $control['backend'] === 'table' &&
+		$control['phase'] === 'stable' &&
+		StorageControl::runtime_ready( $control, $raw_option( StorageAuthority::AUTHORITY_OPTION ) ) &&
+		$raw_option( FOOGALLERY_MIGRATE_OPTION_DATA ) === null,
+		'Normal migration requires stable verified table authority.' );
+	$result['source'] = $verify_source( $journal, false );
+	$engine = foogallery_migrate_migrator_instance();
+	$limit = $engine->get_images_per_turn();
+	floor_real_check( is_numeric( $limit ) && (int) $limit > 0,
+		'Normal images-per-turn setting is invalid.' );
+	$result['images_per_turn'] = (int) $limit;
+	$operation_started = microtime( true );
+	if ( $step === 'settings100' ) {
+		floor_real_check( $journal['phase'] === 'migrating' &&
+			isset( $journal['turns'], $journal['completed'] ) &&
+			(int) $journal['turns'] === 5 && (int) $journal['completed'] === 25 &&
+			! isset( $journal['images_per_turn'] ) && (int) $limit === 5,
+			'Exactly five successful default-five turns required before setting 100.' );
+		$settings = new MigratorSettings();
+		$settings->save_settings( array( MigratorSettings::SETTING_IMAGES_PER_TURN => 100 ) );
+		floor_real_check( $settings->get_images_per_turn() === 100 &&
+			$engine->get_images_per_turn() === 100,
+			'Normal images-per-turn setting did not persist.' );
+		$journal['images_per_turn'] = 100;
+		$save( $journal );
+		$result['images_per_turn'] = 100;
+	} else {
+		floor_real_check( $journal['phase'] === 'ready' || $journal['phase'] === 'migrating',
+			'No pending normal migration turn.' );
+		$turns = isset( $journal['turns'] ) ? (int) $journal['turns'] : 0;
+		$completed_before = isset( $journal['completed'] ) ? (int) $journal['completed'] : 0;
+		floor_real_check( ( $turns < 5 && ! isset( $journal['images_per_turn'] ) && (int) $limit === 5 ) ||
+			( $turns >= 5 && isset( $journal['images_per_turn'] ) &&
+				(int) $journal['images_per_turn'] === 100 && (int) $limit === 100 ),
+			'Owned turn sequence or ordinary images-per-turn setting changed.' );
+		$migrator = $engine->get_gallery_migrator();
+		if ( $journal['phase'] === 'ready' ) {
+			$engine->run_detection();
+			$objects = $migrator->get_objects_to_migrate( true );
+			floor_real_check( count( $objects ) === 1 &&
+				(int) $objects[0]->children_count === $total,
+				'Actual AIGPL detection did not find one 10K gallery.' );
+			$journal['uid'] = $objects[0]->unique_identifier();
+			floor_real_check( $migrator->queue_objects_for_migration(
+				array( $journal['uid'] => array( 'title' => $owner ) ) ),
+				'Normal gallery queue refused.' );
+			$journal['phase'] = 'migrating';
+			$journal['turns'] = 0;
+			$journal['completed'] = 0;
+			$save( $journal );
+		}
+		floor_real_check( $migrator->migrate(), 'Normal migration turn failed.' );
+		$objects = $migrator->get_objects_to_migrate();
+		floor_real_check( count( $objects ) === 1 &&
+			$journal['uid'] === $objects[0]->unique_identifier(),
+			'Actual migration object changed.' );
+		$object = $objects[0];
+		$completed = (int) $object->migrated_child_count;
+		floor_real_check( $completed > $completed_before &&
+			$completed <= min( $total, $completed_before + (int) $limit ) &&
+			(int) $engine->get_images_per_turn() === (int) $limit,
+			'Normal turn progress or images-per-turn changed.' );
+		$journal['turns']++;
+		$journal['completed'] = $completed;
+		$journal['destination'] = (int) $object->migrated_id;
+		$result['migration_status'] = $object->migration_status;
+		if ( $object->migrated ) {
+			floor_real_check( $completed === $total &&
+				$journal['ids'] === get_post_meta( $object->migrated_id,
+					FOOGALLERY_META_ATTACHMENTS, true ),
+				'Destination attachment IDs/order differ.' );
+			$matches = get_posts( array( 'post_type' => FOOGALLERY_CPT_GALLERY,
+				'post_status' => 'any', 'posts_per_page' => 2, 'fields' => 'ids',
+				'meta_key' => Migratable::META_SOURCE_KEY,
+				'meta_value' => $journal['uid'] ) );
+			floor_real_check( count( $matches ) === 1 &&
+				(int) $matches[0] === (int) $object->migrated_id,
+				'Actual destination ownership or uniqueness differs.' );
+			floor_real_check( strpos( do_shortcode( '[foogallery id="' .
+				$object->migrated_id . '"]' ), 'foogallery' ) !== false,
+				'Actual FooGallery output failed.' );
+			$journal['phase'] = 'complete';
+		}
+		$save( $journal );
+		$result['phase'] = $journal['phase'];
+		$result['turns'] = $journal['turns'];
+		$result['completed'] = $journal['completed'];
+		$result['destination'] = $journal['destination'];
+		$result['source_after'] = $verify_source( $journal, false );
+	}
+	$result['operation_seconds'] = round( microtime( true ) - $operation_started, 3 );
+}
+$result['elapsed_seconds'] = round( microtime( true ) - $started, 3 );
+$result['peak_allocated_bytes'] = memory_get_peak_usage( true );
 $result['storage'] = StorageAdmin::status();
 echo json_encode( $result, JSON_UNESCAPED_SLASHES ) . "\n";
+exit( isset( $result['failure'] ) ? 1 : 0 );
