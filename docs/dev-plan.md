@@ -2,7 +2,7 @@
 
 **Updated:** 2026-10-22
 
-**Status:** R1c modern actual10K completed all 10,000 images on `f5e5656`, with exact source/destination proof and a retained table edit. Its 19.6 MB snapshot safely refuses whole-option reversal under the unchanged 16 MiB snapshot cap; positive fitting-case reversal remains required. Floor actual10K is running at 256M. Lifecycle, matching ZIP and M1 remain pending.
+**Status:** R1c actual10K completed on both modern and PHP 5.4 runtimes at 256M, with independent exact source/destination checks. Modern table edits persist; its 19.6 MB snapshot safely refuses whole-option reversal under the unchanged 16 MiB snapshot cap. Positive fitting-case reversal remains required. Essential lifecycle implementation is in progress; matching ZIP and M1 remain pending.
 
 **Branch:** `feature/migrated-store-scalability`
 
@@ -191,7 +191,7 @@ Read guards and phase parameters before using `tests/integration/storage-release
 
 ## Tracking, deferred work and handoff
 
-- **Active work:** R1c modern actual10K completion/edit/refusal evidence on `T4hhza`; separate floor actual10K migration on `jobsd4`. Next: essential lifecycle implementation and positive current-data reversal on a separate fitting owned case. Preserve the full actual10K fixture; do not delete history or raise caps to manufacture a reverse pass. Floor native20K forward conversion is accepted in `3827fd6` on retained `WDmNT3`; no lifecycle/M1 claim.
+- **Active work:** R1d essential lifecycle implementation; separate fitting owned actual-migration/current-data reversal case. Modern actual10K evidence is committed in `70e18d9`; floor actual10K completion evidence is below. Preserve both full actual10K fixtures (`T4hhza`, `jobsd4`); do not delete history or raise caps to manufacture a reverse pass. Floor native20K forward conversion is accepted in `3827fd6` on retained `WDmNT3`; no lifecycle/M1 claim.
 - **Current authorization:** Development, delegated QA, disposable test setup and scoped local commits. No push/merge/release requested.
 - **Documentation validation:** The pre-implementation docs check covered links, fences, task IDs and whitespace without claiming runtime results. Current development evidence is recorded below.
 - **Statuses:** `pending → developing → qa → validating → done`; use `blocked` / `budget-stopped` with a precise reason.
@@ -311,6 +311,13 @@ Targeted attribution (`--filter 'test_real_selected_reset_publishes_empty_map_be
 - Source preparation committed in `31e2791`. Developer `/root/r1_floor` (Sol High) extended only the floor journey runner; independent QA `/root/r0_qa` (Sol Medium) accepts the exercised path through five default turns. Public preflight/provision/switch and four recovery calls at **256M** reached stable empty table authority. Five ordinary detection/queue/migration turns completed **5 / 10 / 15 / 20 / 25** images, destination `10006`, 34 stored records. No refusal occurred in these production operations; a sixth runner turn before the explicit setting change correctly refused without writes.
 - Independent full source verification on `jobsd4` passed all **10,000 files and metadata**, unchanged IDs/content/PNG hashes, stable verified table authority and journal five turns/25. Peak allocated **117,702,656 bytes** for QA verification; first migration turn peaked **131,334,144 bytes**. Supervisor separately confirmed the floor bootstrap has `WP_MAX_MEMORY_LIMIT=256M` while WP-CLI starts with unlimited memory; the runner explicitly sets 256M before operations. The runner's `settings100`/larger-turn branches are prepared and statically reviewed but remain unexercised, not accepted scale evidence.
 - PHP lint and runner review pass. The concurrent uncommitted loaded-parent batching repair in `class-migrator-engine.php` changed during early floor execution, so this is not an immutable source run. Floor is held at 25 until that narrow production repair is accepted. No floor PHP process remains. No full migration, edit/reversal, ZIP, lifecycle or M1 claim.
+
+### Floor actual10K completion — accepted evidence checkpoint
+
+- Developer `/root/r1_floor` (Sol High), independent QA `/root/r0_qa` (Sol Medium). Existing guarded runner completed `jobsd4` at **10,000 images / 105 turns / destination 10006**: five default-five turns, then the ordinary setting of 100 (final partial turn 75). No migration turn failed after `settings100`. PHP **5.4.45 / WordPress 5.0 / 256M**, final whole-turn **14.344 seconds / 161,742,848 allocated peak bytes**; maximum observed whole-turn duration **28.162 seconds** spans multiple storage operations, not an individual repository deadline. Stable verified table storage has **10,010 records**.
+- QA independently ran `bash tests/integration/run-storage-release-floor.sh /tmp/foogallery-migrate-floor.jobsd4 eval-file /repo/tests/integration/storage-release-floor-real-journey.php verify-source --user=fgmflooradmin` and `status`: both exit 0, all **10,000 files and metadata** verified with original IDs/content/PNG hashes. An additional guarded read-only eval at explicit 256M confirmed exact destination attachment IDs/order and a single source-owned output gallery. The accepted runner's final-turn assertions also require shortcode output before marking complete. QA did not replay migration timing or mutations.
+- Initial production history candidate was `f5e5656`; HEAD later moved to `70e18d9` (docs/modern runner only), and uncommitted R1d lifecycle changes loaded in later requests. This is positive completion/integration evidence across revisions, **not an immutable source or ZIP journey**. No reverse, clear, remove-all or uninstall ran on `jobsd4`. No PHP worker remains; the owned database and complete fixture are retained.
+- Next independent runner task: a separate journal-pinned fitting actual migration (approximately 1,000 images) for positive current-data reversal, preserving existing 10K guards and fixtures. R1d uses Sol High for cross-component lifecycle/authority changes; floor runner work remains Sol High because it crosses native PHP 5.4 storage/conversion phases. Independent QA remains Sol Medium; no more than two active workers.
 
 ### Usage policy for this development run
 
