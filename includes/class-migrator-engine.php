@@ -1223,7 +1223,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         }
 
         /**
-         * Overlays one parent's request-local children from one indexed query.
+         * Overlays one parent's request-local children from bounded storage reads.
          *
          * @param object $parent Parent migratable object.
          * @return void
@@ -1237,16 +1237,49 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
             $stored = array();
             $children = $parent->get_children();
             $store = $this->migrated_store();
-            if ( $store instanceof MigratedHistoryRepository ) {
+            $table_backend = $store instanceof MigratedHistoryRepository ? $store->state_backend() : null;
+            if ( $table_backend instanceof LegacyTableBackend ) {
+                // The parent already owns the complete loaded child list. Keep
+                // each table read within one 100-key/byte budget and replace
+                // only those children, releasing each fetched page before the
+                // next one. Pin the same verified history heads across pages;
+                // a supported history write changes this context, so never
+                // publish children assembled from different revisions.
+                $history_context = $table_backend->history_read( 'revision' );
+                $history_context = $history_context['context'];
+                $keys = array(); $positions = array();
+                foreach ( $children as $index => $child ) {
+                    if ( ! is_object( $child ) || ! method_exists( $child, 'unique_identifier' ) ) { continue; }
+                    $key = $child->unique_identifier(); $typed = serialize( $key );
+                    $keys[$typed] = $key; $positions[(string) $key][] = $index;
+                }
+                foreach ( array_chunk( array_values( $keys ), 100 ) as $batch ) {
+                    $migrated_children = $store->get_children_for_parent( $parent_key, $batch );
+                    foreach ( $migrated_children as $object ) {
+                        if ( ! is_object( $object ) || ! method_exists( $object, 'unique_identifier' ) ) { continue; }
+                        $key = (string) $object->unique_identifier();
+                        if ( ! isset( $positions[$key] ) ) { continue; }
+                        $object->migration_store_checked = true;
+                        foreach ( $positions[$key] as $index ) { $children[$index] = $object; }
+                    }
+                    unset( $migrated_children );
+                }
+                $after_context = $table_backend->history_read( 'revision' );
+                if ( $after_context['context'] !== $history_context ) {
+                    throw new \RuntimeException( 'Table history changed during loaded child restoration.' );
+                }
+            } elseif ( $store instanceof MigratedHistoryRepository ) {
                 $keys = array();
                 foreach ( $children as $child ) {
                     if ( is_object( $child ) && method_exists( $child, 'unique_identifier' ) ) { $key = $child->unique_identifier(); $keys[serialize( $key )] = $key; }
                 }
                 $migrated_children = $store->get_children_for_parent( $parent_key, array_values( $keys ) );
             } else { $migrated_children = $store->get_by_parent( $parent_key ); }
-            foreach ( $migrated_children as $object ) {
-                if ( is_object( $object ) && method_exists( $object, 'unique_identifier' ) ) {
-                    $stored[ (string) $object->unique_identifier() ] = $object;
+            if ( ! ( $table_backend instanceof LegacyTableBackend ) ) {
+                foreach ( $migrated_children as $object ) {
+                    if ( is_object( $object ) && method_exists( $object, 'unique_identifier' ) ) {
+                        $stored[ (string) $object->unique_identifier() ] = $object;
+                    }
                 }
             }
 

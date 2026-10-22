@@ -65,14 +65,43 @@ class LegacyHistoryMaintenanceContractTest extends TestCase {
 		$backend = new ChildHistoryBackend(); $history = new MigratedHistoryRepository( $backend, new MigratorSettings() );
 		$parent = new \FooPlugins\FooGalleryMigrate\Objects\Image(); $parent->source_url = 'parent';
 		$children = array();
-		for ( $i = 0; $i < 103; $i++ ) { $child = new \FooPlugins\FooGalleryMigrate\Objects\Image(); $child->source_url = 'child-' . $i; $children['key-' . $i] = $child; }
+		for ( $i = 0; $i < 203; $i++ ) { $child = new \FooPlugins\FooGalleryMigrate\Objects\Image(); $child->source_url = 'child-' . $i; $children['key-' . $i] = $child; }
+		$children['duplicate-last'] = clone $children['key-0'];
 		$parent->children = $children; $backend->parent = $parent->unique_identifier();
 		( new \FooPlugins\FooGalleryMigrate\MigratorEngine( $history ) )->apply_migrated_children( $parent );
-		$this->assertSame( array( 100, 3 ), array_map( 'count', $backend->requests ) );
+		$this->assertSame( array( 100, 100, 3 ), array_map( 'count', $backend->requests ) );
 		$this->assertSame( 71, $parent->children['key-0']->migrated_id );
 		$this->assertTrue( $parent->children['key-0']->migration_store_checked );
+		$this->assertSame( $parent->children['key-0'], $parent->children['duplicate-last'] );
 		$this->assertFalse( property_exists( $parent->children['key-1'], 'migration_store_checked' ) );
 		$this->assertSame( array_keys( $children ), array_keys( $parent->children ) );
+	}
+
+	public function test_failed_later_child_page_never_publishes_partial_parent_replacement(): void {
+		$backend = new ChildHistoryBackend(); $history = new MigratedHistoryRepository( $backend, new MigratorSettings() );
+		$parent = new \FooPlugins\FooGalleryMigrate\Objects\Image(); $parent->source_url = 'parent'; $children = array();
+		for ( $i = 0; $i < 103; ++$i ) { $child = new \FooPlugins\FooGalleryMigrate\Objects\Image(); $child->source_url = 'child-' . $i; $children[] = $child; }
+		$parent->children = $children; $backend->parent = $parent->unique_identifier(); $backend->fail_on_call = 2;
+		try { ( new \FooPlugins\FooGalleryMigrate\MigratorEngine( $history ) )->apply_migrated_children( $parent );
+			$this->fail( 'Second bounded page must fail before parent publication.' ); }
+		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'Injected', $error->getMessage() ); }
+		$this->assertSame( $children, $parent->children );
+		$this->assertSame( array( 100, 3 ), array_map( 'count', $backend->requests ) );
+		$this->assertFalse( property_exists( $parent->children[0], 'migration_store_checked' ) );
+	}
+
+	public function test_changed_history_on_later_child_page_never_publishes_mixed_revision_children(): void {
+		$backend = new ChildHistoryBackend(); $history = new MigratedHistoryRepository( $backend, new MigratorSettings() );
+		$parent = new \FooPlugins\FooGalleryMigrate\Objects\Image(); $parent->source_url = 'parent'; $children = array();
+		for ( $i = 0; $i < 103; ++$i ) { $child = new \FooPlugins\FooGalleryMigrate\Objects\Image(); $child->source_url = 'child-' . $i; $children[] = $child; }
+		$parent->children = $children; $backend->parent = $parent->unique_identifier(); $backend->change_revision_on_call = 2;
+		try { ( new \FooPlugins\FooGalleryMigrate\MigratorEngine( $history ) )->apply_migrated_children( $parent );
+			$this->fail( 'Mixed history revisions must fail before parent publication.' ); }
+		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'changed during loaded child restoration', $error->getMessage() ); }
+		$this->assertSame( $children, $parent->children );
+		$this->assertSame( array( 100, 3 ), array_map( 'count', $backend->requests ) );
+		$this->assertFalse( property_exists( $parent->children[0], 'migration_store_checked' ) );
+		$this->assertSame( 2, $backend->revision_reads );
 	}
 }
 
@@ -95,17 +124,28 @@ class HistoryMaintenanceBackend extends LegacyTableBackend {
 }
 
 class ChildHistoryBackend extends HistoryMaintenanceBackend {
-	public $requests = array(); public $parent;
+	public $requests = array(); public $parent; public $fail_on_call = 0;
+	public $change_revision_on_call = 0; public $revision = 1; public $revision_reads = 0;
 	public function history_read( $operation, $request = array() ) {
+		if ( 'revision' === $operation ) {
+			++$this->revision_reads;
+			return array( 'result' => null, 'context' => $this->history_context() );
+		}
 		if ( 'children' !== $operation ) { throw new \RuntimeException( 'Only exact-key child reads admitted.' ); }
 		$rows = array();
 		foreach ( array_chunk( $request['keys'], 100 ) as $keys ) {
 			$this->requests[] = $keys;
+			if ( $this->fail_on_call && count( $this->requests ) === $this->fail_on_call ) { throw new \RuntimeException( 'Injected child page failure.' ); }
+			if ( $this->change_revision_on_call && count( $this->requests ) === $this->change_revision_on_call ) { ++$this->revision; }
 			foreach ( $keys as $key ) {
 				if ( 'child-1' === $key ) { continue; }
 				$rows[] = array( 'found' => true, 'key' => $key, 'value' => array( 'object_type' => 'image', 'source_url' => $key, 'migrated_id' => 71, 'migration_parent_key' => $this->parent ) );
 			}
 		}
-		return array( 'result' => $rows, 'context' => array( array( 'key' => 'migrated', 'head' => array( 'state_kind' => 'map', 'revision' => 1 ), 'root' => array( 'version' => 1, 'kind' => 'map', 'wrapper' => 'plain' ) ), array( 'key' => 'migrated-revision', 'head' => array( 'state_kind' => 'scalar', 'revision' => 1 ), 'root' => array( 'version' => 1, 'kind' => 'scalar', 'value' => 1 ) ) ) );
+		return array( 'result' => $rows, 'context' => $this->history_context() );
+	}
+	private function history_context() {
+		return array( array( 'key' => 'migrated', 'head' => array( 'state_kind' => 'map', 'revision' => $this->revision ), 'root' => array( 'version' => 1, 'kind' => 'map', 'wrapper' => 'plain' ) ),
+			array( 'key' => 'migrated-revision', 'head' => array( 'state_kind' => 'scalar', 'revision' => $this->revision ), 'root' => array( 'version' => 1, 'kind' => 'scalar', 'value' => $this->revision ) ) );
 	}
 }

@@ -169,7 +169,7 @@ if ( 'seed' === $step ) {
 	$end = min( $total, count( $journal['ids'] ) + $batch );
 	for ( $index = count( $journal['ids'] ); $index < $end; ++$index ) {
 		$file = $media_dir . '/' . $index . '.png';
-		real_check( ! file_exists( $file ) && false !== file_put_contents( $file, $png, LOCK_EX ), 'Owned media collision or write failure.' );
+		real_check( ! file_exists( $file ) && ! is_link( $file ) && false !== file_put_contents( $file, $png, LOCK_EX ), 'Owned media collision or write failure.' );
 		$relative = $owner . '/' . $index . '.png';
 		$id = wp_insert_post( array( 'post_type' => 'attachment', 'post_status' => 'inherit',
 			'post_mime_type' => 'image/png', 'post_title' => $owner . ' ' . $index,
