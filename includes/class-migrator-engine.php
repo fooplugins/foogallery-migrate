@@ -1099,8 +1099,9 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         public function content_scan_repository() { return $this->settings()->content_scan_repository(); }
 
         public function uses_scoped_history() {
-            return $this->migrated_store instanceof MigratedHistoryRepository
-                && $this->migrated_store->state_backend() instanceof LegacyTableBackend;
+            $store = $this->migrated_store();
+            return $store instanceof MigratedHistoryRepository
+                && $store->state_backend() instanceof LegacyTableBackend;
         }
 
         /**
@@ -1230,6 +1231,16 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          */
         public function get_migrated_objects_summary() {
             return $this->migrated_store()->summary();
+        }
+
+        /** Read-only log metadata; table pages must never populate the engine's object cache. */
+        public function get_migrated_log_summary() {
+            return $this->migrated_store()->log_summary();
+        }
+
+        /** One bounded log page in persisted order, with the repository's revision-bound cursor. */
+        public function get_migrated_log_page( $type = '', $status = '', $limit = 100, $cursor = null ) {
+            return $this->migrated_store()->page_log( $type, $status, $limit, $cursor );
         }
 
         /**

@@ -3,8 +3,11 @@ if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
 $migrator = foogallery_migrate_migrator_instance();
+$scoped_history = $migrator->uses_scoped_history();
+$revision = $scoped_history ? $migrator->get_migrated_revision() : null;
 $summary = $migrator->get_migrated_objects_summary();
-$migrated_objects = $migrator->get_migrated_objects();
+$migrated_objects = $scoped_history ? null : $migrator->get_migrated_objects();
+$log_summary = $scoped_history ? $migrator->get_migrated_log_summary() : null;
 $available_types = array();
 $status_options = array(
 	\FooPlugins\FooGalleryMigrate\Objects\Migratable::PROGRESS_NOT_STARTED => __( 'Not migrated', 'foogallery-migrate' ),
@@ -15,27 +18,40 @@ $status_options = array(
 	\FooPlugins\FooGalleryMigrate\Objects\Migratable::PROGRESS_ERROR => __( 'Error', 'foogallery-migrate' ),
 );
 
-if ( empty( $migrated_objects ) || ! is_array( $migrated_objects ) ) { ?>
+if ( $scoped_history ) {
+	if ( ! is_array( $log_summary ) || ! isset( $log_summary['total'], $log_summary['by_type'] ) ||
+		! is_int( $log_summary['total'] ) || $log_summary['total'] < 0 || ! is_array( $log_summary['by_type'] ) ) {
+		throw new \RuntimeException( 'Invalid bounded history log summary.' );
+	}
+	$counted = 0;
+	foreach ( $log_summary['by_type'] as $object_type => $count ) {
+		if ( ! is_string( $object_type ) || '' === $object_type || strlen( $object_type ) > 32 ||
+			! is_int( $count ) || $count < 1 ) {
+			throw new \RuntimeException( 'Invalid bounded history log type.' );
+		}
+		$available_types[ $object_type ] = ucfirst( $object_type );
+		$counted += $count;
+	}
+	if ( $counted !== $log_summary['total'] ) { throw new \RuntimeException( 'Inconsistent bounded history log summary.' ); }
+} elseif ( is_array( $migrated_objects ) ) {
+	foreach ( $migrated_objects as $object ) {
+		if ( ! is_object( $object ) ) { continue; }
+		$object_type = '';
+		if ( method_exists( $object, 'type' ) ) { $object_type = $object->type(); }
+		elseif ( isset( $object->type ) ) { $object_type = $object->type; }
+		if ( is_string( $object_type ) && '' !== $object_type ) {
+			$available_types[ $object_type ] = ucfirst( $object_type );
+		}
+	}
+}
+
+if ( $scoped_history && $migrator->get_migrated_revision() !== $revision ) {
+	throw new \RuntimeException( 'History changed during log summary.' );
+}
+if ( $scoped_history ? 0 === $log_summary['total'] : ( empty( $migrated_objects ) || ! is_array( $migrated_objects ) ) ) { ?>
 	<p><?php esc_html_e( 'No migrated objects found.', 'foogallery-migrate' ); ?></p>
 	<?php
 	return;
-}
-
-foreach ( $migrated_objects as $object ) {
-	if ( ! is_object( $object ) ) {
-		continue;
-	}
-
-	$object_type = '';
-	if ( method_exists( $object, 'type' ) ) {
-		$object_type = $object->type();
-	} elseif ( isset( $object->type ) ) {
-		$object_type = $object->type;
-	}
-
-	if ( is_string( $object_type ) && '' !== $object_type ) {
-		$available_types[ $object_type ] = ucfirst( $object_type );
-	}
 }
 
 $log_type = 'gallery';
@@ -48,23 +64,14 @@ if ( ! empty( $available_types ) && ! array_key_exists( $log_type, $available_ty
 }
 
 $filtered_objects = array();
-foreach ( $migrated_objects as $object_id => $object ) {
-	if ( ! is_object( $object ) ) {
-		continue;
+if ( ! $scoped_history ) {
+	foreach ( $migrated_objects as $object_id => $object ) {
+		if ( ! is_object( $object ) ) { continue; }
+		$object_type = '';
+		if ( method_exists( $object, 'type' ) ) { $object_type = $object->type(); }
+		elseif ( isset( $object->type ) ) { $object_type = $object->type; }
+		if ( '' !== $object_type && $object_type === $log_type ) { $filtered_objects[ $object_id ] = $object; }
 	}
-
-	$object_type = '';
-	if ( method_exists( $object, 'type' ) ) {
-		$object_type = $object->type();
-	} elseif ( isset( $object->type ) ) {
-		$object_type = $object->type;
-	}
-
-	if ( '' === $object_type || $object_type !== $log_type ) {
-		continue;
-	}
-
-	$filtered_objects[ $object_id ] = $object;
 }
 
 $url = foogallery_migrate_admin_url( 'log' );
@@ -78,7 +85,8 @@ if ( $page < 1 ) {
 $url = add_query_arg( 'log_type', $log_type, $url );
 $url = add_query_arg( 'log_paged', $page, $url );
 $page_size = (int) apply_filters( 'foogallery_migrate_log_page_size', 100 );
-$migrated_objects_count = count( $filtered_objects );
+if ( $scoped_history && $page_size < 1 ) { throw new \RuntimeException( 'Invalid bounded history log page size.' ); }
+$migrated_objects_count = $scoped_history ? ( isset( $log_summary['by_type'][ $log_type ] ) ? $log_summary['by_type'][ $log_type ] : 0 ) : count( $filtered_objects );
 
 $pagination = new \FooPlugins\FooGalleryMigrate\Pagination();
 $pagination->items( $migrated_objects_count );
@@ -87,7 +95,7 @@ $pagination->parameterName( 'log_paged' );
 $pagination->url = $url;
 $pagination->currentPage( $page );
 $pagination->calculate();
-$paginated_objects = array_slice( $filtered_objects, $pagination->start, $pagination->limit, true );
+$paginated_objects = $scoped_history ? null : array_slice( $filtered_objects, $pagination->start, $pagination->limit, true );
 ?>
 <h3><?php esc_html_e( 'Migration Stats', 'foogallery-migrate' ); ?></h3>
 <?php if ( array_key_exists( 'album', $summary ) ) { ?>
@@ -131,7 +139,8 @@ $paginated_objects = array_slice( $filtered_objects, $pagination->start, $pagina
 	</form>
 </div>
 <input type="hidden" id="foogallery_migrate_log_nonce" value="<?php echo esc_attr( wp_create_nonce( 'foogallery_migrate_log' ) ); ?>">
-<?php if ( empty( $filtered_objects ) ) { ?>
+<?php if ( $scoped_history && $migrator->get_migrated_revision() !== $revision ) { throw new \RuntimeException( 'History changed during log rendering.' ); } ?>
+<?php if ( 0 === $migrated_objects_count ) { ?>
 	<p><?php esc_html_e( 'No migrated objects found for this type.', 'foogallery-migrate' ); ?></p>
 	<?php
 	return;
@@ -152,9 +161,9 @@ $paginated_objects = array_slice( $filtered_objects, $pagination->start, $pagina
 	<tbody>
 	<?php
 	$row_index = 0;
-	foreach ( $paginated_objects as $object_id => $object ) {
+	$render_log_row = function ( $object_id, $object ) use ( &$row_index, $status_options ) {
 		if ( ! is_object( $object ) ) {
-			continue;
+			return;
 		}
 
 		$type_label = '';
@@ -262,7 +271,47 @@ $paginated_objects = array_slice( $filtered_objects, $pagination->start, $pagina
 				</div>
 			</td>
 		</tr>
-	<?php } ?>
+	<?php
+	};
+	if ( $scoped_history ) {
+		// A UI page may exceed the storage page size. Walk and release fixed
+		// 100-row pages; never hold the complete selected history in memory.
+		$cursor = null; $skip = $pagination->start; $remaining = $pagination->limit;
+		$expected_rows = min( $pagination->limit, max( 0, $migrated_objects_count - $pagination->start ) );
+		$rendered = 0;
+		while ( $remaining > 0 && $pagination->start < $migrated_objects_count ) {
+			$previous_cursor = $cursor;
+			$batch = $migrator->get_migrated_log_page( (string) $log_type, '', 100, $cursor );
+			if ( ! is_array( $batch ) || ! isset( $batch['rows'], $batch['revision'] ) ||
+				! is_array( $batch['rows'] ) || count( $batch['rows'] ) > 100 ||
+				$batch['revision'] !== $revision ||
+				( ! array_key_exists( 'cursor', $batch ) || ( null !== $batch['cursor'] && ! is_array( $batch['cursor'] ) ) ) ||
+				( empty( $batch['rows'] ) && null !== $batch['cursor'] ) ) {
+				throw new \RuntimeException( 'Invalid or changed bounded history log page.' );
+			}
+			foreach ( $batch['rows'] as $entry ) {
+				if ( ! is_array( $entry ) || ! array_key_exists( 'key', $entry ) || ! isset( $entry['value'] ) ||
+					( ! is_string( $entry['key'] ) && ! is_int( $entry['key'] ) ) || ! is_object( $entry['value'] ) ) {
+					throw new \RuntimeException( 'Invalid bounded history log row.' );
+				}
+				if ( $skip > 0 ) { $skip--; continue; }
+				if ( $remaining < 1 ) { break; }
+				$entry_type = method_exists( $entry['value'], 'type' ) ? $entry['value']->type() :
+					( isset( $entry['value']->type ) ? $entry['value']->type : '' );
+				if ( $entry_type !== (string) $log_type ) { throw new \RuntimeException( 'Indexed log type differs from hydrated record.' ); }
+				$render_log_row( $entry['key'], $entry['value'] ); $remaining--; $rendered++;
+			}
+			$cursor = $batch['cursor'];
+			if ( null !== $cursor && $cursor === $previous_cursor ) { throw new \RuntimeException( 'History log cursor did not advance.' ); }
+			if ( null === $cursor ) { break; }
+		}
+		if ( $rendered !== $expected_rows || $migrator->get_migrated_revision() !== $revision ) {
+			throw new \RuntimeException( 'History changed or ended during log rendering.' );
+		}
+	} else {
+		foreach ( $paginated_objects as $object_id => $object ) { $render_log_row( $object_id, $object ); }
+	}
+	?>
 	</tbody>
 </table>
 <div class="tablenav bottom">
