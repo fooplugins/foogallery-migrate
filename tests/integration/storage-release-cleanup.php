@@ -1,7 +1,7 @@
 <?php
 /** Owned disposable lifecycle journey. One explicit phase per fresh PHP process. */
 if ( 'cli' !== PHP_SAPI || 3 !== $argc || ! in_array( $argv[2], array(
-	'init', 'verify', 'seed-state', 'provision', 'switch', 'recover', 'edit', 'adopt-reversed', 'clear', 'seed-repeat-clear', 'repeat-clear', 'verify-clear',
+	'init', 'verify', 'seed-state', 'provision', 'switch', 'recover', 'edit', 'adopt-reversed', 'adopt-table', 'clear', 'seed-repeat-clear', 'repeat-clear', 'verify-clear',
 	'remove-all', 'repeat-remove-all', 'prepare-uninstall', 'uninstall', 'verify-uninstalled', 'reverse', 'verify-reversed' ), true ) ) {
 	throw new RuntimeException( 'Owned site and explicit cleanup phase required.' );
 }
@@ -89,16 +89,35 @@ $verify_protected = function ( $state ) use ( $owner, $owner_meta, $media, $owne
 	cleanup_check( is_file( $media ) && ! is_link( $media ) && hash_file( 'sha256', $media ) === $state['media_hash'] &&
 		get_attached_file( $state['posts']['attachment'] ) === $media, 'Protected attachment file changed.' );
 };
-$verify_real = function ( $state ) use ( $uploads ) {
+$verify_real = function ( $state ) use ( $uploads, $raw, $manifest, $wpdb ) {
 	if ( ! isset( $state['real'] ) ) { return; }
 	$real = $state['real'];
+	$backend = isset( $state['adopted_backend'] ) ? $state['adopted_backend'] : 'option';
+	$expected_total = 'table' === $backend ? 10000 : 1000;
 	cleanup_check( is_array( $real ) && isset( $real['owner'], $real['identity'], $real['total'], $real['ids'],
 		$real['ids_sha256'], $real['source'], $real['content'], $real['content_sha256'],
-		$real['destination'], $real['uid'], $real['edit'], $real['completed'] ) &&
-		$real['total'] === 1000 && $real['completed'] === 1000 && count( $real['ids'] ) === 1000 &&
-		count( array_unique( $real['ids'] ) ) === 1000 &&
+		$real['destination'], $real['uid'], $real['edit'], $real['completed'], $real['phase'] ) &&
+		in_array( $backend, array( 'option', 'table' ), true ) &&
+		$real['phase'] === ( 'table' === $backend ? 'edited' : 'reversed' ) &&
+		$real['total'] === $expected_total && $real['completed'] === $expected_total &&
+		is_array( $real['ids'] ) && count( $real['ids'] ) === $expected_total &&
+		count( array_unique( $real['ids'] ) ) === $expected_total &&
 		hash( 'sha256', implode( ',', $real['ids'] ) ) === $real['ids_sha256'],
 		'Adopted actual migration journal dimensions differ.' );
+	if ( isset( $state['real_journal_sha256'] ) ) {
+		$actual = $raw( 'fgm_real_owned_journey_v1' );
+		cleanup_check( is_string( $actual ) && hash( 'sha256', $actual ) === $state['real_journal_sha256'] &&
+			maybe_unserialize( $actual ) === $real, 'Adopted real journal changed.' );
+	}
+	if ( isset( $state['adopted_package'] ) ) {
+		cleanup_check( isset( $manifest['package'] ) && $state['adopted_package'] === $manifest['package'],
+			'Adopted package identity changed.' );
+	}
+	foreach ( array( 'attachment' => $expected_total, 'aigpl_gallery' => 1, 'page' => 1 ) as $kind => $expected ) {
+		$count = $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM `' . $wpdb->posts . '` p INNER JOIN `' . $wpdb->postmeta . '` m ON m.post_id=p.ID WHERE m.meta_key=%s AND m.meta_value=%s AND p.post_type=%s',
+			'_fgm_real_fixture_owner', $real['owner'], $kind ) );
+		cleanup_check( ! $wpdb->last_error && (int) $count === $expected, 'Adopted real post count changed: ' . $kind );
+	}
 	$source = get_post( $real['source'] ); $content = get_post( $real['content'] );
 	$destination = get_post( $real['destination'] );
 	cleanup_check( $source && $source->post_type === 'aigpl_gallery' && $source->post_status === 'publish' &&
@@ -110,6 +129,11 @@ $verify_real = function ( $state ) use ( $uploads ) {
 		hash( 'sha256', $content->post_content ) === $real['content_sha256'] &&
 		get_post_meta( $destination->ID, FOOGALLERY_META_ATTACHMENTS, true ) === $real['ids'],
 		'Adopted actual source/content/destination changed.' );
+	$post_hash = hash( 'sha256', serialize( array( $source->post_title, $source->post_content, $source->post_status,
+		$destination->post_title, $destination->post_content, $destination->post_status ) ) );
+	if ( isset( $state['adopted_posts_sha256'] ) ) {
+		cleanup_check( $post_hash === $state['adopted_posts_sha256'], 'Adopted source/destination post changed.' );
+	}
 	$matches = get_posts( array( 'post_type' => FOOGALLERY_CPT_GALLERY, 'post_status' => 'any',
 		'posts_per_page' => 2, 'fields' => 'ids', 'meta_key' => '_foogallery_migrate_source_key',
 		'meta_value' => $real['uid'] ) );
@@ -133,9 +157,10 @@ $verify_real = function ( $state ) use ( $uploads ) {
 	}
 	$files = glob( $media_dir . '/*.png' );
 	$output = do_shortcode( '[foogallery id="' . $destination->ID . '"]' );
-	cleanup_check( is_array( $files ) && count( $files ) === 1000 &&
+	cleanup_check( is_array( $files ) && count( $files ) === $expected_total &&
 		is_string( $output ) && false !== strpos( $output, 'foogallery' ),
 		'Adopted media count or FooGallery output changed.' );
+	return $post_hash;
 };
 $fixed_options = array( 'foogallery-migrate-data', 'foogallery-migrate-settings',
 	'foogallery_migrate_storage_control', 'foogallery_migrate_storage_authority', 'foogallery_migrate_storage_maintenance',
@@ -171,9 +196,45 @@ if ( 'adopt-reversed' === $step ) {
 		is_array( $decoded ) && array_key_exists( $expected_owner, $decoded ) &&
 		$decoded[$expected_owner] === $real['edit'], 'Exact typed CURRENT option edit required before cleanup adoption.' );
 	$journal = array( 'identity' => $identity, 'owner' => $owner, 'phase' => 'edited',
-		'real' => $real, 'adopted_current_sha256' => hash( 'sha256', $current ) );
-	$verify_real( $journal );
+		'real' => $real, 'adopted_backend' => 'option', 'real_journal_sha256' => hash( 'sha256', $real_raw ),
+		'adopted_current_sha256' => hash( 'sha256', $current ) );
+	if ( isset( $manifest['package'] ) ) { $journal['adopted_package'] = $manifest['package']; }
+	$journal['adopted_posts_sha256'] = $verify_real( $journal );
 	cleanup_check( add_option( $journal_key, $journal, '', false ), 'Owned adoption journal insertion failed.' );
+	$save( $journal );
+}
+if ( 'adopt-table' === $step ) {
+	cleanup_check( null === $journal && array() === $owned_posts() &&
+		! file_exists( $media_dir ) && ! is_link( $media_dir ),
+		'Adoption refuses an existing lifecycle journal or unrelated protected posts.' );
+	cleanup_check( isset( $manifest['package']['zip_sha256'], $manifest['package']['tree_sha256'] ) &&
+		$manifest['package']['zip_sha256'] === '67489aa5f1849c9dc6e0c4e10911463338fbd2403797c2bcf565926409ed6379' &&
+		$manifest['package']['tree_sha256'] === 'd18c9a460fa4a5ebeaaf87087d59b0250b7501dd4f0cc24c791fc670de05644e',
+		'Exact reviewed 10K package required for table adoption.' );
+	$real = get_option( 'fgm_real_owned_journey_v1', null );
+	$real_raw = $raw( 'fgm_real_owned_journey_v1' );
+	$expected_owner = 'fgm-real-' . $suffix;
+	cleanup_check( is_array( $real ) && is_string( $real_raw ) && maybe_unserialize( $real_raw ) === $real &&
+		isset( $real['identity'], $real['owner'], $real['phase'], $real['total'], $real['completed'], $real['edit'],
+			$real['option_bytes'], $real['option_sha256'] ) &&
+		$real['identity'] === $identity && $real['owner'] === $expected_owner &&
+		$real['phase'] === 'edited' && $real['total'] === 10000 && $real['completed'] === 10000,
+		'Exact same-fixture complete edited 10K migration required.' );
+	$status = StorageAdmin::status();
+	$backup = $raw( StorageAuthority::STORAGE_BACKUP_OPTION );
+	cleanup_check( $status['backend'] === 'table' && $status['phase'] === 'stable' &&
+		$status['schema'] === 'verified' && $status['problem'] === '' &&
+		null !== $raw( StorageAuthority::CONTROL_OPTION ) &&
+		null !== $raw( StorageAuthority::AUTHORITY_OPTION ) &&
+		null === $raw( FOOGALLERY_MIGRATE_OPTION_DATA ) && is_string( $backup ) &&
+		strlen( $backup ) === $real['option_bytes'] && hash( 'sha256', $backup ) === $real['option_sha256'] &&
+		foogallery_migrate_migrator_instance()->get_migrator_setting( $expected_owner ) === $real['edit'],
+		'Exact stable table, retained option prefix, and typed current edit required.' );
+	$journal = array( 'identity' => $identity, 'owner' => $owner, 'phase' => 'edited',
+		'real' => $real, 'adopted_backend' => 'table', 'real_journal_sha256' => hash( 'sha256', $real_raw ),
+		'adopted_package' => $manifest['package'] );
+	$journal['adopted_posts_sha256'] = $verify_real( $journal );
+	cleanup_check( add_option( $journal_key, $journal, '', false ), 'Owned table adoption journal insertion failed.' );
 	$save( $journal );
 }
 if ( 'init' === $step ) {
@@ -203,6 +264,25 @@ if ( 'init' === $step ) {
 cleanup_check( is_array( $journal ) && isset( $journal['identity'], $journal['owner'], $journal['phase'] ) &&
 	$identity === $journal['identity'] && $owner === $journal['owner'] && 'seeding' !== $journal['phase'], 'Owned lifecycle journal missing, partial or mismatched.' );
 $verify_protected( $journal );
+if ( isset( $journal['real'] ) ) {
+	$real = $journal['real'];
+	$real_raw = $raw( 'fgm_real_owned_journey_v1' );
+	cleanup_check( is_array( $real ) && isset( $real['identity'], $real['owner'] ) &&
+		$real['identity'] === $identity && $real['owner'] === 'fgm-real-' . $suffix &&
+		( ! isset( $journal['real_journal_sha256'] ) ||
+			( is_string( $real_raw ) && hash( 'sha256', $real_raw ) === $journal['real_journal_sha256'] &&
+				maybe_unserialize( $real_raw ) === $real ) ) &&
+		( ! isset( $journal['adopted_package'] ) ||
+			( isset( $manifest['package'] ) && $manifest['package'] === $journal['adopted_package'] ) ),
+		'Adopted source ownership, journal or package changed before lifecycle operation.' );
+	if ( isset( $journal['adopted_posts_sha256'] ) ) {
+		$source = get_post( $real['source'] ); $destination = get_post( $real['destination'] );
+		cleanup_check( $source && $destination && hash( 'sha256', serialize( array(
+			$source->post_title, $source->post_content, $source->post_status,
+			$destination->post_title, $destination->post_content, $destination->post_status ) ) ) === $journal['adopted_posts_sha256'],
+			'Adopted source or destination post changed before lifecycle operation.' );
+	}
+}
 $result = array( 'step' => $step, 'site' => $site, 'database' => $manifest['database'],
 	'wordpress' => $wp_version, 'php' => PHP_VERSION, 'phase' => $journal['phase'] );
 $request = function ( $operation, $target, $confirm ) {
@@ -264,6 +344,13 @@ if ( 'verify-reversed' === $step ) {
 }
 if ( 'clear' === $step ) {
 	cleanup_check( 'edited' === $journal['phase'], 'Edited table state required for clear.' );
+	$selected_backend = isset( $journal['adopted_backend'] ) ? $journal['adopted_backend'] :
+		( isset( $journal['real'] ) ? 'option' : 'table' );
+	$status = StorageAdmin::status();
+	cleanup_check( in_array( $selected_backend, array( 'option', 'table' ), true ) &&
+		$status['backend'] === $selected_backend && 'stable' === $status['phase'] &&
+		'verified' === $status['schema'] && '' === $status['problem'],
+		'Adopted authority changed before clear.' );
 	$result['receipt'] = $request( 'clear', 'state', 'clear-current-state' );
 	cleanup_check( ! empty( $result['receipt']['complete'] ), 'Public clear incomplete; retain marker and journal.' );
 	$journal['phase'] = 'cleared'; $save( $journal );
@@ -280,6 +367,13 @@ if ( 'seed-repeat-clear' === $step ) {
 }
 if ( 'repeat-clear' === $step ) {
 	cleanup_check( 'repeat-ready' === $journal['phase'] && isset( $journal['preferences'] ), 'Second table state must be seeded in a prior request.' );
+	$selected_backend = isset( $journal['adopted_backend'] ) ? $journal['adopted_backend'] :
+		( isset( $journal['real'] ) ? 'option' : 'table' );
+	$status = StorageAdmin::status();
+	cleanup_check( in_array( $selected_backend, array( 'option', 'table' ), true ) &&
+		$status['backend'] === $selected_backend && 'stable' === $status['phase'] &&
+		'verified' === $status['schema'] && '' === $status['problem'],
+		'Adopted authority changed before repeated clear.' );
 	$result['receipt'] = $request( 'clear', 'state', 'clear-current-state' );
 	cleanup_check( ! empty( $result['receipt']['complete'] ) && get_option( FOOGALLERY_MIGRATE_OPTION_SETTINGS, null ) === $journal['preferences'],
 		'Repeated clear did not complete while preserving preferences: ' . json_encode( $result['receipt'] ) );
@@ -287,13 +381,16 @@ if ( 'repeat-clear' === $step ) {
 }
 if ( 'verify-clear' === $step ) {
 	cleanup_check( 'cleared' === $journal['phase'], 'Completed table clear required.' );
+	$selected_backend = isset( $journal['adopted_backend'] ) ? $journal['adopted_backend'] :
+		( isset( $journal['real'] ) ? 'option' : 'table' );
+	cleanup_check( in_array( $selected_backend, array( 'option', 'table' ), true ), 'Invalid adopted backend.' );
 	$status = StorageAdmin::status(); cleanup_check( 'stable' === $status['phase'] && 'verified' === $status['schema'] &&
-		$status['backend'] === ( isset( $journal['real'] ) ? 'option' : 'table' ), 'Selected authority/schema not preserved by clear.' );
+		$status['backend'] === $selected_backend, 'Selected authority/schema not preserved by clear.' );
 	$current = $raw( FOOGALLERY_MIGRATE_OPTION_DATA );
 	cleanup_check( null !== $raw( StorageAuthority::CONTROL_OPTION ) &&
-		( isset( $journal['real'] ) ? null === $raw( StorageAuthority::AUTHORITY_OPTION ) : null !== $raw( StorageAuthority::AUTHORITY_OPTION ) ) &&
+		( 'option' === $selected_backend ? null === $raw( StorageAuthority::AUTHORITY_OPTION ) : null !== $raw( StorageAuthority::AUTHORITY_OPTION ) ) &&
 		null !== $raw( LegacyStorageSchema::VERSION_OPTION ) &&
-		( isset( $journal['real'] ) ? ( is_string( $current ) && maybe_unserialize( $current ) === array() ) : null === $current ) &&
+		( 'option' === $selected_backend ? ( is_string( $current ) && maybe_unserialize( $current ) === array() ) : null === $current ) &&
 		null === $raw( StorageAuthority::STORAGE_BACKUP_OPTION ) && null === $raw( MigratedStore::LEGACY_BACKUP_OPTION ) &&
 		null === $raw( StorageAuthority::CLEANUP_OPTION ), 'Clear mode, stale-copy or marker mismatch.' );
 	foreach ( array_slice( $fixed_tables, 2 ) as $table ) {
@@ -352,6 +449,6 @@ if ( 'verify-uninstalled' === $step ) {
 $verify_protected( $journal );
 $verify_real( $journal );
 $result['phase'] = $journal['phase'];
-$result['protected_posts'] = isset( $journal['real'] ) ? array( 'actual_attachments' => 1000,
+$result['protected_posts'] = isset( $journal['real'] ) ? array( 'actual_attachments' => $journal['real']['total'],
 	'actual_source' => $journal['real']['source'], 'actual_destination' => $journal['real']['destination'] ) : $journal['posts'];
 echo json_encode( $result, JSON_UNESCAPED_SLASHES ) . "\n";
