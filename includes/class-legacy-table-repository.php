@@ -85,6 +85,11 @@ class LegacyTableRepository {
 		if ( in_array( $operation, array( 'log_summary', 'summary' ), true ) && count( $request ) ) { $this->fail( 'Malformed logical summary request.' ); }
 		$this->start_budget(); $this->history_read_active = true;
 		try {
+			if ( $this->history_pair_absent() ) {
+				$result = $this->empty_history_read( $operation, $request );
+				if ( ! $this->history_pair_absent() ) { $this->fail( 'Empty history changed during bounded read.' ); }
+				return $this->finish_history_read( $result );
+			}
 			$keys = array( 'migrated', 'migrated-revision' ); $context = $this->metadata_many( $keys );
 			if ( 'map' !== $context[0]['head']['state_kind'] || ! isset( $context[0]['root']['wrapper'] ) ) { $this->fail( 'Indexed history wrapper required; old header-root layouts are not admitted.' ); }
 			switch ( $operation ) {
@@ -117,6 +122,117 @@ class LegacyTableRepository {
 			return $this->finish_history_read( array( 'context' => $context, 'result' => $result ) );
 		} catch ( \Exception $error ) { $this->history_read_active = false; throw $error; }
 		catch ( \Throwable $error ) { $this->history_read_active = false; throw $error; }
+	}
+
+	/** Missing history is distinct from a partial pair, shadow head or orphan row. */
+	private function history_pair_absent() {
+		$history = $this->reader->head( 'migrated' ); $revision = $this->reader->head( 'migrated-revision' );
+		if ( false !== $history && false !== $revision ) { return false; }
+		if ( false !== $history || false !== $revision ) { $this->fail( 'Partial history heads; no empty fallback.' ); }
+		$shadow = $this->read( $this->db->prepare( 'SELECT id FROM `' . $this->state . '` WHERE blog_id = %d AND '
+			. '(state_key_value = %s OR state_key_value = %s) LIMIT 1', array( $this->blog,
+				$this->codec->key_value( 'migrated' ), $this->codec->key_value( 'migrated-revision' ) ) ) );
+		if ( count( $shadow ) ) { $this->fail( 'History head identity is corrupt.' ); }
+		$orphan = $this->read( $this->db->prepare( 'SELECT r.id FROM `' . $this->table . '` r LEFT JOIN `' . $this->state . '` s '
+			. 'ON s.id = r.state_id AND s.blog_id = r.blog_id WHERE r.blog_id = %d AND s.id IS NULL LIMIT 1', array( $this->blog ) ) );
+		if ( count( $orphan ) ) { $this->fail( 'Orphan table record; no empty fallback.' ); }
+		return true;
+	}
+
+	/** Read-only logical defaults; the first write publishes real heads atomically. */
+	private function empty_history_read( $operation, $request ) {
+		$root = ( new LegacyCollectionEnvelope( $this->codec ) )->split( 'migrated', 'map', array() )['root'];
+		$context = array(
+			array( 'key' => 'migrated', 'head' => array( 'id' => 0, 'active_generation' => 0, 'revision' => 0,
+				'state_kind' => 'map', 'virtual_absent' => true ), 'root' => $root ),
+			array( 'key' => 'migrated-revision', 'head' => array( 'id' => 0, 'active_generation' => 0, 'revision' => 0,
+				'state_kind' => 'scalar', 'virtual_absent' => true ),
+				'root' => array( 'version' => 1, 'kind' => 'scalar', 'value' => 0 ) ) );
+		$result = null;
+		if ( 'identifiers' === $operation || 'presence' === $operation ) {
+			if ( count( $request ) > 100 ) { $this->fail( 'Invalid empty-history identifiers.' ); }
+			$this->consume( 0, strlen( $this->codec->key_value( 'migrated' ) ) );
+			$seen = array(); $result = array();
+			foreach ( $request as $key ) {
+				$this->typed_key( $key ); $hash = $this->codec->key_hash( $key );
+				if ( isset( $seen[$hash] ) ) { $this->fail( 'Duplicate history identifier.' ); } $seen[$hash] = true;
+				$this->consume( 0, strlen( $this->codec->key_value( $key ) ) );
+				$row = array( 'found' => false, 'key' => $key );
+				if ( 'identifiers' === $operation ) { $row['value'] = null; }
+				$result[] = $row;
+			}
+		} elseif ( 'children' === $operation ) {
+			if ( array_keys( $request ) !== array( 'parent', 'keys' ) || ! is_array( $request['keys'] ) || count( $request['keys'] ) > $this->max_rows ) { $this->fail( 'Malformed empty-history children request.' ); }
+			$this->typed_key( $request['parent'] ); $this->consume( 0, strlen( $this->codec->key_value( $request['parent'] ) ) );
+			foreach ( array_chunk( $request['keys'], 100 ) as $batch ) {
+				$this->consume( 0, strlen( $this->codec->key_value( 'migrated' ) ) ); $seen = array();
+				foreach ( $batch as $key ) {
+					$this->typed_key( $key ); $hash = $this->codec->key_hash( $key );
+					if ( isset( $seen[$hash] ) ) { $this->fail( 'Duplicate history child identifier.' ); } $seen[$hash] = true;
+					$this->consume( 0, strlen( $this->codec->key_value( $key ) ) );
+				}
+			}
+			$result = array();
+		} elseif ( 'source' === $operation ) {
+			if ( array_keys( $request ) !== array( 'type', 'plugin', 'id' ) || ! is_string( $request['type'] ) || '' === $request['type'] ||
+				strlen( $request['type'] ) > 32 || ( null !== $request['plugin'] && ! is_string( $request['plugin'] ) ) || ! is_scalar( $request['id'] ) ) { $this->fail( 'Malformed empty-history source request.' ); }
+			$this->consume( 0, strlen( $this->codec->key_value( 'migrated' ) ) );
+			$identity = null === $request['plugin'] || '' === (string) $request['id']
+				? array( $request['type'], $request['plugin'], $request['id'] )
+				: array( 'type' => $request['type'], 'plugin' => $request['plugin'], 'id' => (string) $request['id'] );
+			$this->consume( 0, strlen( $this->codec->encode( $identity ) ) );
+			$result = array( 'found' => false, 'key' => null, 'value' => null );
+		} elseif ( 'page' === $operation || 'export' === $operation ) {
+			if ( array_keys( $request ) !== array( 'limit', 'filters', 'cursor' ) || ! is_array( $request['filters'] ) || ! is_int( $request['limit'] ) || $request['limit'] < 1 ||
+				$request['limit'] > 100 || null !== $request['cursor'] || ( 'export' === $operation && count( $request['filters'] ) ) ) { $this->fail( 'Malformed empty-history page.' ); }
+			$this->byte_limit = min( $this->max_bytes, 4194304 );
+			$this->consume( 0, strlen( $this->codec->key_value( 'migrated' ) ) );
+			$this->filters( $request['filters'] );
+			$result = array( 'rows' => array(), 'cursor' => null, 'revision' => 0 );
+		} elseif ( 'count' === $operation ) { $result = 0; }
+		elseif ( 'log_summary' === $operation ) { $result = array( 'total' => 0, 'count' => 0, 'by_type' => array(), 'types' => array(),
+			'by_status' => array(), 'statuses' => array(), 'completed' => 0, 'error' => 0 ); }
+		elseif ( 'summary' === $operation ) { $result = array(); }
+		return array( 'context' => $context, 'result' => $result );
+	}
+
+	/** The first logical history write creates history, revision and companions
+	 * together with absent-head guards. A failed transaction leaves no half-pair.
+	 */
+	private function empty_history_mutate( $operation, $request, $companions ) {
+		if ( 'status' === $operation || 'delete' === $operation ) { return false; }
+		if ( 'retry' === $operation || 'clear' === $operation ) { return true; }
+		$order = $this->next_state_order(); $changes = array(); $guards = array(
+			array( 'key' => 'migrated', 'head' => false ), array( 'key' => 'migrated-revision', 'head' => false ) );
+		if ( count( $request ) ) {
+			$items = array();
+			foreach ( $request as $record ) {
+				$payload = $record['value'];
+				$parent = null !== $record['parent'] ? $record['parent'] : $record['fallback_parent'];
+				if ( null !== $parent ) { $payload['migration_parent_key'] = $parent; }
+				$items[$record['key']] = $payload;
+			}
+			$changes[] = array( 'key' => 'migrated', 'order' => $order++, 'kind' => 'map',
+				'value' => array( MigratorSettings::COMPACT_MARKER => MigratorSettings::COMPACT_VERSION,
+					'type' => 'migratable', 'items' => $items ), 'expected_revision' => null );
+			$changes[] = array( 'key' => 'migrated-revision', 'order' => $order++, 'kind' => 'scalar',
+				'value' => 1, 'expected_revision' => null );
+		}
+		foreach ( $companions as $key => $value ) {
+			$head = $this->reader->head( $key ); $guards[] = array( 'key' => $key, 'head' => $head );
+			if ( false !== $head ) {
+				$entry = $this->metadata_many( array( $key ) )[0];
+				if ( 'scalar' !== $entry['head']['state_kind'] ) { $this->fail( 'Existing scalar companion head required.' ); }
+				if ( serialize( $entry['root']['value'] ) === serialize( $value ) ) { continue; }
+				$changes[] = array( 'key' => $key, 'order' => $head['state_order'], 'kind' => 'scalar',
+					'value' => $value, 'expected_revision' => $head['revision'] );
+			} else {
+				$changes[] = array( 'key' => $key, 'order' => $order++, 'kind' => 'scalar',
+					'value' => $value, 'expected_revision' => null );
+			}
+		}
+		if ( count( $changes ) ) { $this->replace_bounded( $changes, $guards ); }
+		return count( $request );
 	}
 
 	/** Closed logical mutations over an admitted indexed history wrapper.
@@ -153,6 +269,7 @@ class LegacyTableRepository {
 				$this->typed_key( $request['key'] ); $identifiers[] = $request['key'];
 				if ( 'status' === $operation && ( ! is_string( $request['status'] ) || strlen( $request['status'] ) > 32 ) ) { $this->fail( 'Unindexed status is not admitted.' ); }
 			}
+			if ( $this->history_pair_absent() ) { return $this->finish_history_read( $this->empty_history_mutate( $operation, $request, $companions ) ); }
 			$context = $this->metadata_many( $keys ); $history = $context[0]; $revision = $context[1];
 			if ( 'map' !== $history['head']['state_kind'] || ! isset( $history['root']['wrapper'] ) ) { $this->fail( 'Indexed history wrapper required.' ); }
 			if ( 'scalar' !== $revision['head']['state_kind'] || ! is_int( $revision['root']['value'] ) || $revision['root']['value'] < 0 ) { $this->fail( 'Invalid logical history revision.' ); }

@@ -2,7 +2,7 @@
 
 **Updated:** 2026-10-22
 
-**Status:** R0, R1a, floor environment and actual10K source preparation committed; R1b bounded forward copy/verification accepted in this checkpoint. Actual migration, reversal and lifecycle remain pending.
+**Status:** R1b bounded forward copy/verification committed as `7004fe0`; R1c actual migration/reversal and independent floor forward execution developing. Lifecycle and M1 remain pending.
 
 **Branch:** `feature/migrated-store-scalability`
 
@@ -67,7 +67,7 @@ Historical receipts: [October 20 review](pr15-review-checkpoint-2026-10-20.md), 
 
 ## Ordered work
 
-R0–R4 replace the previous S0–S9 sequence. R0 is done in `c7eda75`; R1a is done in `fb65305`; R1b is accepted in this checkpoint and R2–R4 remain pending. R1 as a whole is incomplete. Independent QA is GPT-6 Sol Medium, separate from the developer.
+R0–R4 replace the previous S0–S9 sequence. R0 is done in `c7eda75`; R1a is done in `fb65305`; R1b is done in `7004fe0` and R2–R4 remain pending. R1 as a whole is incomplete. Independent QA is GPT-6 Sol Medium, separate from the developer.
 
 | ID | Deliverable / exit | Depends on | Owned areas | Proposed developer and reason |
 |---|---|---|---|---|
@@ -191,14 +191,14 @@ Read guards and phase parameters before using `tests/integration/storage-release
 
 ## Tracking, deferred work and handoff
 
-- **Next ready work:** R1c actual10K production migration, table edit and current-data reversal; independent floor forward conversion can run on its own owned site without production edits. Floor environment ready in `7cac1e4`, actual10K source preparation ready in `b5176db`.
+- **Active work:** R1c actual10K production migration, table edit and current-data reversal; independent floor forward conversion runs on its own owned site without production edits. Floor environment ready in `7cac1e4`, actual10K source preparation ready in `b5176db`.
 - **Current authorization:** Development, delegated QA, disposable test setup and scoped local commits. No push/merge/release requested.
 - **Documentation validation:** The pre-implementation docs check covered links, fences, task IDs and whitespace without claiming runtime results. Current development evidence is recorded below.
 - **Statuses:** `pending → developing → qa → validating → done`; use `blocked` / `budget-stopped` with a precise reason.
 - **Per-task ledger:** Kickoff `54f7ae2`. R0: developer `/root/r0_journey` (Sol High), QA `/root/r0_qa` (Sol Medium), repairs 0, accepted `c7eda75`. R1a: same developer/independent QA, repair 1 (explicit test memory limit), accepted `fb65305`. Floor support: developer `/root/r1_floor` (Sol High), QA `/root/r0_qa` (Sol Medium), repair 1 (seed guards), accepted `7cac1e4`. R1c source preparation: same floor developer/QA, accepted `b5176db`. R1b: `/root/r0_journey` (Sol High, cross-component copy/verification safety), independently accepted by `/root/r0_qa` (Sol Medium) in this checkpoint; two harness QA repairs, plus the documented performance reassessments before QA. No nested delegation.
 - **Shared files:** R1/R2 share engine/settings/repository/lifecycle code. R3 consumes their services. Production ownership and integration are serial; independent fixture-only work may run in parallel as recorded below.
 - **Supervisor:** Current session's exact model/effort cannot be independently verified. Developer routing remains explicit Sol High for R0 and Sol Medium for independent QA.
-- **Active workers / wakeups:** R1b developer and independent QA have completed the accepted slice. Next dispatches: Sol High for actual migration/reversal and encountered persistence defects (shared production files, one owner); Sol High for independent floor execution/runner-only repairs (separate fixture, no production edits). No scheduled wakeups.
+- **Active workers / wakeups:** `/root/r0_journey` (Sol High) owns actual migration/reversal and the first encountered persistence defect (shared production files, one owner). `/root/r1_floor` (Sol High) owns independent floor forward execution/runner-only repairs (separate fixture, no production edits). Both dependencies are committed in `7004fe0`; evidence must distinguish that source from later working changes. Independent QA reuses `/root/r0_qa` (Sol Medium) after each frozen slice. No scheduled wakeups.
 - **Deferred backlog, not follow-on authorized tasks:** Multisite table support/network lifecycle; advanced recommendation tiers/re-notification; convenience reset/stale-copy UI; broader diagnostic/host qualification polish. A future scope decision is required to schedule these. Do not label the first release incomplete merely because this backlog remains.
 - **Never implied:** New engine/config work, pushing, merging, deployment. Brad must explicitly confirm any WordPress.org live tag or stable-tag change.
 
@@ -255,6 +255,17 @@ Targeted attribution (`--filter 'test_real_selected_reset_publishes_empty_map_be
 - Exactly **10,000** owned attachment posts/files, AIGPL source `10004`, protected content page `10005`. Ordered attachment IDs SHA-256 `48c943771951356744164a9f018a3f41a35c71c3b3c575d21769f2e44fdf224a`; content SHA-256 `40e45aa5a30231bf1cd01a9ef4955bd766aa877bd2af2d951888c19d5e73633b`; PNG SHA-256 `a38a4ff7320a3d8764ac959b264f15e335360d7c1e23a0627dee7f366c95c58f`.
 - QA independently passed `php tests/integration/storage-release-real-journey.php /tmp/foogallery-migrate-r0.T4hhza verify-source`, including all IDs/order, metadata and 10,000 file hashes; `status` confirms `ready`, zero turns/completed children, stable option authority and no schema. PHP/shell lint and whitespace checks pass. Completed-fixture reseed and invalid-path attempts refuse before writes.
 - Both initial and resumed seeding check raw migration data/control/authority/maintenance/backup/schema markers and schema-table absence. Journal identity binds site/database/container ID. A hard crash between file/post creation and journal persistence safely refuses on collision; this test fixture does not promise automatic orphan reconciliation. Future `turn`/`edit` phases are prepared but unaccepted until exercised after R1b. No M1 claim.
+
+### R1c empty-history initialization — accepted checkpoint
+
+- Public preflight/provision/switch/recover on `T4hhza` reached stable empty table mode from an absent option, with allocated peak below 51 MB. First default-five-image migration turn exposed a missing-history-head error on legitimate fresh table state. The narrow repair provides a guarded, read-only empty view only when both history heads are absent and shadow/orphan checks pass. Partial/malformed heads and SQL failures still refuse. First nonempty upsert publishes history, revision and companions together through the existing guarded transaction. Companion-only writes retain options-mode behavior without inventing history.
+- Developer `/root/r0_journey` (Sol High), independent QA `/root/r0_qa` (Sol Medium), no QA repair required. Supervisor reproduced **107 tests / 24,643 assertions** with `php -d memory_limit=256M vendor/bin/phpunit --colors=never --do-not-cache-result --filter '(StorageEmptyHistoryContract|LegacyHistory(Read|Mutation|Summary)Contract|LegacyTableRepository|StorageCapacityConversion|StorageCapacityCopyTransaction|StorageOperations|StorageAuthority|StorageControl)Test'`. QA separately passed 75 tests / 403 assertions, lint, whitespace, native read-only status and full source verification. Six unchanged `StorageSnapshotScaleTest` finite-scale admission errors in a broader diagnostic run remain explicitly red; no whole-suite claim.
+- Native ordinary turns now complete **5, 10, 15** images using the unchanged default batch size of five. Destination gallery `10006` contains exactly 15 attachments in source order; journal records three turns. All 10,000 source files/IDs and protected content hashes remain exact. Fourth turn refuses at the 10-second child-history lookup deadline, without advancing journal/output. Approximately 22,700 SQL session questions per turn identify the next separate bounded child-lookup repair. This checkpoint accepts initialization only, not M1. After checking default behavior, the existing ordinary images-per-turn setting may be set to 100 on this owned fixture to complete scale acceptance; no production-default change.
+
+### Floor forward execution — in progress
+
+- Floor `WDmNT3` passed public preflight and provision on `7004fe0`, but switch at 256M refused before control/cursor creation. Native decode/round-trip and structural scanning pass independently; admission refuses the nested decode/verify reserves plus the PHP 5.4 allocation baseline. A discriminating **384M** public switch passes under the unchanged release policy (512 MiB ceiling); no floor raise or reserve bypass. Preflight passing at 256M is not full-conversion readiness (`conversion_ready=false`); practical memory guidance/preflight usability remain to address before M2.
+- Fresh 256-row recovery requests at 384M copied **10,752 / 20,208 rows** before a new refusal. Option remains authoritative, native source hash unchanged, no backup, cursor and records exactly 10,752. `/root/r1_floor` is diagnosing with the existing scalar observation hook; no identical retry loop or production edits. Conversion code remains `7004fe0`; concurrent empty-history edits do not affect the decoder/copy path but mean the source checkout is not immutable. Any production repair is serialized with the actual-migration developer. Neither path is M1 acceptance yet.
 
 ### Usage policy for this development run
 

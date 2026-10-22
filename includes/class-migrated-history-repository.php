@@ -171,8 +171,12 @@ class MigratedHistoryRepository {
 	private function table_read( $operation, $request = array() ) {
 		$read = $this->backend->history_read( $operation, $request ); $entries = $read['context'];
 		$root = $entries[0]['root'];
-		if ( 'map' !== $entries[0]['head']['state_kind'] || ! array_key_exists( 'wrapper', $root ) ) { throw new \RuntimeException( 'Verified indexed history wrapper required; old header-root layouts are not admitted.' ); }
+		$empty = ! empty( $entries[0]['head']['virtual_absent'] ) && ! empty( $entries[1]['head']['virtual_absent'] ) &&
+			0 === $entries[0]['head']['revision'] && 0 === $entries[1]['head']['revision'] &&
+			$root === array( 'version' => 1, 'kind' => 'map', 'root_count' => 0 );
+		if ( 'map' !== $entries[0]['head']['state_kind'] || ( ! $empty && ! array_key_exists( 'wrapper', $root ) ) ) { throw new \RuntimeException( 'Verified indexed history wrapper required; old header-root layouts are not admitted.' ); }
 		if ( 'scalar' !== $entries[1]['head']['state_kind'] || ! is_int( $entries[1]['root']['value'] ) || $entries[1]['root']['value'] < 0 ) { throw new \RuntimeException( 'Invalid logical history revision.' ); }
+		if ( $empty && 0 !== $entries[1]['root']['value'] ) { throw new \RuntimeException( 'Invalid empty logical history revision.' ); }
 		return $read;
 	}
 	private function hydrate( $record ) {

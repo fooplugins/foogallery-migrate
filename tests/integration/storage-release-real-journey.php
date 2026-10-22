@@ -2,11 +2,11 @@
 /**
  * Owned, resumable actual AIGPL 10K fixture. One step per fresh CLI process.
  *
- * php storage-release-real-journey.php /tmp/foogallery-migrate-r0.XXXXXX seed|verify-source|status|turn|edit
+ * php storage-release-real-journey.php /tmp/foogallery-migrate-r0.XXXXXX seed|verify-source|status|preflight|provision|switch|recover|turn|edit
  * Seed and verify-source leave migration storage in its original option mode.
  * Turn/edit are for the later, explicitly table-backed R1c journey only.
  */
-if ( 'cli' !== PHP_SAPI || 3 !== $argc || ! in_array( $argv[2], array( 'seed', 'verify-source', 'status', 'turn', 'edit' ), true ) ) {
+if ( 'cli' !== PHP_SAPI || 3 !== $argc || ! in_array( $argv[2], array( 'seed', 'verify-source', 'status', 'preflight', 'provision', 'switch', 'recover', 'turn', 'edit' ), true ) ) {
 	throw new RuntimeException( 'An owned site path and one explicit step are required.' );
 }
 $site = realpath( $argv[1] );
@@ -26,9 +26,19 @@ if ( ! is_array( $manifest ) || ! isset( $manifest['kind'], $manifest['site'], $
 	realpath( $site . '/wp-content/plugins/foogallery-migrate' ) !== realpath( $manifest['repo'] ) ) {
 	throw new RuntimeException( 'Owned disposable site manifest or plugin source mismatch.' );
 }
+$container_check = array(); $container_code = 0;
+exec( 'docker inspect --format ' . escapeshellarg( '{{.Id}} {{index .Config.Labels "foogallery-migrate-r0"}}' ) . ' ' .
+	escapeshellarg( $manifest['container'] ) . ' 2>/dev/null', $container_check, $container_code );
+if ( 0 !== $container_code || count( $container_check ) !== 1 ||
+	trim( $container_check[0] ) !== $manifest['container_id'] . ' owned' ) {
+	throw new RuntimeException( 'Owned SQL container identity mismatch.' );
+}
+define( 'WP_MAX_MEMORY_LIMIT', '256M' );
+ini_set( 'memory_limit', '256M' );
 require $site . '/wp-load.php';
 use FooPlugins\FooGalleryMigrate\StorageAdmin;
 use FooPlugins\FooGalleryMigrate\StorageAuthority;
+use FooPlugins\FooGalleryMigrate\StorageCli;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\Plugins\Aigpl;
 use FooPlugins\FooGalleryMigrate\Objects\Migratable;
@@ -39,6 +49,8 @@ function real_check( $okay, $message ) {
 real_check( ! is_multisite() && DB_NAME === $manifest['database'] && DB_HOST === $manifest['host'] &&
 	$wpdb->get_var( 'SELECT DATABASE()' ) === $manifest['database'] && ! $wpdb->last_error,
 	'Live SQL/site ownership differs from the manifest.' );
+real_check( '256M' === ini_get( 'memory_limit' ) && '256M' === WP_MAX_MEMORY_LIMIT,
+	'Owned request must use the 256M memory limit.' );
 real_check( function_exists( 'foogallery_migrate_migrator_instance' ) &&
 	function_exists( 'foogallery_default_gallery_template' ) && defined( 'FOOGALLERY_VERSION' ),
 	'Actual FooGallery and FooGallery Migrate must be active.' );
@@ -72,6 +84,13 @@ $raw_option = function ( $name ) use ( $wpdb ) {
 	$value = $wpdb->get_var( $wpdb->prepare( "SELECT option_value FROM `{$wpdb->options}` WHERE option_name=%s", $name ) );
 	real_check( ! $wpdb->last_error, 'Raw migration storage option query failed.' );
 	return $value;
+};
+$questions = function () use ( $wpdb ) {
+	$rows = $wpdb->dbh->query( "SHOW SESSION STATUS LIKE 'Questions'" );
+	real_check( $rows instanceof mysqli_result, 'Owned session query counter unavailable.' );
+	$row = $rows->fetch_assoc(); $rows->free();
+	real_check( is_array( $row ) && isset( $row['Value'] ) && ctype_digit( $row['Value'] ), 'Invalid owned query counter.' );
+	return (int) $row['Value'];
 };
 $assert_pristine_storage = function () use ( $raw_option, $wpdb ) {
 	foreach ( array( FOOGALLERY_MIGRATE_OPTION_DATA, StorageAuthority::CONTROL_OPTION,
@@ -191,11 +210,28 @@ if ( 'status' === $step ) {
 	$result['storage'] = StorageAdmin::status();
 	if ( 'seeding' !== $journal['phase'] ) { $result['source'] = $verify_source( $journal, false ); }
 }
+if ( in_array( $step, array( 'preflight', 'provision', 'switch', 'recover' ), true ) ) {
+	real_check( 'ready' === $journal['phase'] && 0 === $journal['turns'] && 0 === $journal['completed'],
+		'Storage enablement requires the unchanged, unstarted actual fixture.' );
+	$result['source'] = $verify_source( $journal, false );
+	$before_questions = $questions(); $started = microtime( true );
+	$confirm = 'recover' === $step ? 'recover-storage' :
+		( 'provision' === $step ? 'provision-shared-schema' : 'switch-to-table' );
+	$storage_result = StorageCli::execute( $step, array( 'target' => 'table', 'confirm' => $confirm ) );
+	$result['elapsed_seconds'] = round( microtime( true ) - $started, 3 );
+	$result['session_questions_delta'] = $questions() - $before_questions;
+	$result['peak_allocated_bytes'] = memory_get_peak_usage( true );
+	$result['storage'] = StorageAdmin::status();
+	if ( is_wp_error( $storage_result ) ) {
+		$result['failure'] = array( 'code' => $storage_result->get_error_code(), 'message' => $storage_result->get_error_message() );
+	} else { $result['storage_result'] = $storage_result; }
+}
 if ( 'turn' === $step || 'edit' === $step ) {
 	$storage = StorageAdmin::status();
 	real_check( 'table' === $storage['backend'] && 'stable' === $storage['phase'] &&
 		'verified' === $storage['schema'] && '' === $storage['problem'], 'Stable verified table authority is required.' );
 	$result['source'] = $verify_source( $journal, false );
+	$before_questions = $questions(); $started = microtime( true );
 	$engine = foogallery_migrate_migrator_instance();
 	$limit = $engine->get_images_per_turn();
 	real_check( is_numeric( $limit ) && (int) $limit > 0, 'Normal images-per-turn setting is invalid.' );
@@ -248,5 +284,9 @@ if ( 'turn' === $step || 'edit' === $step ) {
 		$save( $journal );
 		$result['phase'] = $journal['phase'];
 	}
+	$result['elapsed_seconds'] = round( microtime( true ) - $started, 3 );
+	$result['session_questions_delta'] = $questions() - $before_questions;
+	$result['peak_allocated_bytes'] = memory_get_peak_usage( true );
 }
 echo json_encode( $result, JSON_UNESCAPED_SLASHES ) . "\n";
+exit( isset( $result['failure'] ) ? 1 : 0 );
