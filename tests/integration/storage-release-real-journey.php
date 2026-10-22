@@ -2,11 +2,11 @@
 /**
  * Owned, resumable actual AIGPL 10K fixture. One step per fresh CLI process.
  *
- * php storage-release-real-journey.php /tmp/foogallery-migrate-r0.XXXXXX seed|verify-source|status|preflight|provision|switch|recover|turn|children|settings100|edit
+ * php storage-release-real-journey.php /tmp/foogallery-migrate-r0.XXXXXX seed|verify-source|verify-destination|status|preflight|provision|switch|recover|turn|children|settings100|edit|reverse
  * Seed and verify-source leave migration storage in its original option mode.
  * Turn/edit are for the later, explicitly table-backed R1c journey only.
  */
-if ( 'cli' !== PHP_SAPI || 3 !== $argc || ! in_array( $argv[2], array( 'seed', 'verify-source', 'status', 'preflight', 'provision', 'switch', 'recover', 'turn', 'children', 'settings100', 'edit' ), true ) ) {
+if ( 'cli' !== PHP_SAPI || 3 !== $argc || ! in_array( $argv[2], array( 'seed', 'verify-source', 'verify-destination', 'status', 'preflight', 'provision', 'switch', 'recover', 'turn', 'children', 'settings100', 'edit', 'reverse' ), true ) ) {
 	throw new RuntimeException( 'An owned site path and one explicit step are required.' );
 }
 $site = realpath( $argv[1] );
@@ -111,7 +111,7 @@ $assert_pristine_storage = function () use ( $raw_option, $wpdb ) {
 		'Source seeding requires clean original option authority.' );
 };
 $verify_source = function ( $state, $full ) use ( $total, $owner, $owner_key, $media_dir, $upload, $png_hash, $owned_count ) {
-	real_check( 'ready' === $state['phase'] || 'migrating' === $state['phase'] || 'complete' === $state['phase'] || 'edited' === $state['phase'], 'The actual source is not complete.' );
+	real_check( in_array( $state['phase'], array( 'ready', 'migrating', 'complete', 'edited', 'reversing', 'reversed' ), true ), 'The actual source is not complete.' );
 	real_check( $total === count( $state['ids'] ) && $total === count( array_unique( $state['ids'] ) ) &&
 		isset( $state['ids_sha256'], $state['source'], $state['content'], $state['content_sha256'] ) &&
 		hash( 'sha256', implode( ',', $state['ids'] ) ) === $state['ids_sha256'], 'Ordered attachment ID manifest differs.' );
@@ -208,6 +208,25 @@ $result = array( 'step' => $step, 'site' => $site, 'database' => $manifest['data
 	'turns' => $journal['turns'], 'completed' => $journal['completed'] );
 if ( 'verify-source' === $step ) {
 	$result['source'] = $verify_source( $journal, true );
+}
+if ( 'verify-destination' === $step ) {
+	real_check( in_array( $journal['phase'], array( 'complete', 'edited', 'reversed' ), true ) && $total === (int) $journal['completed'] &&
+		isset( $journal['uid'], $journal['destination'] ), 'Completed owned migration required for destination proof.' );
+	$result['source'] = $verify_source( $journal, false );
+	$destination = get_post( $journal['destination'] );
+	real_check( $destination && FOOGALLERY_CPT_GALLERY === $destination->post_type &&
+		$journal['ids'] === get_post_meta( $destination->ID, FOOGALLERY_META_ATTACHMENTS, true ),
+		'Destination gallery or exact attachment order differs.' );
+	$matches = get_posts( array( 'post_type' => FOOGALLERY_CPT_GALLERY, 'post_status' => 'any',
+		'posts_per_page' => 2, 'fields' => 'ids', 'meta_key' => Migratable::META_SOURCE_KEY,
+		'meta_value' => $journal['uid'] ) );
+	real_check( 1 === count( $matches ) && (int) $matches[0] === (int) $destination->ID,
+		'Actual destination ownership/uniqueness differs.' );
+	real_check( false !== strpos( do_shortcode( '[foogallery id="' . $destination->ID . '"]' ), 'foogallery' ),
+		'Actual FooGallery output failed.' );
+	$result['destination'] = (int) $destination->ID;
+	$result['attachments'] = count( $journal['ids'] );
+	$result['ordered_ids_sha256'] = hash( 'sha256', implode( ',', get_post_meta( $destination->ID, FOOGALLERY_META_ATTACHMENTS, true ) ) );
 }
 if ( 'status' === $step ) {
 	$result['storage'] = StorageAdmin::status();
@@ -331,6 +350,58 @@ if ( 'turn' === $step || 'edit' === $step ) {
 	$result['elapsed_seconds'] = round( microtime( true ) - $started, 3 );
 	$result['session_questions_delta'] = $questions() - $before_questions;
 	$result['peak_allocated_bytes'] = memory_get_peak_usage( true );
+}
+if ( 'reverse' === $step ) {
+	real_check( in_array( $journal['phase'], array( 'edited', 'reversing' ), true ) &&
+		$total === (int) $journal['completed'] && isset( $journal['edit'], $journal['destination'], $journal['uid'] ),
+		'Only completed, edited owned table migration may reverse.' );
+	$result['source'] = $verify_source( $journal, false );
+	$storage = StorageAdmin::status();
+	real_check( 'verified' === $storage['schema'] && '' === $storage['problem'] &&
+		( ( 'stable' === $storage['phase'] && in_array( $storage['backend'], array( 'table', 'option' ), true ) ) ||
+			( in_array( $storage['backend'], array( 'table', 'option' ), true ) && 'option' === $storage['target'] ) ),
+		'Owned verified table-to-option transition required.' );
+	$engine = foogallery_migrate_migrator_instance();
+	if ( 'stable' === $storage['phase'] ) {
+		real_check( $journal['edit'] === $engine->get_migrator_setting( $owner ), 'Current edited setting differs before reversal.' );
+	}
+	$tables = array_keys( ( new LegacyStorageSchema( $wpdb ) )->definitions() );
+	$heads = $wpdb->get_row( $wpdb->prepare( 'SELECT COUNT(*) AS n, COALESCE(SUM(payload_bytes),0) AS bytes FROM `' . $tables[0] . '` WHERE blog_id=%d', get_current_blog_id() ), ARRAY_A );
+	$rows = $wpdb->get_row( $wpdb->prepare( 'SELECT COUNT(*) AS n, COALESCE(SUM(payload_bytes),0) AS bytes, COALESCE(MAX(payload_bytes),0) AS largest FROM `' . $tables[1] . '` WHERE blog_id=%d', get_current_blog_id() ), ARRAY_A );
+	real_check( ! $wpdb->last_error && is_array( $heads ) && is_array( $rows ), 'Current table dimensions unavailable.' );
+	$result['table_dimensions'] = array( 'heads' => (int) $heads['n'], 'head_payload_bytes' => (int) $heads['bytes'],
+		'rows' => (int) $rows['n'], 'row_payload_bytes' => (int) $rows['bytes'], 'largest_row_bytes' => (int) $rows['largest'] );
+	$operation = 'stable' === $storage['phase'] ? ( 'table' === $storage['backend'] ? 'switch' : null ) : 'recover';
+	$before_questions = $questions(); $started = microtime( true );
+	$storage_result = null === $operation ? null : StorageCli::execute( $operation, array( 'target' => 'option',
+		'confirm' => 'switch' === $operation ? 'switch-to-option' : 'recover-storage' ) );
+	$result['elapsed_seconds'] = round( microtime( true ) - $started, 3 );
+	$result['session_questions_delta'] = $questions() - $before_questions;
+	$result['peak_allocated_bytes'] = memory_get_peak_usage( true );
+	$result['storage'] = StorageAdmin::status();
+	if ( is_wp_error( $storage_result ) ) {
+		$result['failure'] = array( 'code' => $storage_result->get_error_code(), 'message' => $storage_result->get_error_message() );
+	} else {
+		if ( null !== $storage_result ) { $result['storage_result'] = $storage_result; }
+		if ( 'stable' === $result['storage']['phase'] && 'option' === $result['storage']['backend'] ) {
+			$current = $raw_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+			$backup = $raw_option( StorageAuthority::STORAGE_BACKUP_OPTION );
+			real_check( is_string( $current ) && is_string( $backup ) && $current !== $backup,
+				'Reversal did not publish CURRENT option data distinct from the original backup.' );
+			$decoded = maybe_unserialize( $current );
+			real_check( is_array( $decoded ) && array_key_exists( $owner, $decoded ) &&
+				$journal['edit'] === $decoded[$owner], 'CURRENT option bytes lost the exact table edit.' );
+			unset( $decoded );
+			$result['current_option_bytes'] = strlen( $current );
+			$result['current_option_sha256'] = hash( 'sha256', $current );
+			$journal['phase'] = 'reversed'; $save( $journal );
+		} else {
+			real_check( in_array( $result['storage']['backend'], array( 'table', 'option' ), true ) && 'option' === $result['storage']['target'] &&
+				'stable' !== $result['storage']['phase'], 'Reverse transition changed authority unexpectedly.' );
+			$journal['phase'] = 'reversing'; $save( $journal );
+		}
+		$result['phase'] = $journal['phase'];
+	}
 }
 echo json_encode( $result, JSON_UNESCAPED_SLASHES ) . "\n";
 exit( isset( $result['failure'] ) ? 1 : 0 );
