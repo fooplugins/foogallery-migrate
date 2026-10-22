@@ -219,7 +219,7 @@ if ( 'children' === $step ) {
 		'' === $storage['problem'] && 'migrating' === $journal['phase'] && $journal['completed'] > 0,
 		'Owned populated stable table history required for child proof.' );
 	$result['source'] = $verify_source( $journal, false );
-	$keys = array(); $number = min( 25, (int) $journal['completed'] );
+	$keys = array(); $number = min( 100, (int) $journal['completed'] );
 	for ( $i = 0; $i < $number; ++$i ) {
 		$key = wp_get_attachment_url( $journal['ids'][$i] );
 		real_check( is_string( $key ) && '' !== $key, 'Owned image URL unavailable.' ); $keys[] = $key;

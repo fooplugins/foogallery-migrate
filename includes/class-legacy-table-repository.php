@@ -932,16 +932,103 @@ class LegacyTableRepository {
 					array_merge( array( $this->blog, $head['id'], $head['active_generation'] ), $missing ) ) );
 				if ( count( $unprojected ) ) { $this->fail( 'Missing identifier projection.' ); }
 			}
+			$trees = $this->history_child_trees( $head, $found, $nodes, $by_hash );
 			foreach ( $batch as $key ) {
 				$hash = $this->codec->key_hash( $key );
 				if ( ! isset( $found[$hash] ) ) { continue; }
-				$tree = $this->tree_hash( 'migrated', $head, $nodes[$hash] );
-				if ( false === $tree || $tree['key'] !== $key ) { $this->fail( 'Identifier collision or corruption.' ); }
+				$tree = $trees[$hash];
 				if ( is_array( $tree['value'] ) && isset( $tree['value']['migration_parent_key'] ) &&
 					$parent === $tree['value']['migration_parent_key'] ) { $result[] = array( 'found' => true, 'key' => $key, 'value' => $tree['value'] ); }
 			}
 		}
 		$this->unchanged( 'migrated', $head ); return $result;
+	}
+
+	/** Batch flat, selected roots after aggregate metadata admission. Nested
+	 * historical trees retain the existing bounded traversal and codec proof.
+	 */
+	private function history_child_trees( $head, $found, $nodes, $keys ) {
+		if ( ! count( $found ) ) { return array(); }
+		$scope = array( $this->blog, $head['id'], $head['active_generation'] );
+		$record_bytes = $this->record_bytes();
+		$select = 'SELECT id, blog_id, state_id, generation, item_order, HEX(node_hash) AS node_hash, '
+			. 'HEX(parent_node_hash) AS parent_node_hash, payload_bytes, ' . $record_bytes . ' AS encoded_bytes '
+			. 'FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL';
+		$selected = array(); foreach ( $found as $hash => $unused ) { $selected[] = $nodes[$hash]; }
+		$slots = implode( ', ', array_fill( 0, count( $selected ), 'UNHEX(%s)' ) );
+		$meta = $this->read( $this->db->prepare( $select . ' AND node_hash IN (' . $slots . ') LIMIT 101', array_merge( $scope, $selected ) ) );
+		if ( count( $meta ) !== count( $selected ) ) { $this->fail( 'Selected history roots changed or duplicated.' ); }
+		$by_node = array(); $total = 0;
+		foreach ( $meta as $row ) {
+			$node = $this->hex( $row['node_hash'] ); $bytes = $this->number( $row['encoded_bytes'] );
+			if ( ! in_array( $node, $selected, true ) || isset( $by_node[$node] ) || null !== $row['parent_node_hash'] ||
+				$bytes > LegacyTableReader::MAX_RECORD_BYTES || $bytes > $this->max_bytes - $this->used_bytes - $total ) { $this->fail( 'Invalid selected history root metadata.' ); }
+			foreach ( array( 'blog_id' => $this->blog, 'state_id' => $head['id'], 'generation' => $head['active_generation'] ) as $field => $expected ) {
+				if ( $this->number( $row[$field] ) !== $expected ) { $this->fail( 'Selected history root scope changed.' ); }
+			}
+			$this->number( $row['id'] ); $this->number( $row['item_order'] ); $this->number( $row['payload_bytes'] );
+			$total += $bytes; $by_node[$node] = $row;
+		}
+		if ( count( $meta ) > $this->max_rows - $this->used_rows ) { $this->fail( 'Selected history row budget exceeded.' ); }
+		$parents = $this->read( $this->db->prepare( 'SELECT HEX(parent_node_hash) AS parent_hash FROM `' . $this->table . '` '
+			. 'WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IN (' . $slots . ') '
+			. 'GROUP BY parent_node_hash LIMIT 101', array_merge( $scope, $selected ) ) );
+		if ( count( $parents ) > count( $selected ) ) { $this->fail( 'Selected history child probe exceeded its bound.' ); }
+		$nested = array();
+		foreach ( $parents as $row ) {
+			$node = $this->hex( $row['parent_hash'] );
+			if ( ! isset( $by_node[$node] ) || isset( $nested[$node] ) ) { $this->fail( 'Selected history child projection changed.' ); }
+			$nested[$node] = true;
+		}
+		$flat = array(); $flat_bytes = 0;
+		foreach ( $selected as $node ) {
+			if ( isset( $nested[$node] ) ) { continue; }
+			$flat[] = $by_node[$node]; $flat_bytes += $this->number( $by_node[$node]['encoded_bytes'] );
+		}
+		$trees = array();
+		if ( count( $flat ) ) {
+			$this->consume( count( $flat ), $flat_bytes );
+			$columns = array();
+			foreach ( $this->definitions[$this->table]['columns'] as $name => $spec ) { $columns[] = 'binary(32)' === $spec[0] ? 'HEX(`' . $name . '`) AS `' . $name . '`' : '`' . $name . '`'; }
+			$ids = array(); $cases = array(); $args = $scope;
+			foreach ( $flat as $row ) { $ids[] = '%d'; $args[] = $this->number( $row['id'] ); }
+			foreach ( $flat as $row ) { $cases[] = 'WHEN %d THEN %d';
+				$args[] = $this->number( $row['id'] ); $args[] = $this->number( $row['encoded_bytes'] ); }
+			$rows = $this->read( $this->db->prepare( 'SELECT ' . implode( ', ', $columns ) . ', ' . $record_bytes . ' AS encoded_bytes '
+				. 'FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL '
+				. 'AND id IN (' . implode( ', ', $ids ) . ') AND (' . $record_bytes . ') = CASE id '
+				. implode( ' ', $cases ) . ' ELSE -1 END LIMIT 101', $args ) );
+			if ( count( $rows ) !== count( $flat ) ) { $this->fail( 'Sized history roots changed or disappeared.' ); }
+			foreach ( $rows as $row ) {
+				$node = $this->hex( $row['node_hash'] );
+				if ( ! isset( $by_node[$node] ) || isset( $nested[$node] ) ) { $this->fail( 'Selected history root collision.' ); }
+				foreach ( $by_node[$node] as $field => $expected ) {
+					$actual = $row[$field];
+					if ( null !== $expected && substr( $field, -5 ) === '_hash' ) { $actual = $this->hex( $actual ); $expected = $this->hex( $expected ); }
+					else if ( null !== $expected ) { $actual = $this->number( $actual ); $expected = $this->number( $expected ); }
+					if ( $actual !== $expected ) { $this->fail( 'Selected history root metadata changed.' ); }
+				}
+				$value = $this->records->rebuild_tree( 'migrated', $node, array( $row ) );
+				$key_bytes = base64_decode( $row['key_value'], true );
+				$key = 'integer' === $row['key_type'] ? (int) $key_bytes : $key_bytes;
+				$hash = $this->hex( $row['legacy_identifier_hash'] );
+				if ( isset( $trees[$hash] ) || ! array_key_exists( $hash, $keys ) || $keys[$hash] !== $key ||
+					$row['legacy_identifier_value'] !== $this->codec->key_value( $key ) || $hash !== $this->codec->key_hash( $key ) ) {
+					$this->fail( 'History identifier projection mismatch.' );
+				}
+				$trees[$hash] = array( 'key' => $key, 'value' => $value );
+			}
+		}
+		foreach ( $selected as $node ) {
+			if ( ! isset( $nested[$node] ) ) { continue; }
+			$tree = $this->tree_hash( 'migrated', $head, $node );
+			if ( false === $tree ) { $this->fail( 'Nested history root disappeared.' ); }
+			$hash = $this->codec->key_hash( $tree['key'] );
+			if ( ! array_key_exists( $hash, $keys ) || $keys[$hash] !== $tree['key'] ) { $this->fail( 'Nested history identifier collision.' ); }
+			$trees[$hash] = $tree;
+		}
+		if ( count( $trees ) !== count( $found ) ) { $this->fail( 'Selected history root count changed.' ); }
+		return $trees;
 	}
 
 	/** First eligible root in legacy insertion order, exact or image absint semantics. */
