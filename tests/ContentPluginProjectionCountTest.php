@@ -46,6 +46,17 @@ class ContentPluginProjectionCountTest extends TestCase {
 		$this->expectException( \RuntimeException::class );
 		$this->plugin_count( $appearing );
 	}
+	public function test_filtered_window_uses_existing_source_plugin_index_and_fixed_limit(): void {
+		$db = new ContentPluginProjectionConnection();
+		$page = ( new LegacyTableRepository( $db, 1 ) )->content_window( 0, 100, null, 'WordPress Core' );
+		$this->assertSame( array(), $page['items'] );
+		$this->assertSame( 202, $page['total'] );
+		$this->assertSame( 1, $page['revision'] );
+		$this->assertSame( 1, $db->selector_reads );
+		$this->assertStringContainsString( 'FORCE INDEX (`source_plugin`)', $db->selector_sql );
+		$this->assertStringContainsString( 'source_plugin_hash = UNHEX(%s)', $db->selector_sql );
+		$this->assertStringContainsString( 'LIMIT %d OFFSET %d', $db->selector_sql );
+	}
 }
 
 class ContentPluginProjectionConnection extends LegacyTransactionConnection {
@@ -56,6 +67,8 @@ class ContentPluginProjectionConnection extends LegacyTransactionConnection {
 	public $raw_reads = 0;
 	public $unrelated_reads = 0;
 	public $writes = 0;
+	public $selector_reads = 0;
+	public $selector_sql = '';
 	private $args = array();
 	private $codec;
 	private $root;
@@ -86,6 +99,10 @@ class ContentPluginProjectionConnection extends LegacyTransactionConnection {
 		if ( false !== strpos( $sql, 'SELECT root_payload FROM' ) ) { return array( array( 'root_payload' => $this->root ) ); }
 		if ( false !== strpos( $sql, 'SELECT COUNT(*) AS total' ) ) {
 			return array( array( 'total' => $this->args[3] === $this->codec->key_hash( 'WordPress Core' ) ? (string) count( $this->rows ) : '0' ) );
+		}
+		if ( false !== strpos( $sql, 'SELECT HEX(node_hash) AS node_hash' ) ) {
+			$this->selector_reads++; $this->selector_sql = $sql;
+			return array();
 		}
 		if ( false !== strpos( $sql, 'AS plugin_bytes' ) ) {
 			$this->metadata_pages++;

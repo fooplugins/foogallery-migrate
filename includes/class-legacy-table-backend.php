@@ -40,6 +40,8 @@ class LegacyTableBackend {
 	public function mutate_scalars( $values ) { return $this->repository( true )->mutate_scalars( $values ); }
 	public function delete_scalar( $key ) { return $this->repository( true )->delete_scalar( $key ); }
 	public function content_window( $offset, $limit, $keys = null ) { return $this->repository()->content_window( $offset, $limit, $keys ); }
+	public function content_selected( $keys ) { return $this->repository()->content_selected( $keys ); }
+	public function content_plugin_window( $plugin, $offset, $limit ) { return $this->repository()->content_window( $offset, $limit, null, $plugin ); }
 	public function content_count_plugin( $plugin ) { return $this->repository()->content_count_plugin( $plugin ); }
 	public function replace_content_state( $value ) { return $this->repository( true )->replace_content_state( $value ); }
 	public function content_batch( $items, $progress, $append, $revision = null ) { return $this->repository( true )->content_batch( $items, $progress, $append, $revision ); }

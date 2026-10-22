@@ -329,6 +329,19 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			$state = $this->scoped_content_repository()->window( $offset, $limit, $keys );
 			$state['progress'] = $this->normalize_progress( $state['progress'] ); return $state;
 		}
+		/** Read only selected table findings; retain the original typed keys and one scan revision. */
+		private function selected_content_items( $repository, $keys, &$context = null ) {
+			$selected = $repository->selected_many( $keys );
+			$context = array( 'revision' => $selected['revision'], 'total' => $selected['total'] );
+			$this->assert_selected_content_context( $repository, $context );
+			return $selected['items'];
+		}
+		private function assert_selected_content_context( $repository, $context ) {
+			$check = $repository->window( 0, 1, array() );
+			if ( $context['revision'] !== $check['revision'] || $context['total'] !== $check['total'] ) {
+				throw new \RuntimeException( 'Content changed during selected action.' );
+			}
+		}
 		private function persist_scan_batch( $repository, $reset, $items, $progress, $revision ) {
 			if ( null === $repository ) { $this->persist_scan_state( $items, $progress ); return; }
 			$ok = $reset ? $repository->update_with_scan_state( $items, $progress ) : $repository->append_batch( $items, $progress, $revision );
@@ -383,10 +396,11 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 * @param array $content_items Content findings.
 		 * @return void
 		 */
-		private function persist_content_items( $content_items ) {
+		private function persist_content_items( $content_items, $expected_revision = null ) {
 			$repository = $this->scoped_content_repository();
 			if ( null !== $repository ) {
 				$state = $repository->window( 0, 1 );
+				if ( null !== $expected_revision && $state['revision'] !== $expected_revision ) { throw new \RuntimeException( 'Content changed before selected checkpoint.' ); }
 				if ( false === $repository->patch_batch( $content_items, $state['progress'], $state['revision'] ) ) { throw new \RuntimeException( 'Unable to persist selected content findings.' ); } return;
 			}
 			$state = $this->get_scan_state();
@@ -1562,7 +1576,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		function replace_content( $selected_items, $expected_post_contents = array() ) {
 			$this->migrator_engine->assert_storage_writer();
 			$repository = $this->scoped_content_repository();
-			$content_items = null === $repository ? $this->get_content_items() : $repository->get_many( $selected_items );
+			$context = null;
+			$content_items = null === $repository ? $this->get_content_items() : $this->selected_content_items( $repository, $selected_items, $context );
 			$replaced_count = 0;
 			$errors = array();
 			$status_lookup = null;
@@ -1647,6 +1662,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			// transaction across scan storage, posts, or third-party post hooks.
 			$repository = $this->scoped_content_repository();
 			if ( null !== $repository ) {
+				$this->assert_selected_content_context( $repository, $context );
 				if ( false === $repository->clear() ) { throw new \RuntimeException( 'Unable to invalidate content scan.' ); }
 			} else if ( false === $this->set_setting( $this->type, false ) || false === $this->set_setting( $this->type . '_scan_state', false ) ) {
 				throw new \RuntimeException( 'Unable to invalidate content scan.' );
@@ -1737,14 +1753,15 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 */
 		function migrate_and_replace_content( $selected_items ) {
 			$repository = $this->scoped_content_repository();
-			$content_items = null === $repository ? $this->get_content_items() : $repository->get_many( array_unique( array_map( 'absint', (array) $selected_items ) ) );
+			$selected_item_keys = array_unique( array_map( 'absint', (array) $selected_items ) );
+			$context = null;
+			$content_items = null === $repository ? $this->get_content_items() : $this->selected_content_items( $repository, $selected_item_keys, $context );
 			if ( ! is_array( $content_items ) ) {
 				$content_items = array();
 			}
 			$core_source_ids = array();
 			$preflight_errors = array();
 			$preflight_post_contents = array();
-			$selected_item_keys = array_unique( array_map( 'absint', (array) $selected_items ) );
 			$status_lookup = null;
 			$status_plugins = null;
 
@@ -1792,6 +1809,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			}
 
 			if ( ! empty( $core_source_ids ) ) {
+				if ( null !== $repository && count( $selected_item_keys ) > 100 ) {
+					return array( 'success' => 0, 'errors' => array( __( 'This table-backed action supports up to 100 selected occurrences when creating reusable galleries. Select fewer occurrences and try again.', 'foogallery-migrate' ) ) );
+				}
+				if ( null !== $repository ) { $this->assert_selected_content_context( $repository, $context ); }
 				$gallery_migrator = $this->migrator_engine->get_gallery_migrator();
 				$galleries = $gallery_migrator->get_objects_to_migrate( true );
 				$queue = array();
@@ -1856,7 +1877,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 						$content_items[ $item_key ]['migrated_foogallery_id'] = $migrated_core_ids[ $source_id ];
 					}
 				}
-				$this->persist_content_items( $content_items );
+				$this->persist_content_items( $content_items, null === $context ? null : $context['revision'] );
 			}
 
 			return $this->replace_content( $selected_item_keys, $preflight_post_contents );
@@ -1867,7 +1888,92 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		 *
 		 * @return void
 		 */
+		private function table_content_rows( $repository, $header, $offset, $length, $lookup, $plugins ) {
+			$enabled = 0;
+			ob_start();
+			try {
+				for ( $read = 0; $read < $length; $read += $take ) {
+					$take = min( 100, $length - $read );
+					$batch = $this->scan_window( $offset + $read, $take );
+					if ( $batch['revision'] !== $header['revision'] || $batch['total'] !== $header['total'] || count( $batch['items'] ) !== $take ) {
+						throw new \RuntimeException( 'Content changed during bounded form read.' );
+					}
+					foreach ( $batch['items'] as $key => $item ) {
+						if ( ! is_array( $item ) || ! isset( $item['post_id'] ) ) { continue; }
+						$item = $this->reconcile_content_item_status( $item, $lookup, $plugins );
+						$is_core = isset( $item['plugin_name'] ) && 'WordPress Core' === $item['plugin_name'];
+						if ( $this->is_content_item_replaceable( $item ) || $is_core ) { ++$enabled; }
+						$this->render_table_content_row( $key, $item );
+					}
+				}
+				$html = ob_get_clean();
+			} catch ( \Exception $error ) { ob_end_clean(); throw $error; }
+			catch ( \Throwable $error ) { ob_end_clean(); throw $error; }
+			return array( 'html' => $html, 'enabled' => $enabled );
+		}
+		/** Inspect only Core-projected trees, not the unrelated content history. */
+		private function table_core_notice_flags( $repository, $header ) {
+			$reusable = false;
+			for ( $offset = 0; $offset < $header['total']; $offset += 100 ) {
+				$page = $repository->plugin_window( 'WordPress Core', $offset, 100 );
+				if ( $page['revision'] !== $header['revision'] || $page['total'] !== $header['total'] ) {
+					throw new \RuntimeException( 'Content changed during Core notice read.' );
+				}
+				foreach ( $page['items'] as $item ) {
+					if ( ! is_array( $item ) || ! isset( $item['plugin_name'] ) || 'WordPress Core' !== $item['plugin_name'] ) {
+						throw new \RuntimeException( 'Core notice projection changed.' );
+					}
+					if ( ! empty( $item['replacement_content'] ) ) {
+						return array( 'dynamic' => true, 'reusable' => $reusable );
+					}
+					$reusable = true;
+				}
+				if ( count( $page['items'] ) < 100 ) { break; }
+			}
+			return array( 'dynamic' => false, 'reusable' => $reusable );
+		}
+
+		private function render_table_content_row( $key, $item ) {
+			$post_edit_link = admin_url( 'post.php?post=' . absint( $item['post_id'] ) . '&action=edit' );
+			$foogallery_edit_link = ! empty( $item['migrated_foogallery_id'] ) ? admin_url( 'post.php?post=' . absint( $item['migrated_foogallery_id'] ) . '&action=edit' ) : '';
+			$is_migrated = ! empty( $item['migrated'] ) && ! empty( $item['migrated_foogallery_id'] );
+			$is_core = isset( $item['plugin_name'] ) && 'WordPress Core' === $item['plugin_name'];
+			$direct = isset( $item['replacement_content'] ) && is_string( $item['replacement_content'] ) && '' !== trim( $item['replacement_content'] );
+			$actionable = $this->is_content_item_replaceable( $item ) || $is_core;
+			echo '<tr class="' . esc_attr( (int) $key % 2 === 0 ? 'alternate' : '' ) . '"><th scope="row" class="check-column">';
+			echo '<input name="content-item[]" type="checkbox" ' . ( $actionable ? 'checked="checked"' : 'disabled="disabled"' ) . ' value="' . esc_attr( $key ) . '"></th>';
+			echo '<td><a href="' . esc_url( $post_edit_link ) . '" target="_blank"><strong>' . esc_html( $item['post_title'] ) . '</strong></a><br><small>' . esc_html( ucfirst( $item['post_type'] ) ) . '</small></td>';
+			echo '<td>' . esc_html( $item['plugin_name'] ) . '</td><td>' . esc_html( isset( $item['source_context'] ) ? $item['source_context'] : $item['gallery_id'] ) . '</td>';
+			echo '<td>' . esc_html( ucfirst( $item['type'] ) . ' / ' . $this->get_content_item_object_type_label( $item ) ) . '</td><td>';
+			if ( $item['migrated_foogallery_id'] ) { echo '<a href="' . esc_url( $foogallery_edit_link ) . '" target="_blank">' . esc_html( $item['migrated_foogallery_id'] ) . '</a>'; }
+			else { echo '<span style="color: #999;">—</span>'; }
+			echo '</td><td>';
+			if ( $is_migrated ) { echo '<span style="color: #080;">' . esc_html__( 'Ready to replace', 'foogallery-migrate' ) . '</span><br><small>' . esc_html__( 'The destination FooGallery is ready.', 'foogallery-migrate' ) . '</small>'; }
+			else if ( $direct && $is_core ) { echo '<span style="color: #080;">' . esc_html__( 'Ready for dynamic replacement', 'foogallery-migrate' ) . '</span><br><small>' . esc_html__( 'No FooGallery record will be created.', 'foogallery-migrate' ) . '</small>'; }
+			else if ( $direct ) { echo '<span style="color: #080;">' . esc_html__( 'Ready to replace', 'foogallery-migrate' ) . '</span>'; }
+			else if ( $is_core ) { echo '<span style="color: #2271b1;">' . esc_html__( 'Ready to migrate & replace', 'foogallery-migrate' ) . '</span>'; }
+			else { echo '<span style="color: #b26200;">' . esc_html__( 'Migrate source gallery first', 'foogallery-migrate' ) . '</span><br><small>' . esc_html__( 'Migrate it from the Galleries tab.', 'foogallery-migrate' ) . '</small>'; }
+			echo '</td></tr>';
+		}
+
 		function render_content_form() {
+			$repository = $this->scoped_content_repository();
+			if ( null === $repository ) { $this->render_content_form_body( null ); return; }
+			ob_start();
+			try {
+				$this->render_content_form_body( $repository );
+				$check = $repository->window( 0, 1, array() );
+				if ( $this->content_render_revision !== $check['revision'] || $this->content_render_total !== $check['total'] ) {
+					throw new \RuntimeException( 'Content changed during form rendering.' );
+				}
+				$html = ob_get_clean(); echo $html;
+			} catch ( \Exception $error ) { ob_end_clean(); throw $error; }
+			catch ( \Throwable $error ) { ob_end_clean(); throw $error; }
+		}
+
+		private $content_render_revision = null;
+		private $content_render_total = null;
+		private function render_content_form_body( $repository ) {
 			$url = foogallery_migrate_admin_url( 'content' );
 			$page = 1;
 			if ( defined( 'DOING_AJAX' ) ) {
@@ -1892,22 +1998,30 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			if ( $page < 1 ) {
 				$page = 1;
 			}
-			$repository = $this->scoped_content_repository();
 			$page_size = $this->migrator_engine->get_page_size();
-			if ( null !== $repository ) { $page_size = $page_size > 0 ? min( 100, $page_size ) : 100; }
 			if ( null === $repository ) { $state = $this->get_scan_state(); }
 			else {
 				$header = $this->scan_window( 0, 1, array() );
-				$page = min( $page, max( 1, (int) ceil( $header['total'] / $page_size ) ) );
-				$state = $this->scan_window( ( $page - 1 ) * $page_size, $page_size );
-				if ( $header['revision'] !== $state['revision'] ) { throw new \RuntimeException( 'Content changed during page selection; reload the page.' ); }
+				$this->content_render_revision = $header['revision']; $this->content_render_total = $header['total'];
+				if ( $page_size > 0 ) { $page = min( $page, max( 1, (int) ceil( $header['total'] / $page_size ) ) ); }
+				else { $page = 1; }
+				$state = $header; $state['items'] = array();
 			}
 			$url = add_query_arg( 'content_paged', $page, $url ) . '#shortcodes';
 			$content_items = $state['items'];
+			$table_rows = null;
+			$core_notice = null;
+			if ( null !== $repository && $state['total'] > 0 ) {
+				$offset = $page_size > 0 ? ( $page - 1 ) * $page_size : 0;
+				$length = $page_size > 0 ? min( $page_size, $state['total'] - $offset ) : $state['total'];
+				$table_rows = $this->table_content_rows( $repository, $header, $offset, $length,
+					$this->build_migrated_object_lookup(), $this->get_plugins_by_name() );
+				$core_notice = $this->table_core_notice_flags( $repository, $header );
+			}
 			$progress = $state['progress'];
 			$has_scanned_content = ! empty( $progress['started'] );
 			$scan_paused = $has_scanned_content && ! $progress['complete'];
-			$status_stale = $has_scanned_content && ! empty( $content_items ) && absint( $progress['migrated_revision'] ) !== $this->get_migrated_revision();
+			$status_stale = $has_scanned_content && ( null === $repository ? ! empty( $content_items ) : $state['total'] > 0 ) && absint( $progress['migrated_revision'] ) !== $this->get_migrated_revision();
 			$status_progress = $progress['status_refresh'];
 			$status_refresh_paused = $status_stale && ! empty( $status_progress['started'] ) && empty( $status_progress['complete'] );
 
@@ -1931,6 +2045,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 						&& empty( $item['replacement_content'] );
 				}
 			);
+			if ( null !== $core_notice ) { $core_dynamic_items = $core_notice['dynamic']; $core_reusable_items = $core_notice['reusable']; }
 
 			if ( ! empty( $core_dynamic_items ) ) {
 				echo '<div class="notice notice-info inline"><p><strong>' . esc_html__( 'WordPress galleries: Dynamic replacement mode', 'foogallery-migrate' ) . '</strong><br>';
@@ -1951,7 +2066,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			}
 
 
-			if ( empty( $content_items ) ) {
+			if ( null === $repository ? empty( $content_items ) : 0 === $state['total'] ) {
 				if ( $has_scanned_content && $progress['complete'] ) {
 					echo '<p>' . esc_html__( 'No gallery shortcodes or blocks found in your content.', 'foogallery-migrate' ) . '</p>';
 				} else if ( ! $scan_paused ) {
@@ -1983,13 +2098,13 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 						$end = $content_items_count - 1;
 					}
 
-				$enabled_count = 0;
-				$checked_count = 0;
+				$enabled_count = null === $repository ? 0 : $table_rows['enabled'];
+				$checked_count = $enabled_count;
 				$paginated_items = array();
-				$status_lookup = $this->build_migrated_object_lookup();
-				$status_plugins = $this->get_plugins_by_name();
+				$status_lookup = null === $repository ? $this->build_migrated_object_lookup() : null;
+				$status_plugins = null === $repository ? $this->get_plugins_by_name() : null;
 
-				$visible_items = null === $repository ? array_slice( $content_items, $start, max( 0, $end - $start + 1 ), true ) : $content_items;
+				$visible_items = null === $repository ? array_slice( $content_items, $start, max( 0, $end - $start + 1 ), true ) : array();
 				foreach ( $visible_items as $counter => $item ) {
 					if ( ! is_array( $item ) || ! isset( $item['post_id'] ) ) {
 						continue;
@@ -2033,74 +2148,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 					</thead>
 					<tbody>
 					<?php
+					if ( null !== $repository ) { echo $table_rows['html']; }
 					foreach ( $paginated_items as $key => $item ) {
-						if ( ! is_array( $item ) || ! isset( $item['post_id'] ) ) {
-							continue;
-						}
-
-						$post_edit_link = admin_url( 'post.php?post=' . absint( $item['post_id'] ) . '&action=edit' );
-						$foogallery_edit_link = '';
-						if ( ! empty( $item['migrated_foogallery_id'] ) ) {
-							$foogallery_edit_link = admin_url( 'post.php?post=' . absint( $item['migrated_foogallery_id'] ) . '&action=edit' );
-						}
-						$is_migrated = ! empty( $item['migrated'] ) && ! empty( $item['migrated_foogallery_id'] );
-						$is_core = isset( $item['plugin_name'] ) && 'WordPress Core' === $item['plugin_name'];
-						$is_direct_replacement = isset( $item['replacement_content'] ) && is_string( $item['replacement_content'] ) && '' !== trim( $item['replacement_content'] );
-						$is_actionable = $this->is_content_item_replaceable( $item ) || $is_core;
-						?>
-						<tr class="<?php echo esc_attr( ((int) $key % 2 === 0) ? 'alternate' : '' ); ?>">
-							<th scope="row" class="check-column">
-								<?php if ( $is_actionable ) { ?>
-									<input name="content-item[]" type="checkbox" checked="checked" value="<?php echo esc_attr( $key ); ?>">
-								<?php } else { ?>
-									<input name="content-item[]" type="checkbox" disabled="disabled" value="<?php echo esc_attr( $key ); ?>">
-								<?php } ?>
-							</th>
-							<td>
-								<a href="<?php echo esc_url( $post_edit_link ); ?>" target="_blank">
-									<strong><?php echo esc_html( $item['post_title'] ); ?></strong>
-								</a>
-								<br>
-								<small><?php echo esc_html( ucfirst( $item['post_type'] ) ); ?></small>
-							</td>
-							<td>
-								<?php echo esc_html( $item['plugin_name'] ); ?>
-							</td>
-							<td>
-								<?php echo esc_html( isset( $item['source_context'] ) ? $item['source_context'] : $item['gallery_id'] ); ?>
-							</td>
-							<td>
-								<?php
-								echo esc_html( ucfirst( $item['type'] ) . ' / ' . $this->get_content_item_object_type_label( $item ) );
-								?>
-							</td>
-							<td>
-								<?php if ( $item['migrated_foogallery_id'] ) { ?>
-									<a href="<?php echo esc_url( $foogallery_edit_link ); ?>" target="_blank">
-										<?php echo esc_html( $item['migrated_foogallery_id'] ); ?>
-									</a>
-								<?php } else { ?>
-									<span style="color: #999;">—</span>
-								<?php } ?>
-							</td>
-							<td>
-								<?php if ( $is_migrated ) { ?>
-									<span style="color: #080;"><?php esc_html_e( 'Ready to replace', 'foogallery-migrate' ); ?></span>
-									<br><small><?php esc_html_e( 'The destination FooGallery is ready.', 'foogallery-migrate' ); ?></small>
-								<?php } else if ( $is_direct_replacement && $is_core ) { ?>
-									<span style="color: #080;"><?php esc_html_e( 'Ready for dynamic replacement', 'foogallery-migrate' ); ?></span>
-									<br><small><?php esc_html_e( 'No FooGallery record will be created.', 'foogallery-migrate' ); ?></small>
-								<?php } else if ( $is_direct_replacement ) { ?>
-									<span style="color: #080;"><?php esc_html_e( 'Ready to replace', 'foogallery-migrate' ); ?></span>
-								<?php } elseif ( $is_core ) { ?>
-									<span style="color: #2271b1;"><?php esc_html_e( 'Ready to migrate & replace', 'foogallery-migrate' ); ?></span>
-								<?php } else { ?>
-									<span style="color: #b26200;"><?php esc_html_e( 'Migrate source gallery first', 'foogallery-migrate' ); ?></span>
-									<br><small><?php esc_html_e( 'Migrate it from the Galleries tab.', 'foogallery-migrate' ); ?></small>
-								<?php } ?>
-							</td>
-						</tr>
-						<?php
+						if ( is_array( $item ) && isset( $item['post_id'] ) ) { $this->render_table_content_row( $key, $item ); }
 					}
 					?>
 					</tbody>

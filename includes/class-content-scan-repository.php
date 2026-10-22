@@ -36,11 +36,19 @@ class ContentScanRepository extends ScalarStateRepository {
 		$state = $this->option_state();
 		return array( 'items' => array_slice( $state['items'], $offset, $limit, true ), 'progress' => $state['progress'], 'total' => count( $state['items'] ), 'revision' => null );
 	}
+	public function plugin_window( $plugin, $offset, $limit ) {
+		if ( ! $this->is_table() ) { throw new \RuntimeException( 'Plugin-filtered content window requires table storage.' ); }
+		return $this->backend->content_plugin_window( $plugin, $offset, $limit );
+	}
 	public function get_many( $keys ) {
 		self::exact_keys( $keys );
 		if ( $this->is_table() ) { return $this->backend->content_window( 0, 1, $keys )['items']; }
 		$state = $this->option_state(); $items = array();
 		foreach ( $keys as $key ) { if ( array_key_exists( $key, $state['items'] ) ) { $items[$key] = $state['items'][$key]; } } return $items;
+	}
+	public function selected_many( $keys ) {
+		if ( ! $this->is_table() ) { throw new \RuntimeException( 'Bounded selected content read requires table storage.' ); }
+		return $this->backend->content_selected( $keys );
 	}
 	public function metadata() { return $this->is_table() ? $this->backend->content_window( 0, 1, array() )['progress'] : $this->option_state()['progress']; }
 	public function checkpoint() { return $this->metadata(); }

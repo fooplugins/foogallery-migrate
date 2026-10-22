@@ -56,7 +56,7 @@ class ContentIndependentRecordRegressionTest extends TestCase {
         $this->assertStringContainsString( 'name="foogallery_content_migrate_paged" value="2"', $html );
         $this->assertStringContainsString( 'content_paged=2', $html );
         $this->assertStringNotContainsString( 'No gallery shortcodes or blocks found', $html );
-        $this->assertSame( array( array(0, 1), array(100, 100) ), $repository->windows );
+        $this->assertSame( array( array(0, 1), array(100, 51), array(0, 1) ), $repository->windows );
     }
     /**
      * @runInSeparateProcess
@@ -72,7 +72,7 @@ class ContentIndependentRecordRegressionTest extends TestCase {
         $this->assertStringContainsString('4 gallery occurrences found.', $html);
         $this->assertStringContainsString('name="foogallery_content_migrate_paged" value="1"', $html);
         $this->assertStringNotContainsString('No gallery shortcodes or blocks found', $html);
-        $this->assertSame(array(array(0,1),array(0,100)), $repository->windows);
+        $this->assertSame(array(array(0,1),array(0,4),array(0,1)), $repository->windows);
     }
     /**
      * @runInSeparateProcess
@@ -86,6 +86,119 @@ class ContentIndependentRecordRegressionTest extends TestCase {
         list($repository,$migrator) = $this->setup_case(151); $repository->interleave=true;
         $this->expectException(\RuntimeException::class);
         $migrator->render_content_form();
+    }
+    public function test_table_show_all_and_large_logical_pages_use_bounded_windows(): void {
+        list($repository,$migrator,$engine) = $this->setup_case(151); $engine->page_size=0;
+        ob_start(); try { $migrator->render_content_form(); } finally { $html=ob_get_clean(); }
+        $this->assertSame(151, substr_count($html,'name="content-item[]"'));
+        $this->assertSame(array(array(0,1),array(0,100),array(100,51),array(0,1)), $repository->windows);
+        $this->assertStringNotContainsString('class="pagination-links"', $html);
+        list($repository,$migrator,$engine) = $this->setup_case(151); $engine->page_size=150;
+        ob_start(); try { $migrator->render_content_form(); } finally { $html=ob_get_clean(); }
+        $this->assertSame(150, substr_count($html,'name="content-item[]"'));
+        $this->assertSame(array(array(0,1),array(0,100),array(100,50),array(0,1)), $repository->windows);
+        $_GET['content_paged']=2;
+        ob_start(); try { $migrator->render_content_form(); } finally { $html=ob_get_clean(); unset($_GET['content_paged']); }
+        $this->assertSame(1, substr_count($html,'name="content-item[]"'));
+        $this->assertStringContainsString('name="foogallery_content_migrate_paged" value="2"', $html);
+    }
+    public function test_large_selected_direct_replacement_reads_bounded_keys_and_preserves_duplicates(): void {
+        $repository = new ContentLargeSelectionRepository();
+        for ($key=0; $key<101; $key++) {
+            $post_id=2000+$key;
+            $GLOBALS['foogallery_migrate_test_posts'][$post_id]=(object)array('ID'=>$post_id,'post_title'=>'Owned '.$key,
+                'post_type'=>'post','post_status'=>'publish','post_content'=>'[old'.$key.']');
+            $repository->items[$key]=array('post_id'=>$post_id,'post_title'=>'Owned '.$key,'post_type'=>'post',
+                'plugin_name'=>'WordPress Core','type'=>'shortcode','gallery_id'=>(string)$key,
+                'original_content'=>'[old'.$key.']','replacement_content'=>'[new'.$key.']','match_offset'=>0);
+        }
+        $migrator = new ContentMigrator(new ContentRegressionEngine($repository),'block-shortcode');
+        $result=$migrator->migrate_and_replace_content(array_merge(range(0,100),array(1,100)));
+        $this->assertSame(101,$result['success']); $this->assertSame(array(),$result['errors']);
+        $this->assertSame(array(100,1,100,1),$repository->key_batch_sizes);
+        $this->assertTrue($repository->cleared);
+        $this->assertSame('[new0]', get_post(2000)->post_content);
+        $this->assertSame('[new100]', get_post(2100)->post_content);
+    }
+    public function test_changed_revision_in_later_selected_batch_refuses_before_posts_or_scan_change(): void {
+        $repository = new ContentLargeSelectionRepository();
+        for ($key=0; $key<101; $key++) {
+            $post_id=3000+$key;
+            $GLOBALS['foogallery_migrate_test_posts'][$post_id]=(object)array('ID'=>$post_id,'post_title'=>'Owned '.$key,
+                'post_type'=>'post','post_status'=>'publish','post_content'=>'[old'.$key.']');
+            $repository->items[$key]=array('post_id'=>$post_id,'post_title'=>'Owned '.$key,'post_type'=>'post',
+                'plugin_name'=>'WordPress Core','type'=>'shortcode','gallery_id'=>(string)$key,
+                'original_content'=>'[old'.$key.']','replacement_content'=>'[new'.$key.']','match_offset'=>0);
+        }
+        $repository->interleave=true;
+        $migrator = new ContentMigrator(new ContentRegressionEngine($repository),'block-shortcode');
+        try { $migrator->migrate_and_replace_content(range(0,100)); $this->fail('Changed scan must refuse.'); }
+        catch (\RuntimeException $error) { $this->assertStringContainsString('changed',$error->getMessage()); }
+        $this->assertFalse($repository->cleared);
+        $this->assertSame('[old0]',get_post(3000)->post_content);
+        $this->assertSame('[old100]',get_post(3100)->post_content);
+    }
+    public function test_oversized_reusable_core_selection_refuses_before_gallery_or_post_writes(): void {
+        $repository = new ContentLargeSelectionRepository();
+        for ($key=0; $key<101; $key++) {
+            $post_id=4000+$key;
+            $GLOBALS['foogallery_migrate_test_posts'][$post_id]=(object)array('ID'=>$post_id,'post_title'=>'Owned '.$key,
+                'post_type'=>'post','post_status'=>'publish','post_content'=>'[old'.$key.']');
+            $repository->items[$key]=array('post_id'=>$post_id,'post_title'=>'Owned '.$key,'post_type'=>'post',
+                'plugin_name'=>'WordPress Core','type'=>'shortcode','gallery_id'=>(string)$key,
+                'original_content'=>'[old'.$key.']','replacement_content'=>$key===0 ? '' : '[new'.$key.']','match_offset'=>0);
+        }
+        $engine = new ContentRegressionEngine($repository);
+        $result=(new ContentMigrator($engine,'block-shortcode'))->migrate_and_replace_content(range(0,100));
+        $this->assertSame(0,$result['success']); $this->assertNotEmpty($result['errors']);
+        $this->assertFalse($repository->cleared); $this->assertSame(array(),$engine->writes);
+        $this->assertSame('[old0]',get_post(4000)->post_content);
+        $this->assertSame('[old100]',get_post(4100)->post_content);
+    }
+    public function test_off_page_core_notice_uses_filtered_history_and_refuses_stale_projection(): void {
+        $core=$this->item(); $core['plugin_name']='WordPress Core';
+        $repository=new ContentNoticeRepository($this->item(),151,$core);
+        $migrator=new ContentMigrator(new ContentRegressionEngine($repository),'block-shortcode');
+        $_GET['content_paged']=2;
+        ob_start(); try { $migrator->render_content_form(); } finally { $html=ob_get_clean(); unset($_GET['content_paged']); }
+        $this->assertStringContainsString('Dynamic replacement mode',$html);
+        $this->assertSame(array(array('WordPress Core',0,100)), $repository->plugin_windows);
+        $repository->stale=true;
+        ob_start(); try { $migrator->render_content_form(); $this->fail('Stale Core projection must refuse.'); }
+        catch (\RuntimeException $error) { $this->assertStringContainsString('changed',$error->getMessage()); }
+        finally { $html=ob_get_clean(); }
+        $this->assertSame('',$html);
+    }
+    public function test_core_notice_keeps_option_empty_semantics_for_zero_and_whitespace(): void {
+        foreach (array(array('0',false), array('   ',true)) as $case) {
+            list($replacement,$dynamic)=$case;
+            $core=$this->item(); $core['plugin_name']='WordPress Core'; $core['replacement_content']=$replacement;
+            $repository=new ContentNoticeRepository($this->item(),151,$core);
+            $migrator=new ContentMigrator(new ContentRegressionEngine($repository),'block-shortcode');
+            ob_start(); try { $migrator->render_content_form(); } finally { $html=ob_get_clean(); }
+            $this->assertSame($dynamic, strpos($html,'Dynamic replacement mode')!==false);
+            $this->assertSame(!$dynamic, strpos($html,'Reusable FooGallery mode')!==false);
+        }
+    }
+    public function test_option_and_table_rows_share_status_markup_for_each_action_state(): void {
+        $cases=array(
+            array('plugin_name'=>'Example','replacement_content'=>'[new]'),
+            array('plugin_name'=>'WordPress Core','replacement_content'=>'[new]'),
+            array('plugin_name'=>'WordPress Core','replacement_content'=>''),
+            array('plugin_name'=>'Example','replacement_content'=>''),
+        );
+        foreach ($cases as $case) {
+            $item=array_merge($this->item(),$case);
+            $table=new ContentMigrator(new ContentRegressionEngine(new ContentRegressionRepository($item,1)),'block-shortcode');
+            ob_start(); try { $table->render_content_form(); } finally { $table_html=ob_get_clean(); }
+            $option_engine=new ContentOptionParityEngine(new ContentOptionParityRepository());
+            $option_engine->state=array('items'=>array($item),'progress'=>array('started'=>true,'complete'=>true));
+            $option=new ContentMigrator($option_engine,'block-shortcode');
+            ob_start(); try { $option->render_content_form(); } finally { $option_html=ob_get_clean(); }
+            preg_match('~<tbody>(.*?)</tbody>~s',$table_html,$table_row);
+            preg_match('~<tbody>(.*?)</tbody>~s',$option_html,$option_row);
+            $this->assertSame(preg_replace('/\s+/u','',$option_row[1]),preg_replace('/\s+/u','',$table_row[1]));
+        }
     }
     public function test_content_descriptor_matches_all_emitted_columns_and_qualified_path(): void {
         $tree = $this->item(); $tree['plugin_name'] = str_repeat('x', 2300);
@@ -121,6 +234,18 @@ class ContentRegressionRepository extends ContentScanRepository {
     public function reset_total($total) { $this->total=$total; ++$this->revision; }
     public function is_table() { return true; }
     public function get_many($keys) { return count($keys) ? array(0=>$this->item) : array(); }
+    public function selected_many($keys) {
+        $header=$this->window(0,1,array());
+        return array('items'=>count($keys) ? array(0=>$this->item) : array(),
+            'total'=>$header['total'],'revision'=>$header['revision']);
+    }
+    public function plugin_window($plugin,$offset,$limit) {
+        $items=array();
+        if ($this->item['plugin_name']===$plugin) {
+            for ($key=$offset; $key<min($this->total,$offset+$limit); $key++) { $items[$key]=$this->item; }
+        }
+        return array('items'=>$items,'progress'=>array(),'total'=>$this->total,'revision'=>$this->revision);
+    }
     public function clear() {
         if ($this->refuse) { throw new \RuntimeException('Admission refused'); }
         $this->post_at_clear=get_post(71)->post_content; $this->cleared=true; ++$this->revision; $this->total=0; return true;
@@ -128,13 +253,60 @@ class ContentRegressionRepository extends ContentScanRepository {
     public function window($offset,$limit,$keys=null) {
         $this->windows[]=array($offset,$limit);
         if ($this->interleave && count($this->windows)===2) { $this->clear(); }
-        return array('items'=>array() === $keys ? array() : ($offset < $this->total ? array($offset=>$this->item) : array()),
+        $items=array();
+        if (array() !== $keys) { for ($key=$offset; $key<min($this->total,$offset+$limit); $key++) { $items[$key]=$this->item; } }
+        return array('items'=>$items,
             'progress'=>array('started'=>true,'complete'=>true,'scanned'=>$this->total), 'total'=>$this->total, 'revision'=>$this->revision);
     }
     public function patch_batch($items,$progress,$revision=null) { $this->patches[]=array($items,$progress,$revision); return true; }
 }
+
+class ContentLargeSelectionRepository extends ContentScanRepository {
+    public $items=array(); public $key_batch_sizes=array(); public $cleared=false; public $interleave=false;
+    private $revision=1;
+    public function __construct() {}
+    public function is_table() { return true; }
+    public function window($offset,$limit,$keys=null) { return array('items'=>array(),'progress'=>array('started'=>true,'complete'=>true),
+        'total'=>count($this->items),'revision'=>$this->revision); }
+    public function get_many($keys) {
+        $this->key_batch_sizes[]=count($keys);
+        $found=array(); foreach($keys as $key) { if (array_key_exists($key,$this->items)) { $found[$key]=$this->items[$key]; } }
+        if ($this->interleave && count($this->key_batch_sizes)===2) { ++$this->revision; }
+        return $found;
+    }
+    public function selected_many($keys) {
+        $items=array();
+        foreach(array_chunk($keys,100) as $chunk) {
+            foreach($this->get_many($chunk) as $key=>$item) { $items[$key]=$item; }
+            if($this->interleave && count($this->key_batch_sizes)===2) { throw new \RuntimeException('Content changed during selected read.'); }
+        }
+        return array('items'=>$items,'total'=>count($this->items),'revision'=>$this->revision);
+    }
+    public function clear() { $this->cleared=true; return true; }
+}
+
+class ContentNoticeRepository extends ContentRegressionRepository {
+    public $plugin_windows=array(); public $stale=false; private $core;
+    public function __construct($item,$total,$core) { parent::__construct($item,$total); $this->core=$core; }
+    public function plugin_window($plugin,$offset,$limit) {
+        $this->plugin_windows[]=array($plugin,$offset,$limit);
+        return array('items'=>0===$offset ? array(0=>$this->core) : array(),'progress'=>array(),
+            'total'=>151,'revision'=>$this->stale ? 2 : 1);
+    }
+}
+
+class ContentOptionParityRepository extends ContentScanRepository {
+    public function __construct() {}
+    public function is_table() { return false; }
+}
+class ContentOptionParityEngine extends ContentRegressionEngine {
+    public $state;
+    public function get_migrator_setting($key,$default=false) {
+        return 'block-shortcode_scan_state'===$key ? $this->state : $default;
+    }
+}
 class ContentRegressionEngine {
-    public $writes=array(); private $repository;
+    public $writes=array(); public $page_size=100; private $repository;
     public function __construct($repository) { $this->repository=$repository; }
     public function assert_storage_writer() {}
     public function content_scan_repository() { return $this->repository; }
@@ -143,7 +315,7 @@ class ContentRegressionEngine {
     public function get_plugins($detected=true) { return array(); }
     public function get_migrated_revision() { return 0; }
     public function get_migrated_objects() { return array(); }
-    public function get_page_size() { return 100; }
+    public function get_page_size() { return $this->page_size; }
 }
 
 namespace FooPlugins\FooGalleryMigrate;

@@ -22,6 +22,20 @@ class ContentSentinelConversionRegressionTest extends StorageByteDomainAccountin
         $this->assertSame('map',$db->head['state_kind']); $this->assertSame(0,$db->head['record_count']);
         $state=(new \FooPlugins\FooGalleryMigrate\LegacyTableSnapshot($db,7))->read_bounded(ContentScanRepository::STATE_KEY);
         $this->assertSame(array('items'=>array(),'progress'=>array()),$state);
+        $windows=array_values(array_filter($db->queries,function($sql) { return strpos($sql,' AS window_bytes FROM `wp_foogallery_migrate_legacy_records`')!==false; }));
+        $this->assertNotEmpty($windows,'The empty map must be read through the real keyset window.');
+        $window=end($windows);
+        foreach (array(
+            str_replace('blog_id = 7','blog_id = 8',$window),
+            str_replace('LIMIT 32','LIMIT 31',$window),
+            'SELECT id FROM `wp_foogallery_migrate_legacy_records` ORDER BY id ASC',
+        ) as $unsupported) {
+            try { $db->get_results($unsupported,ARRAY_A); $this->fail('The sentinel SQL double accepted an unsupported or wrong-scope query.'); }
+            catch (\RuntimeException $error) { $this->assertStringContainsString('Unsupported sentinel host rows',$error->getMessage()); }
+        }
+        $db->head['record_count']=1;
+        try { $db->get_results($window,ARRAY_A); $this->fail('The zero-row sentinel read accepted a nonempty head.'); }
+        catch (\RuntimeException $error) { $this->assertStringContainsString('Unsupported sentinel host rows',$error->getMessage()); }
     }
     public function test_real_backend_admission_refuses_before_replacement(): void {
         $db=new SentinelRoundtripConnection(); $GLOBALS['wpdb']=$db;
@@ -89,6 +103,10 @@ class ContentSentinelConversionRegressionTest extends StorageByteDomainAccountin
 }
 
 class ReplacementSelectedBackend extends \FooPlugins\FooGalleryMigrate\LegacyTableBackend {
+    public function content_selected($keys) {
+        if (array(0)!==$keys) { throw new \RuntimeException('Unsupported sentinel selected keys.'); }
+        return $this->content_window(0,1,array(0));
+    }
     public function content_window($offset,$limit,$keys=null) {
         return array('items'=>array(0=>array('post_id'=>71,'post_title'=>'Occurrence','post_type'=>'post','plugin_name'=>'Example',
             'type'=>'shortcode','gallery_id'=>'9','migrated_foogallery_id'=>0,'original_content'=>'[old]','replacement_content'=>'[new]','match_offset'=>0)),
@@ -140,7 +158,22 @@ class SentinelRoundtripConnection extends CoordinatorSourceConnection {
         if (strpos($sql,'SHOW ')===0 || strpos($sql,'SELECT @@SESSION.autocommit')===0 || strpos($sql,'FROM information_schema.TABLES')!==false) { return parent::get_results($sql,$format); }
         if (strpos($sql,'MAX(state_order)')!==false) { return array(array('last_order'=>null)); }
         if (strpos($sql,'SELECT 1 AS present FROM `wp_options`')===0) { $args=$this->bindings[$sql]; return isset($this->options[$args[0]])?array(array('present'=>1)):array(); }
-        if (strpos($sql,'_legacy_records`')!==false && strpos($sql,'ORDER BY id ASC')!==false) { return array(); }
+        if (strpos($sql,' AS window_bytes FROM `wp_foogallery_migrate_legacy_records`')!==false) {
+            $head=$this->head;
+            if (!is_array($head) || 0!==$head['record_count']) { throw new \RuntimeException('Unsupported sentinel host rows: '.$sql); }
+            // A new head has active_generation=0 until the empty generation 1 is committed.
+            $generation=0===$head['active_generation'] ? 1 : $head['active_generation'];
+            $args=array(7,$head['id'],$generation,0,0,0,32);
+            $template='SELECT id, item_order, (OCTET_LENGTH(payload) + OCTET_LENGTH(mutable_payload) + OCTET_LENGTH(key_value) + '
+                .'COALESCE(OCTET_LENGTH(legacy_identifier_value),0) + COALESCE(OCTET_LENGTH(source_plugin_value),0) + '
+                .'COALESCE(OCTET_LENGTH(source_id_value),0)) AS window_bytes FROM `wp_foogallery_migrate_legacy_records` '
+                .'WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL '
+                .'AND (item_order > %d OR (item_order = %d AND id > %d)) ORDER BY item_order ASC, id ASC LIMIT %d';
+            if (!isset($this->bindings[$sql]) || $this->bindings[$sql]!==$args || $sql!==parent::prepare($template,$args)) {
+                throw new \RuntimeException('Unsupported sentinel host rows: '.$sql);
+            }
+            return array();
+        }
         if (strpos($sql,'COUNT(*) AS record_count')!==false) { return array(array('record_count'=>'0','payload_bytes'=>'0','encoded_bytes'=>'0')); }
         if (strpos($sql,' AS key_value, state_order')!==false) { return null===$this->head?array():array($this->summary()); }
         if (strpos($sql,'SELECT root_payload')===0) { return array(array('root_payload'=>$this->head['root_payload'])); }

@@ -448,18 +448,36 @@ class LegacyTableRepository {
 	}
 
 	/** SQL offset selects only small root selectors; only requested trees decode. */
-	public function content_window( $offset, $limit, $keys = null ) {
+	public function content_window( $offset, $limit, $keys = null, $plugin = null ) {
 		if ( ! is_int( $offset ) || $offset < 0 || ! is_int( $limit ) || $limit < 1 || $limit > 100 ||
-			( null !== $keys && ( ! is_array( $keys ) || count( $keys ) > 100 ) ) || $this->history_read_active ) { $this->fail( 'Invalid content window.' ); }
+			( null !== $keys && ( ! is_array( $keys ) || count( $keys ) > 100 ) ) ||
+			( null !== $plugin && ( null !== $keys || ! is_string( $plugin ) || '' === $plugin ) ) || $this->history_read_active ) { $this->fail( 'Invalid content window.' ); }
 		if ( null !== $keys ) { foreach ( $keys as $key ) { $this->typed_key( $key ); } }
 		$this->start_budget(); $this->history_read_active = true;
 		try {
 			$entry = $this->content_context(); $items = array(); $head = $entry['head'];
 			if ( false !== $head ) {
 				if ( null === $keys ) {
-					$rows = $this->read( $this->db->prepare( 'SELECT HEX(node_hash) AS node_hash FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL ORDER BY item_order ASC, id ASC LIMIT %d OFFSET %d',
-						array( $this->blog, $head['id'], $head['active_generation'], $limit, $offset ) ) );
-					foreach ( $rows as $row ) { $tree = $this->tree_hash( $entry['key'], $head, $this->hex( $row['node_hash'] ) ); if ( false === $tree ) { $this->fail( 'Content tree disappeared.' ); } $items[$tree['key']] = $tree['value']; }
+					$filter = '';
+					$args = array( $this->blog, $head['id'], $head['active_generation'] );
+					if ( null !== $plugin ) {
+						$encoded = $this->codec->encode( $plugin ); $this->consume( 0, strlen( $encoded ) );
+						$filter = ' source_plugin_hash = UNHEX(%s) AND'; $args[] = $this->codec->key_hash( $plugin );
+					}
+					$args[] = $limit; $args[] = $offset;
+					$rows = $this->read( $this->db->prepare( 'SELECT HEX(node_hash) AS node_hash FROM `' . $this->table . '` '
+						. ( null === $plugin ? '' : 'FORCE INDEX (`source_plugin`) ' )
+						. 'WHERE blog_id = %d AND state_id = %d AND generation = %d AND' . $filter . ' parent_node_hash IS NULL '
+						. 'ORDER BY item_order ASC, id ASC LIMIT %d OFFSET %d', $args ) );
+					if ( count( $rows ) > $limit ) { $this->fail( 'Content selector page exceeds limit.' ); }
+					foreach ( $rows as $row ) {
+						$tree = $this->tree_hash( $entry['key'], $head, $this->hex( $row['node_hash'] ) );
+						if ( false === $tree || ( null !== $plugin && ( ! is_array( $tree['value'] ) || ! isset( $tree['value']['plugin_name'] ) || $tree['value']['plugin_name'] !== $plugin ) ) ) {
+							$this->fail( 'Content tree or source-plugin projection changed.' );
+						}
+						if ( array_key_exists( $tree['key'], $items ) ) { $this->fail( 'Duplicate content selector in page.' ); }
+						$items[$tree['key']] = $tree['value'];
+					}
 				} else {
 					$selected = array();
 					foreach ( $keys as $key ) { $tree = $this->tree( $entry['key'], $head, $key ); if ( false !== $tree ) { $selected[] = $tree; } }
@@ -469,6 +487,31 @@ class LegacyTableRepository {
 			}
 			if ( $this->reader->head( $entry['key'] ) !== $head ) { $this->fail( 'Content changed during window read.' ); }
 			return $this->finish_history_read( array( 'items' => $items, 'progress' => $entry['root']['wrapper']['values']['progress'], 'total' => $entry['root']['root_count'], 'revision' => false === $head ? null : $head['revision'] ) );
+		} catch ( \Exception $error ) { $this->history_read_active = false; throw $error; }
+		catch ( \Throwable $error ) { $this->history_read_active = false; throw $error; }
+	}
+
+	/** One budget for all retained selected findings; every tree admits metadata before payload. */
+	public function content_selected( $keys ) {
+		if ( $this->history_read_active || ! is_array( $keys ) || count( $keys ) > $this->max_rows ) { $this->fail( 'Invalid selected content keys.' ); }
+		$this->start_budget(); $this->history_read_active = true;
+		try {
+			$seen = array();
+			foreach ( $keys as $key ) {
+				$this->typed_key( $key ); $hash = $this->codec->key_hash( $key );
+				if ( isset( $seen[$hash] ) ) { $this->fail( 'Duplicate selected content key.' ); }
+				$seen[$hash] = true; $this->consume( 0, strlen( $this->codec->key_value( $key ) ) );
+			}
+			$entry = $this->content_context(); $head = $entry['head']; $items = array();
+			if ( false !== $head ) {
+				foreach ( $keys as $key ) {
+					$tree = $this->tree( $entry['key'], $head, $key );
+					if ( false !== $tree ) { $items[$tree['key']] = $tree['value']; }
+				}
+			}
+			if ( $this->reader->head( $entry['key'] ) !== $head ) { $this->fail( 'Content changed during selected read.' ); }
+			return $this->finish_history_read( array( 'items' => $items, 'progress' => $entry['root']['wrapper']['values']['progress'],
+				'total' => $entry['root']['root_count'], 'revision' => false === $head ? null : $head['revision'] ) );
 		} catch ( \Exception $error ) { $this->history_read_active = false; throw $error; }
 		catch ( \Throwable $error ) { $this->history_read_active = false; throw $error; }
 	}
