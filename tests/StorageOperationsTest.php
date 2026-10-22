@@ -7,7 +7,10 @@ use FooPlugins\FooGalleryMigrate\StorageConversion;
 use PHPUnit\Framework\TestCase;
 
 class StorageOperationsTest extends TestCase {
+	private $saved_memory_limit;
 	protected function setUp(): void {
+		$this->saved_memory_limit = ini_get( 'memory_limit' );
+		ini_set( 'memory_limit', '128M' );
 		$GLOBALS['wpdb'] = new OperationsNoSqlWpdb();
 		$GLOBALS['wp_version'] = '6.9-test';
 		$GLOBALS['foogallery_migrate_test_blog_id'] = 1;
@@ -16,6 +19,7 @@ class StorageOperationsTest extends TestCase {
 		$_SERVER['REQUEST_METHOD'] = 'POST';
 	}
 	protected function tearDown(): void {
+		ini_set( 'memory_limit', $this->saved_memory_limit );
 		unset( $GLOBALS['wpdb'], $GLOBALS['wp_version'], $GLOBALS['foogallery_migrate_test_blog_id'], $GLOBALS['foogallery_migrate_test_capabilities'], $GLOBALS['foogallery_migrate_test_nonce'], $_SERVER['REQUEST_METHOD'] );
 		$_POST = array();
 	}
@@ -46,13 +50,13 @@ class StorageOperationsTest extends TestCase {
 		$this->assertSame( 'foogallery_migrate_storage_' . $suffix, $result->get_error_code() );
 		$this->assertSame( array(), $GLOBALS['wpdb']->calls );
 	}
-	public function test_missing_calibration_refuses_all_authorized_operations_before_sql(): void {
+	public function test_release_policy_refuses_low_memory_before_sql_for_all_operations(): void {
 		$receiver = new StorageOperations();
-		$this->error( 'calibration_required', $receiver->dispatch( 'preflight', $this->request() ) );
-		$this->error( 'calibration_required', $receiver->dispatch( 'switch', $this->request() ) );
+		$this->error( 'decode_refused', $receiver->dispatch( 'preflight', $this->request() ) );
+		$this->error( 'decode_refused', $receiver->dispatch( 'switch', $this->request() ) );
 		$r = $this->request(); $r['confirmation'] = 'recover-storage';
 		$GLOBALS['foogallery_migrate_test_nonce']['action'] = 'foogallery_migrate_storage_recover_1';
-		$this->error( 'calibration_required', $receiver->dispatch( 'recover', $r ) );
+		$this->error( 'decode_refused', $receiver->dispatch( 'recover', $r ) );
 	}
 	public function test_encoding_failure_never_matches_the_old_empty_identity_hash_before_sql(): void {
 		$profile = $this->profile();
@@ -108,7 +112,7 @@ class StorageOperationsTest extends TestCase {
 		$r['confirmation'] = 'replace-retained-with-table';
 		$this->error( 'invalid_nonce', $receiver->dispatch( 'replace', $r ) );
 		$GLOBALS['foogallery_migrate_test_nonce']['action'] = 'foogallery_migrate_storage_option_reimport_1';
-		$this->error( 'calibration_required', $receiver->dispatch( 'replace', $r ) );
+		$this->error( 'decode_refused', $receiver->dispatch( 'replace', $r ) );
 		$this->error( 'decode_policy_required', ( new StorageConversion() )->replace_retained( $r ) );
 		$r['target'] = 'option';
 		$this->error( 'invalid_request', $receiver->dispatch( 'replace', $r ) );
@@ -120,7 +124,7 @@ class StorageOperationsTest extends TestCase {
 		$_SERVER['REQUEST_METHOD'] = 'POST'; $_POST['policy'] = array( 'amplification' => 1 );
 		$this->assertHttpError( 'invalid_request', 400 );
 		unset( $_POST['policy'] );
-		$this->assertHttpError( 'calibration_required', 409 );
+		$this->assertHttpError( 'decode_refused', 409 );
 		$GLOBALS['foogallery_migrate_test_capabilities']['manage_options'] = false;
 		$this->assertHttpError( 'forbidden', 403 );
 	}

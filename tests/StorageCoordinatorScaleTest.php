@@ -56,11 +56,19 @@ class StorageCoordinatorScaleTest extends TestCase {
 		$this->assertNull( $this->get( $a, 'clock' ) ); $this->assertNull( $this->get( $a, 'memory' ) );
 		$this->assertSame( 24576, $a->limit( 'max_rows' ) );
 		$this->assertGreaterThan( 0, $this->get( $a, 'work' ) );
-		foreach ( array( null, array_merge( $this->profile(), array( 'status' => 'measurement_only' ) ), array_merge( $this->profile(), array( 'fingerprint' => str_repeat( '0', 64 ) ) ) ) as $profile ) {
+		// Explicit old profiles remain private diagnostic fixtures and require identity.
+		foreach ( array( array_merge( $this->profile(), array( 'status' => 'measurement_only' ) ), array_merge( $this->profile(), array( 'fingerprint' => str_repeat( '0', 64 ) ) ) ) as $profile ) {
 			$GLOBALS['wpdb']->manager = null;
 			$this->assertSame( 'foogallery_migrate_storage_calibration_required', ( new StorageOperations( $profile ) )->dispatch( 'switch', $this->request() )->get_error_code() );
 			$this->assertNull( $GLOBALS['wpdb']->manager );
 		}
+		$previous_limit = ini_get( 'memory_limit' );
+		try {
+			ini_set( 'memory_limit', '128M' );
+			$GLOBALS['wpdb']->manager = null;
+			$this->assertSame( 'foogallery_migrate_storage_decode_refused', ( new StorageOperations() )->dispatch( 'switch', $this->request() )->get_error_code() );
+			$this->assertNull( $GLOBALS['wpdb']->manager ); // Low memory refuses before the SQL spy.
+		} finally { ini_set( 'memory_limit', $previous_limit ); }
 		$r = $this->request(); $r['scale'] = StorageScaleAdmissionTest::policy();
 		$this->assertSame( 'foogallery_migrate_storage_invalid_request', $receiver->dispatch( 'switch', $r )->get_error_code() );
 	}

@@ -1,1 +1,1 @@
-{"schema_version":2,"model_version":1,"implementation_sha256":null,"training_evidence_sha256":null,"classes":[]}
+{"version":1,"max_raw_bytes":3145728,"decode_amplification":16,"reserve_bytes":134217728,"phase_headroom_bytes":33554432}

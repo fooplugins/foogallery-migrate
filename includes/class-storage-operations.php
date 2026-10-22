@@ -32,18 +32,18 @@ class StorageOperations {
 		StorageScalarObserver::milestone( 'authorized' );
 		$memory->sample();
 		// Explicit constructor profiles are a legacy private test dependency.
-		// UI, registered HTTP and CLI all use the fixed release resolver. The old
-		// calibration filter cannot approve the production path.
+		// UI, registered HTTP and CLI use the fixed release-owned policy.
 		$capacity = null;
 		if ( null === $this->calibration ) {
 			$class = StorageCapacityPolicy::resolve(); if ( is_wp_error( $class ) ) { return $class; }
 			if ( function_exists( 'wp_raise_memory_limit' ) ) { wp_raise_memory_limit( 'admin' ); }
+			$policy = array( 'max_raw_bytes' => $class['limits']['max_raw_bytes'],
+				'amplification' => $class['amplification'], 'reserve_bytes' => $class['reserve_bytes'] );
+			$headroom = StoragePreflight::decode_budget( 0, ini_get( 'memory_limit' ), $memory->sample(), $policy );
+			if ( is_wp_error( $headroom ) ) { return $headroom; }
 			try { $capacity = new StorageCapacityBudget( $class ); }
 			catch ( \Exception $error ) { return self::refused(); }
 			catch ( \Throwable $error ) { return self::refused(); }
-			// Compatibility bridge for raw-size APIs only. No old numeric profile
-			// selects or approves a release class, and no old amplification runs.
-			$policy = array( 'max_raw_bytes' => $capacity->limit( 'max_raw_bytes' ), 'amplification' => 1, 'reserve_bytes' => $class['reserve_bytes'] );
 		} else { $policy = StorageCalibration::policy( $this->calibration ); }
 		if ( is_wp_error( $policy ) ) { return $policy; }
 		StorageScalarObserver::milestone( 'policy' );

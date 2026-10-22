@@ -3,7 +3,9 @@ namespace FooPlugins\FooGalleryMigrate\Tests;
 
 use FooPlugins\FooGalleryMigrate\StorageCapacityPolicy as Policy;
 use FooPlugins\FooGalleryMigrate\StorageCapacityBudget as Budget;
+use FooPlugins\FooGalleryMigrate\StoragePreflight;
 use PHPUnit\Framework\TestCase;
+require_once __DIR__ . '/support/StorageA7OptionsFixture.php';
 
 class StorageCapacityPolicyTest extends TestCase {
 	public static function capacity_class() {
@@ -21,10 +23,38 @@ class StorageCapacityPolicyTest extends TestCase {
 		try { $callback(); $this->fail( 'Invalid capacity input admitted.' ); }
 		catch ( \RuntimeException $e ) { $this->assertNotEmpty( $e->getMessage() ); }
 	}
-	public function test_unreceived_release_is_fail_closed_and_data_is_not_executed(): void {
-		$this->assertInstanceOf( \WP_Error::class, Policy::resolve() );
+	public function test_release_owned_policy_has_finite_headroom_without_host_qualification(): void {
+		$release = Policy::resolve();
+		$this->assertIsArray( $release );
+		$this->assertSame( 1, $release['release_version'] );
+		$this->assertSame( 3145728, $release['limits']['max_raw_bytes'] );
+		$this->assertSame( 16, $release['amplification'] );
+		$this->assertSame( 134217728, $release['reserve_bytes'] );
+		$this->assertSame( 33554432, $release['phase_headroom_bytes'] );
+		$this->assertArrayNotHasKey( 'eligibility', $release );
+		$this->assertArrayNotHasKey( 'qualification_id', $release );
+		$this->assertSame( $release, Policy::release_policy( trim( file_get_contents( dirname( __DIR__ ) . '/includes/storage-capacity-policy.json' ) ) ) );
+		$this->refused( function () { Policy::release_policy( '{"version":1,"max_raw_bytes":3145729,"decode_amplification":16,"reserve_bytes":134217728,"phase_headroom_bytes":33554432}' ); } );
+		$this->refused( function () { Policy::release_policy( '{"version":1,"max_raw_bytes":3145728,"decode_amplification":1,"reserve_bytes":134217728,"phase_headroom_bytes":33554432}' ); } );
+		$this->refused( function () { Policy::release_policy( '{"version":1,"max_raw_bytes":3145728,"decode_amplification":16,"reserve_bytes":1,"phase_headroom_bytes":33554432}' ); } );
+		$this->refused( function () { Policy::release_policy( '{"version":1,"max_raw_bytes":3145728,"decode_amplification":16,"reserve_bytes":134217728,"phase_headroom_bytes":33554432,"unknown":true}' ); } );
 		$this->refused( function () { Policy::parse( '<?php exit;', str_repeat( 'a', 64 ) ); } );
 		$this->refused( function () { Policy::parse( str_repeat( ' ', Policy::MAX_BYTES + 1 ), str_repeat( 'a', 64 ) ); } );
+	}
+	public function test_release_policy_admits_native_20k_budget_and_refuses_raw_or_memory_overage(): void {
+		$release = Policy::resolve();
+		$policy = array( 'max_raw_bytes' => $release['limits']['max_raw_bytes'], 'amplification' => $release['amplification'],
+			'reserve_bytes' => $release['reserve_bytes'] );
+		$bytes = StorageA7OptionsFixture::RAW_BYTES;
+		$this->assertLessThan( $policy['max_raw_bytes'], $bytes );
+		$admitted = StoragePreflight::decode_budget( $bytes, '256M', 46661632, $policy );
+		$this->assertIsArray( $admitted );
+		$this->assertSame( 47972688, $admitted['estimated_decode_bytes'] );
+		foreach ( array( array( $bytes, '128M' ), array( $policy['max_raw_bytes'] + 1, '512M' ) ) as $case ) {
+			$refusal = StoragePreflight::decode_budget( $case[0], $case[1], 46661632, $policy );
+			$this->assertInstanceOf( \WP_Error::class, $refusal );
+			$this->assertSame( 'foogallery_migrate_storage_decode_refused', $refusal->get_error_code() );
+		}
 	}
 	public function test_strict_schema_duplicate_unknown_missing_bad_numeric_binding_and_utf8(): void {
 		$p = self::policy(); $raw = json_encode( $p );

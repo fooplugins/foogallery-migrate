@@ -15,8 +15,8 @@ class StoragePreflight {
 	private $incoming_memory;
 
 	/**
-	 * Policy must come from trusted, benchmarked server configuration, never POST.
-	 * There is deliberately no default amplification factor or raw-size ceiling.
+	 * Policy comes from the shipped release resolver or an explicit private
+	 * test dependency, never POST. A missing policy always refuses.
 	 */
 	private $capacity;
 	public function __construct( $database = null, $policy = null, $memory = null, $capacity = null ) {
@@ -63,15 +63,16 @@ class StoragePreflight {
 		if ( is_wp_error( $site ) ) { return $site; }
 		$bytes = $this->option_size();
 		if ( is_wp_error( $bytes ) ) { return $bytes; }
+		$budget = self::decode_budget( $bytes, ini_get( 'memory_limit' ), $memory->sample(), $this->policy );
+		if ( is_wp_error( $budget ) ) { return $budget; }
 		if ( null !== $this->capacity ) {
 			try {
 				$token = $this->capacity->open( $this, 'fetch_scan', array( 'R' => $bytes ) );
 				$this->capacity->close( $this, $token );
-				$budget = array( 'decode_admitted' => false, 'raw_bytes' => $bytes, 'structural_admission_required' => true );
+				$budget['structural_admission_required'] = true;
 			} catch ( \Exception $error ) { return self::refused_error(); }
 			catch ( \Throwable $error ) { return self::refused_error(); }
-		} else { $budget = self::decode_budget( $bytes, ini_get( 'memory_limit' ), $memory->sample(), $this->policy ); }
-		if ( is_wp_error( $budget ) ) { return $budget; }
+		}
 		$budget['blog_id'] = $blog_id;
 		$budget['conversion_ready'] = false;
 		return $budget;
@@ -100,9 +101,9 @@ class StoragePreflight {
 	 * Bounded admission arithmetic, also usable by a future authenticated CLI.
 	 * Optional phase only labels an already-authorized private scalar diagnostic;
 	 * it cannot arm observation or alter the returned admission decision.
-	 * Unlimited PHP memory still obeys the calibrated hard raw-byte ceiling.
+	 * Unlimited PHP memory still obeys the release hard raw-byte ceiling.
 	 * reserve_bytes covers retained data, staging, validation and response work;
-	 * the factor must include the raw string AND decoded graph peak allocation.
+	 * the factor includes the raw string and decoded graph allocation.
 	 */
 	public static function decode_budget( $raw_bytes, $memory_limit, $memory_used, $policy, $diagnostic_phase = null ) {
 		if ( ! is_array( $policy ) || 3 !== count( $policy ) ) {

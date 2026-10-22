@@ -18,7 +18,7 @@ final class StorageCapacityBudget {
 
 	/** Injected observers are private harness dependencies, never request fields. */
 	public function __construct( $class, $clock = null, $memory = null ) {
-		$this->class = StorageCapacityPolicy::validate_class( $class );
+		$this->class = isset( $class['release_version'] ) ? self::release_class( $class ) : StorageCapacityPolicy::validate_class( $class );
 		if ( ( null !== $clock && ! is_callable( $clock ) ) || ( null !== $memory && ! is_callable( $memory ) ) ) { self::fail(); }
 		$this->clock = $clock; $this->memory = $memory;
 		$this->deadline = $this->now() + $this->limit( 'max_seconds' );
@@ -46,9 +46,12 @@ final class StorageCapacityBudget {
 	public function open( $owner, $phase, $dimensions ) {
 		if ( ! is_object( $owner ) || ! in_array( $phase, StorageCapacityPolicy::phases(), true ) || count( $this->stack ) >= 65 || $this->serial >= 65536 ) { self::fail(); }
 		$d = $this->dimensions( $dimensions ); $pending = 0;
-		foreach ( $this->class['phase_envelopes'][$phase] as $domain ) {
-			$pending = self::add( $pending, $domain['fixed_bytes'] );
-			foreach ( $domain['per_dimension'] as $key => $coefficient ) { $pending = self::add( $pending, self::multiply( $coefficient, $d[$key] ) ); }
+		if ( isset( $this->class['release_version'] ) ) { $pending = $this->class['phase_headroom_bytes']; }
+		else {
+			foreach ( $this->class['phase_envelopes'][$phase] as $domain ) {
+				$pending = self::add( $pending, $domain['fixed_bytes'] );
+				foreach ( $domain['per_dimension'] as $key => $coefficient ) { $pending = self::add( $pending, self::multiply( $coefficient, $d[$key] ) ); }
+			}
 		}
 		$this->checkpoint( $pending );
 		$token = new \stdClass();
@@ -73,7 +76,7 @@ final class StorageCapacityBudget {
 		if ( $this->sampling ) { self::fail(); } $this->sampling = true;
 		$this->tick();
 		if ( ! is_int( $scratch ) || $scratch < 0 ) { self::fail(); }
-		$sample = null === $this->memory ? self::observe() : call_user_func( $this->memory );
+		$sample = null === $this->memory ? $this->observe() : call_user_func( $this->memory );
 		$this->sampling = false;
 		if ( ! is_array( $sample ) || array_keys( $sample ) !== array( 'limit', 'zend', 'live', 'rss', 'peak' ) ) { self::fail(); }
 		$limit = StoragePreflight::memory_bytes( $sample['limit'] );
@@ -84,15 +87,32 @@ final class StorageCapacityBudget {
 		foreach ( $this->stack as $scope ) { $pending = self::add( $pending, $scope['pending'] ); }
 		if ( $pending > $ceiling ) { self::fail(); }
 	}
-	private static function observe() {
-		// Bounded Linux process observation. Do not subtract Zend from RSS or
-		// confuse this sample with a kernel/native allocation ceiling.
+	private function observe() {
+		if ( isset( $this->class['release_version'] ) ) {
+			// Portable real-size peak plus the release reserve for untracked native
+			// allocations; not a claim of allocator-specific peak proof.
+			$zend = memory_get_usage( true ); $live = memory_get_usage( false ); $peak = memory_get_peak_usage( true );
+			if ( ! is_int( $zend ) || ! is_int( $live ) || ! is_int( $peak ) || $zend < 0 || $live < 0 || $peak < 0 ) { self::fail(); }
+			return array( 'limit' => ini_get( 'memory_limit' ), 'zend' => $zend, 'live' => $live, 'rss' => $zend, 'peak' => $peak );
+		}
+		// The old host-qualified envelope remains a diagnostic-only dependency.
 		if ( 'Linux' !== PHP_OS || ! is_readable( '/proc/self/status' ) || ! function_exists( 'getrusage' ) ) { self::fail(); }
 		$raw = file_get_contents( '/proc/self/status', false, null, 0, 8193 );
 		if ( ! is_string( $raw ) || strlen( $raw ) > 8192 || ! preg_match( '/^VmRSS:\s+([0-9]+) kB$/m', $raw, $match ) || (string) (int) $match[1] !== $match[1] ) { self::fail(); }
 		$rss = self::multiply( (int) $match[1], 1024 ); $usage = getrusage();
 		if ( ! is_array( $usage ) || ! isset( $usage['ru_maxrss'] ) || ! is_int( $usage['ru_maxrss'] ) || $usage['ru_maxrss'] < 0 ) { self::fail(); }
 		return array( 'limit' => ini_get( 'memory_limit' ), 'zend' => memory_get_usage( true ), 'live' => memory_get_usage( false ), 'rss' => $rss, 'peak' => self::multiply( $usage['ru_maxrss'], 1024 ) );
+	}
+	private static function release_class( $class ) {
+		if ( ! is_array( $class ) || array_keys( $class ) !== array( 'release_version', 'limits', 'reserve_bytes', 'amplification', 'phase_headroom_bytes' ) ||
+			1 !== $class['release_version'] || ! is_array( $class['limits'] ) || ! isset( $class['limits']['max_raw_bytes'] ) ||
+			$class['limits'] !== array_replace( StorageCapacityPolicy::ceilings(), array(
+				'max_raw_bytes' => $class['limits']['max_raw_bytes'], 'memory_ceiling_bytes' => 536870912 ) ) ||
+			! is_int( $class['reserve_bytes'] ) || $class['reserve_bytes'] < 134217728 || $class['reserve_bytes'] > 268435456 ||
+			! is_int( $class['amplification'] ) || $class['amplification'] < 16 || $class['amplification'] > 64 ||
+			! is_int( $class['phase_headroom_bytes'] ) || $class['phase_headroom_bytes'] < 33554432 || $class['phase_headroom_bytes'] > 67108864 ||
+			! is_int( $class['limits']['max_raw_bytes'] ) || $class['limits']['max_raw_bytes'] < 1 || $class['limits']['max_raw_bytes'] > 3145728 ) { self::fail(); }
+		return $class;
 	}
 	public static function add( $a, $b ) { if ( ! is_int( $a ) || ! is_int( $b ) || $a < 0 || $b < 0 || $b > PHP_INT_MAX - $a ) { self::fail(); } return $a + $b; }
 	public static function multiply( $a, $b ) { if ( ! is_int( $a ) || ! is_int( $b ) || $a < 0 || $b < 0 ) { self::fail(); } $n = $a * $b; if ( ! is_int( $n ) ) { self::fail(); } return $n; }

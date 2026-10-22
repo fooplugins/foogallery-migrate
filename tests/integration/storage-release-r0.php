@@ -1,11 +1,11 @@
 <?php
 /**
  * Owned, disposable modern-runtime start of the production storage journey.
- * Usage: php storage-release-r0.php /tmp/foogallery-migrate-r0.XXXXXX seed|preflight|status
+ * Usage: php storage-release-r0.php /tmp/foogallery-migrate-r0.XXXXXX seed|preflight|preflight-low-memory|provision|switch|recover|status
  * Keep the site and SQL container after RED so the exact state can be inspected.
  */
-if ( 'cli' !== PHP_SAPI || 3 !== $argc || ! in_array( $argv[2], array( 'seed', 'preflight', 'status' ), true ) ) {
-	throw new RuntimeException( 'An owned site path and seed, preflight or status are required.' );
+if ( 'cli' !== PHP_SAPI || 3 !== $argc || ! in_array( $argv[2], array( 'seed', 'preflight', 'preflight-low-memory', 'provision', 'switch', 'recover', 'status' ), true ) ) {
+	throw new RuntimeException( 'An owned site path and one explicit journey step are required.' );
 }
 $site = realpath( $argv[1] );
 if ( false === $site || ! preg_match( '~^/(?:private/)?tmp/foogallery-migrate-r0\.[A-Za-z0-9]+$~D', $site ) ) {
@@ -24,6 +24,10 @@ if ( ! is_file( $site . '/wp-load.php' ) || ! is_file( $site . '/wp-config.php' 
 	realpath( $site . '/wp-content/plugins/foogallery-migrate' ) !== realpath( $manifest['repo'] ) ) {
 	throw new RuntimeException( 'WordPress installation or plugin source does not match the owned manifest.' );
 }
+if ( 'preflight-low-memory' === $argv[2] ) {
+	define( 'WP_MAX_MEMORY_LIMIT', '128M' );
+	ini_set( 'memory_limit', '128M' );
+}
 require $site . '/wp-load.php';
 require_once dirname( __DIR__ ) . '/support/StorageA7OptionsFixture.php';
 require_once dirname( __DIR__ ) . '/support/StorageReleaseJourney.php';
@@ -33,6 +37,9 @@ use FooPlugins\FooGalleryMigrate\Tests\StorageReleaseJourney as Journey;
 use FooPlugins\FooGalleryMigrate\StorageAuthority;
 use FooPlugins\FooGalleryMigrate\StorageCapacityPolicy;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
+use FooPlugins\FooGalleryMigrate\StorageAdmin;
+use FooPlugins\FooGalleryMigrate\StorageControl;
+use FooPlugins\FooGalleryMigrate\StorageScalarObserver;
 
 global $wpdb, $wp_version;
 Journey::check( ! is_multisite() && DB_NAME === $manifest['database'] && DB_HOST === $manifest['host'] &&
@@ -63,14 +70,20 @@ if ( 'seed' === $step ) {
 }
 Journey::check( $journal === $seed_identity || 'seed' === $step, 'Missing or mismatched owned seed journal.' );
 $persisted = $raw( FOOGALLERY_MIGRATE_OPTION_DATA );
+if ( null === $persisted ) { $persisted = $raw( StorageAuthority::STORAGE_BACKUP_OPTION ); }
 Journey::check( is_string( $persisted ) && strlen( $persisted ) === Native::RAW_BYTES &&
-	hash( 'sha256', $persisted ) === Native::RAW_SHA256, 'Native-text SQL seed changed.' );
+	hash( 'sha256', $persisted ) === Native::RAW_SHA256, 'Native-text SQL seed/backup changed.' );
 unset( $persisted );
 $result = array( 'step' => $step, 'site' => $site, 'database' => $manifest['database'], 'db_host' => $manifest['host'],
 	'php' => PHP_VERSION, 'wordpress' => $wp_version, 'mysql' => $wpdb->get_var( 'SELECT VERSION()' ),
 	'implementation_digest' => StorageCapacityPolicy::implementation_digest(), 'fixture' => Native::NAME,
 	'raw_bytes' => Native::RAW_BYTES, 'raw_sha256' => Native::RAW_SHA256 );
-if ( 'preflight' === $step ) {
+if ( 'preflight' === $step || 'preflight-low-memory' === $step ) {
+	if ( 'preflight-low-memory' === $step ) {
+		ini_set( 'memory_limit', '128M' );
+		Journey::check( '128M' === ini_get( 'memory_limit' ) && '128M' === WP_MAX_MEMORY_LIMIT,
+			'Low-memory fixture could not set its WordPress/PHP limit.' );
+	}
 	foreach ( $storage_options as $name ) { Journey::check( null === $raw( $name ), 'Storage marker appeared before preflight.' ); }
 	$tables = array_keys( ( new LegacyStorageSchema( $wpdb ) )->definitions() );
 	foreach ( $tables as $table ) {
@@ -94,4 +107,37 @@ if ( 'preflight' === $step ) {
 		exit( 1 );
 	}
 }
+if ( in_array( $step, array( 'provision', 'switch', 'recover' ), true ) ) {
+	$control = $raw( StorageAuthority::CONTROL_OPTION );
+	if ( 'provision' === $step || 'switch' === $step ) {
+		Journey::check( null === $control, 'An existing control forbids starting this step.' );
+	} else {
+		$record = StorageControl::decode( $control, get_current_blog_id() );
+		Journey::check( is_array( $record ) && 'stable' !== $record['phase'] && 'option' === $record['from'] &&
+			'table' === $record['to'], 'A forward copying/verification control is required.' );
+	}
+	if ( 'switch' === $step || 'recover' === $step ) {
+		Journey::check( ( new LegacyStorageSchema( $wpdb ) )->verify(), 'Owned SQL schema is not verified.' );
+	}
+	$enabled = new ReflectionProperty( 'FooPlugins\\FooGalleryMigrate\\StorageScalarObserver', 'milestones_enabled' );
+	$milestones = new ReflectionProperty( 'FooPlugins\\FooGalleryMigrate\\StorageScalarObserver', 'milestones' );
+	$refusal = new ReflectionProperty( 'FooPlugins\\FooGalleryMigrate\\StorageScalarObserver', 'refusal' );
+	$enabled->setValue( null, true ); $milestones->setValue( null, array() ); $refusal->setValue( null, null );
+	try { $result['result'] = Journey::request( 'switch' === $step ? 'switch' : ( 'recover' === $step ? 'recover' : 'provision' ), 'table' ); }
+	catch ( RuntimeException $error ) { $result['failure'] = $error->getMessage(); }
+	$result['milestones'] = array();
+	foreach ( $milestones->getValue() as $event ) {
+		$result['milestones'][] = array( 'name' => $event['name'], 'elapsed_seconds' => round( $event['time'] - $milestones->getValue()[0]['time'], 3 ),
+			'peak_allocated_bytes' => $event['peak_allocated_cumulative'] );
+	}
+	$result['refusal'] = $refusal->getValue();
+	$result['status'] = StorageAdmin::status();
+	$source = $raw( FOOGALLERY_MIGRATE_OPTION_DATA );
+	$backup = $raw( StorageAuthority::STORAGE_BACKUP_OPTION );
+	Journey::check( ( is_string( $source ) && hash( 'sha256', $source ) === Native::RAW_SHA256 ) ||
+		( is_string( $backup ) && hash( 'sha256', $backup ) === Native::RAW_SHA256 ), 'Original seed/backup changed after public step.' );
+	echo json_encode( $result, JSON_UNESCAPED_SLASHES ) . "\n";
+	exit( isset( $result['failure'] ) ? 1 : 0 );
+}
+if ( 'status' === $step ) { $result['status'] = StorageAdmin::status(); }
 echo json_encode( $result, JSON_UNESCAPED_SLASHES ) . "\n";

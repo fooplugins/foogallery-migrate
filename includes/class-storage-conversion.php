@@ -453,23 +453,25 @@ class StorageConversion {
 	}
 
 	/** Serialized option reads/decoding/reverse encoding keep the exact raw cap. */
-	private function budget( $bytes ) { $this->memory_budget( $bytes, $this->policy ); }
+	private function budget( $bytes ) { $this->memory_budget( $bytes, $this->policy, true ); }
 
 	/** Derived envelopes use the existing finite table cap, not the raw source cap. */
 	private function table_budget( $bytes ) {
 		$policy = $this->policy;
 		$policy['max_raw_bytes'] = $this->limit( 'max_bytes', 16777216 );
-		$this->memory_budget( $bytes, $policy );
+		$this->memory_budget( $bytes, $policy, false );
 	}
 
-	/** Same amplification/reserve, co-live sample and operation-owned scale checks. */
-	private function memory_budget( $bytes, $policy ) {
+	/** Full option decode needs the raw forecast; table pages use their bounded workspace. */
+	private function memory_budget( $bytes, $policy, $full_decode ) {
+		if ( $full_decode || null === $this->capacity() ) {
+			$result = StoragePreflight::decode_budget( $bytes, ini_get( 'memory_limit' ), $this->memory->sample(), $policy, 'conversion-budget' );
+			$this->require_true( ! is_wp_error( $result ) && true === $result['decode_admitted'] );
+		}
 		if ( null !== $this->scale ) { $this->scale->admit_memory( $bytes ); }
 		if ( null !== $this->capacity() ) {
 			$this->require_true( is_int( $bytes ) && $bytes >= 0 && $bytes <= $policy['max_raw_bytes'] ); return;
 		}
-		$result = StoragePreflight::decode_budget( $bytes, ini_get( 'memory_limit' ), $this->memory->sample(), $policy, 'conversion-budget' );
-		$this->require_true( ! is_wp_error( $result ) && true === $result['decode_admitted'] );
 	}
 
 	/** Consume receiver context once; direct/reused coordinators get a fresh operation. */

@@ -2,7 +2,7 @@
 
 **Updated:** 2026-10-22
 
-**Status:** R0 validated; R1a capacity-policy repair next under the approved five cuts.
+**Status:** R0 committed; R1a capacity-policy repair validated for commit; growing-prefix copy deadline repair R1b next.
 
 **Branch:** `feature/migrated-store-scalability`
 
@@ -67,7 +67,7 @@ Historical receipts: [October 20 review](pr15-review-checkpoint-2026-10-20.md), 
 
 ## Ordered work
 
-R0–R4 replace the previous S0–S9 sequence. R0 is validated for the checkpoint commit; R1a is next and R2–R4 remain pending. Independent QA is GPT-6 Sol Medium, separate from the developer.
+R0–R4 replace the previous S0–S9 sequence. R0 is done in `c7eda75`; R1a is developing and R2–R4 remain pending. Independent QA is GPT-6 Sol Medium, separate from the developer.
 
 | ID | Deliverable / exit | Depends on | Owned areas | Proposed developer and reason |
 |---|---|---|---|---|
@@ -191,14 +191,14 @@ Read guards and phase parameters before using `tests/integration/storage-release
 
 ## Tracking, deferred work and handoff
 
-- **Active task:** R1a next — release-owned capacity policy and production preflight.
+- **Active task:** R1a — release-owned capacity policy and production preflight; independent floor-runtime setup proceeds alongside it.
 - **Current authorization:** Development, delegated QA, disposable test setup and scoped local commits. No push/merge/release requested.
 - **Documentation validation:** File/heading links, code-fence balance, active task IDs and whitespace checked across the three changed documents. No runtime tests were run or runtime pass claimed for this update.
 - **Statuses:** `pending → developing → qa → validating → done`; use `blocked` / `budget-stopped` with a precise reason.
-- **Per-task ledger:** R0 developer `/root/r0_journey`, GPT-6 Sol High (environment/isolation and failure attribution); independent QA `/root/r0_qa`, GPT-6 Sol Medium. Repairs 0; QA passed and supervisor reproduced the public refusal. Kickoff plan committed as `54f7ae2`; R0 acceptance belongs to this checkpoint commit. R1a reuses Sol High because admission spans receiver, decoder and conversion safety.
+- **Per-task ledger:** R0 developer `/root/r0_journey`, GPT-6 Sol High (environment/isolation and failure attribution); independent QA `/root/r0_qa`, GPT-6 Sol Medium. Repairs 0; QA passed and supervisor reproduced the public refusal. Kickoff plan committed as `54f7ae2`; R0 accepted as `c7eda75`. R1a reuses `/root/r0_journey`, Sol High, because admission spans receiver, decoder and conversion safety; repairs 0, QA not assigned yet. `/root/r1_floor`, Sol High, owns independent disposable floor-environment preparation only; no production/shared-runner writes.
 - **Shared files:** R1/R2 share engine/settings/repository/lifecycle code. R3 consumes their services. Default is serial ownership and integration; no parallel work scheduled.
 - **Supervisor:** Current session's exact model/effort cannot be independently verified. Developer routing remains explicit Sol High for R0 and Sol Medium for independent QA.
-- **Active workers / wakeups:** R0 developer and QA finished; R1a dispatch next. No scheduled wakeups.
+- **Active workers / wakeups:** `/root/r0_journey` on R1a; `/root/r1_floor` on runtime preparation. No scheduled wakeups.
 - **Deferred backlog, not follow-on authorized tasks:** Multisite table support/network lifecycle; advanced recommendation tiers/re-notification; convenience reset/stale-copy UI; broader diagnostic/host qualification polish. A future scope decision is required to schedule these. Do not label the first release incomplete merely because this backlog remains.
 - **Never implied:** New engine/config work, pushing, merging, deployment. Brad must explicitly confirm any WordPress.org live tag or stable-tag change.
 
@@ -213,6 +213,18 @@ Independent QA `/root/r0_qa` passed the runner's isolation, manifest/container b
 - Focused existing safety baseline: `php -d memory_limit=256M vendor/bin/phpunit --colors=never --do-not-cache-result --filter 'Storage(Preflight|Operations|Authority|SingleSitePolicy|Conversion)Test'`: **41 tests, 436 assertions pass**. Existing tests asserting absent customer calibration are expected to require explicit replacement when R1 changes that architecture; authorization and nonmutation assertions stay.
 - `node tests/ajax-js-regression.js` and `php tests/content-scan-regression.php` pass. `php tests/runtime-cleanup-regression.php`: 148 checks pass, explicitly fault-injection connection coverage, **not native cleanup acceptance**. No GitHub Actions workflow exists in this checkout; these direct repository checks are the applicable baseline.
 - Next smallest repair: replace the empty host-qualified production policy with measured, conservative release-owned admission, including portable memory checks (the old budget observer requires Linux `/proc`). Rerun the native preflight immediately; conversion, actual migration, reversal and cleanup remain unproven.
+
+Binary-safe follow-up discovery completed (exit 2): **1,621 tests, 309,954 assertions, 158 errors, 87 failures, 20 skips**. This run overlapped R1a edits, so it is a diagnostic inventory, not an immutable before/after receipt. Many errors are source-hash/callsite-bound allocator experiments (`StorageCurrent*` and predecessor trace/composition families); failures also include exact-host allocations and the now-changing absent-calibration assertions. These require explicit diagnostic disposition/replacement coverage in R4, not a blanket waiver. The content-reset and original20K snapshot-stat errors are being reproduced separately to distinguish product failures from host-only assumptions. No whole-suite pass is claimed.
+
+Targeted attribution (`--filter 'test_real_selected_reset_publishes_empty_map_before_replacement|test_callback_free_original20k_stats_do_not_admit_retained_output'`) confirms two errors: the content sentinel fake SQL connection does not implement the current keyset-window query (**fixture defect**, repair while preserving reset-before-side-effect assertions); the snapshot-stat test forces a 128M, original arbitrary-byte fixture through a host-dependent optimized path, falling into generic admission refusal (**performance/diagnostic boundary**, separate native-text positive coverage from lossless byte-codec tests before any retirement). Neither result proves a product data-integrity defect or permits deleting its underlying guarantee.
+
+### R1a evidence — capacity policy (accepted checkpoint)
+
+- Developer `/root/r0_journey`, Sol High; independent QA `/root/r0_qa`, Sol Medium. Scope: small shipped release policy and portable admission, no engine changes. Original host-class APIs remain diagnostics; production no longer selects exact host/certificate classes. Candidate limits: 3 MiB raw, 16x whole-option decode forecast, 128 MiB reserve and 32 MiB per active phase. These are not yet whole-journey/floor qualification.
+- Native WordPress hydration of the 2,998,293-byte fixture measured about 21.6 MiB additional allocated memory (~7.2x). Public preflight succeeds at 256M with a 44.5 MiB sampled baseline and ~48 MB decode forecast; `conversion_ready` remains false. The same public path capped at 128M refuses without modifying seed, markers or schema.
+- Explicit provision/switch and 11 bounded recover turns copied **11,264 of 20,208 rows**, peak allocated about 66.5 MiB (earlier process RSS samples ~97–110 MiB). Options remain authoritative. The next recover repeatedly hits the existing 10-second deadline after `source-decoded`; the last successful request took 9.875 seconds. Failed requests leave seed and cursor unchanged. Reproduce with `php tests/integration/storage-release-r0.php /tmp/foogallery-migrate-r0.S1gKqR recover`. **R1b must repair growing-prefix copy/verification work; do not simply inflate the deadline.**
+- Supervisor PHP lint and whitespace checks pass. Focused validation at the plan's 256M invocation found a new test assuming 128M without setting it (`StorageCoordinatorScaleTest`); test-fixture repair 1 now scopes/restores its limit explicitly. Developer and independent QA then ran `php -d memory_limit=256M vendor/bin/phpunit --colors=never --do-not-cache-result --filter 'Storage(CapacityPolicy|Operations|CoordinatorScale|Preflight|SingleSitePolicy)Test'`: **40 tests, 676 assertions pass**. QA reviewed the exact production diff and found no blocker; R1a is accepted in this checkpoint commit, not M1.
+- Directly amended absent-calibration assertions are replaced with release-policy parsing/bounds and low-memory-before-SQL checks; request authorization remains covered. QA also identified two old `StorageBaselineCompositionTest` allocation-release assumptions tied to the removed calibration filter. Reviewer `/root/r0_qa` confirmed their preceding entry-baseline-retention assertions and the direct high-water test pass; unchanged `sample()` retains max(real-size memory). The obsolete allocation-release assertions are classified for explicit release-path composition replacement at R4. The broader maintained suite remains red, not waived or green.
 
 ### Usage policy for this development run
 

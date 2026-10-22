@@ -19,7 +19,7 @@ final class StorageCapacityPolicy {
 			'max_response_bytes' => 65536, 'copy_batch_rows' => 1024, 'copy_batch_bytes' => 1048576 );
 	}
 
-	/** No discovery or executable include of policy data; fixed bounded read. */
+	/** One shipped release policy. Host identity and customer certificates are not admission inputs. */
 	public static function resolve() {
 		$site = StorageAuthority::table_mode_error();
 		if ( is_wp_error( $site ) ) { return $site; }
@@ -27,14 +27,27 @@ final class StorageCapacityPolicy {
 			$path = dirname( __FILE__ ) . '/storage-capacity-policy.json';
 			if ( ! is_file( $path ) || ! is_readable( $path ) ) { self::fail(); }
 			$raw = file_get_contents( $path, false, null, 0, self::MAX_BYTES + 1 );
-			$policy = self::parse( $raw, self::implementation_digest() );
-			$selected = self::select( $policy, self::facts() );
-			// Configuration may only deny or tighten a received class, not replace
-			// facts, implementation/evidence bindings, phases or coefficients.
-			$tight = apply_filters( 'foogallery_migrate_storage_capacity_restrict', $selected );
-			return self::tighten( $selected, $tight );
+			return self::release_policy( $raw );
 		} catch ( \Exception $error ) { return self::required(); }
 		catch ( \Throwable $error ) { return self::required(); }
+	}
+
+	/** Strict release-owned data. Old per-host class methods remain diagnostic only. */
+	public static function release_policy( $raw ) {
+		if ( ! is_string( $raw ) || '' === $raw || strlen( $raw ) > self::MAX_BYTES ) { self::fail(); }
+		$p = json_decode( $raw, true, 8 );
+		if ( JSON_ERROR_NONE !== json_last_error() || ! is_array( $p ) || json_encode( $p ) !== trim( $raw ) ) { self::fail(); }
+		self::keys( $p, array( 'version', 'max_raw_bytes', 'decode_amplification', 'reserve_bytes', 'phase_headroom_bytes' ) );
+		if ( 1 !== $p['version'] ) { self::fail(); }
+		self::integer( $p['max_raw_bytes'], 1, 3145728 );
+		self::integer( $p['decode_amplification'], 16, 64 );
+		self::integer( $p['reserve_bytes'], 134217728, 268435456 );
+		self::integer( $p['phase_headroom_bytes'], 33554432, 67108864 );
+		$limits = self::ceilings();
+		$limits['max_raw_bytes'] = $p['max_raw_bytes'];
+		$limits['memory_ceiling_bytes'] = 536870912;
+		return array( 'release_version' => 1, 'limits' => $limits, 'reserve_bytes' => $p['reserve_bytes'],
+			'amplification' => $p['decode_amplification'], 'phase_headroom_bytes' => $p['phase_headroom_bytes'] );
 	}
 
 	/** Pure validation is not release receiving or permission to execute storage. */
@@ -204,5 +217,5 @@ final class StorageCapacityPolicy {
 	private static function integer( $n, $min, $max ) { if ( ! is_int( $n ) || $n < $min || $n > $max ) { self::fail(); } }
 	private static function digest( $s ) { return is_string( $s ) && preg_match( '/^[a-f0-9]{64}$/D', $s ); }
 	private static function fail() { throw new \RuntimeException( 'Release storage capacity policy is absent, invalid, ineligible or ambiguous.' ); }
-	public static function required() { return new \WP_Error( 'foogallery_migrate_storage_calibration_required', __( 'No received release capacity class matches this runtime. Retain storage; no conversion was started.', 'foogallery-migrate' ) ); }
+	public static function required() { return new \WP_Error( 'foogallery_migrate_storage_policy_unavailable', __( 'The bundled release storage policy is missing or invalid. Retain storage; no conversion was started.', 'foogallery-migrate' ) ); }
 }
