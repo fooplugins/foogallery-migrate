@@ -1,12 +1,20 @@
 <?php
 /**
- * Owned, resumable actual AIGPL 10K fixture. One step per fresh CLI process.
+ * Owned, resumable actual AIGPL fixture. One step per fresh CLI process.
  *
- * php storage-release-real-journey.php /tmp/foogallery-migrate-r0.XXXXXX seed|verify-source|verify-destination|status|preflight|provision|switch|recover|turn|children|settings100|edit|reverse
+ * php storage-release-real-journey.php /tmp/foogallery-migrate-r0.XXXXXX seed|verify-source|verify-destination|verify-reversed|status|preflight|provision|switch|recover|turn|children|settings100|edit|reverse
+ * Append 1000 to the first seed call only for a new fitting fixture; the default remains 10K.
  * Seed and verify-source leave migration storage in its original option mode.
  * Turn/edit are for the later, explicitly table-backed R1c journey only.
  */
-if ( 'cli' !== PHP_SAPI || 3 !== $argc || ! in_array( $argv[2], array( 'seed', 'verify-source', 'verify-destination', 'status', 'preflight', 'provision', 'switch', 'recover', 'turn', 'children', 'settings100', 'edit', 'reverse' ), true ) ) {
+$wp_cli_mode = defined( 'WP_CLI' ) && WP_CLI;
+if ( $wp_cli_mode ) {
+	if ( ! isset( $args ) || ! is_array( $args ) ) { throw new RuntimeException( 'WP-CLI fixture arguments are unavailable.' ); }
+	$argv = array_merge( array( __FILE__ ), $args );
+	$argc = count( $argv );
+}
+if ( 'cli' !== PHP_SAPI || ! ( 3 === $argc || ( 4 === $argc && isset( $argv[2], $argv[3] ) && 'seed' === $argv[2] && '1000' === $argv[3] ) ) ||
+	! in_array( $argv[2], array( 'seed', 'verify-source', 'verify-destination', 'verify-reversed', 'status', 'preflight', 'provision', 'switch', 'recover', 'turn', 'children', 'settings100', 'edit', 'reverse' ), true ) ) {
 	throw new RuntimeException( 'An owned site path and one explicit step are required.' );
 }
 $site = realpath( $argv[1] );
@@ -33,11 +41,15 @@ if ( 0 !== $container_code || count( $container_check ) !== 1 ||
 	trim( $container_check[0] ) !== $manifest['container_id'] . ' owned' ) {
 	throw new RuntimeException( 'Owned SQL container identity mismatch.' );
 }
-define( 'WP_MAX_MEMORY_LIMIT', '256M' );
+if ( $wp_cli_mode && realpath( ABSPATH ) !== $site ) {
+	throw new RuntimeException( 'WP-CLI loaded a different site from the owned fixture.' );
+}
+if ( ! defined( 'WP_MAX_MEMORY_LIMIT' ) ) { define( 'WP_MAX_MEMORY_LIMIT', '256M' ); }
 ini_set( 'memory_limit', '256M' );
-require $site . '/wp-load.php';
+if ( ! $wp_cli_mode ) { require $site . '/wp-load.php'; }
 use FooPlugins\FooGalleryMigrate\StorageAdmin;
 use FooPlugins\FooGalleryMigrate\StorageAuthority;
+use FooPlugins\FooGalleryMigrate\StorageControl;
 use FooPlugins\FooGalleryMigrate\StorageCli;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
@@ -61,12 +73,12 @@ wp_set_current_user( 1 );
 real_check( current_user_can( 'manage_options' ), 'Owned administrator is unavailable.' );
 
 $step = $argv[2];
+$requested_total = 4 === $argc ? 1000 : null;
 $suffix = substr( $site, strrpos( $site, '.' ) + 1 );
 $owner = 'fgm-real-' . $suffix;
 $owner_key = '_fgm_real_fixture_owner';
 $journal_key = 'fgm_real_owned_journey_v1';
 $identity = hash( 'sha256', $site . '|' . $manifest['database'] . '|' . $manifest['container_id'] );
-$total = 10000;
 $batch = 256;
 $png = base64_decode( 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=' );
 $png_hash = hash( 'sha256', $png );
@@ -74,9 +86,20 @@ $upload = wp_upload_dir();
 real_check( empty( $upload['error'] ) && isset( $upload['basedir'], $upload['baseurl'] ) && is_dir( $upload['basedir'] ), 'Owned upload root is unavailable.' );
 $media_dir = $upload['basedir'] . '/' . $owner;
 $journal = get_option( $journal_key, null );
-$save = function ( $value ) use ( $journal_key ) {
-	real_check( update_option( $journal_key, $value, false ), 'Owned journal write failed.' );
-	real_check( get_option( $journal_key, null ) === $value, 'Owned journal readback failed.' );
+$total = null === $journal ? ( null === $requested_total ? 10000 : $requested_total ) :
+	( is_array( $journal ) && isset( $journal['total'] ) ? $journal['total'] : 10000 );
+real_check( is_int( $total ) && in_array( $total, array( 1000, 10000 ), true ) &&
+	( null === $journal || null === $requested_total ),
+	'Existing owned journal fixes size; requested size change refused.' );
+$save = function ( $value ) use ( $journal_key, $wpdb ) {
+	// An exact no-op may return false; durable raw SQL and Options API must agree.
+	update_option( $journal_key, $value, false );
+	$raw = $wpdb->get_var( $wpdb->prepare(
+		"SELECT option_value FROM `{$wpdb->options}` WHERE option_name=%s", $journal_key
+	) );
+	real_check( ! $wpdb->last_error && is_string( $raw ) &&
+		maybe_unserialize( $raw ) === $value && get_option( $journal_key, null ) === $value,
+		'Owned journal durable readback failed.' );
 };
 $owned_count = function ( $post_type ) use ( $wpdb, $owner_key, $owner ) {
 	$count = $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM `{$wpdb->posts}` p INNER JOIN `{$wpdb->postmeta}` m ON m.post_id=p.ID WHERE p.post_type=%s AND m.meta_key=%s AND m.meta_value=%s", $post_type, $owner_key, $owner ) );
@@ -98,7 +121,8 @@ $questions = function () use ( $wpdb ) {
 $assert_pristine_storage = function () use ( $raw_option, $wpdb ) {
 	foreach ( array( FOOGALLERY_MIGRATE_OPTION_DATA, StorageAuthority::CONTROL_OPTION,
 		StorageAuthority::AUTHORITY_OPTION, StorageAuthority::MAINTENANCE_OPTION,
-		StorageAuthority::STORAGE_BACKUP_OPTION, LegacyStorageSchema::VERSION_OPTION ) as $name ) {
+		StorageAuthority::STORAGE_BACKUP_OPTION, LegacyStorageSchema::VERSION_OPTION,
+		LegacyStorageSchema::LOCK_OPTION ) as $name ) {
 		real_check( null === $raw_option( $name ), 'Source seeding refuses existing migration storage or schema marker.' );
 	}
 	$schema = new LegacyStorageSchema( $wpdb );
@@ -148,13 +172,33 @@ $verify_source = function ( $state, $full ) use ( $total, $owner, $owner_key, $m
 		'content_sha256' => $state['content_sha256'], 'png_sha256' => $png_hash,
 		'files_checked' => $full ? $total : 0 );
 };
+$verify_destination = function ( $state ) use ( $total ) {
+	real_check( in_array( $state['phase'], array( 'complete', 'edited', 'reversing', 'reversed' ), true ) &&
+		$total === (int) $state['completed'] && isset( $state['uid'], $state['destination'] ),
+		'Completed owned migration required for destination proof.' );
+	$destination = get_post( $state['destination'] );
+	real_check( $destination && FOOGALLERY_CPT_GALLERY === $destination->post_type &&
+		$state['ids'] === get_post_meta( $destination->ID, FOOGALLERY_META_ATTACHMENTS, true ),
+		'Destination gallery or exact attachment order differs.' );
+	$matches = get_posts( array( 'post_type' => FOOGALLERY_CPT_GALLERY, 'post_status' => 'any',
+		'posts_per_page' => 2, 'fields' => 'ids', 'meta_key' => Migratable::META_SOURCE_KEY,
+		'meta_value' => $state['uid'] ) );
+	real_check( 1 === count( $matches ) && (int) $matches[0] === (int) $destination->ID,
+		'Actual destination ownership/uniqueness differs.' );
+	$output = do_shortcode( '[foogallery id="' . $destination->ID . '"]' );
+	real_check( is_string( $output ) && false !== strpos( $output, 'foogallery' ),
+		'Actual FooGallery output failed.' );
+	return array( 'post' => (int) $destination->ID, 'attachments' => $total,
+		'ordered_ids_sha256' => hash( 'sha256', implode( ',', $state['ids'] ) ),
+		'output_bytes' => strlen( $output ) );
+};
 
 if ( 'seed' === $step && null === $journal ) {
 	real_check( 0 === $owned_count( 'attachment' ) && 0 === $owned_count( Aigpl::POST_TYPE ) &&
 		0 === $owned_count( 'page' ) && ! file_exists( $media_dir ), 'Owned fixture already exists without its journal.' );
 	// Seeding must not replace an existing migration or change storage authority.
 	$assert_pristine_storage();
-	$journal = array( 'identity' => $identity, 'owner' => $owner, 'phase' => 'seeding',
+	$journal = array( 'identity' => $identity, 'owner' => $owner, 'total' => $total, 'phase' => 'seeding',
 		'ids' => array(), 'turns' => 0, 'completed' => 0 );
 	real_check( add_option( $journal_key, $journal, '', false ), 'Owned fixture journal could not be created.' );
 }
@@ -204,29 +248,41 @@ if ( 'seed' === $step ) {
 }
 $result = array( 'step' => $step, 'site' => $site, 'database' => $manifest['database'],
 	'php' => PHP_VERSION, 'wordpress' => $wp_version, 'owner' => $owner,
+	'memory_limit' => ini_get( 'memory_limit' ), 'fixture_total' => $total,
 	'phase' => $journal['phase'], 'seeded' => count( $journal['ids'] ),
 	'turns' => $journal['turns'], 'completed' => $journal['completed'] );
 if ( 'verify-source' === $step ) {
 	$result['source'] = $verify_source( $journal, true );
 }
 if ( 'verify-destination' === $step ) {
-	real_check( in_array( $journal['phase'], array( 'complete', 'edited', 'reversed' ), true ) && $total === (int) $journal['completed'] &&
-		isset( $journal['uid'], $journal['destination'] ), 'Completed owned migration required for destination proof.' );
 	$result['source'] = $verify_source( $journal, false );
-	$destination = get_post( $journal['destination'] );
-	real_check( $destination && FOOGALLERY_CPT_GALLERY === $destination->post_type &&
-		$journal['ids'] === get_post_meta( $destination->ID, FOOGALLERY_META_ATTACHMENTS, true ),
-		'Destination gallery or exact attachment order differs.' );
-	$matches = get_posts( array( 'post_type' => FOOGALLERY_CPT_GALLERY, 'post_status' => 'any',
-		'posts_per_page' => 2, 'fields' => 'ids', 'meta_key' => Migratable::META_SOURCE_KEY,
-		'meta_value' => $journal['uid'] ) );
-	real_check( 1 === count( $matches ) && (int) $matches[0] === (int) $destination->ID,
-		'Actual destination ownership/uniqueness differs.' );
-	real_check( false !== strpos( do_shortcode( '[foogallery id="' . $destination->ID . '"]' ), 'foogallery' ),
-		'Actual FooGallery output failed.' );
-	$result['destination'] = (int) $destination->ID;
-	$result['attachments'] = count( $journal['ids'] );
-	$result['ordered_ids_sha256'] = hash( 'sha256', implode( ',', get_post_meta( $destination->ID, FOOGALLERY_META_ATTACHMENTS, true ) ) );
+	$result['destination_proof'] = $verify_destination( $journal );
+}
+if ( 'verify-reversed' === $step ) {
+	$storage = StorageAdmin::status();
+	real_check( 'reversed' === $journal['phase'] && isset( $journal['edit'] ) &&
+		'option' === $storage['backend'] && 'stable' === $storage['phase'] &&
+		'verified' === $storage['schema'] && '' === $storage['problem'] && ! empty( $storage['retained'] ),
+		'Stable retained current-option reversal required for proof.' );
+	$result['source'] = $verify_source( $journal, true );
+	$result['destination_proof'] = $verify_destination( $journal );
+	$current = $raw_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+	$backup = $raw_option( StorageAuthority::STORAGE_BACKUP_OPTION );
+	real_check( is_string( $current ) && is_string( $backup ) && $current !== $backup,
+		'CURRENT option must differ from retained old backup.' );
+	$decoded = maybe_unserialize( $current );
+	real_check( is_array( $decoded ) && array_key_exists( $owner, $decoded ) &&
+		$decoded[$owner] === $journal['edit'], 'Raw CURRENT option lost the exact typed table edit.' );
+	unset( $decoded );
+	$control_raw = $raw_option( StorageAuthority::CONTROL_OPTION );
+	$control = is_string( $control_raw ) ? StorageControl::decode( $control_raw, get_current_blog_id() ) : null;
+	real_check( is_array( $control ) && 'option' === $control['backend'] &&
+		'stable' === $control['phase'] && StorageControl::runtime_ready( $control,
+			$raw_option( StorageAuthority::AUTHORITY_OPTION ) ),
+		'Stable current-option authority differs.' );
+	$result['current_option_bytes'] = strlen( $current );
+	$result['current_option_sha256'] = hash( 'sha256', $current );
+	$result['edit_sha256'] = hash( 'sha256', serialize( $journal['edit'] ) );
 }
 if ( 'status' === $step ) {
 	$result['storage'] = StorageAdmin::status();
@@ -361,9 +417,9 @@ if ( 'reverse' === $step ) {
 		( ( 'stable' === $storage['phase'] && in_array( $storage['backend'], array( 'table', 'option' ), true ) ) ||
 			( in_array( $storage['backend'], array( 'table', 'option' ), true ) && 'option' === $storage['target'] ) ),
 		'Owned verified table-to-option transition required.' );
-	$engine = foogallery_migrate_migrator_instance();
 	if ( 'stable' === $storage['phase'] ) {
-		real_check( $journal['edit'] === $engine->get_migrator_setting( $owner ), 'Current edited setting differs before reversal.' );
+		real_check( $journal['edit'] === foogallery_migrate_migrator_instance()->get_migrator_setting( $owner ),
+			'Current edited setting differs before reversal.' );
 	}
 	$tables = array_keys( ( new LegacyStorageSchema( $wpdb ) )->definitions() );
 	$heads = $wpdb->get_row( $wpdb->prepare( 'SELECT COUNT(*) AS n, COALESCE(SUM(payload_bytes),0) AS bytes FROM `' . $tables[0] . '` WHERE blog_id=%d', get_current_blog_id() ), ARRAY_A );

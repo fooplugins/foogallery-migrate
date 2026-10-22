@@ -31,6 +31,8 @@ final class StorageCapacityBudget {
 	public function __wakeup() { self::fail(); }
 	public function limit( $name ) { if ( ! isset( $this->class['limits'][$name] ) ) { self::fail(); } return $this->class['limits'][$name]; }
 	public function deadline() { return $this->deadline; }
+	/** Release phases have one fixed headroom, independent of parsed dimensions. */
+	public function release_policy() { return isset( $this->class['release_version'] ); }
 	public function max_dimensions() {
 		return array( 'R' => $this->limit( 'max_raw_bytes' ), 'T' => $this->limit( 'max_tokens' ), 'N' => $this->limit( 'max_rows' ),
 			'E' => $this->limit( 'max_bytes' ), 'S' => $this->limit( 'max_scalar_bytes' ), 'M' => $this->limit( 'max_row_bytes' ),

@@ -2,7 +2,7 @@
 /** Owned disposable lifecycle journey. One explicit phase per fresh PHP process. */
 if ( 'cli' !== PHP_SAPI || 3 !== $argc || ! in_array( $argv[2], array(
 	'init', 'verify', 'seed-state', 'provision', 'switch', 'recover', 'edit', 'clear', 'seed-repeat-clear', 'repeat-clear', 'verify-clear',
-	'remove-all', 'repeat-remove-all', 'prepare-uninstall', 'uninstall', 'verify-uninstalled' ), true ) ) {
+	'remove-all', 'repeat-remove-all', 'prepare-uninstall', 'uninstall', 'verify-uninstalled', 'reverse', 'verify-reversed' ), true ) ) {
 	throw new RuntimeException( 'Owned site and explicit cleanup phase required.' );
 }
 $site = realpath( $argv[1] ); $step = $argv[2];
@@ -148,6 +148,33 @@ if ( 'edit' === $step ) {
 	cleanup_check( 'table' === $journal['phase'] && 'table' === StorageAdmin::status()['backend'], 'Stable selected table required for edit.' );
 	cleanup_check( foogallery_migrate_migrator_instance()->set_migrator_setting( 'cleanup_edit', 'current table state after switch' ), 'Current table state edit failed.' );
 	$journal['phase'] = 'edited'; $save( $journal );
+}
+if ( 'reverse' === $step ) {
+	cleanup_check( in_array( $journal['phase'], array( 'edited', 'reversing' ), true ), 'Owned edited table or recorded reverse required.' );
+	$status = StorageAdmin::status();
+	cleanup_check( 'verified' === $status['schema'] && '' === $status['problem'] &&
+		( 'table' === $status['backend'] || 'option' === $status['backend'] ) &&
+		( 'stable' === $status['phase'] || 'option' === $status['target'] ), 'Verified owned reverse transition required.' );
+	if ( 'stable' !== $status['phase'] ) { $result['storage'] = $request( 'recover', 'option', 'recover-storage' ); }
+	elseif ( 'table' === $status['backend'] ) { $result['storage'] = $request( 'switch', 'option', 'switch-to-option' ); }
+	$status = StorageAdmin::status();
+	if ( 'stable' === $status['phase'] && 'option' === $status['backend'] ) {
+		$current = $raw( FOOGALLERY_MIGRATE_OPTION_DATA ); $backup = $raw( StorageAuthority::STORAGE_BACKUP_OPTION );
+		$decoded = is_string( $current ) ? maybe_unserialize( $current ) : null;
+		cleanup_check( is_string( $backup ) && is_array( $decoded ) && $current !== $backup &&
+			isset( $decoded['cleanup_edit'] ) && 'current table state after switch' === $decoded['cleanup_edit'], 'CURRENT option lost exact table edit.' );
+		$journal['phase'] = 'reversed'; $journal['current_hash'] = hash( 'sha256', $current ); $save( $journal );
+	} else { $journal['phase'] = 'reversing'; $save( $journal ); }
+	$result['status'] = $status;
+}
+if ( 'verify-reversed' === $step ) {
+	cleanup_check( 'reversed' === $journal['phase'] && isset( $journal['current_hash'] ), 'Completed owned reverse required.' );
+	$status = StorageAdmin::status(); $current = $raw( FOOGALLERY_MIGRATE_OPTION_DATA );
+	$decoded = is_string( $current ) ? maybe_unserialize( $current ) : null;
+	cleanup_check( 'stable' === $status['phase'] && 'option' === $status['backend'] && ! empty( $status['retained'] ) &&
+		is_array( $decoded ) && isset( $decoded['cleanup_edit'] ) && 'current table state after switch' === $decoded['cleanup_edit'] &&
+		hash( 'sha256', $current ) === $journal['current_hash'], 'Stable CURRENT option reverse proof failed.' );
+	$result['storage'] = $status; $result['current_option_bytes'] = strlen( $current );
 }
 if ( 'clear' === $step ) {
 	cleanup_check( 'edited' === $journal['phase'], 'Edited table state required for clear.' );

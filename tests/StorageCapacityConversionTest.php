@@ -1,6 +1,7 @@
 <?php
 namespace FooPlugins\FooGalleryMigrate\Tests;
 use FooPlugins\FooGalleryMigrate\StorageCapacityBudget;
+use FooPlugins\FooGalleryMigrate\StorageCapacityPolicy;
 use FooPlugins\FooGalleryMigrate\StorageScaleAdmission;
 use FooPlugins\FooGalleryMigrate\StorageCopyCursor;
 use FooPlugins\FooGalleryMigrate\StorageControl;
@@ -11,6 +12,71 @@ use FooPlugins\FooGalleryMigrate\StorageConversion;
 use PHPUnit\Framework\TestCase;
 
 class StorageCapacityConversionTest extends TestCase {
+	private function release_scale_for_sample( $sample ) {
+		$class = StorageCapacityPolicy::release_policy( trim( file_get_contents( dirname( __DIR__ ) . '/includes/storage-capacity-policy.json' ) ) );
+		$capacity = new StorageCapacityBudget( $class, null, $sample );
+		$limits = array( 'version' => 1 );
+		foreach ( array( 'max_tokens', 'max_rows', 'max_bytes', 'max_depth', 'max_heads', 'max_physical_rows_per_table', 'max_physical_rows', 'max_physical_bytes', 'memory_ceiling_bytes', 'max_seconds' ) as $key ) { $limits[$key] = $class['limits'][$key]; }
+		$policy = array( 'max_raw_bytes' => $class['limits']['max_raw_bytes'], 'amplification' => $class['amplification'], 'reserve_bytes' => $class['reserve_bytes'] );
+		return array( new StorageScaleAdmission( $limits, $policy, $capacity->deadline(), null, null, null, $capacity ), $policy, $capacity );
+	}
+	public function test_release_decoder_refuses_before_structural_scan_when_32m_phase_cannot_fit(): void {
+		$used = 100 * 1048576; $sample = function () use ( &$used ) { return array( 'limit' => '256M', 'zend' => $used, 'live' => $used, 'rss' => $used, 'peak' => $used ); };
+		list( $scale ) = $this->release_scale_for_sample( $sample );
+		$decoder = new LegacyOptionDecoder( 3145728, 64, 262144, $scale );
+		try { $decoder->decode( 'a:1:{i:0;R:1;}' ); $this->fail( 'Insufficient scan phase headroom was admitted.' ); }
+		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'capacity budget refused', $error->getMessage() ); }
+	}
+	public function test_final_option_digest_readback_keeps_its_own_phase_until_completion(): void {
+		$used = 70 * 1048576; $sample = function () use ( &$used ) { return array( 'limit' => '256M', 'zend' => $used, 'live' => $used, 'rss' => $used, 'peak' => $used ); };
+		$old = isset( $GLOBALS['wpdb'] ) ? $GLOBALS['wpdb'] : null;
+		$old_blog = isset( $GLOBALS['foogallery_migrate_test_blog_id'] ) ? $GLOBALS['foogallery_migrate_test_blog_id'] : null;
+		$db = new CapacitySequentialOptionDb( serialize( array( 'small' => 'value' ) ) );
+		$db->on_second_hash = function () use ( &$used ) { $used = 100 * 1048576; };
+		$GLOBALS['wpdb'] = $db; $GLOBALS['foogallery_migrate_test_blog_id'] = 1;
+		try {
+			list( $scale, $policy, $capacity ) = $this->release_scale_for_sample( $sample );
+			$conversion = new StorageConversion( $policy, null, $scale );
+			foreach ( array( 'gate' => new CapacitySequentialGate(), 'connection' => $db, 'deadline' => $capacity->deadline(), 'memory' => new \FooPlugins\FooGalleryMigrate\StorageMemoryBaseline() ) as $name => $value ) {
+				$property = new \ReflectionProperty( StorageConversion::class, $name ); $property->setAccessible( true ); $property->setValue( $conversion, $value );
+			}
+			$method = new \ReflectionMethod( StorageConversion::class, 'source_metadata' ); $method->setAccessible( true );
+			try { $method->invoke( $conversion, 'option', false ); $this->fail( 'Final digest readback escaped its phase.' ); }
+			catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'capacity budget refused', $error->getMessage() ); }
+			$this->assertSame( 2, $db->hash_reads );
+		} finally { $GLOBALS['wpdb'] = $old; $GLOBALS['foogallery_migrate_test_blog_id'] = $old_blog; }
+	}
+	public function test_option_fetch_and_decode_use_sequential_release_headroom_at_70m_highwater(): void {
+		$class = StorageCapacityPolicy::release_policy( trim( file_get_contents( dirname( __DIR__ ) . '/includes/storage-capacity-policy.json' ) ) );
+		$sample = function () { $used = 70 * 1048576; return array( 'limit' => '256M', 'zend' => $used, 'live' => $used, 'rss' => $used, 'peak' => $used ); };
+		$nested = new StorageCapacityBudget( $class, null, $sample ); $owner = new \stdClass();
+		$outer = $nested->open( $owner, 'option_verify', $nested->dimensions( array( 'R' => 32 ) ) );
+		try { $nested->open( $owner, 'option_decode', $nested->dimensions( array( 'R' => 32 ) ) ); $this->fail( 'Overlapping fixed headrooms must refuse.' ); }
+		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'capacity budget refused', $error->getMessage() ); }
+		$old = isset( $GLOBALS['wpdb'] ) ? $GLOBALS['wpdb'] : null;
+		$old_blog = isset( $GLOBALS['foogallery_migrate_test_blog_id'] ) ? $GLOBALS['foogallery_migrate_test_blog_id'] : null;
+		$db = new CapacitySequentialOptionDb( serialize( array( 'small' => array( 1, true, 'typed' ) ) ) );
+		$GLOBALS['wpdb'] = $db; $GLOBALS['foogallery_migrate_test_blog_id'] = 1;
+		try {
+			$capacity = new StorageCapacityBudget( $class, null, $sample );
+			$limits = array( 'version' => 1 );
+			foreach ( array( 'max_tokens', 'max_rows', 'max_bytes', 'max_depth', 'max_heads', 'max_physical_rows_per_table', 'max_physical_rows', 'max_physical_bytes', 'memory_ceiling_bytes', 'max_seconds' ) as $key ) { $limits[$key] = $class['limits'][$key]; }
+			$policy = array( 'max_raw_bytes' => $class['limits']['max_raw_bytes'], 'amplification' => $class['amplification'], 'reserve_bytes' => $class['reserve_bytes'] );
+			$scale = new StorageScaleAdmission( $limits, $policy, $capacity->deadline(), null, null, null, $capacity );
+			$conversion = new StorageConversion( $policy, null, $scale );
+			foreach ( array( 'gate' => new CapacitySequentialGate(), 'connection' => $db, 'deadline' => $capacity->deadline(), 'memory' => new \FooPlugins\FooGalleryMigrate\StorageMemoryBaseline() ) as $name => $value ) {
+				$property = new \ReflectionProperty( StorageConversion::class, $name ); $property->setAccessible( true ); $property->setValue( $conversion, $value );
+			}
+			$method = new \ReflectionMethod( StorageConversion::class, 'source_metadata' ); $method->setAccessible( true );
+			$result = $method->invoke( $conversion, 'option', false );
+			$this->assertSame( hash( 'sha256', 'present:' . hash( 'sha256', $db->raw ) ), $result['physical'] );
+			$this->assertSame( ( new LegacyStateCodec() )->snapshot_digest( unserialize( $db->raw ) ), $result['logical'] );
+			$this->assertSame( 2, $db->payload_reads, 'Exact raw fetch and structural decode occurred under owned sequential scopes.' );
+			$db->raw = 'a:1:{i:0;R:1;}';
+			try { $method->invoke( $conversion, 'option', false ); $this->fail( 'Malformed structural token was admitted.' ); }
+			catch ( \RuntimeException $error ) { $this->assertNotEmpty( $error->getMessage() ); }
+		} finally { $GLOBALS['wpdb'] = $old; $GLOBALS['foogallery_migrate_test_blog_id'] = $old_blog; }
+	}
 	public function test_raw_fetch_requires_an_owned_capacity_phase_before_sql(): void {
 		$old = isset( $GLOBALS['wpdb'] ) ? $GLOBALS['wpdb'] : null;
 		$GLOBALS['wpdb'] = new class {
@@ -96,4 +162,22 @@ class StorageCapacityConversionTest extends TestCase {
 		$this->assertTrue( $records->walk_conversion_tree( 'active', 0, $root, 0, function ( $row ) use ( $direct ) { hash_update( $direct, $row['node_hash'] . $row['logical_hash'] ); return true; } ) );
 		$this->assertSame( hash_final( $direct ), hash_final( $digest ) );
 	}
+}
+
+class CapacitySequentialOptionDb {
+	public $prefix = 'wp_'; public $base_prefix = 'wp_'; public $last_error = ''; public $payload_reads = 0; public $hash_reads = 0; public $on_second_hash; public $raw;
+	public function __construct( $raw ) { $this->raw = $raw; }
+	public function prepare( $sql, $args = null ) { return $sql; }
+	public function is_current() { return true; }
+	public function get_var( $sql ) {
+		if ( false !== strpos( $sql, 'SHA2(option_value' ) ) { ++$this->hash_reads; if ( 2 === $this->hash_reads && null !== $this->on_second_hash ) { call_user_func( $this->on_second_hash ); } return hash( 'sha256', $this->raw ); }
+		if ( false !== strpos( $sql, 'SELECT LENGTH(option_value)' ) ) { ++$this->payload_reads; return (string) strlen( $this->raw ); }
+		if ( false !== strpos( $sql, "SELECT CONCAT('v:', option_value)" ) ) { ++$this->payload_reads; return 'v:' . $this->raw; }
+		throw new \RuntimeException( 'Unexpected option SQL.' );
+	}
+}
+class CapacitySequentialGate extends \FooPlugins\FooGalleryMigrate\StorageMaintenanceGate {
+	public function __construct() {}
+	public function renew_maintenance() { return true; }
+	public function maintenance_ready( $verdict ) { return true; }
 }

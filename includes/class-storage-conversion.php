@@ -421,7 +421,15 @@ class StorageConversion {
 	}
 
 	private function option_snapshot() {
-		$this->ready(); $before = $this->raw_option_digest( FOOGALLERY_MIGRATE_OPTION_DATA ); $raw = $this->option_raw();
+		$this->ready(); $before = $this->raw_option_digest( FOOGALLERY_MIGRATE_OPTION_DATA );
+		// Fetch and native decode are sequential workspaces. A standalone option
+		// verification owns its raw SQL phase only until that SQL buffer unwinds;
+		// the decoder then owns its separate structural/hydration phase.
+		$fetch = null !== $this->capacity() && 0 === $this->capacity_phase_depth ? $this->open_capacity( 'option_verify' ) : null;
+		try { $raw = $this->option_raw(); }
+		catch ( \Exception $error ) { $this->abort_capacity(); throw $error; }
+		catch ( \Throwable $error ) { $this->abort_capacity(); throw $error; }
+		$this->close_capacity( $fetch );
 		$value = array();
 		if ( null !== $raw ) {
 			$this->budget( strlen( $raw ) );
@@ -433,9 +441,14 @@ class StorageConversion {
 			unset( $raw ); // Exact decode is complete; hashing needs only the graph.
 			StorageScalarObserver::milestone( 'source-decoded' );
 		}
-		$this->require_true( count( $value ) <= $this->limit( 'max_heads', 100 ) );
-		$logical = $this->codec->snapshot_digest( $value ); // Reject objects, depth overflow and unsupported scalars once.
-		$this->require_true( $before === $this->raw_option_digest( FOOGALLERY_MIGRATE_OPTION_DATA ) );
+		$verify = null !== $this->capacity() && 0 === $this->capacity_phase_depth ? $this->open_capacity( 'option_verify' ) : null;
+		try {
+			$this->require_true( count( $value ) <= $this->limit( 'max_heads', 100 ) );
+			$logical = $this->codec->snapshot_digest( $value ); // Reject objects, depth overflow and unsupported scalars once.
+			$this->require_true( $before === $this->raw_option_digest( FOOGALLERY_MIGRATE_OPTION_DATA ) );
+		} catch ( \Exception $error ) { $this->abort_capacity(); throw $error; }
+		catch ( \Throwable $error ) { $this->abort_capacity(); throw $error; }
+		$this->close_capacity( $verify );
 		return array( 'physical' => $before, 'logical' => $logical, 'value' => $value );
 	}
 
@@ -450,7 +463,9 @@ class StorageConversion {
 	private function close_capacity( $token ) { if ( null !== $token ) { $this->capacity()->close( $this, $token ); --$this->capacity_phase_depth; } }
 	private function abort_capacity() { if ( null !== $this->capacity() ) { $this->capacity()->abort(); $this->capacity_phase_depth = 0; } }
 	private function source_metadata( $backend, $refresh ) {
-		$token = $this->open_capacity( 'table' === $backend ? 'table_verify' : 'option_verify' );
+		// option_snapshot owns a short raw-fetch phase and its decoder owns a
+		// separate decode phase; neither retains the other's SQL workspace.
+		$token = 'table' === $backend ? $this->open_capacity( 'table_verify' ) : null;
 		try { $result = $this->source_metadata_owned( $backend, $refresh ); }
 		catch ( \Exception $error ) { $this->abort_capacity(); throw $error; }
 		catch ( \Throwable $error ) { $this->abort_capacity(); throw $error; }

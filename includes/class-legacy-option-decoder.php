@@ -45,9 +45,16 @@ class LegacyOptionDecoder {
 		if ( null !== $this->scale && null !== $this->scale->capacity() ) { $this->scale->capacity()->abort(); }
 	}
 	private function decode_owned( $raw ) {
-		$statistics = $this->structural_statistics( $raw );
 		$capacity = null === $this->scale ? null : $this->scale->capacity();
-		$token = null === $capacity ? null : $capacity->open( $this, 'option_decode', $statistics );
+		// The release's fixed phase headroom covers the structural scan as well
+		// as native hydration. Older diagnostic classes still use parsed dimensions.
+		$release = null !== $capacity && $capacity->release_policy();
+		$token = $release ? $capacity->open( $this, 'option_decode', array( 'R' => is_string( $raw ) ? strlen( $raw ) : 0 ) ) : null;
+		$statistics = $this->structural_statistics( $raw );
+		if ( null !== $capacity ) {
+			if ( $release ) { $capacity->dimensions( $statistics ); }
+			else { $token = $capacity->open( $this, 'option_decode', $statistics ); }
+		}
 		$value = $this->decode_native( $raw );
 		if ( null !== $capacity ) { $capacity->close( $this, $token ); }
 		return $value;
