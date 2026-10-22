@@ -38,9 +38,8 @@ if ( ! is_array( $manifest ) || ! isset( $manifest['kind'], $manifest['fixture']
 	$manifest['database'] ) || $manifest['kind'] !== 'foogallery-migrate-floor-v1' ||
 	! preg_match( '~^/(?:private/)?tmp/foogallery-migrate-floor\.[A-Za-z0-9]+$~D', $manifest['fixture'] ) ||
 	$manifest['site'] !== $manifest['fixture'] . '/site' ||
-	realpath( ABSPATH ) !== '/site' || $repo !== '/repo' ||
+	realpath( ABSPATH ) !== '/site' || ! in_array( $repo, array( '/repo', '/harness' ), true ) ||
 	! is_string( $manifest['repo'] ) || $manifest['repo'] === '' ||
-	realpath( ABSPATH . 'wp-content/plugins/foogallery-migrate' ) !== $repo ||
 	! preg_match( '/^fgm-floor-[A-Za-z0-9]+$/D', $manifest['network'] ) ||
 	$manifest['container'] !== $manifest['network'] . '-db' ||
 	! preg_match( '/^[a-f0-9]{64}$/D', $manifest['container_id'] ) ||
@@ -48,6 +47,20 @@ if ( ! is_array( $manifest ) || ! isset( $manifest['kind'], $manifest['fixture']
 	DB_NAME !== $manifest['database'] || DB_HOST !== $manifest['container'] ||
 	PHP_VERSION !== '5.4.45' || $GLOBALS['wp_version'] !== '5.0' || is_multisite() ) {
 	throw new RuntimeException( 'Floor runtime or fixture ownership mismatch.' );
+}
+$plugin_dir = ABSPATH . 'wp-content/plugins/foogallery-migrate';
+if ( isset( $manifest['package'] ) ) {
+	if ( $repo !== '/harness' || is_link( $plugin_dir ) || realpath( $plugin_dir ) !== '/site/wp-content/plugins/foogallery-migrate' ) {
+		throw new RuntimeException( 'Owned floor package plugin directory mismatch.' );
+	}
+	$identity_output = array(); $identity_code = 0;
+	exec( 'php ' . escapeshellarg( $repo . '/tests/integration/storage-release-package-identity.php' ) .
+		' verify-tree ' . escapeshellarg( $plugin_dir ) . ' /fixture-owner.json 2>/dev/null', $identity_output, $identity_code );
+	if ( $identity_code !== 0 || count( $identity_output ) !== 1 || trim( $identity_output[0] ) !== $manifest['package']['tree_sha256'] ) {
+		throw new RuntimeException( 'Extracted floor package differs from pinned ZIP identity.' );
+	}
+} elseif ( $repo !== '/repo' || realpath( $plugin_dir ) !== $repo ) {
+	throw new RuntimeException( 'Floor source plugin symlink mismatch.' );
 }
 global $wpdb;
 function floor_real_check( $okay, $message ) {

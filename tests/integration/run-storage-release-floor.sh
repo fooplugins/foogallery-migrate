@@ -23,7 +23,20 @@ network="fgm-floor-${fixture##*.}"
 test "$(docker inspect --format '{{.Id}}' "$network-db")" = "$expected_id"
 test "$(docker inspect --format '{{index .Config.Labels "foogallery-migrate-floor"}}' "$network-db")" = "${fixture##*.}"
 test "$(docker network inspect --format '{{index .Labels "foogallery-migrate-floor"}}' "$network")" = "${fixture##*.}"
-test "$(readlink "$fixture/site/wp-content/plugins/foogallery-migrate")" = /repo
+package_mode="$(php -r '
+$m=json_decode(file_get_contents($argv[1]),true);
+if (!is_array($m)) exit(1);
+echo isset($m["package"]) ? "package" : "source";
+' "$manifest")"
+if test "$package_mode" = source; then
+	test "$(readlink "$fixture/site/wp-content/plugins/foogallery-migrate")" = /repo
+else
+	test "$package_mode" = package
+	test -d "$fixture/site/wp-content/plugins/foogallery-migrate"
+	test ! -L "$fixture/site/wp-content/plugins/foogallery-migrate"
+	php "$repo/tests/integration/storage-release-package-identity.php" verify-tree \
+		"$fixture/site/wp-content/plugins/foogallery-migrate" "$manifest" >/dev/null
+fi
 read_config() {
 	docker run --rm --platform linux/arm64 --network none \
 		--volume "$fixture/site:/site:ro" --workdir /site \
@@ -33,8 +46,17 @@ read_config() {
 test "$(read_config DB_NAME)" = "fgm_floor_$(printf '%s' "${fixture##*.}" | tr '[:upper:]' '[:lower:]')"
 test "$(read_config DB_HOST)" = "$network-db"
 shift
-docker run --rm --platform linux/arm64 --network "$network" \
-	--volume "$fixture/site:/site" --volume "$repo:/repo:ro" \
-	--volume "$manifest:/fixture-owner.json:ro" --workdir /site \
-	--env WP_CLI_DISABLE_AUTO_CHECK_UPDATE=1 fgm-floor-php54:5.4.45 \
-	php /site/.wp-cli-2.1.0.phar "$@" --path=/site --allow-root
+if test "$package_mode" = source; then
+	docker run --rm --platform linux/arm64 --network "$network" \
+		--volume "$fixture/site:/site" --volume "$repo:/repo:ro" \
+		--volume "$manifest:/fixture-owner.json:ro" --workdir /site \
+		--env WP_CLI_DISABLE_AUTO_CHECK_UPDATE=1 fgm-floor-php54:5.4.45 \
+		php /site/.wp-cli-2.1.0.phar "$@" --path=/site --allow-root
+else
+	docker run --rm --platform linux/arm64 --network "$network" \
+		--volume "$fixture/site:/site" \
+		--volume "$fixture/site/wp-content/plugins/foogallery-migrate:/site/wp-content/plugins/foogallery-migrate:ro" \
+		--volume "$repo:/harness:ro" --volume "$manifest:/fixture-owner.json:ro" --workdir /site \
+		--env WP_CLI_DISABLE_AUTO_CHECK_UPDATE=1 fgm-floor-php54:5.4.45 \
+		php /site/.wp-cli-2.1.0.phar "$@" --path=/site --allow-root
+fi

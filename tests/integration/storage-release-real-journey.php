@@ -30,9 +30,24 @@ if ( ! is_array( $manifest ) || ! isset( $manifest['kind'], $manifest['site'], $
 	! preg_match( '/^fgm-r0-[A-Za-z0-9]+$/D', $manifest['container'] ) ||
 	! preg_match( '/^[a-f0-9]{64}$/D', $manifest['container_id'] ) ||
 	realpath( dirname( dirname( __DIR__ ) ) ) !== realpath( $manifest['repo'] ) ||
-	! is_file( $site . '/wp-load.php' ) || ! is_file( $site . '/wp-config.php' ) ||
-	realpath( $site . '/wp-content/plugins/foogallery-migrate' ) !== realpath( $manifest['repo'] ) ) {
+	! is_file( $site . '/wp-load.php' ) || ! is_file( $site . '/wp-config.php' ) ) {
 	throw new RuntimeException( 'Owned disposable site manifest or plugin source mismatch.' );
+}
+$plugin_dir = $site . '/wp-content/plugins/foogallery-migrate';
+if ( isset( $manifest['package'] ) ) {
+	if ( is_link( $plugin_dir ) || realpath( $plugin_dir ) !== $plugin_dir ) {
+		throw new RuntimeException( 'Extracted package must be an owned regular plugin directory.' );
+	}
+	$identity_output = array(); $identity_code = 0;
+	exec( escapeshellarg( PHP_BINARY ) . ' ' . escapeshellarg( __DIR__ . '/storage-release-package-identity.php' ) .
+		' verify-tree ' . escapeshellarg( $plugin_dir ) . ' ' . escapeshellarg( $manifest_path ) . ' 2>/dev/null',
+		$identity_output, $identity_code );
+	if ( 0 !== $identity_code || count( $identity_output ) !== 1 ||
+		trim( $identity_output[0] ) !== $manifest['package']['tree_sha256'] ) {
+		throw new RuntimeException( 'Extracted package differs from pinned ZIP identity.' );
+	}
+} elseif ( realpath( $plugin_dir ) !== realpath( $manifest['repo'] ) ) {
+	throw new RuntimeException( 'Owned plugin source symlink differs from manifest.' );
 }
 $container_check = array(); $container_code = 0;
 exec( 'docker inspect --format ' . escapeshellarg( '{{.Id}} {{index .Config.Labels "foogallery-migrate-r0"}}' ) . ' ' .

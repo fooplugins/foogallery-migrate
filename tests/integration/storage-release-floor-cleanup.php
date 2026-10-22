@@ -8,7 +8,7 @@ use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 if ( ! defined( 'WP_CLI' ) || ! WP_CLI || ! defined( 'ABSPATH' ) ||
 	! is_file( '/fixture-owner.json' ) || ! isset( $args[0] ) || count( $args ) !== 1 ||
 	! in_array( $args[0], array( 'init', 'verify', 'seed-state', 'provision', 'switch', 'recover',
-		'edit', 'clear', 'seed-repeat-clear', 'repeat-clear', 'verify-clear', 'remove-all',
+		'edit', 'adopt-reversed', 'clear', 'seed-repeat-clear', 'repeat-clear', 'verify-clear', 'remove-all',
 		'repeat-remove-all', 'prepare-uninstall', 'uninstall', 'verify-uninstalled' ), true ) ) {
 	throw new RuntimeException( 'Exactly one owned floor lifecycle step is required.' );
 }
@@ -21,7 +21,7 @@ if ( ! is_array( $manifest ) || ! isset( $manifest['kind'], $manifest['fixture']
 	$manifest['database'] ) || $manifest['kind'] !== 'foogallery-migrate-floor-v1' ||
 	! preg_match( '~^/(?:private/)?tmp/foogallery-migrate-floor\.[A-Za-z0-9]+$~D', $manifest['fixture'] ) ||
 	$manifest['site'] !== $manifest['fixture'] . '/site' || realpath( ABSPATH ) !== '/site' ||
-	$repo !== '/repo' || realpath( ABSPATH . 'wp-content/plugins/foogallery-migrate' ) !== $repo ||
+	! in_array( $repo, array( '/repo', '/harness' ), true ) ||
 	! preg_match( '/^fgm-floor-[A-Za-z0-9]+$/D', $manifest['network'] ) ||
 	$manifest['container'] !== $manifest['network'] . '-db' ||
 	! preg_match( '/^[a-f0-9]{64}$/D', $manifest['container_id'] ) ||
@@ -30,6 +30,20 @@ if ( ! is_array( $manifest ) || ! isset( $manifest['kind'], $manifest['fixture']
 	PHP_VERSION !== '5.4.45' || $GLOBALS['wp_version'] !== '5.0' || is_multisite() ||
 	ini_get( 'memory_limit' ) !== '256M' || WP_MAX_MEMORY_LIMIT !== '256M' ) {
 	throw new RuntimeException( 'Floor runtime or fixture ownership mismatch.' );
+}
+$plugin_dir = ABSPATH . 'wp-content/plugins/foogallery-migrate';
+if ( isset( $manifest['package'] ) ) {
+	if ( $repo !== '/harness' || is_link( $plugin_dir ) || realpath( $plugin_dir ) !== '/site/wp-content/plugins/foogallery-migrate' ) {
+		throw new RuntimeException( 'Owned floor package plugin directory mismatch.' );
+	}
+	$identity_output = array(); $identity_code = 0;
+	exec( 'php ' . escapeshellarg( $repo . '/tests/integration/storage-release-package-identity.php' ) .
+		' verify-tree ' . escapeshellarg( $plugin_dir ) . ' /fixture-owner.json 2>/dev/null', $identity_output, $identity_code );
+	if ( $identity_code !== 0 || count( $identity_output ) !== 1 || trim( $identity_output[0] ) !== $manifest['package']['tree_sha256'] ) {
+		throw new RuntimeException( 'Extracted floor package differs from pinned ZIP identity.' );
+	}
+} elseif ( $repo !== '/repo' || realpath( $plugin_dir ) !== $repo ) {
+	throw new RuntimeException( 'Floor source plugin symlink mismatch.' );
 }
 global $wpdb;
 function floor_cleanup_check( $okay, $message ) {
@@ -43,7 +57,7 @@ $inactive = in_array( $step, array( 'uninstall', 'verify-uninstalled' ), true );
 floor_cleanup_check( $inactive || ( function_exists( 'foogallery_migrate_migrator_instance' ) &&
 	function_exists( 'foogallery_default_gallery_template' ) && defined( 'FOOGALLERY_VERSION' ) ),
 	'Actual plugins are unavailable.' );
-if ( $inactive ) { require_once $repo . '/includes/constants.php'; }
+if ( $inactive ) { require_once $plugin_dir . '/includes/constants.php'; }
 $suffix = substr( $manifest['fixture'], strrpos( $manifest['fixture'], '.' ) + 1 );
 $owner = 'fgm-floor-cleanup-' . $suffix;
 $owner_meta = '_fgm_floor_cleanup_owner';
@@ -77,6 +91,7 @@ floor_cleanup_check( empty( $uploads['error'] ) && is_dir( $uploads['basedir'] )
 $media_dir = $uploads['basedir'] . '/' . $owner;
 $media = $media_dir . '/protected.png';
 $verify_protected = function ( $state ) use ( $owner, $owner_meta, $owned_posts, $media ) {
+	if ( isset( $state['real'] ) ) { return; }
 	floor_cleanup_check( isset( $state['posts'], $state['post_hashes'], $state['media_hash'] ) &&
 		array_values( $state['posts'] ) === $owned_posts(), 'Protected post identities/count differ.' );
 	foreach ( $state['posts'] as $kind => $id ) {
@@ -90,6 +105,54 @@ $verify_protected = function ( $state ) use ( $owner, $owner_meta, $owned_posts,
 		hash_file( 'sha256', $media ) === $state['media_hash'] &&
 		get_attached_file( $state['posts']['attachment'] ) === $media,
 		'Protected attachment file changed.' );
+};
+$verify_real = function ( $state ) use ( $uploads ) {
+	if ( ! isset( $state['real'] ) ) { return; }
+	$real = $state['real'];
+	floor_cleanup_check( is_array( $real ) && isset( $real['owner'], $real['identity'], $real['total'], $real['ids'],
+		$real['ids_sha256'], $real['source'], $real['content'], $real['content_sha256'],
+		$real['destination'], $real['uid'], $real['edit'], $real['completed'] ) &&
+		$real['total'] === 1000 && $real['completed'] === 1000 && count( $real['ids'] ) === 1000 &&
+		count( array_unique( $real['ids'] ) ) === 1000 &&
+		hash( 'sha256', implode( ',', $real['ids'] ) ) === $real['ids_sha256'],
+		'Adopted actual migration journal dimensions differ.' );
+	$source = get_post( $real['source'] ); $content = get_post( $real['content'] );
+	$destination = get_post( $real['destination'] );
+	floor_cleanup_check( $source && $source->post_type === 'aigpl_gallery' && $source->post_status === 'publish' &&
+		$content && $content->post_type === 'page' && $content->post_status === 'publish' &&
+		$destination && $destination->post_type === FOOGALLERY_CPT_GALLERY &&
+		get_post_meta( $source->ID, '_fgm_floor_real_fixture_owner', true ) === $real['owner'] &&
+		get_post_meta( $content->ID, '_fgm_floor_real_fixture_owner', true ) === $real['owner'] &&
+		get_post_meta( $source->ID, '_aigpl_gallery_imgs', true ) === $real['ids'] &&
+		hash( 'sha256', $content->post_content ) === $real['content_sha256'] &&
+		get_post_meta( $destination->ID, FOOGALLERY_META_ATTACHMENTS, true ) === $real['ids'],
+		'Adopted actual source/content/destination changed.' );
+	$matches = get_posts( array( 'post_type' => FOOGALLERY_CPT_GALLERY, 'post_status' => 'any',
+		'posts_per_page' => 2, 'fields' => 'ids', 'meta_key' => '_foogallery_migrate_source_key',
+		'meta_value' => $real['uid'] ) );
+	floor_cleanup_check( count( $matches ) === 1 && (int) $matches[0] === (int) $destination->ID,
+		'Adopted migrated destination identity/uniqueness changed.' );
+	$png_hash = hash( 'sha256', base64_decode( 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=' ) );
+	$media_dir = $uploads['basedir'] . '/' . $real['owner'];
+	floor_cleanup_check( is_dir( $media_dir ) && ! is_link( $media_dir ), 'Adopted media directory changed.' );
+	foreach ( $real['ids'] as $index => $id ) {
+		$relative = $real['owner'] . '/' . $index . '.png';
+		$file = $media_dir . '/' . $index . '.png';
+		$post = get_post( $id ); $meta = wp_get_attachment_metadata( $id );
+		floor_cleanup_check( $post && $post->post_type === 'attachment' && $post->post_status === 'inherit' &&
+			$post->post_mime_type === 'image/png' &&
+			get_post_meta( $id, '_fgm_floor_real_fixture_owner', true ) === $real['owner'] &&
+			get_post_meta( $id, '_wp_attached_file', true ) === $relative &&
+			is_array( $meta ) && isset( $meta['file'], $meta['width'], $meta['height'] ) &&
+			$meta['file'] === $relative && (int) $meta['width'] === 1 && (int) $meta['height'] === 1 &&
+			is_file( $file ) && ! is_link( $file ) && hash_file( 'sha256', $file ) === $png_hash,
+			'Adopted attachment or file changed at index ' . $index . '.' );
+	}
+	$files = glob( $media_dir . '/*.png' );
+	$output = do_shortcode( '[foogallery id="' . $destination->ID . '"]' );
+	floor_cleanup_check( is_array( $files ) && count( $files ) === 1000 &&
+		is_string( $output ) && strpos( $output, 'foogallery' ) !== false,
+		'Adopted media count or FooGallery output changed.' );
 };
 $fixed_options = array( 'foogallery-migrate-data', 'foogallery-migrate-settings',
 	'foogallery_migrate_storage_control', 'foogallery_migrate_storage_authority',
@@ -114,6 +177,31 @@ $no_internal = function () use ( $fixed_options, $fixed_tables, $raw, $table_exi
 		$wpdb->esc_like( '_transient_timeout_foogallery_migrate_content_result_' ) . '%' ) );
 	floor_cleanup_check( ! $wpdb->last_error && (string) $count === '0', 'Content-result transient remains.' );
 };
+if ( $step === 'adopt-reversed' ) {
+	floor_cleanup_check( null === $journal && $owned_posts() === array() &&
+		! file_exists( $media_dir ) && ! is_link( $media_dir ),
+		'Adoption refuses an existing lifecycle journal or unrelated protected posts.' );
+	$real = get_option( 'fgm_floor_real_owned_journey_v1', null );
+	$real_raw = $raw( 'fgm_floor_real_owned_journey_v1' );
+	$expected_owner = 'fgm-floor-real-' . $suffix;
+	floor_cleanup_check( is_array( $real ) && is_string( $real_raw ) && maybe_unserialize( $real_raw ) === $real &&
+		isset( $real['identity'], $real['owner'], $real['phase'], $real['edit'] ) &&
+		$real['identity'] === $identity && $real['owner'] === $expected_owner && $real['phase'] === 'reversed',
+		'Exact same-fixture reversed actual migration required.' );
+	$status = StorageAdmin::status();
+	$current = $raw( FOOGALLERY_MIGRATE_OPTION_DATA );
+	$backup = $raw( StorageAuthority::STORAGE_BACKUP_OPTION );
+	$decoded = is_string( $current ) ? maybe_unserialize( $current ) : null;
+	floor_cleanup_check( $status['backend'] === 'option' && $status['phase'] === 'stable' &&
+		! empty( $status['retained'] ) && is_string( $current ) && is_string( $backup ) &&
+		$current !== $backup && is_array( $decoded ) && array_key_exists( $expected_owner, $decoded ) &&
+		$decoded[$expected_owner] === $real['edit'], 'Exact typed CURRENT option edit required before cleanup adoption.' );
+	$journal = array( 'identity' => $identity, 'owner' => $owner, 'phase' => 'edited',
+		'real' => $real, 'adopted_current_sha256' => hash( 'sha256', $current ) );
+	$verify_real( $journal );
+	floor_cleanup_check( add_option( $journal_key, $journal, '', false ), 'Owned adoption journal insertion failed.' );
+	$save( $journal );
+}
 if ( $step === 'init' ) {
 	floor_cleanup_check( null === $journal && $owned_posts() === array() &&
 		! file_exists( $media_dir ) && ! is_link( $media_dir ), 'Owned lifecycle fixture collision.' );
@@ -210,11 +298,14 @@ if ( $step === 'seed-repeat-clear' ) {
 if ( $step === 'verify-clear' ) {
 	floor_cleanup_check( $journal['phase'] === 'cleared', 'Completed clear required for proof.' );
 	$status = StorageAdmin::status();
-	floor_cleanup_check( $status['backend'] === 'table' && $status['phase'] === 'stable' &&
+	floor_cleanup_check( $status['backend'] === ( isset( $journal['real'] ) ? 'option' : 'table' ) && $status['phase'] === 'stable' &&
 		$status['schema'] === 'verified' && null !== $raw( StorageAuthority::CONTROL_OPTION ) &&
-		null !== $raw( StorageAuthority::AUTHORITY_OPTION ) &&
+		( isset( $journal['real'] ) ? null === $raw( StorageAuthority::AUTHORITY_OPTION ) : null !== $raw( StorageAuthority::AUTHORITY_OPTION ) ) &&
 		null !== $raw( LegacyStorageSchema::VERSION_OPTION ) &&
-		null === $raw( FOOGALLERY_MIGRATE_OPTION_DATA ) &&
+		( isset( $journal['real'] ) ?
+			( is_string( $raw( FOOGALLERY_MIGRATE_OPTION_DATA ) ) &&
+				maybe_unserialize( $raw( FOOGALLERY_MIGRATE_OPTION_DATA ) ) === array() ) :
+			null === $raw( FOOGALLERY_MIGRATE_OPTION_DATA ) ) &&
 		null === $raw( StorageAuthority::STORAGE_BACKUP_OPTION ),
 		'Clear changed authority/schema or left option state.' );
 	foreach ( array_slice( $fixed_tables, 2 ) as $table ) {
@@ -258,7 +349,7 @@ if ( $step === 'uninstall' ) {
 		'Standalone uninstall requires inactive plugin and absent engine.' );
 	$before = get_included_files();
 	define( 'WP_UNINSTALL_PLUGIN', 'foogallery-migrate/migrate.php' );
-	require $repo . '/uninstall.php';
+	require $plugin_dir . '/uninstall.php';
 	$added = array_diff( get_included_files(), $before );
 	foreach ( $added as $path ) {
 		floor_cleanup_check( false === strpos( $path, '/vendor/' ) &&
@@ -277,7 +368,9 @@ if ( $step === 'verify-uninstalled' ) {
 	$no_internal();
 }
 $verify_protected( $journal );
+$verify_real( $journal );
 $result['phase'] = $journal['phase'];
-$result['protected_posts'] = $journal['posts'];
-$result['media_sha256'] = $journal['media_hash'];
+$result['protected_posts'] = isset( $journal['real'] ) ? array( 'actual_attachments' => 1000,
+	'actual_source' => $journal['real']['source'], 'actual_destination' => $journal['real']['destination'] ) : $journal['posts'];
+if ( ! isset( $journal['real'] ) ) { $result['media_sha256'] = $journal['media_hash']; }
 echo json_encode( $result, JSON_UNESCAPED_SLASHES ) . "\n";
