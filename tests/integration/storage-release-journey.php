@@ -4,6 +4,8 @@
  * One explicit step per fresh CLI process. The EXTERNAL aggregate ledger must
  * reserve each invocation/public request. No automatic recovery or test loop.
  * All errors leave journal/output/evidence in place; no failure-finally purge.
+ * Cleanup is intentionally refused until independently verified exclusion and
+ * exact CURRENT-row/file ownership can be supplied by a reviewed harness.
  */
 if ( 'cli' !== PHP_SAPI || 4 !== $argc || ! in_array( $argv[1], array( '54', '56' ), true ) ||
 	! in_array( $argv[2], array( 'preflight', 'provision', 'forward', 'seed-real', 'turn', 'edit', 'reverse', 'cleanup' ), true ) ||
@@ -21,7 +23,6 @@ use FooPlugins\FooGalleryMigrate\StorageControl;
 use FooPlugins\FooGalleryMigrate\StorageCapacityPolicy;
 use FooPlugins\FooGalleryMigrate\StorageMaintenanceGate;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
-use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
 use FooPlugins\FooGalleryMigrate\Plugins\Aigpl;
 global $wpdb;
@@ -119,11 +120,15 @@ if ( 'preflight' === $step ) {
 	} elseif ( 'turn' === $step ) {
 		J::check( 'turn' === $journal['phase'] && count( $journal['ids'] ) === J::REAL_IMAGES, 'Original10K source required.' );
 		$engine = foogallery_migrate_migrator_instance();
-		if ( 0 === $journal['turns'] ) {
-			$engine->run_detection(); $migrator = $engine->get_gallery_migrator(); $objects = $migrator->get_objects_to_migrate();
+		if ( J::needs_first_discovery( $journal ) ) {
+			J::check( isset( $journal['source'] ) && Aigpl::POST_TYPE === get_post_type( $journal['source'] ) &&
+				J::OWNER === get_post_meta( $journal['source'], J::POST_OWNER, true ), 'Real source ownership required before first discovery.' );
+			$journal['discovery_pending'] = true; $save( $journal );
+			$objects = J::discover_first_turn( $engine ); $migrator = $engine->get_gallery_migrator();
 			J::check( 1 === count( $objects ) && J::REAL_IMAGES === $objects[0]->children_count, 'Original-size real discovery mismatch.' );
 			$journal['uid'] = $objects[0]->unique_identifier();
-			J::check( $migrator->queue_objects_for_migration( array( $journal['uid'] => array( 'title' => J::OWNER ) ) ), 'Queue refused.' ); $save( $journal );
+			J::check( $migrator->queue_objects_for_migration( array( $journal['uid'] => array( 'title' => J::OWNER ) ) ), 'Queue refused.' );
+			unset( $journal['discovery_pending'] ); $save( $journal );
 		} else { $migrator = $engine->get_gallery_migrator(); }
 		// One ordinary migration turn, unchanged images_per_turn. Fresh process
 		// on re-entry. A slice's64-request ceiling never grants an automatic retry.
@@ -143,36 +148,7 @@ if ( 'preflight' === $step ) {
 		J::check( $engine->set_migrator_setting( J::OWNER, $journal['edit'] ) && $journal['edit'] === $engine->get_migrator_setting( J::OWNER ), 'Normal table edit/readback failed.' );
 		StorageMaintenanceGate::current()->shutdown_writer(); $journal['phase'] = 'reverse'; $save( $journal );
 	} elseif ( 'cleanup' === $step ) {
-		J::check( 'cleanup' === $journal['phase'] && $journal['stable_control'] === $raw( StorageAuthority::CONTROL_OPTION ) && 'option' === $control()['backend'] && 'stable' === $control()['phase'], 'Not the exact completed owned reversal.' );
-		J::check( null === $raw( StorageAuthority::MAINTENANCE_OPTION ) && null === $raw( StorageAuthority::AUTHORITY_OPTION ), 'A writer/authority remains; no assisted takeover.' );
-		J::check( $journal['ids'] === get_post_meta( $journal['destination'], FOOGALLERY_META_ATTACHMENTS, true ) &&
-			$journal['uid'] === get_post_meta( $journal['destination'], \FooPlugins\FooGalleryMigrate\Objects\Migratable::META_SOURCE_KEY, true ) &&
-			get_post_meta( $journal['source'], J::POST_OWNER, true ) === J::OWNER, 'Fixture/output ownership changed.' );
-		J::check( hash( 'sha256', $raw( StorageAuthority::STORAGE_BACKUP_OPTION ) ) === Native::RAW_SHA256, 'Retained backup changed; no cleanup.' );
-		// Fixture teardown, NOT a claim of product uninstall/retirement acceptance.
-		// No shared-table DDL. Initially every table was verified completely empty.
-		$db = new LegacyTransactionConnection( $wpdb );
-		J::check( false !== $db->query( 'START TRANSACTION' ), 'Cleanup transaction refused.' );
-		try {
-			$locked = $db->get_var( $db->prepare( 'SELECT option_value FROM `' . $wpdb->options . '` WHERE option_name=%s FOR UPDATE', array( StorageAuthority::CONTROL_OPTION ) ) );
-			J::check( ! $db->last_error && $locked === $journal['stable_control'], 'Owned stable control changed before cleanup.' );
-			foreach ( $tables as $table ) { J::check( false !== $db->query( $db->prepare( 'DELETE FROM `' . $table . '` WHERE blog_id=%d AND EXISTS (SELECT 1 FROM `' . $wpdb->options . '` WHERE option_name=%s AND BINARY option_value=BINARY %s)', array( $blog, StorageAuthority::CONTROL_OPTION, $journal['stable_control'] ) ) ), 'Owned row cleanup failed; preserve journal.' ); }
-			foreach ( array( StorageAuthority::STORAGE_BACKUP_OPTION, StorageAuthority::CONTROL_OPTION ) as $name ) {
-				$value = $db->get_var( $db->prepare( 'SELECT option_value FROM `' . $wpdb->options . '` WHERE option_name=%s FOR UPDATE', array( $name ) ) );
-				J::check( ! $db->last_error && is_string( $value ) && ( StorageAuthority::CONTROL_OPTION === $name ? $value === $journal['stable_control'] : hash( 'sha256', $value ) === Native::RAW_SHA256 ), 'Owned marker changed; rollback cleanup.' );
-				J::check( 1 === $db->query( $db->prepare( 'DELETE FROM `' . $wpdb->options . '` WHERE option_name=%s AND BINARY option_value=BINARY %s', array( $name, $value ) ) ), 'Exact owned marker cleanup failed.' );
-			}
-			J::check( false !== $db->query( 'COMMIT' ), 'Cleanup commit failed.' );
-		} catch ( Exception $error ) { $db->query( 'ROLLBACK' ); throw $error; }
-		catch ( Throwable $error ) { $db->query( 'ROLLBACK' ); throw $error; }
-		foreach ( $journal['ids'] as $id ) { J::check( J::OWNER === get_post_meta( $id, J::POST_OWNER, true ) && wp_delete_attachment( $id, true ), 'Owned attachment cleanup failed.' ); }
-		J::check( wp_delete_post( $journal['source'], true ) && wp_delete_post( $journal['destination'], true ), 'Owned source/destination cleanup failed.' );
-		J::check( is_dir( $journal['media_dir'] ) && ! is_link( $journal['media_dir'] ) && rmdir( $journal['media_dir'] ), 'Owned media directory is not empty.' );
-		update_option( FOOGALLERY_MIGRATE_OPTION_DATA, Native::value(), false );
-		if ( null === $journal['saved_settings'] ) { delete_option( FOOGALLERY_MIGRATE_OPTION_SETTINGS ); } else { update_option( FOOGALLERY_MIGRATE_OPTION_SETTINGS, $journal['saved_settings'], false ); }
-		J::check( hash( 'sha256', $raw( FOOGALLERY_MIGRATE_OPTION_DATA ) ) === Native::RAW_SHA256, 'Exact original fixture restoration failed.' );
-		foreach ( $tables as $table ) { J::check( '0' === (string) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM `' . $table . '` WHERE blog_id=%d', $blog ) ) && ! $wpdb->last_error, 'Owned rows remain.' ); }
-		delete_option( J::JOURNAL ); J::check( null === get_option( J::JOURNAL, null ), 'Journal cleanup failed.' );
+		J::cleanup();
 	}
 }
 $after = get_option( J::JOURNAL, null );
