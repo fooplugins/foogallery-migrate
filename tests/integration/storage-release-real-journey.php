@@ -2,10 +2,10 @@
 /**
  * Owned, resumable actual AIGPL fixture. One step per fresh CLI process.
  *
- * php storage-release-real-journey.php /tmp/foogallery-migrate-r0.XXXXXX seed|verify-source|verify-destination|verify-reversed|status|preflight|provision|switch|recover|turn|children|settings100|edit|reverse
+ * php storage-release-real-journey.php /tmp/foogallery-migrate-r0.XXXXXX seed|verify-source|verify-destination|verify-reversed|status|option-start|option-turn|preflight|provision|switch|recover|turn|children|settings100|edit|reverse
  * Append 1000 to the first seed call only for a new fitting fixture; the default remains 10K.
- * Seed and verify-source leave migration storage in its original option mode.
- * Turn/edit are for the later, explicitly table-backed R1c journey only.
+ * The guarded option prefix uses ordinary detection, queue and migration before
+ * explicit table conversion. Turn/edit remain table-backed operations.
  */
 $wp_cli_mode = defined( 'WP_CLI' ) && WP_CLI;
 if ( $wp_cli_mode ) {
@@ -14,7 +14,7 @@ if ( $wp_cli_mode ) {
 	$argc = count( $argv );
 }
 if ( 'cli' !== PHP_SAPI || ! ( 3 === $argc || ( 4 === $argc && isset( $argv[2], $argv[3] ) && 'seed' === $argv[2] && '1000' === $argv[3] ) ) ||
-	! in_array( $argv[2], array( 'seed', 'verify-source', 'verify-destination', 'verify-reversed', 'status', 'preflight', 'provision', 'switch', 'recover', 'turn', 'children', 'settings100', 'edit', 'reverse' ), true ) ) {
+	! in_array( $argv[2], array( 'seed', 'verify-source', 'verify-destination', 'verify-reversed', 'status', 'option-start', 'option-turn', 'preflight', 'provision', 'switch', 'recover', 'turn', 'children', 'settings100', 'edit', 'reverse' ), true ) ) {
 	throw new RuntimeException( 'An owned site path and one explicit step are required.' );
 }
 $site = realpath( $argv[1] );
@@ -150,7 +150,7 @@ $assert_pristine_storage = function () use ( $raw_option, $wpdb ) {
 		'Source seeding requires clean original option authority.' );
 };
 $verify_source = function ( $state, $full ) use ( $total, $owner, $owner_key, $media_dir, $upload, $png_hash, $owned_count ) {
-	real_check( in_array( $state['phase'], array( 'ready', 'migrating', 'complete', 'edited', 'reversing', 'reversed' ), true ), 'The actual source is not complete.' );
+	real_check( in_array( $state['phase'], array( 'ready', 'option-starting', 'migrating', 'complete', 'edited', 'reversing', 'reversed' ), true ), 'The actual source is not complete.' );
 	real_check( $total === count( $state['ids'] ) && $total === count( array_unique( $state['ids'] ) ) &&
 		isset( $state['ids_sha256'], $state['source'], $state['content'], $state['content_sha256'] ) &&
 		hash( 'sha256', implode( ',', $state['ids'] ) ) === $state['ids_sha256'], 'Ordered attachment ID manifest differs.' );
@@ -207,6 +207,49 @@ $verify_destination = function ( $state ) use ( $total ) {
 		'ordered_ids_sha256' => hash( 'sha256', implode( ',', $state['ids'] ) ),
 		'output_bytes' => strlen( $output ) );
 };
+$option_measure = function ( $state, $allow_backup ) use ( $raw_option ) {
+	$current = $raw_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+	$backup = $allow_backup ? $raw_option( StorageAuthority::STORAGE_BACKUP_OPTION ) : null;
+	$raw = is_string( $current ) ? $current : $backup;
+	real_check( is_string( $raw ), 'Pinned option state is absent from both current and retained storage.' );
+	$measurement = array( 'bytes' => strlen( $raw ), 'sha256' => hash( 'sha256', $raw ) );
+	if ( isset( $state['option_sha256'] ) ) {
+		real_check( $measurement['bytes'] === $state['option_bytes'] &&
+			$measurement['sha256'] === $state['option_sha256'], 'Pinned option bytes changed outside the owned journey.' );
+	}
+	return $measurement;
+};
+$verify_progress = function ( $state, $engine ) use ( $total ) {
+	real_check( isset( $state['uid'], $state['completed'], $state['destination'] ) &&
+		is_string( $state['uid'] ) && '' !== $state['uid'] && is_int( $state['completed'] ) &&
+		$state['completed'] >= 0 && $state['completed'] < $total,
+		'Owned unfinished migration identity or progress is invalid.' );
+	$objects = $engine->get_gallery_migrator()->get_objects_to_migrate();
+	real_check( 1 === count( $objects ) && $state['uid'] === $objects[0]->unique_identifier() &&
+		$total === (int) $objects[0]->children_count && ! empty( $objects[0]->part_of_migration ) &&
+		in_array( $objects[0]->migration_status, array( Migratable::PROGRESS_QUEUED, Migratable::PROGRESS_STARTED ), true ) &&
+		( ! isset( $state['option_status'] ) || $state['option_status'] === $objects[0]->migration_status ) &&
+		$state['completed'] === (int) $objects[0]->migrated_child_count &&
+		(int) $state['destination'] === (int) $objects[0]->migrated_id,
+		'Queued gallery identity, status, destination or progress changed.' );
+	if ( $state['completed'] > 0 ) {
+		$destination = get_post( $state['destination'] );
+		$ids = get_post_meta( $state['destination'], FOOGALLERY_META_ATTACHMENTS, true );
+		real_check( $destination && FOOGALLERY_CPT_GALLERY === $destination->post_type &&
+			is_array( $ids ) && array_slice( $state['ids'], 0, $state['completed'] ) === $ids &&
+			$state['uid'] === get_post_meta( $destination->ID, Migratable::META_SOURCE_KEY, true ),
+			'Owned destination prefix, attachment order or source identity changed.' );
+		$matches = get_posts( array( 'post_type' => FOOGALLERY_CPT_GALLERY, 'post_status' => 'any',
+			'posts_per_page' => 2, 'fields' => 'ids', 'meta_key' => Migratable::META_SOURCE_KEY,
+			'meta_value' => $state['uid'] ) );
+		real_check( 1 === count( $matches ) && (int) $matches[0] === (int) $state['destination'],
+			'Owned destination is not unique.' );
+	} else {
+		real_check( 0 === (int) $state['destination'], 'Unstarted gallery unexpectedly has a destination.' );
+	}
+	return array( 'uid' => $state['uid'], 'completed' => $state['completed'],
+		'destination' => (int) $state['destination'], 'status' => $objects[0]->migration_status );
+};
 
 if ( 'seed' === $step && null === $journal ) {
 	real_check( 0 === $owned_count( 'attachment' ) && 0 === $owned_count( Aigpl::POST_TYPE ) &&
@@ -220,6 +263,15 @@ if ( 'seed' === $step && null === $journal ) {
 real_check( is_array( $journal ) && isset( $journal['identity'], $journal['owner'], $journal['phase'], $journal['ids'] ) &&
 	$identity === $journal['identity'] && $owner === $journal['owner'] && is_array( $journal['ids'] ) &&
 	count( $journal['ids'] ) <= $total, 'Owned fixture journal is missing or mismatched.' );
+if ( isset( $journal['option_prefix'] ) ) {
+	real_check( true === $journal['option_prefix'] && 10000 === $total &&
+		isset( $journal['uid'], $journal['destination'], $journal['option_status'], $journal['option_bytes'], $journal['option_sha256'] ) &&
+		in_array( $journal['option_status'], array( Migratable::PROGRESS_QUEUED, Migratable::PROGRESS_STARTED ), true ) &&
+		is_int( $journal['option_bytes'] ) && $journal['option_bytes'] > 0 &&
+		is_string( $journal['option_sha256'] ) && preg_match( '/^[a-f0-9]{64}$/D', $journal['option_sha256'] ) &&
+		in_array( $journal['phase'], array( 'migrating', 'complete', 'edited', 'reversing', 'reversed' ), true ),
+		'Owned option-prefix journal is incomplete or incompatible.' );
+}
 
 if ( 'seed' === $step ) {
 	real_check( 'seeding' === $journal['phase'], 'Fixture is already complete; refusing reseed.' );
@@ -302,6 +354,103 @@ if ( 'verify-reversed' === $step ) {
 if ( 'status' === $step ) {
 	$result['storage'] = StorageAdmin::status();
 	if ( 'seeding' !== $journal['phase'] ) { $result['source'] = $verify_source( $journal, false ); }
+	if ( isset( $journal['option_prefix'] ) ) {
+		$result['pinned_option'] = $option_measure( $journal, true );
+		if ( 'migrating' === $journal['phase'] && 'stable' === $result['storage']['phase'] ) {
+			$result['progress'] = $verify_progress( $journal, foogallery_migrate_migrator_instance() );
+		}
+	}
+}
+if ( 'option-start' === $step ) {
+	real_check( 10000 === $total && 'ready' === $journal['phase'] && 0 === $journal['turns'] &&
+		0 === $journal['completed'] && ! isset( $journal['option_prefix'] ) &&
+		null === $raw_option( FOOGALLERY_MIGRATE_OPTION_DATA ) &&
+		null === $raw_option( StorageAuthority::CONTROL_OPTION ),
+		'Only the untouched owned 10K option fixture may start the option prefix.' );
+	$storage = StorageAdmin::status();
+	real_check( 'option' === $storage['backend'] && 'stable' === $storage['phase'] &&
+		'' === $storage['problem'], 'Original option authority is not healthy.' );
+	$result['source'] = $verify_source( $journal, false );
+	$engine = foogallery_migrate_migrator_instance();
+	real_check( 5 === (int) $engine->get_images_per_turn(), 'Owned option prefix must start with the ordinary default five.' );
+	// A crash after any production write must not silently re-detect or re-queue.
+	$journal['phase'] = 'option-starting'; $save( $journal );
+	$before_questions = $questions(); $started = microtime( true );
+	$engine->run_detection();
+	$migrator = $engine->get_gallery_migrator();
+	$objects = $migrator->get_objects_to_migrate( true );
+	real_check( 1 === count( $objects ) && (int) $journal['source'] === (int) $objects[0]->ID &&
+		$total === (int) $objects[0]->children_count, 'Actual AIGPL discovery changed.' );
+	$uid = $objects[0]->unique_identifier();
+	real_check( $migrator->queue_objects_for_migration( array( $uid => array( 'title' => $owner ) ) ),
+		'Actual option-backed gallery queue refused.' );
+	$journal['uid'] = $uid; $journal['destination'] = 0;
+	$queued = $migrator->get_objects_to_migrate();
+	real_check( 1 === count( $queued ) && $uid === $queued[0]->unique_identifier() &&
+		Migratable::PROGRESS_QUEUED === $queued[0]->migration_status &&
+		! empty( $queued[0]->part_of_migration ) && 0 === (int) $queued[0]->migrated_child_count,
+		'Ordinary option queue was not durably retained.' );
+	$measure = $option_measure( array(), false );
+	$journal['option_prefix'] = true;
+	$journal['option_status'] = $queued[0]->migration_status;
+	$journal['option_bytes'] = $measure['bytes'];
+	$journal['option_sha256'] = $measure['sha256'];
+	$journal['phase'] = 'migrating'; $save( $journal );
+	$result['option'] = $measure;
+	$result['progress'] = $verify_progress( $journal, $engine );
+	$result['elapsed_seconds'] = round( microtime( true ) - $started, 3 );
+	$result['session_questions_delta'] = $questions() - $before_questions;
+	$result['peak_allocated_bytes'] = memory_get_peak_usage( true );
+	$result['phase'] = $journal['phase'];
+}
+if ( 'option-turn' === $step ) {
+	real_check( 10000 === $total && 'migrating' === $journal['phase'] &&
+		isset( $journal['option_prefix'] ) && true === $journal['option_prefix'] &&
+		$journal['option_bytes'] < 1048576 && $journal['completed'] < $total,
+		'Option prefix is absent, complete or already at the 1 MiB inspection point.' );
+	$storage = StorageAdmin::status();
+	real_check( 'option' === $storage['backend'] && 'stable' === $storage['phase'] &&
+		'' === $storage['problem'], 'Option turn requires stable original option authority.' );
+	$result['source'] = $verify_source( $journal, false );
+	$option_measure( $journal, false );
+	$before_questions = $questions(); $started = microtime( true );
+	$engine = foogallery_migrate_migrator_instance();
+	$verify_progress( $journal, $engine );
+	$limit = $engine->get_images_per_turn();
+	real_check( is_numeric( $limit ) && (int) $limit > 0 &&
+		$journal['completed'] + (int) $limit < $total &&
+		( $journal['turns'] < 5 ? 5 === (int) $limit :
+			( isset( $journal['images_per_turn'] ) ? 100 === (int) $limit : 5 === (int) $limit ) ),
+		'Normal option turn size changed or would finish the source before conversion.' );
+	$migrator = $engine->get_gallery_migrator();
+	$before = $journal['completed'];
+	real_check( $migrator->migrate(), 'Normal option-backed migration turn failed.' );
+	$objects = $migrator->get_objects_to_migrate();
+	real_check( 1 === count( $objects ) && $journal['uid'] === $objects[0]->unique_identifier() &&
+		! $objects[0]->migrated && $objects[0]->migrated_child_count > $before &&
+		$objects[0]->migrated_child_count <= $before + (int) $limit &&
+		(int) $objects[0]->migrated_id > 0,
+		'Option turn did not preserve the unfinished queued gallery.' );
+	$journal['turns']++;
+	$journal['completed'] = (int) $objects[0]->migrated_child_count;
+	$journal['destination'] = (int) $objects[0]->migrated_id;
+	$journal['option_status'] = $objects[0]->migration_status;
+	$measure = $option_measure( array(), false );
+	real_check( $measure['sha256'] !== $journal['option_sha256'],
+		'Option turn advanced output without a durable migration-option write.' );
+	$journal['option_bytes'] = $measure['bytes'];
+	$journal['option_sha256'] = $measure['sha256'];
+	$save( $journal );
+	$result['option'] = $measure;
+	$result['progress'] = $verify_progress( $journal, $engine );
+	$result['images_per_turn'] = (int) $limit;
+	$result['turns'] = $journal['turns'];
+	$result['completed'] = $journal['completed'];
+	$result['destination'] = $journal['destination'];
+	$result['inspection_ready'] = $measure['bytes'] >= 1048576;
+	$result['elapsed_seconds'] = round( microtime( true ) - $started, 3 );
+	$result['session_questions_delta'] = $questions() - $before_questions;
+	$result['peak_allocated_bytes'] = memory_get_peak_usage( true );
 }
 if ( 'children' === $step ) {
 	$storage = StorageAdmin::status();
@@ -332,10 +481,17 @@ if ( 'children' === $step ) {
 }
 if ( 'settings100' === $step ) {
 	$storage = StorageAdmin::status();
-	real_check( 'table' === $storage['backend'] && 'stable' === $storage['phase'] && 'verified' === $storage['schema'] &&
+	$option_prefix = 'option' === $storage['backend'] && 10000 === $total &&
+		isset( $journal['option_prefix'] ) && true === $journal['option_prefix'];
+	real_check( in_array( $storage['backend'], array( 'option', 'table' ), true ) &&
+		'stable' === $storage['phase'] && ( $option_prefix || 'verified' === $storage['schema'] ) &&
 		'' === $storage['problem'] && 'migrating' === $journal['phase'] && $journal['turns'] >= 5 &&
 		$journal['completed'] >= 25 && ! isset( $journal['images_per_turn'] ),
 		'Only the owned, default-turn-validated migration may change this setting once.' );
+	if ( $option_prefix ) {
+		$option_measure( $journal, false );
+		$verify_progress( $journal, foogallery_migrate_migrator_instance() );
+	}
 	$settings = new MigratorSettings();
 	real_check( 5 === $settings->get_images_per_turn(), 'Existing normal setting is not the default five.' );
 	$settings->save_settings( array( MigratorSettings::SETTING_IMAGES_PER_TURN => 100 ) );
@@ -345,9 +501,27 @@ if ( 'settings100' === $step ) {
 	$result['images_per_turn'] = 100;
 }
 if ( in_array( $step, array( 'preflight', 'provision', 'switch', 'recover' ), true ) ) {
-	real_check( 'ready' === $journal['phase'] && 0 === $journal['turns'] && 0 === $journal['completed'],
-		'Storage enablement requires the unchanged, unstarted actual fixture.' );
+	$option_prefix = 'migrating' === $journal['phase'] && 10000 === $total &&
+		isset( $journal['option_prefix'] ) && true === $journal['option_prefix'] &&
+		$journal['option_bytes'] >= 1048576 && $journal['completed'] > 0 && $journal['completed'] < $total;
+	real_check( ( 'ready' === $journal['phase'] && 0 === $journal['turns'] && 0 === $journal['completed'] ) ||
+		$option_prefix, 'Storage enablement requires an untouched fixture or pinned large unfinished option prefix.' );
 	$result['source'] = $verify_source( $journal, false );
+	if ( $option_prefix ) {
+		$before_storage = StorageAdmin::status();
+		real_check( ( 'option' === $before_storage['backend'] && 'stable' === $before_storage['phase'] ) ||
+			( 'recover' === $step && 'stable' !== $before_storage['phase'] &&
+				in_array( $before_storage['backend'], array( 'option', 'table' ), true ) &&
+				'table' === $before_storage['target'] ),
+			'Pinned option conversion authority is not recoverable.' );
+		real_check(
+			'' === $before_storage['problem'], 'Pinned option conversion authority is not healthy.' );
+		$result['option_before'] = $option_measure( $journal, 'recover' === $step );
+		// The pinned raw SQL hash already commits the verified queue/progress.
+		// Reading through the engine here would admit a request-long option
+		// writer and correctly block the maintenance gate below. A separate
+		// fresh status request proves the queue before and after conversion.
+	}
 	$before_questions = $questions(); $started = microtime( true );
 	$confirm = 'recover' === $step ? 'recover-storage' :
 		( 'provision' === $step ? 'provision-shared-schema' : 'switch-to-table' );
@@ -356,6 +530,12 @@ if ( in_array( $step, array( 'preflight', 'provision', 'switch', 'recover' ), tr
 	$result['session_questions_delta'] = $questions() - $before_questions;
 	$result['peak_allocated_bytes'] = memory_get_peak_usage( true );
 	$result['storage'] = StorageAdmin::status();
+	if ( $option_prefix && 'table' === $result['storage']['backend'] && 'stable' === $result['storage']['phase'] ) {
+		$result['retained_option'] = $option_measure( $journal, true );
+		// An engine loaded before the switch may still cache option authority in
+		// this request. Status and the first table turn prove progress afresh.
+		$result['fresh_table_proof_required'] = true;
+	}
 	if ( is_wp_error( $storage_result ) ) {
 		$result['failure'] = array( 'code' => $storage_result->get_error_code(), 'message' => $storage_result->get_error_message() );
 	} else { $result['storage_result'] = $storage_result; }
@@ -373,6 +553,10 @@ if ( 'turn' === $step || 'edit' === $step ) {
 	if ( 'turn' === $step ) {
 		real_check( 'ready' === $journal['phase'] || 'migrating' === $journal['phase'], 'No pending migration turn.' );
 		$migrator = $engine->get_gallery_migrator();
+		if ( 'migrating' === $journal['phase'] && isset( $journal['option_prefix'] ) ) {
+			$result['retained_option'] = $option_measure( $journal, true );
+			$result['progress_before'] = $verify_progress( $journal, $engine );
+		}
 		if ( 'ready' === $journal['phase'] ) {
 			$engine->run_detection();
 			$objects = $migrator->get_objects_to_migrate( true );
