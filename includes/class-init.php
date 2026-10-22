@@ -157,13 +157,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             $migrator->get_gallery_migrator()->get_objects_to_migrate( true );
             $content_migrator = $migrator->get_content_migrator();
             $progress = $content_migrator->scan_content_batch( true );
-            $content_items = $content_migrator->scan_content();
-            $count = 0;
-            foreach ( $content_items as $item ) {
-                if ( is_array( $item ) && isset( $item['plugin_name'] ) && 'WordPress Core' === $item['plugin_name'] ) {
-                    $count++;
-                }
-            }
+            $count = $content_migrator->count_scanned_items_for_plugin( 'WordPress Core' );
 
             $redirect_url = add_query_arg(
                 array(

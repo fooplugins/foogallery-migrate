@@ -249,6 +249,7 @@ $progress = $migrator->scan_content_batch( true );
 $state = $engine->settings['content_scan_state'];
 assert_same( 2, $progress['scanned'], 'the first request processes only the configured batch size' );
 assert_same( 2, count( $state['items'] ), 'findings are persisted in the atomic state' );
+assert_same( 2, $migrator->count_scanned_items_for_plugin( 'Example Gallery' ), 'option-mode plugin count preserves the existing finding list' );
 assert_true( false !== stripos( $wpdb->queries[0], 'LIMIT 3' ), 'the bounded query fetches one lookahead row' );
 assert_true( false !== stripos( $wpdb->queries[0], 'ID > 0' ), 'the query uses a keyset cursor' );
 assert_same( false, $progress['complete'], 'lookahead reports more work' );

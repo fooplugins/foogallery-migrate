@@ -473,6 +473,73 @@ class LegacyTableRepository {
 		catch ( \Throwable $error ) { $this->history_read_active = false; throw $error; }
 	}
 
+	/** Count indexed content findings for one exact source plugin, not every tree. */
+	public function content_count_plugin( $plugin ) {
+		if ( ! is_string( $plugin ) || '' === $plugin || $this->history_read_active ) { $this->fail( 'Invalid content plugin count.' ); }
+		$this->start_budget(); $this->history_read_active = true;
+		try {
+			$encoded = $this->codec->encode( $plugin );
+			$this->consume( 0, strlen( $encoded ) );
+			$entry = $this->content_context(); $head = $entry['head'];
+			if ( false === $head ) {
+				if ( false !== $this->reader->head( ContentScanRepository::STATE_KEY ) ) { $this->fail( 'Content changed during plugin count.' ); }
+				return $this->finish_history_read( 0 );
+			}
+			$hash = $this->codec->key_hash( $plugin );
+			$args = array( $this->blog, $head['id'], $head['active_generation'], $hash );
+			$totals = $this->read( $this->db->prepare( 'SELECT COUNT(*) AS total FROM `' . $this->table . '` FORCE INDEX (`source_plugin`) '
+				. 'WHERE blog_id = %d AND state_id = %d AND generation = %d AND source_plugin_hash = UNHEX(%s) AND parent_node_hash IS NULL', $args ) );
+			if ( count( $totals ) !== 1 ) { $this->fail( 'Invalid content plugin count.' ); }
+			$expected = $this->number( $totals[0]['total'] );
+			if ( $expected > $this->max_rows || $expected > $entry['root']['root_count'] ) { $this->fail( 'Content plugin count exceeds root budget.' ); }
+			$last_order = 0; $last_id = 0; $count = 0;
+			do {
+				$rows = $this->read( $this->db->prepare( 'SELECT id, item_order, OCTET_LENGTH(source_plugin_value) AS plugin_bytes '
+					. 'FROM `' . $this->table . '` FORCE INDEX (`source_plugin`) WHERE blog_id = %d AND state_id = %d AND generation = %d '
+					. 'AND source_plugin_hash = UNHEX(%s) AND parent_node_hash IS NULL '
+					. 'AND (item_order > %d OR (item_order = %d AND id > %d)) ORDER BY item_order ASC, id ASC LIMIT 100',
+					array_merge( $args, array( $last_order, $last_order, $last_id ) ) ) );
+				if ( count( $rows ) > 100 || count( $rows ) > $expected - $count ) { $this->fail( 'Content plugin index changed during count.' ); }
+				$page_bytes = 0; $metadata = array(); $clauses = array();
+				$raw_args = array( $this->blog, $head['id'], $head['active_generation'], $hash );
+				foreach ( $rows as $row ) {
+					$id = $this->number( $row['id'] ); $order = $this->number( $row['item_order'] );
+					$bytes = $this->number( $row['plugin_bytes'] );
+					if ( $id < 1 || ( $order < $last_order || ( $order === $last_order && $id <= $last_id ) ) ||
+						$bytes < 1 || $bytes > LegacyTableReader::MAX_RECORD_BYTES || $bytes > 4194304 - $page_bytes ) {
+						$this->fail( 'Invalid content plugin projection size or order.' );
+					}
+					$this->consume( 1, $bytes ); $page_bytes += $bytes;
+					$metadata[] = array( 'id' => $id, 'order' => $order, 'bytes' => $bytes );
+					$clauses[] = '(id = %d AND OCTET_LENGTH(source_plugin_value) = %d)';
+					$raw_args[] = $id; $raw_args[] = $bytes;
+					$last_order = $order; $last_id = $id;
+				}
+				if ( count( $metadata ) ) {
+					$raw = $this->read( $this->db->prepare( 'SELECT id, item_order, HEX(source_plugin_hash) AS plugin_hash, source_plugin_value '
+						. 'FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d '
+						. 'AND source_plugin_hash = UNHEX(%s) AND parent_node_hash IS NULL AND (' . implode( ' OR ', $clauses ) . ') '
+						. 'ORDER BY item_order ASC, id ASC LIMIT 100', $raw_args ) );
+					if ( count( $raw ) !== count( $metadata ) ) { $this->fail( 'Content plugin projection changed during bounded read.' ); }
+					foreach ( $metadata as $index => $expected_row ) {
+						$value = $raw[$index];
+						if ( $this->number( $value['id'] ) !== $expected_row['id'] || $this->number( $value['item_order'] ) !== $expected_row['order'] ||
+							$this->hex( $value['plugin_hash'] ) !== $hash || ! is_string( $value['source_plugin_value'] ) ||
+							strlen( $value['source_plugin_value'] ) !== $expected_row['bytes'] || $value['source_plugin_value'] !== $encoded ||
+							$this->codec->decode( $value['source_plugin_value'] ) !== $plugin ) {
+							$this->fail( 'Content plugin hash collision or raw projection mismatch.' );
+						}
+					}
+					$count += count( $metadata );
+				}
+			} while ( count( $rows ) === 100 );
+			if ( $count !== $expected ) { $this->fail( 'Content plugin index changed during count.' ); }
+			$this->unchanged( ContentScanRepository::STATE_KEY, $head );
+			return $this->finish_history_read( $count );
+		} catch ( \Exception $error ) { $this->history_read_active = false; throw $error; }
+		catch ( \Throwable $error ) { $this->history_read_active = false; throw $error; }
+	}
+
 	/** A replacement is an explicit operation; never import/repair during reads. */
 	/** Preserve missing in the full compatibility facade; not used by UI paging. */
 	public function read_content_state() {

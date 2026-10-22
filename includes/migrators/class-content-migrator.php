@@ -80,6 +80,18 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			return $this->get_content_items();
 		}
 
+		/** Count one plugin's saved findings without retaining table history. */
+		function count_scanned_items_for_plugin( $plugin_name ) {
+			$repository = $this->scoped_content_repository();
+			if ( null !== $repository ) { return $repository->count_by_plugin( $plugin_name ); }
+			$items = $this->scan_content();
+			$count = 0;
+			foreach ( $items as $item ) {
+				if ( is_array( $item ) && isset( $item['plugin_name'] ) && $plugin_name === $item['plugin_name'] ) { $count++; }
+			}
+			return $count;
+		}
+
 		/**
 		 * Process one bounded, resumable batch of posts containing possible gallery content.
 		 *

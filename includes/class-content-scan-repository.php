@@ -22,6 +22,15 @@ class ContentScanRepository extends ScalarStateRepository {
 		return $this->state( $this->backend->read_all() );
 	}
 	public function is_table() { return $this->backend instanceof LegacyTableBackend; }
+	public function count_by_plugin( $plugin ) {
+		if ( ! is_string( $plugin ) || '' === $plugin ) { throw new \RuntimeException( 'Invalid content plugin count.' ); }
+		if ( $this->is_table() ) { return $this->backend->content_count_plugin( $plugin ); }
+		$count = 0;
+		foreach ( $this->option_state()['items'] as $item ) {
+			if ( is_array( $item ) && isset( $item['plugin_name'] ) && $plugin === $item['plugin_name'] ) { $count++; }
+		}
+		return $count;
+	}
 	public function window( $offset, $limit, $keys = null ) {
 		if ( $this->is_table() ) { return $this->backend->content_window( $offset, $limit, $keys ); }
 		$state = $this->option_state();
