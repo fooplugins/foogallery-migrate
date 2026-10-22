@@ -2,7 +2,7 @@
 
 **Updated:** 2026-10-22
 
-**Status:** Five scope cuts approved; documentation only. Implementation remains stopped.
+**Status:** Development authorized on 2026-10-22; R0 starting under the approved five cuts.
 
 **Branch:** `feature/migrated-store-scalability`
 
@@ -16,7 +16,7 @@
 
 ## Approved scope and authority
 
-On 2026-10-22 Brad explicitly approved all five cuts in the [PR simplification proposal](https://github.com/fooplugins/foogallery-migrate/pull/15#issuecomment-6287530658), requested this documentation update/commit, and said not to start implementation. The comment originally recorded a proposal; this later approval settles its scope amendments. It does not authorize development, delegation, database changes, pushing, merging or release.
+On 2026-10-22 Brad explicitly approved all five cuts in the [PR simplification proposal](https://github.com/fooplugins/foogallery-migrate/pull/15#issuecomment-6287530658). After committing the documentation, Brad requested development using this plan and then instructed: “dont worry about budget - just go”. This authorizes implementation, delegated development/independent QA, owned disposable testing and scoped local commits. The explicit budget override removes the workflow's usage-budget approval/stop requirement for this run. Pushing, merging and public release remain separately controlled.
 
 Deliver a testable **single-site** storage upgrade using the existing migration engine and useful PR #15 foundations. Preserve codecs, repositories, authority and bounded table access where they serve the release. Existing complexity is not automatically a requirement to preserve: simplify or remove obsolete product calibration/proof paths with reviewed replacement coverage, without rewriting the engine.
 
@@ -67,7 +67,7 @@ Historical receipts: [October 20 review](pr15-review-checkpoint-2026-10-20.md), 
 
 ## Ordered work
 
-R0–R4 replace the previous S0–S9 sequence. All tasks are `pending`: no agents assigned, zero repairs, no new runtime evidence or implementation commits. Proposed routing below applies only after an authorized development kickoff and budget. Independent QA is GPT-6 Sol Medium, separate from the developer.
+R0–R4 replace the previous S0–S9 sequence. R0 is starting; R1–R4 remain pending. Independent QA is GPT-6 Sol Medium, separate from the developer. There are no accepted implementation commits yet.
 
 | ID | Deliverable / exit | Depends on | Owned areas | Proposed developer and reason |
 |---|---|---|---|---|
@@ -155,7 +155,7 @@ Do not require every historical allocator/host-identity experiment to pass after
 
 ## Workflow to avoid repeated blockers
 
-These rules apply **only after** development and its usage allowance are authorized. This documentation commit starts no workers or implementation.
+Development is now authorized. Apply these rules with Brad's explicit no-budget-stop instruction; do not reopen the settled scope or request a usage allowance again.
 
 1. **One supervisor, one tracker, one settled release contract.** This file is the forward tracker; no per-worker plans or parallel acceptance ledgers. Old checkpoints are historical evidence. Record new decisions here without reopening the five approved cuts.
 2. **Prepare the environment once.** Record the disposable site's ownership, runner, dependencies, runtime-floor access and teardown. Reuse it; never assume old private fixture paths exist. Missing access is a real blocker, not a reason to invent another test platform.
@@ -191,27 +191,27 @@ Read guards and phase parameters before using `tests/integration/storage-release
 
 ## Tracking, deferred work and handoff
 
-- **Next ready task:** R0 after explicit development kickoff and usage allowance; not now.
-- **Current authorization:** Documentation update and local commit only. No implementation, agents, database work, automation or release started.
+- **Active task:** R0 — prepare an owned disposable runner and reproduce/classify the first customer-path failure.
+- **Current authorization:** Development, delegated QA, disposable test setup and scoped local commits. No push/merge/release requested.
 - **Documentation validation:** File/heading links, code-fence balance, active task IDs and whitespace checked across the three changed documents. No runtime tests were run or runtime pass claimed for this update.
 - **Statuses:** `pending → developing → qa → validating → done`; use `blocked` / `budget-stopped` with a precise reason.
 - **Per-task ledger:** Record developer model/reason and agent ID, separate Sol Medium QA ID, repair/reassignment history, commands/results, milestone gaps and accepted commit. Currently all unassigned, repairs 0, runtime checks not run, no implementation commits.
 - **Shared files:** R1/R2 share engine/settings/repository/lifecycle code. R3 consumes their services. Default is serial ownership and integration; no parallel work scheduled.
-- **Supervisor:** Planning session model/effort not independently verified; disclose actual setting at kickoff. A skill does not silently switch it.
+- **Supervisor:** Current session's exact model/effort cannot be independently verified. Developer routing remains explicit Sol High for R0 and Sol Medium for independent QA.
 - **Active workers / wakeups:** None created for this plan.
 - **Deferred backlog, not follow-on authorized tasks:** Multisite table support/network lifecycle; advanced recommendation tiers/re-notification; convenience reset/stale-copy UI; broader diagnostic/host qualification polish. A future scope decision is required to schedule these. Do not label the first release incomplete merely because this backlog remains.
 - **Never implied:** New engine/config work, pushing, merging, deployment. Brad must explicitly confirm any WordPress.org live tag or stable-tag change.
 
-### Usage ledger for a future development run
+### Usage policy for this development run
 
-No development allowance has been supplied and no budgeted run has started. Apply the `budget-dev` workflow on an explicit kickoff, capturing its account-wide monitored baseline before implementation/delegation. Do not infer a budget from this documentation request.
+Brad explicitly overrode usage-budget gating with “dont worry about budget - just go” after the kickoff request. Continue the scoped work without percentage-budget stops or allowance questions. Retain the workflow's task routing, independent QA, evidence and scoped commits; provider availability and separately controlled actions still apply.
 
 | Item | Current value |
 |---|---|
-| Authorized allowance / extensions | Not supplied / none |
+| Authorized allowance / extensions | No percentage cap requested; explicit user override |
 | Original baseline and window history | Not captured |
-| Cumulative observed development usage | Not measured; no development run started |
+| Cumulative observed development usage | Not tracked as a task stop condition |
 | Advisory reserve / remaining allowance | Not set / unknown |
-| Checkpoint | 2026-10-22: five cuts approved, first-release plan documented; implementation remains stopped |
+| Checkpoint | 2026-10-22: kickoff authorized; R0 starting at `bbc9448` |
 
-Retain baseline, allowance and repair history on resume. Keep account identifiers/raw usage responses out of Git. Budget approval does not authorize scope expansion or controlled release actions.
+Retain task and repair history on resume. Do not infer scope expansion or controlled release authorization from the budget override.
