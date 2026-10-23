@@ -278,6 +278,26 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
 
         private function migrate_admitted() {
             $this->migrator_engine->assert_storage_writer();
+			$table = $this->table_collection_repository();
+			if ( null !== $table ) {
+				$context = $table->migration_turn_context( $this->type );
+				if ( ! $context['found'] ) {
+					$this->get_objects_to_migrate();
+					$context = $table->migration_turn_context( $this->type );
+					if ( ! $context['found'] ) { throw new \RuntimeException( 'Discovered migration collection was not persisted.' ); }
+				}
+				$old = null === $context['root'] ? null : self::turn_contribution( $context['object'] );
+				$this->migrator_engine->begin_migrated_object_batch();
+				if ( null !== $context['root'] ) { $context['object']->migrate(); }
+				if ( ! $this->migrator_engine->flush_migrated_object_batch() ) { return false; }
+				$counts = $context['counts'];
+				if ( null !== $old ) {
+					$new = self::turn_contribution( $context['object'] );
+					foreach ( $counts as $name => $count ) { $counts[$name] = $count - $old[$name] + $new[$name]; }
+				}
+				return $table->checkpoint_migration_turn( $this->type, $context,
+					self::queue_summary( $counts['queued'], $counts['completed'], $counts['errors'] ) );
+			}
             $objects = $this->get_objects_to_migrate();
 
             $this->migrator_engine->begin_migrated_object_batch();
@@ -301,6 +321,13 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
 			$objects_saved = $this->set_setting( $this->type, $objects );
 
 			return $state_saved && $objects_saved;
+		}
+
+		private static function turn_contribution( $object ) {
+			$selected = (bool) $object->part_of_migration;
+			return array( 'queued' => $selected ? 1 : 0,
+				'completed' => $selected && $object->migrated ? 1 : 0,
+				'errors' => $selected && Migratable::PROGRESS_ERROR === $object->migration_status ? 1 : 0 );
 		}
     }
 }

@@ -185,6 +185,50 @@ try {
 	$album_cancelled = $backend->roots( 'albums', array( '09' ) )[0]['value'];
 	$check( false === $album_cancelled['part_of_migration'] && 'not_started' === $album_cancelled['migration_status'] &&
 		$backend->read( 'albums-state' )['value'] === array( 'queued' => 0, 'completed' => 0, 'progress' => 0 ), 'typed album cancel restores status and summary' );
+	// A migration turn reads one runnable tree and carries its original budget
+	// across external output. Failed companion creation must roll the tree back.
+	$check( $backend->delete_scalar( 'galleries-state' ), 'turn companion absent for atomic-create test' );
+	$turn_fault = new CollectionQueueFaultConnection( $wpdb ); $turn_fault->state_table = $tables[0]; $turn_fault->fail_insert = true;
+	$turn_backend = new LegacyTableBackend( $turn_fault, $blog );
+	$turn = $turn_backend->migration_turn_context( 'galleries' );
+	$check( $turn['found'] && 1 === $turn['root']['key'] && 'queued' === $turn['root']['value']['migration_status'] &&
+		$turn['counts'] === array( 'queued' => 121, 'completed' => 1, 'errors' => 1 ), 'first queued root follows preceding completed error in persisted order' );
+	$turn_value = $turn['root']['value']; $turn_value['migration_status'] = 'completed'; $turn_value['migrated'] = true;
+	$check( $backend->mutate_scalars( array( 'galleries-state' => MigratorBase::queue_summary( 121, 1, 1 ) ) ), 'interleaved companion creation' );
+	$before_absent_race = $physical();
+	$refuses( function () use ( $turn_backend, $turn, $turn_value ) {
+		$turn_backend->checkpoint_migration_turn( 'galleries', $turn, $turn_value, MigratorBase::queue_summary( 121, 2, 1 ) );
+	}, 'absent companion becoming present refuses turn checkpoint' );
+	$check( $before_absent_race === $physical(), 'absent-to-present race leaves root and companion untouched' );
+	$check( $backend->delete_scalar( 'galleries-state' ), 'turn companion absent again for rollback test' );
+	$turn = $turn_backend->migration_turn_context( 'galleries' );
+	$turn_summary = MigratorBase::queue_summary( 121, 2, 1 ); $before_turn_failure = $physical();
+	$refuses( function () use ( $turn_backend, $turn, $turn_value, $turn_summary ) {
+		$turn_backend->checkpoint_migration_turn( 'galleries', $turn, $turn_value, $turn_summary );
+	}, 'turn companion insert failure rolls back affected root' );
+	$check( $before_turn_failure === $physical() && ! $backend->read( 'galleries-state' )['found'], 'failed turn checkpoint leaves no root or companion change' );
+	$fresh_turn = $backend->migration_turn_context( 'galleries' );
+	$check( 1 === $fresh_turn['root']['key'] && 'queued' === $fresh_turn['root']['value']['migration_status'], 'fresh context sees original runnable root after rollback' );
+	$fresh_value = $fresh_turn['root']['value']; $fresh_value['migration_status'] = 'completed'; $fresh_value['migrated'] = true;
+	$check( $backend->checkpoint_migration_turn( 'galleries', $fresh_turn, $fresh_value, $turn_summary ), 'fresh turn checkpoint succeeds' );
+	$check( 'completed' === $backend->roots( 'galleries', array( 1 ) )[0]['value']['migration_status'] &&
+		$backend->read( 'galleries-state' )['value'] === $turn_summary, 'root and exact selected/status-error summary publish together' );
+	$present_turn = $backend->migration_turn_context( 'galleries' );
+	$check( $backend->mutate_scalars( array( 'galleries-state' => MigratorBase::queue_summary( 121, 2, 0 ) ) ), 'interleaved companion revision change' );
+	$before_present_race = $physical();
+	$refuses( function () use ( $backend, $present_turn, $turn_summary ) {
+		$backend->checkpoint_migration_turn( 'galleries', $present_turn,
+			null === $present_turn['root'] ? null : $present_turn['root']['value'], $turn_summary );
+	}, 'existing companion revision change refuses turn checkpoint' );
+	$check( $before_present_race === $physical(), 'existing companion race leaves root and state untouched' );
+	$stale_turn = $backend->migration_turn_context( 'galleries' );
+	$changed = $backend->roots( 'galleries', array( 2 ) )[0]['value']; $changed['title'] = 'Interleaved checkpoint writer';
+	$check( $backend->update_collection_record( 'galleries', array( 'root' => 2, 'path' => array() ), $changed ), 'interleaved root write changes head' );
+	$before_stale_turn = $physical();
+	$refuses( function () use ( $backend, $stale_turn, $turn_summary ) {
+		$backend->checkpoint_migration_turn( 'galleries', $stale_turn, null === $stale_turn['root'] ? null : $stale_turn['root']['value'], $turn_summary );
+	}, 'turn checkpoint refuses stale head after external work' );
+	$check( $before_stale_turn === $physical(), 'stale turn checkpoint leaves both collection and companion untouched' );
 	echo wp_json_encode( array( 'ok' => true, 'blog_id' => $blog, 'check_count' => count( $checks ), 'checks' => $checks ) );
 } finally {
 	foreach ( array_reverse( $created ) as $table_name ) { $wpdb->query( 'DROP TABLE IF EXISTS `' . $table_name . '`' ); }

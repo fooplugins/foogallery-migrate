@@ -65,6 +65,51 @@ class MigratableCollectionRepository extends ScalarStateRepository {
 				'error' => 'error' === $object->migration_status );
 		}, $summarize );
 	}
+	/** Table-only first runnable root; no unrelated roots are hydrated. */
+	public function migration_turn_context( $bucket ) {
+		$bucket = $this->bucket( $bucket );
+		if ( ! $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table collection turn required.' ); }
+		$context = $this->backend->migration_turn_context( $bucket );
+		if ( ! $context['found'] ) { return $context; }
+		if ( null !== $context['root'] ) {
+			$hydrated = $this->hydrate_view_record( $bucket, $context['root'] );
+			if ( ! is_object( $hydrated['value'] ) || ! method_exists( $hydrated['value'], 'migrate' ) ) { throw new \RuntimeException( 'Runnable collection root could not hydrate.' ); }
+			$context['object'] = $hydrated['value'];
+		}
+		return $context;
+	}
+	/** Compact only the affected root; retain opaque fields and child keys. */
+	public function checkpoint_migration_turn( $bucket, $context, $summary ) {
+		$bucket = $this->bucket( $bucket );
+		if ( ! $this->backend instanceof LegacyTableBackend || ! is_array( $context ) || ! array_key_exists( 'root', $context ) ) { throw new \RuntimeException( 'Invalid collection checkpoint.' ); }
+		$value = null;
+		if ( null !== $context['root'] ) {
+			if ( ! isset( $context['object'] ) || ! is_object( $context['object'] ) || ! is_array( $context['root']['value'] ) ) { throw new \RuntimeException( 'Invalid migrated collection root.' ); }
+			$compact = $this->encode( $bucket, array( $context['object'] ) );
+			if ( ! isset( $compact['items'][0] ) || ! is_array( $compact['items'][0] ) ) { throw new \RuntimeException( 'Invalid migrated collection root.' ); }
+			$value = $this->merge_turn_record( $context['root']['value'], $compact['items'][0] );
+		}
+		return $this->backend->checkpoint_migration_turn( $bucket, $context, $value, $summary );
+	}
+	/** Compaction owns known runtime fields; keep opaque legacy fields and child keys. */
+	private function merge_turn_record( $original, $compact ) {
+		// The runtime compact codec intentionally omits cleared error/settings and
+		// gallery child caches. Do not resurrect those known fields from old rows.
+		foreach ( array( 'error', 'settings', 'children' ) as $field ) {
+			if ( ! array_key_exists( $field, $compact ) ) { unset( $original[$field] ); }
+		}
+		foreach ( $compact as $field => $value ) {
+			if ( 'children' === $field && isset( $original[$field] ) && is_array( $original[$field] ) && is_array( $value ) ) {
+				$children = array();
+				foreach ( $value as $key => $child ) {
+					$children[$key] = isset( $original[$field][$key] ) && is_array( $original[$field][$key] ) && is_array( $child )
+						? $this->merge_turn_record( $original[$field][$key], $child ) : $child;
+				}
+				$original[$field] = $children;
+			} else { $original[$field] = $value; }
+		}
+		return $original;
+	}
 	public function first_started( $bucket ) {
 		$bucket = $this->bucket( $bucket );
 		if ( ! $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table collection view required.' ); }

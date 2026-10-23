@@ -1399,6 +1399,83 @@ class LegacyTableRepository {
 		return array( 'rows' => $rows, 'head' => $head );
 	}
 
+	/** First queued OR started root in persisted order, with one affected-tree budget. */
+	public function migration_turn_context( $state_key ) {
+		$this->collection_key( $state_key ); $this->start_budget(); $this->typed_key( $state_key );
+		if ( false === $this->reader->head( $state_key ) ) {
+			if ( false !== $this->reader->head( $state_key ) ) { $this->fail( 'Absent migration collection changed.' ); }
+			return array( 'found' => false );
+		}
+		$head = $this->head( $state_key ); $root = $this->collection( $head );
+		if ( ! isset( $root['wrapper'] ) || ! in_array( $head['state_kind'], array( 'map', 'list' ), true ) ) { $this->fail( 'Indexed migratable collection required.' ); }
+		$rows = $this->read( $this->db->prepare( 'SELECT COUNT(*) AS total, COALESCE(SUM(is_selected),0) AS queued, '
+			. 'COALESCE(SUM(CASE WHEN is_selected = 1 THEN is_migrated ELSE 0 END),0) AS completed, '
+			. "COALESCE(SUM(CASE WHEN is_selected = 1 AND migration_status = 'error' THEN 1 ELSE 0 END),0) AS errors "
+			. 'FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL',
+			array( $this->blog, $head['id'], $head['active_generation'] ) ) );
+		if ( count( $rows ) !== 1 || $this->number( $rows[0]['total'] ) !== $root['root_count'] ) { $this->fail( 'Migration root aggregate changed.' ); }
+		$counts = array( 'queued' => $this->number( $rows[0]['queued'] ), 'completed' => $this->number( $rows[0]['completed'] ),
+			'errors' => $this->number( $rows[0]['errors'] ) );
+		if ( $counts['queued'] > $root['root_count'] || $counts['completed'] > $counts['queued'] || $counts['errors'] > $counts['queued'] ) { $this->fail( 'Invalid migration root aggregate.' ); }
+		$selected = $this->read( $this->db->prepare( "SELECT id, item_order, HEX(node_hash) AS node_hash, migration_status, is_selected, is_migrated FROM `" . $this->table . '` '
+			. "WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL AND migration_status IN ('queued','started') "
+			. 'ORDER BY item_order ASC, id ASC LIMIT 1', array( $this->blog, $head['id'], $head['active_generation'] ) ) );
+		if ( count( $selected ) > 1 ) { $this->fail( 'Invalid migration root selector.' ); }
+		$row = null;
+		if ( count( $selected ) ) {
+			$entry = $selected[0]; $id = $this->number( $entry['id'] ); $order = $this->number( $entry['item_order'] );
+			$tree = $this->tree_hash( $state_key, $head, $this->hex( $entry['node_hash'] ) );
+			if ( false === $tree || ! in_array( $entry['migration_status'], array( 'queued', 'started' ), true ) ||
+				$this->number( $tree['rows'][0]['id'] ) !== $id || $tree['order'] !== $order ||
+				! is_array( $tree['value'] ) || ! array_key_exists( 'migration_status', $tree['value'] ) ||
+				$tree['value']['migration_status'] !== $entry['migration_status'] ||
+				$this->number( $entry['is_selected'] ) !== (int) ! empty( $tree['value']['part_of_migration'] ) ||
+				$this->number( $entry['is_migrated'] ) !== (int) ! empty( $tree['value']['migrated'] ) ) { $this->fail( 'Runnable root projection changed.' ); }
+			$row = array( 'key' => $tree['key'], 'value' => $tree['value'] );
+		}
+		$companion = $state_key . '-state'; $state_head = $this->reader->head( $companion );
+		if ( false !== $state_head && 'scalar' !== $state_head['state_kind'] ) { $this->fail( 'Migration companion is not scalar.' ); }
+		$this->unchanged( $state_key, $head );
+		if ( $this->reader->head( $companion ) !== $state_head ) { $this->fail( 'Migration companion changed during bounded read.' ); }
+		$this->tick();
+		$spent = microtime( true ) - ( $this->deadline - $this->max_seconds );
+		return array( 'found' => true, 'head' => $head, 'state_head' => $state_head, 'root' => $row, 'counts' => $counts,
+			'budget' => array( 'rows' => $this->used_rows, 'bytes' => $this->used_bytes, 'seconds' => $spent ) );
+	}
+
+	/** Resume the read budget after output/history work; CAS root and companion together. */
+	public function checkpoint_migration_turn( $state_key, $context, $value, $summary ) {
+		$this->collection_key( $state_key ); $this->start_budget();
+		if ( ! is_array( $context ) || ! isset( $context['head'], $context['counts'], $context['budget'] ) ||
+			! array_key_exists( 'root', $context ) || ! array_key_exists( 'state_head', $context ) ||
+			! is_array( $summary ) || array_keys( $summary ) !== array( 'queued', 'completed', 'progress' ) ||
+			! is_int( $summary['queued'] ) || ! is_int( $summary['completed'] ) || ! is_numeric( $summary['progress'] ) ) { $this->fail( 'Invalid migration checkpoint.' ); }
+		$budget = $context['budget'];
+		if ( ! is_array( $budget ) || ! isset( $budget['rows'], $budget['bytes'], $budget['seconds'] ) || ! is_int( $budget['rows'] ) || ! is_int( $budget['bytes'] ) ||
+			! is_float( $budget['seconds'] ) || $budget['rows'] < 0 || $budget['rows'] > $this->max_rows || $budget['bytes'] < 0 || $budget['bytes'] > $this->max_bytes ||
+			$budget['seconds'] < 0 || $budget['seconds'] >= $this->max_seconds ) { $this->fail( 'Invalid retained migration budget.' ); }
+		$this->used_rows = $budget['rows']; $this->used_bytes = $budget['bytes']; $this->deadline = microtime( true ) + $this->max_seconds - $budget['seconds'];
+		$head = $context['head']; $original = $context['root'];
+		if ( ! is_array( $head ) || ! isset( $head['revision'], $head['state_kind'] ) || ! in_array( $head['state_kind'], array( 'map', 'list' ), true ) ||
+			( null !== $original && ( ! is_array( $original ) || array_keys( $original ) !== array( 'key', 'value' ) || ! is_array( $value ) ) ) ||
+			( null === $original && null !== $value ) ) { $this->fail( 'Invalid retained migration root.' ); }
+		$this->unchanged( $state_key, $head );
+		$companion = $state_key . '-state'; $state_head = $context['state_head'];
+		if ( false !== $state_head && ( ! is_array( $state_head ) || ! isset( $state_head['revision'], $state_head['state_kind'] ) ||
+			'scalar' !== $state_head['state_kind'] ) ) { $this->fail( 'Invalid retained migration companion.' ); }
+		if ( $this->reader->head( $companion ) !== $state_head ) { $this->fail( 'Migration companion changed before checkpoint.' ); }
+		$changes = array();
+		if ( null !== $original ) {
+			$old = $this->tree( $state_key, $head, $original['key'] );
+			if ( false === $old || $old['value'] !== $original['value'] ) { $this->fail( 'Runnable root changed before checkpoint.' ); }
+			$changes[] = array( 'key' => $state_key, 'expected_revision' => $head['revision'],
+				'patches' => array( array( 'key' => $original['key'], 'value' => $value ) ) );
+		}
+		$changes[] = array( 'key' => $companion, 'expected_revision' => false === $state_head ? null : $state_head['revision'], 'value' => $summary );
+		$this->patch( $changes, 'list' === $head['state_kind'], array( array( 'key' => $state_key, 'head' => $head ) ), true );
+		return true;
+	}
+
 	/** Queue/cancel only the affected gallery/album roots, with one read/write budget. */
 	public function queue_collection( $state_key, $selection, $transition, $summarize ) {
 		$this->collection_key( $state_key );
