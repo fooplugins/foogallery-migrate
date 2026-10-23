@@ -9,7 +9,7 @@ import zipfile
 
 root = pathlib.Path(__file__).resolve().parent.parent
 archive = pathlib.Path(sys.argv[1])
-excluded_dirs = {"node_modules", "vendor", "bin", "dist", "scripts", "src", "tests"}
+excluded_dirs = {"node_modules", "vendor", "bin", "dist", "docs", "scripts", "src", "tests", "wp-content"}
 excluded_files = {"fs-config.json", "composer.json", "composer.lock", "phpunit.xml.dist", "wpgulp.config.js", "gulpfile.babel.js"}
 expected = set()
 for directory, dirs, files in os.walk(root):
@@ -31,7 +31,7 @@ with zipfile.ZipFile(archive) as package:
         path = pathlib.PurePosixPath(entry.filename)
         assert not path.is_absolute() and ".." not in path.parts, "Unsafe ZIP path"
         assert not stat.S_ISLNK(entry.external_attr >> 16), "ZIP symlink"
-        assert path.parts[0] not in ("vendor", "tests", "node_modules"), "Development payload shipped: " + entry.filename
+        assert path.parts[0] not in excluded_dirs, "Development or local payload shipped: " + entry.filename
     for entry in payloads:
         assert package.read(entry) == (root / entry.filename).read_bytes(), "Source/package bytes differ: " + entry.filename
     assert "migrate.php" in names and "includes/functions.php" in names, "Production entrypoints absent"

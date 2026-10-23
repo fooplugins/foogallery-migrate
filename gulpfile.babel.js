@@ -102,9 +102,11 @@ const zip = require( 'gulp-zip' ),
 		'!./{vendor,vendor/**/*}', // Composer dependencies are development-only.
 		'!./{bin,bin/**/*}',
 		'!./{dist,dist/**/*}',
+		'!./{docs,docs/**/*}',
 		'!./{scripts,scripts/**/*}',
 		'!./{src,src/**/*}',
 		'!./{tests,tests/**/*}',
+		'!./{wp-content,wp-content/**/*}', // Local WordPress cache is not a plugin asset.
 		'!fs-config.json',
 		'!composer.json',
 		'!composer.lock',
