@@ -48,6 +48,7 @@ use FooPlugins\FooGalleryMigrate\StorageAdmin;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\StorageCopyCursor;
 global $wpdb, $wp_version;
 function assisted_check( $yes, $message ) { if ( ! $yes ) { throw new RuntimeException( $message ); } }
 assisted_check( ! is_multisite() && realpath( ABSPATH ) === $site && DB_NAME === $manifest['database'] &&
@@ -202,8 +203,17 @@ if ( 'arm' === $step ) {
 	$control = $control_row ? StorageControl::decode( $control_row['option_value'], get_current_blog_id() ) : null;
 	assisted_check( is_array( $control ) && $control['phase'] === 'verified' && $control['backend'] === 'option' &&
 		$control['from'] === 'option' && $control['to'] === 'table' && null !== $option_row( FOOGALLERY_MIGRATE_OPTION_DATA ) &&
-		null === $option_row( StorageAuthority::AUTHORITY_OPTION ), 'Exact verified option-to-table stage required.' );
-	$source_sha = $table_equals_source( $option_row( FOOGALLERY_MIGRATE_OPTION_DATA ) );
+		null === $option_row( StorageAuthority::AUTHORITY_OPTION ) &&
+		null === $option_row( StorageAuthority::STORAGE_BACKUP_OPTION ),
+		'Exact verified option-to-table stage before retained backup required.' );
+	$source_row = $option_row( FOOGALLERY_MIGRATE_OPTION_DATA );
+	$source_sha = $table_equals_source( $source_row );
+	$source_value = maybe_unserialize( $source_row['option_value'] );
+	$proof = 4 === $control['version'] && isset( $control['verify_cursor'] ) ?
+		StorageCopyCursor::validate_verify( $control['verify_cursor'] ) : null;
+	assisted_check( is_array( $proof ) && is_string( $proof['heads_digest'] ) &&
+		$proof['state_order'] === count( $source_value ) && 0 === $proof['next_root_ordinal'] &&
+		0 === $proof['next_node_ordinal'], 'Complete verified proof cursor required before arming the flip receiver.' );
 	$journal = array( 'identity' => $identity, 'phase' => 'armed', 'source_files' => $source(),
 		'cleanup_sha256' => hash( 'sha256', $cleanup_row['option_value'] ), 'protected_sha256' => $protected_sha,
 		'source_value_sha256' => $source_sha,
@@ -228,19 +238,30 @@ if ( 'kill' === $step ) {
 	try {
 		stream_set_timeout( $pipes[1], 30 ); $line = fgets( $pipes[1], 4096 ); $hello = is_string( $line ) ? json_decode( $line, true ) : null;
 		$status = proc_get_status( $process );
-		assisted_check( is_array( $hello ) && isset( $hello['pid'], $hello['thread'], $hello['database'], $hello['phase'], $hello['next'] ) &&
+		if ( ! ( is_array( $hello ) && isset( $hello['pid'], $hello['thread'], $hello['database'], $hello['phase'], $hello['next'] ) &&
 			$status['running'] && $hello['pid'] === $status['pid'] && $hello['thread'] > 0 &&
-			$hello['database'] === DB_NAME && $hello['phase'] === 'verified' && $hello['next'] === 'flipped',
-			'Exact held worker PID, SQL thread or transition differs.' );
+			$hello['database'] === DB_NAME && $hello['phase'] === 'verified' && $hello['next'] === 'flipped' ) ) {
+			$exit = ! $status['running'] && isset( $status['exitcode'] ) && is_int( $status['exitcode'] ) ?
+				(string) $status['exitcode'] : 'unavailable';
+			throw new RuntimeException( 'Exact held worker handshake differs (hello ' . ( is_array( $hello ) ? 'invalid' : 'absent' ) .
+				', child ' . ( $status['running'] ? 'running' : 'exited' ) . ', exit ' . $exit . ').' );
+		}
 		$live = $wpdb->get_var( $wpdb->prepare( 'SELECT DB FROM information_schema.PROCESSLIST WHERE ID=%d', $hello['thread'] ) );
 		assisted_check( ! $wpdb->last_error && $live === DB_NAME, 'Held worker SQL session not independently present.' );
 		$before = $capture(); $marker = $before['options'][StorageAuthority::MAINTENANCE_OPTION];
 		$control = StorageControl::decode( $before['options'][StorageAuthority::CONTROL_OPTION]['option_value'], get_current_blog_id() );
+		$pending = $control; ++$pending['epoch'];
+		$sentinel = json_encode( StorageControl::sentinel( $pending ) );
+		$source_row = $before['options'][FOOGALLERY_MIGRATE_OPTION_DATA];
+		$backup_row = $before['options'][StorageAuthority::STORAGE_BACKUP_OPTION];
+		$authority_row = $before['options'][StorageAuthority::AUTHORITY_OPTION];
 		assisted_check( $marker && array() === $before['writers'] && $control['phase'] === 'verified' &&
 			$control['backend'] === 'option' && $control['to'] === 'table' &&
-			null === $before['options'][StorageAuthority::AUTHORITY_OPTION] &&
+			is_array( $source_row ) && is_array( $backup_row ) && is_array( $authority_row ) &&
+			$backup_row['option_value'] === $source_row['option_value'] &&
+			$authority_row['option_value'] === $sentinel &&
 			$protected() === $journal['protected_sha256'] &&
-			$table_equals_source( $before['options'][FOOGALLERY_MIGRATE_OPTION_DATA] ) === $journal['source_value_sha256'],
+			$table_equals_source( $source_row ) === $journal['source_value_sha256'],
 			'Exact interrupted owner, source, destination or protected output differs.' );
 		assisted_check( proc_terminate( $process, 9 ), 'SIGKILL of exact owned child failed.' );
 		$deadline = microtime( true ) + 5;

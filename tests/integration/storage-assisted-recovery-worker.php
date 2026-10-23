@@ -47,6 +47,15 @@ $control_raw = $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM `' . $w
 $control = \FooPlugins\FooGalleryMigrate\StorageControl::decode( $control_raw, get_current_blog_id() );
 if ( ! is_array( $control ) || $control['phase'] !== 'verified' || $control['backend'] !== 'option' ||
 	$control['to'] !== 'table' || hash( 'sha256', $control_raw ) !== $journal['control_sha256'] ) { exit( 10 ); }
+$source_raw = $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM `' . $wpdb->options . '` WHERE option_name=%s',
+	FOOGALLERY_MIGRATE_OPTION_DATA ) );
+$source_value = is_string( $source_raw ) ? maybe_unserialize( $source_raw ) : null;
+$proof = 4 === $control['version'] && isset( $control['verify_cursor'] ) ?
+	\FooPlugins\FooGalleryMigrate\StorageCopyCursor::validate_verify( $control['verify_cursor'] ) : null;
+if ( ! is_array( $source_value ) || count( $source_value ) < 1 || count( $source_value ) > 16 ||
+	! is_array( $proof ) || ! is_string( $proof['heads_digest'] ) ||
+	$proof['state_order'] !== count( $source_value ) || $proof['next_root_ordinal'] !== 0 ||
+	$proof['next_node_ordinal'] !== 0 || $wpdb->last_error ) { exit( 10 ); }
 class FgmAssistedHoldConnection extends \FooPlugins\FooGalleryMigrate\LegacyTransactionConnection {
 	public function query( $sql ) {
 		$set = stripslashes( substr( $sql, 0, (int) strpos( $sql, ' WHERE ' ) ) );
