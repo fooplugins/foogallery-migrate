@@ -1399,6 +1399,54 @@ class LegacyTableRepository {
 		return array( 'rows' => $rows, 'head' => $head );
 	}
 
+	/** Exact UID selection uses the queue identity projection, never UID parsing. */
+	public function targeted_collection_context( $state_key, $uid ) {
+		$this->collection_key( $state_key ); $this->start_budget(); $this->typed_key( $state_key );
+		if ( ! in_array( $state_key, array( 'galleries', 'albums' ), true ) ) { $this->fail( 'Targeted migratable collection required.' ); }
+		if ( ! is_string( $uid ) || '' === $uid ) { $this->fail( 'Invalid collection UID.' ); }
+		$this->consume( 0, strlen( $uid ) );
+		if ( false === $this->reader->head( $state_key ) ) {
+			if ( false !== $this->reader->head( $state_key ) ) { $this->fail( 'Absent collection changed.' ); }
+			return array( 'found' => false, 'absent' => true );
+		}
+		$head = $this->head( $state_key ); $root = $this->collection( $head );
+		if ( ! isset( $root['wrapper'] ) || ! in_array( $head['state_kind'], array( 'map', 'list' ), true ) ) { $this->fail( 'Indexed migratable collection required.' ); }
+		$matches = $this->queue_root_selector( $state_key, $head, $root, array( $uid => true ), true );
+		if ( count( $matches ) > 1 ) { $this->fail( 'Duplicate collection UID.' ); }
+		$row = null;
+		if ( count( $matches ) ) {
+			$target = $matches[0]; $tree = $this->tree_hash( $state_key, $head, $target['node'] );
+			if ( false === $tree || $this->number( $tree['rows'][0]['id'] ) !== $target['id'] || $tree['order'] !== $target['order'] ||
+				! is_array( $tree['value'] ) || ! isset( $tree['value']['object_type'], $tree['value']['plugin_name'] ) ||
+				! array_key_exists( 'ID', $tree['value'] ) || $tree['value']['object_type'] !== $target['type'] ||
+				$tree['value']['plugin_name'] !== $target['plugin'] || (string) $tree['value']['ID'] !== $target['source_id'] ) { $this->fail( 'Targeted collection identity changed.' ); }
+			$row = array( 'key' => $tree['key'], 'value' => $tree['value'] );
+		}
+		$this->unchanged( $state_key, $head ); $this->tick();
+		$spent = microtime( true ) - ( $this->deadline - $this->max_seconds );
+		return array( 'found' => null !== $row, 'absent' => false, 'head' => $head, 'root' => $row,
+			'budget' => array( 'rows' => $this->used_rows, 'bytes' => $this->used_bytes, 'seconds' => $spent ) );
+	}
+
+	/** History/output may have used this repository; restore the original affected-tree budget before CAS. */
+	public function checkpoint_targeted_collection( $state_key, $context, $value ) {
+		$this->collection_key( $state_key ); $this->start_budget();
+		if ( ! in_array( $state_key, array( 'galleries', 'albums' ), true ) ) { $this->fail( 'Targeted migratable collection required.' ); }
+		if ( ! is_array( $context ) || ! isset( $context['head'], $context['root'], $context['budget'] ) ||
+			! isset( $context['found'] ) || true !== $context['found'] || ! is_array( $context['root'] ) ||
+			array_keys( $context['root'] ) !== array( 'key', 'value' ) || ! is_array( $value ) ) { $this->fail( 'Invalid targeted collection checkpoint.' ); }
+		$this->resume_retained_budget( $context['budget'] );
+		$head = $context['head']; $original = $context['root'];
+		if ( ! is_array( $head ) || ! isset( $head['revision'], $head['state_kind'] ) || ! in_array( $head['state_kind'], array( 'map', 'list' ), true ) ) { $this->fail( 'Invalid targeted collection head.' ); }
+		$this->unchanged( $state_key, $head );
+		$old = $this->tree( $state_key, $head, $original['key'] );
+		if ( false === $old || $old['value'] !== $original['value'] ) { $this->fail( 'Targeted collection root changed before checkpoint.' ); }
+		$change = array( 'key' => $state_key, 'expected_revision' => $head['revision'],
+			'patches' => array( array( 'key' => $original['key'], 'value' => $value ) ) );
+		$this->patch( array( $change ), 'list' === $head['state_kind'], array( array( 'key' => $state_key, 'head' => $head ) ), true );
+		return true;
+	}
+
 	/** First queued OR started root in persisted order, with one affected-tree budget. */
 	public function migration_turn_context( $state_key ) {
 		$this->collection_key( $state_key ); $this->start_budget(); $this->typed_key( $state_key );
@@ -1450,11 +1498,7 @@ class LegacyTableRepository {
 			! array_key_exists( 'root', $context ) || ! array_key_exists( 'state_head', $context ) ||
 			! is_array( $summary ) || array_keys( $summary ) !== array( 'queued', 'completed', 'progress' ) ||
 			! is_int( $summary['queued'] ) || ! is_int( $summary['completed'] ) || ! is_numeric( $summary['progress'] ) ) { $this->fail( 'Invalid migration checkpoint.' ); }
-		$budget = $context['budget'];
-		if ( ! is_array( $budget ) || ! isset( $budget['rows'], $budget['bytes'], $budget['seconds'] ) || ! is_int( $budget['rows'] ) || ! is_int( $budget['bytes'] ) ||
-			! is_float( $budget['seconds'] ) || $budget['rows'] < 0 || $budget['rows'] > $this->max_rows || $budget['bytes'] < 0 || $budget['bytes'] > $this->max_bytes ||
-			$budget['seconds'] < 0 || $budget['seconds'] >= $this->max_seconds ) { $this->fail( 'Invalid retained migration budget.' ); }
-		$this->used_rows = $budget['rows']; $this->used_bytes = $budget['bytes']; $this->deadline = microtime( true ) + $this->max_seconds - $budget['seconds'];
+		$this->resume_retained_budget( $context['budget'] );
 		$head = $context['head']; $original = $context['root'];
 		if ( ! is_array( $head ) || ! isset( $head['revision'], $head['state_kind'] ) || ! in_array( $head['state_kind'], array( 'map', 'list' ), true ) ||
 			( null !== $original && ( ! is_array( $original ) || array_keys( $original ) !== array( 'key', 'value' ) || ! is_array( $value ) ) ) ||
@@ -1474,6 +1518,13 @@ class LegacyTableRepository {
 		$changes[] = array( 'key' => $companion, 'expected_revision' => false === $state_head ? null : $state_head['revision'], 'value' => $summary );
 		$this->patch( $changes, 'list' === $head['state_kind'], array( array( 'key' => $state_key, 'head' => $head ) ), true );
 		return true;
+	}
+
+	private function resume_retained_budget( $budget ) {
+		if ( ! is_array( $budget ) || ! isset( $budget['rows'], $budget['bytes'], $budget['seconds'] ) || ! is_int( $budget['rows'] ) || ! is_int( $budget['bytes'] ) ||
+			! is_float( $budget['seconds'] ) || $budget['rows'] < 0 || $budget['rows'] > $this->max_rows || $budget['bytes'] < 0 || $budget['bytes'] > $this->max_bytes ||
+			$budget['seconds'] < 0 || $budget['seconds'] >= $this->max_seconds ) { $this->fail( 'Invalid retained migration budget.' ); }
+		$this->used_rows = $budget['rows']; $this->used_bytes = $budget['bytes']; $this->deadline = microtime( true ) + $this->max_seconds - $budget['seconds'];
 	}
 
 	/** Queue/cancel only the affected gallery/album roots, with one read/write budget. */
@@ -1543,7 +1594,7 @@ class LegacyTableRepository {
 	}
 
 	/** Fixed metadata pages, then exact-size projection pages; no unrelated tree payload. */
-	private function queue_root_selector( $state_key, $head, $root, $selection ) {
+	private function queue_root_selector( $state_key, $head, $root, $selection, $matched_only = false ) {
 		if ( $root['root_count'] > $this->max_rows ) { $this->fail( 'Collection root count exceeds operation budget.' ); }
 		$targets = array(); $count = 0; $last_order = -1;
 		$expected_type = MigratorSettings::KEY_GALLERIES === $state_key ? 'gallery' : 'album';
@@ -1587,9 +1638,9 @@ class LegacyTableRepository {
 						$this->hex( $row['identity_hash'] ) !== $this->codec->snapshot_digest( array( 'source-exact-v1', $expected_type, $plugin, $source_id ) ) ) { $this->fail( 'Collection identity projection mismatch.' ); }
 					$uid = $expected_type . '_' . $plugin . '_' . $source_id;
 					$matched = array_key_exists( $uid, $selection );
-					if ( $matched || $this->number( $row['is_selected'] ) === 1 || 'queued' === $row['migration_status'] ||
+					if ( $matched || ( ! $matched_only && ( $this->number( $row['is_selected'] ) === 1 || 'queued' === $row['migration_status'] ||
 						! array_key_exists( 'part_of_migration', $mutable ) || false !== $mutable['part_of_migration'] ||
-						! array_key_exists( 'migration_status', $mutable ) ) {
+						! array_key_exists( 'migration_status', $mutable ) ) ) ) {
 						$targets[] = array( 'id' => $id, 'order' => $this->number( $row['item_order'] ), 'node' => $this->hex( $row['node_hash'] ),
 							'type' => $expected_type, 'plugin' => $plugin, 'source_id' => $source_id, 'uid' => $uid, 'matched' => $matched );
 					}

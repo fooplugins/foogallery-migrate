@@ -100,6 +100,33 @@ class CollectionMigrationSelectorTest extends TestCase {
 			$this->assertSame( 0, $db->writes );
 		}
 	}
+	public function test_exact_uid_selects_only_one_typed_root_without_unrelated_payload(): void {
+		$db = new TurnSelectorConnection( 'galleries', '09', 'queued', 18, 1 );
+		$context = $this->repository( $db )->targeted_collection_context( 'galleries', 'gallery_Fixture_7' );
+		$this->assertTrue( $context['found'] );
+		$this->assertSame( '09', $context['root']['key'] );
+		$this->assertSame( 1, $db->payload_reads );
+		$this->assertSame( 0, $db->writes );
+		$db = new TurnSelectorConnection( 'galleries', 7, 'queued', 18, 1 );
+		$missing = $this->repository( $db )->targeted_collection_context( 'galleries', 'gallery_Fixture_8' );
+		$this->assertFalse( $missing['found'] );
+		$this->assertSame( 0, $db->payload_reads );
+		$db = new TurnSelectorConnection( 'galleries', 7, 'queued', 18, 1 ); $db->mode = 'absent';
+		$this->assertSame( array( 'found' => false, 'absent' => true ),
+			$this->repository( $db )->targeted_collection_context( 'galleries', 'gallery_Fixture_7' ) );
+	}
+	public function test_targeted_checkpoint_keeps_original_budget_and_head_before_write(): void {
+		$db = new TurnSelectorConnection( 'galleries', '09', 'queued', 18, 1 );
+		$repo = $this->repository( $db ); $context = $repo->targeted_collection_context( 'galleries', 'gallery_Fixture_7' );
+		$db->mode = 'stale'; $db->head_reads = 2;
+		try { $repo->checkpoint_targeted_collection( 'galleries', $context, $context['root']['value'] ); $this->fail( 'Expected stale refusal.' ); }
+		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'State changed', $error->getMessage() ); $this->assertSame( 0, $db->writes ); }
+		$db = new TurnSelectorConnection( 'galleries', '09', 'queued', 18, 1 );
+		$repo = $this->repository( $db ); $context = $repo->targeted_collection_context( 'galleries', 'gallery_Fixture_7' );
+		$context['budget']['bytes'] = 16777216;
+		try { $repo->checkpoint_targeted_collection( 'galleries', $context, $context['root']['value'] ); $this->fail( 'Expected aggregate refusal.' ); }
+		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'budget exceeded', $error->getMessage() ); $this->assertSame( 0, $db->writes ); }
+	}
 }
 
 class TurnSelectorReader extends LegacyTableReader {
@@ -113,6 +140,7 @@ class TurnSelectorReader extends LegacyTableReader {
 			}
 			return $this->db->state_head;
 		}
+		if ( 'absent' === $this->db->mode ) { return false; }
 		++$this->db->head_reads;
 		if ( $this->db->mode === 'stale' && $this->db->head_reads > 2 ) { $head = $this->db->head; ++$head['revision']; return $head; }
 		return $this->db->head;
@@ -132,7 +160,7 @@ class TurnSelectorConnection extends LegacyTransactionConnection {
 	public $mode = '';
 	private $root_payload;
 	private $row;
-	public function __construct( $bucket, $key, $status, $order ) {
+	public function __construct( $bucket, $key, $status, $order, $root_count = 121 ) {
 		$codec = new LegacyStateCodec();
 		$record = array( 'object_type' => 'albums' === $bucket ? 'album' : 'gallery', 'plugin_name' => 'Fixture', 'ID' => '7',
 			'migration_status' => $status, 'part_of_migration' => true, 'migrated' => false, 'opaque' => 'unchanged' );
@@ -143,10 +171,10 @@ class TurnSelectorConnection extends LegacyTransactionConnection {
 		$this->row['encoded_bytes'] = (string) ( strlen( $this->row['payload'] ) + strlen( $this->row['mutable_payload'] ) + strlen( $this->row['key_value'] ) +
 			strlen( $this->row['source_plugin_value'] ) + strlen( $this->row['source_id_value'] ) );
 		$payload = array( MigratorSettings::COMPACT_MARKER => MigratorSettings::COMPACT_VERSION, 'type' => 'migratable', 'items' => array() );
-		$root = ( new LegacyCollectionEnvelope( $codec ) )->split( $bucket, 'map', $payload )['root']; $root['root_count'] = 121;
+		$root = ( new LegacyCollectionEnvelope( $codec ) )->split( $bucket, 'map', $payload )['root']; $root['root_count'] = $root_count;
 		$this->root_payload = $codec->encode( $root );
 		$this->head = array( 'id' => 5, 'blog_id' => 1, 'state_order' => 0, 'state_kind' => 'map', 'active_generation' => 1,
-			'revision' => 1, 'codec_version' => 1, 'record_count' => 121, 'payload_bytes' => 142000,
+			'revision' => 1, 'codec_version' => 1, 'record_count' => $root_count, 'payload_bytes' => 142000,
 			'root_payload_bytes' => strlen( $this->root_payload ), 'state_key_value' => $codec->key_value( $bucket ) );
 	}
 	public function prepare( $sql, $args ) { return $sql; }
@@ -162,6 +190,17 @@ class TurnSelectorConnection extends LegacyTransactionConnection {
 			return array( array( 'id' => '12', 'item_order' => (string) $this->row['item_order'], 'node_hash' => $this->row['node_hash'],
 				'migration_status' => 'projection' === $this->mode ? 'started' : $this->row['migration_status'],
 				'is_selected' => '1', 'is_migrated' => '0' ) );
+		}
+		if ( false !== strpos( $sql, 'SELECT id, item_order, HEX(node_hash) AS node_hash, object_type' ) ) {
+			return array( array( 'id' => '12', 'item_order' => (string) $this->row['item_order'], 'node_hash' => $this->row['node_hash'],
+				'object_type' => $this->row['object_type'], 'migration_status' => $this->row['migration_status'],
+				'is_selected' => $this->row['is_selected'], 'plugin_bytes' => (string) strlen( $this->row['source_plugin_value'] ),
+				'id_bytes' => (string) strlen( $this->row['source_id_value'] ), 'mutable_bytes' => (string) strlen( $this->row['mutable_payload'] ),
+				'plugin_hash' => $this->row['source_plugin_hash'], 'identity_hash' => $this->row['source_identity_hash'] ) );
+		}
+		if ( false !== strpos( $sql, 'SELECT id, source_plugin_value, source_id_value, mutable_payload FROM' ) ) {
+			return array( array( 'id' => '12', 'source_plugin_value' => $this->row['source_plugin_value'],
+				'source_id_value' => $this->row['source_id_value'], 'mutable_payload' => $this->row['mutable_payload'] ) );
 		}
 		if ( false !== strpos( $sql, 'SELECT id, blog_id, state_id, generation, item_order' ) && false !== strpos( $sql, 'parent_node_hash IS NULL LIMIT 2' ) ) {
 			return array( $this->metadata() );

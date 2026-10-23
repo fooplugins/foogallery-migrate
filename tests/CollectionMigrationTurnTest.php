@@ -64,6 +64,21 @@ class CollectionMigrationTurnTest extends TestCase {
 			$this->assertSame( '09', $backend->key );
 		}
 	}
+	public function test_targeted_gallery_checkpoint_keeps_exact_root_key_and_opaque_fields(): void {
+		$raw = array( 'object_type' => 'gallery', 'plugin_name' => 'Fixture', 'ID' => '7',
+			'migration_status' => 'error', 'migrated' => true, 'migrated_id' => 25,
+			'part_of_migration' => true, 'opaque' => array( 'owner' => 'keep' ) );
+		$backend = new TurnCompactBackend( array( 'key' => '09', 'value' => $raw ) );
+		$repository = new MigratableCollectionRepository( $backend, new TurnCompactSettings() );
+		$context = $repository->targeted_context( 'galleries', 'gallery_Fixture_7' );
+		$this->assertSame( '09', $context['root']['key'] );
+		$context['object']->migration_status = 'not_started'; $context['object']->migrated = false;
+		$this->assertTrue( $repository->checkpoint_targeted( 'galleries', $context ) );
+		$this->assertSame( '09', $backend->key );
+		$this->assertSame( array( 'owner' => 'keep' ), $backend->value['opaque'] );
+		$this->assertSame( 'not_started', $backend->value['migration_status'] );
+		$this->assertFalse( $backend->value['migrated'] );
+	}
 }
 
 class TurnMigrator extends MigratorBase {}
@@ -111,7 +126,11 @@ class TurnCompactBackend extends LegacyTableBackend {
 	private $row;
 	public function __construct( $row ) { $this->row = $row; }
 	public function migration_turn_context( $key ) { return array( 'found' => true, 'root' => $this->row, 'counts' => array( 'queued' => 1, 'completed' => 0, 'errors' => 0 ) ); }
+	public function targeted_collection_context( $key, $uid ) { return array( 'found' => true, 'root' => $this->row ); }
 	public function checkpoint_migration_turn( $key, $context, $value, $summary ) {
+		$this->key = $context['root']['key']; $this->value = $value; return true;
+	}
+	public function checkpoint_targeted_collection( $key, $context, $value ) {
 		$this->key = $context['root']['key']; $this->value = $value; return true;
 	}
 }

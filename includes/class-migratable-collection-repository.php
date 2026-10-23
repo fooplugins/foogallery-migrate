@@ -65,6 +65,28 @@ class MigratableCollectionRepository extends ScalarStateRepository {
 				'error' => 'error' === $object->migration_status );
 		}, $summarize );
 	}
+	/** One exact UID, with its raw root and pinned storage budget retained for a later save. */
+	public function targeted_context( $bucket, $uid ) {
+		$bucket = $this->bucket( $bucket );
+		if ( ! $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table collection target required.' ); }
+		$context = $this->backend->targeted_collection_context( $bucket, $uid );
+		if ( ! $context['found'] ) { return $context; }
+		$hydrated = $this->hydrate_view_record( $bucket, $context['root'] );
+		if ( ! is_object( $hydrated['value'] ) || ! method_exists( $hydrated['value'], 'unique_identifier' ) ||
+			$hydrated['value']->unique_identifier() !== $uid ) { throw new \RuntimeException( 'Targeted collection root could not hydrate.' ); }
+		$context['object'] = $hydrated['value'];
+		return $context;
+	}
+	/** Save only the affected root; retry/error callers own their legacy history and queue decisions. */
+	public function checkpoint_targeted( $bucket, $context ) {
+		$bucket = $this->bucket( $bucket );
+		if ( ! $this->backend instanceof LegacyTableBackend || ! is_array( $context ) || ! isset( $context['root'], $context['object'] ) ||
+			! is_object( $context['object'] ) || ! is_array( $context['root']['value'] ) ) { throw new \RuntimeException( 'Invalid targeted collection root.' ); }
+		$compact = $this->encode( $bucket, array( $context['object'] ) );
+		if ( ! isset( $compact['items'][0] ) || ! is_array( $compact['items'][0] ) ) { throw new \RuntimeException( 'Invalid targeted collection encoding.' ); }
+		$value = $this->merge_turn_record( $context['root']['value'], $compact['items'][0] );
+		return $this->backend->checkpoint_targeted_collection( $bucket, $context, $value );
+	}
 	/** Table-only first runnable root; no unrelated roots are hydrated. */
 	public function migration_turn_context( $bucket ) {
 		$bucket = $this->bucket( $bucket );

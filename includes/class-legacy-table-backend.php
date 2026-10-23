@@ -61,6 +61,8 @@ class LegacyTableBackend {
 	public function collection_view_context( $key ) { return $this->repository()->collection_view_context( $key ); }
 	public function collection_view_page( $key, $offset, $limit ) { return $this->repository()->collection_view_page( $key, $offset, $limit ); }
 	public function queue_collection( $key, $selection, $transition, $summarize ) { return $this->repository( true )->queue_collection( $key, $selection, $transition, $summarize ); }
+	public function targeted_collection_context( $key, $uid ) { return $this->repository( true )->targeted_collection_context( $key, $uid ); }
+	public function checkpoint_targeted_collection( $key, $context, $value ) { return $this->repository( true )->checkpoint_targeted_collection( $key, $context, $value ); }
 	public function migration_turn_context( $key ) { return $this->repository( true )->migration_turn_context( $key ); }
 	public function checkpoint_migration_turn( $key, $context, $value, $summary ) { return $this->repository( true )->checkpoint_migration_turn( $key, $context, $value, $summary ); }
 	public function identifiers( $key, $identifiers ) { return $this->repository()->identifiers( $key, $identifiers ); }

@@ -1330,10 +1330,26 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
             return $this->storage_operation( 'retry_gallery_migration_admitted', array( $unique_identifier ) );
         }
 
+        /** Absent collection keeps the legacy one-time source discovery; an unknown UID does not rediscover it. */
+        private function targeted_gallery_context( $table, $gallery_migrator, $unique_identifier ) {
+            $target = $table->targeted_context( self::KEY_GALLERIES, $unique_identifier );
+            if ( ! empty( $target['absent'] ) ) {
+                $gallery_migrator->get_objects_to_migrate();
+                $target = $table->targeted_context( self::KEY_GALLERIES, $unique_identifier );
+                if ( ! empty( $target['absent'] ) ) { throw new \RuntimeException( 'Discovered gallery collection was not persisted.' ); }
+            }
+            return $target;
+        }
+
         private function retry_gallery_migration_admitted( $unique_identifier ) {
             $this->assert_storage_writer();
             $gallery_migrator = $this->get_gallery_migrator();
-            $galleries = $gallery_migrator->get_objects_to_migrate();
+            $table = $this->table_collection_repository();
+            $target = null;
+            if ( null !== $table ) {
+                $target = $this->targeted_gallery_context( $table, $gallery_migrator, $unique_identifier );
+                $galleries = $target['found'] ? array( $target['object'] ) : array();
+            } else { $galleries = $gallery_migrator->get_objects_to_migrate(); }
             $gallery_index = null;
             $gallery = null;
 
@@ -1397,8 +1413,14 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
 				return new \WP_Error( 'foogallery_migrate_store_write_failed', __( 'Migrated gallery state could not be reset.', 'foogallery-migrate' ) );
 			}
 
-            $galleries[ $gallery_index ] = $gallery;
-            if ( ! $this->set_migrator_setting( self::KEY_GALLERIES, $galleries ) ) {
+            if ( null !== $table ) {
+                $target['object'] = $gallery;
+                $saved = $table->checkpoint_targeted( self::KEY_GALLERIES, $target );
+            } else {
+                $galleries[ $gallery_index ] = $gallery;
+                $saved = $this->set_migrator_setting( self::KEY_GALLERIES, $galleries );
+            }
+            if ( ! $saved ) {
 				return new \WP_Error( 'foogallery_migrate_store_write_failed', __( 'Migrated gallery state could not be saved.', 'foogallery-migrate' ) );
 			}
 
@@ -1434,7 +1456,12 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         private function check_for_migration_errors_admitted( $unique_identifier ) {
             $this->assert_storage_writer();
             $gallery_migrator = $this->get_gallery_migrator();
-            $galleries = $gallery_migrator->get_objects_to_migrate();
+            $table = '' !== $unique_identifier ? $this->table_collection_repository() : null;
+            $target = null;
+            if ( null !== $table ) {
+                $target = $this->targeted_gallery_context( $table, $gallery_migrator, $unique_identifier );
+                $galleries = $target['found'] ? array( $target['object'] ) : array();
+            } else { $galleries = $gallery_migrator->get_objects_to_migrate(); }
             $checked = 0;
             $errors = 0;
             $found_gallery = false;
@@ -1466,7 +1493,11 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
 			if ( ! $this->flush_migrated_object_batch() ) {
 				return new \WP_Error( 'foogallery_migrate_store_write_failed', __( 'Migrated gallery state could not be saved.', 'foogallery-migrate' ) );
 			}
-            if ( ! $this->set_migrator_setting( self::KEY_GALLERIES, $galleries ) ) {
+			if ( null !== $table ) {
+				$target['object'] = $galleries[0];
+				$saved = $table->checkpoint_targeted( self::KEY_GALLERIES, $target );
+			} else { $saved = $this->set_migrator_setting( self::KEY_GALLERIES, $galleries ); }
+			if ( ! $saved ) {
 				return new \WP_Error( 'foogallery_migrate_store_write_failed', __( 'Migrated gallery state could not be saved.', 'foogallery-migrate' ) );
             }
 
