@@ -184,6 +184,28 @@ $capture = function () use ( $names, $tables, $option_row, $writer_rows, $wpdb, 
 $snapshot_sha = function ( $state ) { return hash( 'sha256', serialize( $state ) ); };
 $journal_row = $option_row( $journal_name );
 $journal = $journal_row ? maybe_unserialize( $journal_row['option_value'] ) : null;
+$death_snapshot = null;
+if ( is_array( $journal ) && isset( $journal['death'] ) ) {
+	assisted_check( isset( $journal['death']['snapshot_base64'], $journal['death']['snapshot_sha256'] ) &&
+		is_string( $journal['death']['snapshot_base64'] ) && strlen( $journal['death']['snapshot_base64'] ) <= 4194304,
+		'Exact encoded death snapshot is missing or oversized.' );
+	$snapshot_bytes = base64_decode( $journal['death']['snapshot_base64'], true );
+	assisted_check( is_string( $snapshot_bytes ) && base64_encode( $snapshot_bytes ) === $journal['death']['snapshot_base64'] &&
+		hash( 'sha256', $snapshot_bytes ) === $journal['death']['snapshot_sha256'],
+		'Exact encoded death snapshot bytes differ.' );
+	$death_snapshot = @unserialize( $snapshot_bytes, array( 'allowed_classes' => false ) );
+	assisted_check( is_array( $death_snapshot ) && array_keys( $death_snapshot ) ===
+		array( 'options', 'writers', 'tables', 'posts', 'meta', 'media_sha256' ) &&
+		is_array( $death_snapshot['options'] ) && array_keys( $death_snapshot['options'] ) === $names &&
+		is_array( $death_snapshot['writers'] ) && is_array( $death_snapshot['tables'] ) &&
+		array_keys( $death_snapshot['tables'] ) === $tables &&
+		is_array( $death_snapshot['posts'] ) && is_array( $death_snapshot['meta'] ) &&
+		array_keys( $death_snapshot['posts'] ) === array_keys( $cleanup['posts'] ) &&
+		array_keys( $death_snapshot['meta'] ) === array_keys( $cleanup['posts'] ) &&
+		is_string( $death_snapshot['media_sha256'] ) && serialize( $death_snapshot ) === $snapshot_bytes,
+		'Exact death snapshot cannot be decoded losslessly.' );
+	unset( $snapshot_bytes );
+}
 $save = function ( $value, $new ) use ( $journal_name, $option_row ) {
 	$before = $option_row( $journal_name );
 	assisted_check( $new === ( null === $before ), 'Unexpected assisted journal presence.' );
@@ -277,7 +299,7 @@ if ( 'kill' === $step ) {
 		$after = $capture();
 		assisted_check( $before === $after, 'Kill changed committed source, staging, owner or protected output.' );
 		$journal['phase'] = 'dead'; $journal['death'] = array( 'pid' => $hello['pid'], 'thread' => $hello['thread'],
-			'signal' => 9, 'marker' => $marker, 'snapshot' => $before,
+		'signal' => 9, 'marker' => $marker, 'snapshot_base64' => base64_encode( serialize( $before ) ),
 			'snapshot_sha256' => $snapshot_sha( $before ), 'died_at' => time() );
 		$save( $journal, false ); $result['death'] = array( 'pid' => $hello['pid'], 'thread' => $hello['thread'],
 			'marker_sha256' => hash( 'sha256', $marker['option_value'] ), 'snapshot_sha256' => $journal['death']['snapshot_sha256'] );
@@ -288,17 +310,17 @@ if ( 'kill' === $step ) {
 	}
 }
 if ( 'probe' === $step ) {
-	assisted_check( $journal['phase'] === 'dead' && $capture() === $journal['death']['snapshot'],
+	assisted_check( $journal['phase'] === 'dead' && $capture() === $death_snapshot,
 		'Dead owner evidence changed before fresh public refusal.' );
 	$refusal = StorageCli::execute( 'recover', array( 'target' => 'table', 'confirm' => 'recover-storage' ) );
 	assisted_check( is_wp_error( $refusal ) && $refusal->get_error_code() === 'foogallery_migrate_storage_recovery_required' &&
-		$capture() === $journal['death']['snapshot'], 'Fresh public recovery did not refuse unchanged dead ownership.' );
+		$capture() === $death_snapshot, 'Fresh public recovery did not refuse unchanged dead ownership.' );
 	$journal['phase'] = 'refused'; $journal['refusal'] = $refusal->get_error_code(); $save( $journal, false );
 	$result['refusal'] = $journal['refusal'];
 }
 if ( 'inspect' === $step || 'operator-clear' === $step ) {
 	assisted_check( $journal['phase'] === 'refused' && $journal['refusal'] === 'foogallery_migrate_storage_recovery_required' &&
-		$capture() === $journal['death']['snapshot'], 'Assisted evidence changed before operator intervention.' );
+		$capture() === $death_snapshot, 'Assisted evidence changed before operator intervention.' );
 	$thread = (int) $wpdb->get_var( 'SELECT CONNECTION_ID()' );
 	$others = $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM information_schema.PROCESSLIST WHERE DB=%s AND ID<>%d',
 		DB_NAME, $thread ) );
@@ -347,7 +369,7 @@ if ( 'operator-clear' === $step ) {
 	$pin = new LegacyTransactionConnection( $wpdb );
 	$pin_thread = $pin->get_var( 'SELECT CONNECTION_ID()' );
 	assisted_check( $option_row( StorageAuthority::MAINTENANCE_OPTION ) === $expected &&
-		$capture() === $journal['death']['snapshot'] && array() === $writer_rows() &&
+		$capture() === $death_snapshot && array() === $writer_rows() &&
 		$pin->is_current() && ! $pin->last_error && (int) $pin_thread === $thread,
 		'Final exact owner, state or pinned SQL connection changed before CAS.' );
 	$deleted = $pin->query( $pin->prepare( 'DELETE FROM `' . $wpdb->options .
@@ -395,7 +417,7 @@ if ( 'verify' === $step ) {
 	$control = $control_row ? StorageControl::decode( $control_row['option_value'], get_current_blog_id() ) : null;
 	$authority_row = $option_row( StorageAuthority::AUTHORITY_OPTION );
 	$backup_row = $option_row( StorageAuthority::STORAGE_BACKUP_OPTION );
-	$source_before = $journal['death']['snapshot']['options'][FOOGALLERY_MIGRATE_OPTION_DATA];
+	$source_before = $death_snapshot['options'][FOOGALLERY_MIGRATE_OPTION_DATA];
 	assisted_check( $status['backend'] === 'table' && $status['phase'] === 'stable' && $status['problem'] === '' &&
 		is_array( $control ) && $control['phase'] === 'stable' && $control['backend'] === 'table' &&
 		$authority_row && StorageControl::runtime_ready( $control, $authority_row['option_value'] ) &&
@@ -405,7 +427,7 @@ if ( 'verify' === $step ) {
 		'Fresh stable authority, exact backup, schema or protected output differs.' );
 	assisted_check( $table_equals_source( $source_before ) === $journal['source_value_sha256'],
 		'Fresh selected state differs from original source proof.' );
-	$final_raw = $capture(); $death_raw = $journal['death']['snapshot'];
+	$final_raw = $capture(); $death_raw = $death_snapshot;
 	assisted_check( $final_raw['posts'] === $death_raw['posts'] &&
 		$final_raw['meta'] === $death_raw['meta'] &&
 		$final_raw['media_sha256'] === $death_raw['media_sha256'],
