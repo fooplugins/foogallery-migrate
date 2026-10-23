@@ -23,6 +23,35 @@ class MigratableCollectionRepository extends ScalarStateRepository {
 		if ( ! $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table collection view required.' ); }
 		return $this->backend->collection_view_context( $bucket );
 	}
+	/** Exact migrated Core gallery targets without hydrating unrelated roots. */
+	public function migrated_core_gallery_targets( $source_ids ) {
+		if ( ! $this->backend instanceof LegacyTableBackend || ! is_array( $source_ids ) ) { throw new \RuntimeException( 'Table Core gallery lookup required.' ); }
+		$context = $this->view_context( MigratorSettings::KEY_GALLERIES );
+		if ( ! $context['found'] ) { throw new \RuntimeException( 'Core gallery collection changed before lookup.' ); }
+		$targets = array();
+		foreach ( array_chunk( $source_ids, 100 ) as $ids ) {
+			$identities = array();
+			foreach ( $ids as $id ) {
+				if ( ! is_string( $id ) && ! is_int( $id ) ) { throw new \RuntimeException( 'Invalid Core gallery source ID.' ); }
+				$identities[] = array( 'type' => 'gallery', 'plugin' => 'WordPress Core', 'id' => (string) $id );
+			}
+			$rows = $this->backend->source_identities( MigratorSettings::KEY_GALLERIES, $identities );
+			if ( ! is_array( $rows ) || count( $rows ) !== count( $identities ) ) { throw new \RuntimeException( 'Core gallery lookup changed.' ); }
+			foreach ( $rows as $index => $row ) {
+				$identity = $identities[$index];
+				if ( ! is_array( $row ) || ! isset( $row['found'] ) || ! $row['found'] || ! isset( $row['value'] ) || ! is_array( $row['value'] ) ||
+					! isset( $row['value']['object_type'], $row['value']['plugin_name'], $row['value']['ID'], $row['value']['migrated_id'] ) ||
+					'gallery' !== $row['value']['object_type'] || 'WordPress Core' !== $row['value']['plugin_name'] ||
+					! is_scalar( $row['value']['ID'] ) || (string) $row['value']['ID'] !== $identity['id'] ||
+					empty( $row['value']['migrated'] ) || ! is_numeric( $row['value']['migrated_id'] ) || (int) $row['value']['migrated_id'] < 1 ) {
+					throw new \RuntimeException( 'Core gallery lookup did not verify migration.' );
+				}
+				$targets[$identity['id']] = (int) $row['value']['migrated_id'];
+			}
+			if ( $this->view_context( MigratorSettings::KEY_GALLERIES ) !== $context ) { throw new \RuntimeException( 'Core gallery collection changed during lookup.' ); }
+		}
+		return $targets;
+	}
 	private function hydrate_view_record( $bucket, $row ) {
 		if ( ! is_array( $row ) || array_keys( $row ) !== array( 'key', 'value' ) ) { throw new \RuntimeException( 'Invalid collection view row.' ); }
 		$payload = array( MigratorSettings::COMPACT_MARKER => MigratorSettings::COMPACT_VERSION,

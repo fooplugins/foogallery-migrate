@@ -1809,9 +1809,6 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			}
 
 			if ( ! empty( $core_source_ids ) ) {
-				if ( null !== $repository && count( $selected_item_keys ) > 100 ) {
-					return array( 'success' => 0, 'errors' => array( __( 'This table-backed action supports up to 100 selected occurrences when creating reusable galleries. Select fewer occurrences and try again.', 'foogallery-migrate' ) ) );
-				}
 				if ( null !== $repository ) { $this->assert_selected_content_context( $repository, $context ); }
 				$gallery_migrator = $this->migrator_engine->get_gallery_migrator();
 				$galleries = $gallery_migrator->get_objects_to_migrate( true );
@@ -1838,7 +1835,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 					);
 				}
 
-				$gallery_migrator->queue_objects_for_migration( $queue );
+				if ( false === $gallery_migrator->queue_objects_for_migration( $queue ) ) {
+					return array( 'success' => 0, 'errors' => array( __( 'One or more core galleries could not be queued. Review the Galleries tab for details.', 'foogallery-migrate' ) ) );
+				}
 				for ( $step = 0; $step < $maximum_steps; $step++ ) {
 					$state = $gallery_migrator->get_state();
 					if ( is_array( $state ) && isset( $state['queued'], $state['completed'] ) && (int) $state['queued'] === (int) $state['completed'] ) {
@@ -1856,10 +1855,16 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				}
 
 				$migrated_core_ids = array();
-				foreach ( $gallery_migrator->get_objects_to_migrate() as $gallery ) {
-					$source_id = isset( $gallery->ID ) ? (string) $gallery->ID : '';
-					if ( 'WordPress Core' === $gallery->plugin->name() && isset( $core_source_ids[ $source_id ] ) && ! empty( $gallery->migrated ) && ! empty( $gallery->migrated_id ) ) {
-						$migrated_core_ids[ $source_id ] = (int) $gallery->migrated_id;
+				if ( null !== $repository ) {
+					// Forced Core discovery replaced the stored collection above. Its
+					// post/hash/occurrence source IDs are unique; use exact indexed roots.
+					$migrated_core_ids = $this->migrator_engine->table_collection_repository()->migrated_core_gallery_targets( array_keys( $core_source_ids ) );
+				} else {
+					foreach ( $gallery_migrator->get_objects_to_migrate() as $gallery ) {
+						$source_id = isset( $gallery->ID ) ? (string) $gallery->ID : '';
+						if ( 'WordPress Core' === $gallery->plugin->name() && isset( $core_source_ids[ $source_id ] ) && ! empty( $gallery->migrated ) && ! empty( $gallery->migrated_id ) ) {
+							$migrated_core_ids[ $source_id ] = (int) $gallery->migrated_id;
+						}
 					}
 				}
 
