@@ -2,7 +2,8 @@
 /** Owned disposable lifecycle journey. One explicit phase per fresh PHP process. */
 if ( 'cli' !== PHP_SAPI || 3 !== $argc || ! in_array( $argv[2], array(
 	'init', 'verify', 'seed-state', 'provision', 'switch', 'recover', 'edit', 'adopt-reversed', 'adopt-table', 'clear', 'seed-repeat-clear', 'repeat-clear', 'verify-clear',
-	'remove-all', 'repeat-remove-all', 'prepare-uninstall', 'uninstall', 'verify-uninstalled', 'reverse', 'verify-reversed' ), true ) ) {
+	'remove-all', 'repeat-remove-all', 'fault-remove-all', 'verify-partial-remove-all', 'wrong-action-refuses', 'resume-remove-all',
+	'prepare-uninstall', 'uninstall', 'verify-uninstalled', 'reverse', 'verify-reversed' ), true ) ) {
 	throw new RuntimeException( 'Owned site and explicit cleanup phase required.' );
 }
 $site = realpath( $argv[1] ); $step = $argv[2];
@@ -43,6 +44,7 @@ use FooPlugins\FooGalleryMigrate\StorageCli;
 use FooPlugins\FooGalleryMigrate\StorageAdmin;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\MigratedStore;
+use FooPlugins\FooGalleryMigrate\StorageMaintenanceGate;
 global $wpdb, $wp_version;
 function cleanup_check( $yes, $message ) { if ( ! $yes ) { throw new RuntimeException( $message ); } }
 cleanup_check( ! is_multisite() && DB_NAME === $manifest['database'] && DB_HOST === $manifest['host'] &&
@@ -169,6 +171,31 @@ $fixed_options = array( 'foogallery-migrate-data', 'foogallery-migrate-settings'
 	'foogallery-migrate-migrated-legacy-backup', 'foogallery_migrate_storage_schema_version', 'foogallery_migrate_storage_schema_lock' );
 $fixed_tables = array( $wpdb->prefix . 'foogallery_migrate_objects', $wpdb->prefix . 'foogallery_migrate_state',
 	$wpdb->base_prefix . 'foogallery_migrate_legacy_state', $wpdb->base_prefix . 'foogallery_migrate_legacy_records' );
+$fault_source = function () use ( $plugin_dir ) {
+	$files = array( 'migrate.php', 'includes/class-storage-cleanup.php', 'includes/class-storage-maintenance-gate.php',
+		'includes/class-legacy-transaction-connection.php', 'includes/class-storage-cli.php',
+		'includes/class-storage-operations.php', 'includes/class-storage-authority.php' );
+	$hashes = array();
+	foreach ( $files as $file ) {
+		$hash = hash_file( 'sha256', $plugin_dir . '/' . $file );
+		cleanup_check( is_string( $hash ), 'Scoped cleanup source file unavailable: ' . $file );
+		$hashes[$file] = $hash;
+	}
+	return $hashes;
+};
+$fault_snapshot = function () use ( $fixed_options, $fixed_tables, $raw, $exists_table, $wpdb ) {
+	$state = array( 'options' => array(), 'tables' => array() );
+	foreach ( $fixed_options as $name ) {
+		$value = $raw( $name ); $state['options'][$name] = null === $value ? null : hash( 'sha256', $value );
+	}
+	foreach ( $fixed_tables as $table ) {
+		if ( ! $exists_table( $table ) ) { $state['tables'][$table] = null; continue; }
+		$count = $wpdb->get_var( 'SELECT COUNT(*) FROM `' . $table . '`' );
+		cleanup_check( ! $wpdb->last_error && ctype_digit( (string) $count ), 'Owned table count unavailable.' );
+		$state['tables'][$table] = (int) $count;
+	}
+	return $state;
+};
 $no_internal = function () use ( $fixed_options, $fixed_tables, $raw, $exists_table, $wpdb ) {
 	foreach ( $fixed_options as $name ) { cleanup_check( null === $raw( $name ), 'Owned option remains: ' . $name ); }
 	foreach ( $fixed_tables as $table ) { cleanup_check( ! $exists_table( $table ), 'Owned table remains: ' . $table ); }
@@ -264,6 +291,9 @@ if ( 'init' === $step ) {
 cleanup_check( is_array( $journal ) && isset( $journal['identity'], $journal['owner'], $journal['phase'] ) &&
 	$identity === $journal['identity'] && $owner === $journal['owner'] && 'seeding' !== $journal['phase'], 'Owned lifecycle journal missing, partial or mismatched.' );
 $verify_protected( $journal );
+if ( isset( $journal['fault_source'] ) ) {
+	cleanup_check( $journal['fault_source'] === $fault_source(), 'Pinned cleanup source changed during fault journey.' );
+}
 if ( isset( $journal['real'] ) ) {
 	$real = $journal['real'];
 	$real_raw = $raw( 'fgm_real_owned_journey_v1' );
@@ -401,6 +431,96 @@ if ( 'verify-clear' === $step ) {
 		! foogallery_migrate_migrator_instance()->get_migrator_setting( 'cleanup_after_clear', false ), 'Fresh ordinary read found old state.' );
 	if ( isset( $journal['preferences'] ) ) { cleanup_check( get_option( FOOGALLERY_MIGRATE_OPTION_SETTINGS, null ) === $journal['preferences'], 'User preferences changed across clear.' ); }
 	$result['storage'] = $status;
+}
+$fault_fixture = $site === '/private/tmp/foogallery-migrate-r0.mY4iGH' &&
+	$manifest['database'] === 'fgm_r0_my4igh' && $manifest['container'] === 'fgm-r0-mY4iGH' &&
+	$manifest['container_id'] === 'c790a47601f2fb569023e11c43c514428df1e158ab954e9f7c571da67d018a7e';
+$verify_partial_remove_all = function ( $state ) use ( $fault_fixture, $fault_source, $raw, $exists_table, $fixed_tables ) {
+	cleanup_check( $fault_fixture && $state['phase'] === 'remove-all-failed' &&
+		isset( $state['fault_source'], $state['fault_marker_sha256'], $state['fault_receipt'] ) &&
+		$state['fault_source'] === $fault_source(), 'Exact owned partial-cleanup fixture/source required.' );
+	$receipt = $state['fault_receipt'];
+	$expected = array( \FooPlugins\FooGalleryMigrate\StorageCleanup::MARKER,
+		LegacyStorageSchema::VERSION_OPTION, $fixed_tables[2] );
+	$actual = isset( $receipt['residual'] ) ? $receipt['residual'] : null;
+	cleanup_check( is_array( $actual ) && count( $actual ) === count( $expected ), 'Partial cleanup residual count changed.' );
+	sort( $actual ); sort( $expected );
+	cleanup_check( $actual === $expected && isset( $receipt['action'], $receipt['complete'], $receipt['failed'], $receipt['removed'] ) &&
+		$receipt['action'] === 'remove_all' && false === $receipt['complete'] &&
+		$receipt['failed'] === array( 'Owned cleanup SQL failed.' ) &&
+		in_array( $fixed_tables[3], $receipt['removed'], true ) &&
+		! $exists_table( $fixed_tables[3] ) && $exists_table( $fixed_tables[2] ) &&
+		null === $raw( FOOGALLERY_MIGRATE_OPTION_DATA ) && null === $raw( FOOGALLERY_MIGRATE_OPTION_SETTINGS ) &&
+		null === $raw( StorageAuthority::CONTROL_OPTION ) && null === $raw( StorageAuthority::AUTHORITY_OPTION ) &&
+		null !== $raw( LegacyStorageSchema::VERSION_OPTION ),
+		'Native first DROP, rejected second DROP, authority or exact residual proof failed.' );
+	$marker = $raw( \FooPlugins\FooGalleryMigrate\StorageCleanup::MARKER );
+	cleanup_check( is_string( $marker ) && hash( 'sha256', $marker ) === $state['fault_marker_sha256'] &&
+		\FooPlugins\FooGalleryMigrate\StorageCleanup::pending_scope() === 'remove_all' &&
+		is_wp_error( StorageAuthority::runtime_record() ), 'Durable marker did not block ordinary runtime.' );
+};
+if ( 'fault-remove-all' === $step ) {
+	/** One test-only server-query refusal; all other SQL uses the real pinned mysqli handle. */
+	class CleanupOneDropRejectConnection extends \FooPlugins\FooGalleryMigrate\LegacyTransactionConnection {
+		private $target;
+		public $rejections = 0;
+		public function __construct( $wpdb, $target ) { parent::__construct( $wpdb ); $this->target = 'DROP TABLE `' . $target . '`'; }
+		public function query( $sql ) {
+			if ( $sql === $this->target && 0 === $this->rejections ) {
+				$this->rejections++; $this->last_error = 'Owned one-shot DROP refusal'; return false;
+			}
+			return parent::query( $sql );
+		}
+	}
+	cleanup_check( $fault_fixture && ! isset( $manifest['package'] ) && ! isset( $journal['real'] ) &&
+		$journal['phase'] === 'state-seeded' && null === $raw( \FooPlugins\FooGalleryMigrate\StorageCleanup::MARKER ) &&
+		null !== $raw( FOOGALLERY_MIGRATE_OPTION_DATA ) && null !== $raw( LegacyStorageSchema::VERSION_OPTION ) &&
+		null === $raw( StorageAuthority::CONTROL_OPTION ) && null === $raw( StorageAuthority::AUTHORITY_OPTION ) &&
+		$exists_table( $fixed_tables[2] ) && $exists_table( $fixed_tables[3] ) &&
+		! $exists_table( $fixed_tables[0] ) && ! $exists_table( $fixed_tables[1] ),
+		'Exact option-authoritative source fixture and two real shared tables required for one-shot DROP failure.' );
+	$status = StorageAdmin::status();
+	cleanup_check( $status['backend'] === 'option' && $status['phase'] === 'stable' &&
+		$status['schema'] === 'verified' && $status['problem'] === '', 'Stable option authority and verified schema required before fault.' );
+	$journal['fault_source'] = $fault_source(); $journal['phase'] = 'fault-armed'; $save( $journal );
+	$gate = StorageMaintenanceGate::current(); $original = $gate->connection();
+	$probe = new CleanupOneDropRejectConnection( $wpdb, $fixed_tables[2] );
+	$property = new ReflectionProperty( 'FooPlugins\\FooGalleryMigrate\\StorageMaintenanceGate', 'connection' );
+	$property->setAccessible( true );
+	cleanup_check( $property->getValue( $gate ) === $original, 'Pinned connection changed before test fault.' );
+	$property->setValue( $gate, $probe );
+	cleanup_check( $gate->connection() === $probe, 'Test-only pinned connection was not installed.' );
+	$receipt = StorageCli::execute( 'remove_all', array( 'target' => 'all', 'confirm' => 'remove-all-internal-data' ) );
+	cleanup_check( 1 === $probe->rejections && is_array( $receipt ) && isset( $receipt['complete'] ) &&
+		false === $receipt['complete'], 'One precise shared-state DROP must be rejected.' );
+	$marker = $raw( \FooPlugins\FooGalleryMigrate\StorageCleanup::MARKER );
+	cleanup_check( is_string( $marker ), 'Failed cleanup did not retain its durable marker.' );
+	$journal['phase'] = 'remove-all-failed'; $journal['fault_marker_sha256'] = hash( 'sha256', $marker );
+	$journal['fault_receipt'] = $receipt; $save( $journal );
+	$verify_partial_remove_all( $journal );
+	$result['receipt'] = $receipt; $result['rejected_drop'] = $fixed_tables[2];
+}
+if ( 'verify-partial-remove-all' === $step ) {
+	$verify_partial_remove_all( $journal ); $result['receipt'] = $journal['fault_receipt'];
+}
+if ( 'wrong-action-refuses' === $step ) {
+	$verify_partial_remove_all( $journal ); $before = $fault_snapshot();
+	$denied = StorageCli::execute( 'clear', array( 'target' => 'state', 'confirm' => 'clear-current-state' ) );
+	cleanup_check( is_array( $denied ) && isset( $denied['complete'], $denied['failed'] ) &&
+		false === $denied['complete'] && $denied['failed'] === array( 'Cleanup marker requires assisted classification.' ) &&
+		$before === $fault_snapshot(),
+		'Wrong cleanup action did not refuse without changing owned SQL.' );
+	$verify_partial_remove_all( $journal );
+	$journal['wrong_action_refused'] = true; $save( $journal ); $result['wrong_action'] = $denied;
+}
+if ( 'resume-remove-all' === $step ) {
+	$verify_partial_remove_all( $journal );
+	cleanup_check( isset( $journal['wrong_action_refused'] ) && true === $journal['wrong_action_refused'],
+		'Wrong-action refusal must be observed before fresh-request resume.' );
+	$result['receipt'] = $request( 'remove_all', 'all', 'remove-all-internal-data' );
+	cleanup_check( ! empty( $result['receipt']['complete'] ) && empty( $result['receipt']['failed'] ) &&
+		empty( $result['receipt']['residual'] ), 'Same-scope cleanup did not complete.' );
+	$no_internal(); $journal['phase'] = 'removed'; $save( $journal );
 }
 if ( 'remove-all' === $step || 'repeat-remove-all' === $step ) {
 	cleanup_check( in_array( $journal['phase'], array( 'cleared', 'removed' ), true ), 'Cleared state required for remove-all.' );
