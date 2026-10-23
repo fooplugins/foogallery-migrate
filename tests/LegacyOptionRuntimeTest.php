@@ -120,6 +120,39 @@ class LegacyOptionRuntimeTest extends TestCase {
 		$this->assertFalse( $repo->update_with_sync_state( array(), array( 'processed' => 99 ) ) );
 		$this->assertSame( $stable, $this->backend->read_all() );
 	}
+	public function test_image_tag_batch_uses_legacy_numeric_cursor_instead_of_sparse_item_order(): void {
+		$repo = new ImageTagQueueRepository( $this->backend, $this->settings );
+		$state = array( 'items' => array( '09' => array( 'attachment_id' => 9 ),
+			1 => array( 'attachment_id' => 11 ), 2 => null, 3 => false, 4 => 'opaque',
+			5 => array( 'attachment_id' => 15 ) ), 'total' => 6 );
+		$this->assertTrue( $repo->replace_snapshot( $state ) );
+		$batch = $repo->nextBatch( 2 );
+		$this->assertSame( array( array( 'key' => 0, 'found' => false, 'value' => array() ),
+			array( 'key' => 1, 'found' => true, 'value' => $state['items'][1] ) ), $batch['rows'] );
+		$this->assertSame( 2, $batch['cursor'] );
+		$this->assertSame( array( array( 'key' => 2, 'found' => false, 'value' => array() ),
+			array( 'key' => 3, 'found' => true, 'value' => array() ) ),
+			$repo->nextBatch( 2, $batch['cursor'] )['rows'] );
+		$this->assertSame( array( array( 'key' => 4, 'found' => true, 'value' => array() ),
+			array( 'key' => 5, 'found' => true, 'value' => $state['items'][5] ) ),
+			$repo->nextBatch( 2, 4 )['rows'] );
+	}
+	public function test_image_tag_option_replacement_merges_duplicate_attachment_across_pages_once(): void {
+		$repo = new ImageTagQueueRepository( $this->backend, $this->settings );
+		$this->assertSame( array( 'found' => true, 'summary' => array_diff_key( $repo->read_snapshot(), array( 'items' => true ) ),
+			'revision' => null, 'total' => count( $repo->read_snapshot()['items'] ) ), $repo->summary() );
+		$before = $repo->read_snapshot();
+		$this->assertTrue( $repo->beginReplacement() );
+		$this->assertTrue( $repo->applyEngineComputedBuildPage( array( array( 'attachment_id' => 7, 'tags' => array( 'first' ) ),
+			array( 'attachment_id' => 8, 'tags' => array( 'other' ) ) ) ) );
+		$this->assertSame( $before, $repo->read_snapshot(), 'The old option remains authoritative until publication.' );
+		$this->assertSame( array( 'first' ), $repo->getManyBuildRowsByKeys( array( 7 ) )[0]['value']['tags'] );
+		$this->assertTrue( $repo->applyEngineComputedBuildPage( array( array( 'attachment_id' => 7, 'tags' => array( 'merged' ) ) ) ) );
+		$this->assertTrue( $repo->finalizeReplacement( array( 'total' => 2, 'processed' => 0 ) ) );
+		$this->assertSame( array( 7, 8 ), array_column( $repo->read_snapshot()['items'], 'attachment_id' ) );
+		$this->assertSame( array( 'merged' ), $repo->read_snapshot()['items'][0]['tags'] );
+		$this->assertSame( 2, $repo->summary()['total'] );
+	}
 	public function test_history_adapter_uses_existing_owner_and_presence_envelope(): void {
 		$repo = new MigratedHistoryRepository( $this->backend, $this->settings );
 		$key = $this->fixture['image']->unique_identifier();

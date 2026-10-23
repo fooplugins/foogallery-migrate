@@ -30,6 +30,7 @@ class LegacyTableRepository {
 	private $busy = false;
 	private $tainted = false;
 	private $history_read_active = false;
+	private $image_tag_build = null;
 
 	/** Evaluate the result while still guarded, then release on every return. */
 	private function finish_history_read( $result ) {
@@ -671,6 +672,343 @@ class LegacyTableRepository {
 		return false === $value ? false : $this->replace_content_state( $value, false === $head ? null : $head['revision'] );
 	}
 	public function change_image_tag_queue( $change ) { return $this->change_partial_state( ImageTagQueueRepository::STATE_KEY, $change, false ); }
+
+	/** An inactive generation is durable, but never an authoritative queue. */
+	public function image_tag_queue_begin() {
+		$this->start_budget(); $key = ImageTagQueueRepository::STATE_KEY; $this->queue_transaction_start();
+		try {
+			$id = $this->lock_identity( $key, true ); $head = false; $generation = 1; $revision = 0;
+			if ( false === $id ) {
+				$order = $this->next_state_order(); $now = gmdate( 'Y-m-d H:i:s' );
+				$root = $this->codec->encode_collection_root( array( 'version' => 1, 'kind' => 'map', 'root_count' => 0 ) );
+				$sql = 'INSERT INTO `' . $this->state . '` (blog_id, state_key_hash, state_key_value, state_order, state_kind, active_generation, revision, codec_version, record_count, payload_bytes, digest_revision, digest_status, root_payload, created_gmt, updated_gmt) '
+					. "VALUES (%d, UNHEX(%s), %s, %d, 'staging', 0, 0, %d, 0, 0, 0, 'dirty', %s, %s, %s)";
+				if ( 1 !== $this->write( $this->db->prepare( $sql, array( $this->blog, $this->codec->key_hash( $key ), $this->codec->key_value( $key ), $order,
+					LegacyStateCodec::VERSION, $root, $now, $now ) ) ) ) { $this->fail( 'Queue staging head creation failed.' ); }
+				$id = $this->number( $this->db->insert_id ); if ( $id < 1 ) { $this->fail( 'Missing queue staging identity.' ); }
+			} else {
+				$raw = $this->queue_raw_head( $id );
+				if ( 0 === $raw['active_generation'] && 0 === $raw['revision'] && 'staging' === $raw['state_kind'] ) {
+					// An earlier handled build never published. The maintenance owner
+					// permits restarting only this exact inactive queue generation.
+				} else {
+					$head = $this->head( $key );
+					if ( $head['id'] !== $id || ! in_array( $head['state_kind'], array( 'scalar', 'map' ), true ) ) { $this->fail( 'Invalid previous queue head.' ); }
+					if ( 'scalar' === $head['state_kind'] ) {
+						$root = $this->root_metadata( $head ); $this->verify_scalar( $head, $root['value'] );
+					} else { $this->collection( $head ); }
+					$generation = $head['active_generation'] + 1; $revision = $head['revision'];
+					if ( $generation > PHP_INT_MAX || $revision >= PHP_INT_MAX ) { $this->fail( 'Queue generation or revision exhausted.' ); }
+				}
+			}
+			$existing = $this->read( $this->db->prepare( 'SELECT id FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d LIMIT 1',
+				array( $this->blog, $id, $generation ) ) );
+			if ( count( $existing ) ) { $this->fail( 'Inactive queue generation is owned or requires assisted recovery.' ); }
+			$token = hash( 'sha256', uniqid( '', true ) . ':' . mt_rand() . ':' . $id . ':' . microtime( true ) );
+			$shadow = array( 'id' => $id, 'active_generation' => $generation,
+				'state_key_value' => $this->codec->key_value( $key ) );
+			$repo = $this; $sentinel_hash = null;
+			$this->records->flatten_tree( $key, "\0image-tag-build", $token, PHP_INT_MAX - 1, function ( $row ) use ( $repo, $shadow, &$sentinel_hash ) {
+				$sentinel_hash = $row['payload_hash']; $repo->insert_record( $shadow, $row );
+			} );
+			if ( null === $sentinel_hash ) { $this->fail( 'Queue build ownership marker absent.' ); }
+			$this->queue_transaction_finish();
+			$this->image_tag_build = array( 'id' => $id, 'generation' => $generation, 'revision' => $revision,
+				'head' => $head, 'sentinel_hash' => $sentinel_hash ); return true;
+		} catch ( \Exception $error ) { $this->queue_transaction_rollback( $error ); }
+		catch ( \Throwable $error ) { $this->queue_transaction_rollback( $error ); }
+	}
+	public function image_tag_queue_abort() {
+		$this->start_budget(); $build = $this->queue_build_context(); $this->queue_transaction_start();
+		try {
+			$this->lock_identity( ImageTagQueueRepository::STATE_KEY ); $this->queue_build_unchanged( $build, true );
+			$this->write( $this->db->prepare( 'DELETE FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d',
+				array( $this->blog, $build['id'], $build['generation'] ) ) );
+			if ( false === $build['head'] ) {
+				if ( 1 !== $this->write( $this->db->prepare( 'DELETE FROM `' . $this->state . '` WHERE blog_id = %d AND id = %d '
+					. "AND active_generation = 0 AND revision = 0 AND state_kind = 'staging'",
+					array( $this->blog, $build['id'] ) ) ) ) { $this->fail( 'Absent queue staging head changed.' ); }
+			}
+			$this->queue_transaction_finish(); $this->image_tag_build = null; return true;
+		} catch ( \Exception $error ) { $this->queue_transaction_rollback( $error ); }
+		catch ( \Throwable $error ) { $this->queue_transaction_rollback( $error ); }
+	}
+
+	/** Existing staged items only; missing keys do not inspect the active queue. */
+	public function image_tag_queue_build_rows( $keys ) {
+		$this->start_budget(); $build = $this->queue_build_context();
+		if ( ! is_array( $keys ) || count( $keys ) > 100 ) { $this->fail( 'Queue build lookup exceeds page limit.' ); }
+		$this->queue_build_unchanged( $build ); $result = array(); $seen = array();
+		foreach ( $keys as $key ) {
+			if ( ! is_int( $key ) || $key < 1 || isset( $seen[$key] ) ) { $this->fail( 'Invalid or duplicate queue attachment key.' ); }
+			$seen[$key] = true; $rows = $this->queue_dedupe_rows( $build, $key );
+			$value = null;
+			if ( count( $rows ) ) {
+				$tree = $this->tree_hash( ImageTagQueueRepository::STATE_KEY, $this->queue_build_head( $build ), $this->hex( $rows[0]['node_hash'] ) );
+				if ( false === $tree || ! is_array( $tree['value'] ) || ! isset( $tree['value']['attachment_id'] ) || $tree['value']['attachment_id'] !== $key ) { $this->fail( 'Queue attachment projection mismatch.' ); }
+				$value = $tree['value'];
+			}
+			$result[] = array( 'found' => count( $rows ) === 1, 'key' => $key, 'value' => $value );
+		}
+		$this->queue_build_unchanged( $build ); return $result;
+	}
+
+	/** Engine has already merged tags; physical storage only replaces exact IDs. */
+	public function image_tag_queue_build_page( $items ) {
+		if ( ! is_array( $items ) || count( $items ) > 100 ) { $this->fail( 'Queue build page exceeds 100 items.' ); }
+		$this->start_budget(); $build = $this->queue_build_context();
+		foreach ( $items as $item ) {
+			if ( ! is_array( $item ) || ! isset( $item['attachment_id'] ) || ! is_int( $item['attachment_id'] ) || $item['attachment_id'] < 1 ) { $this->fail( 'Invalid engine-computed attachment.' ); }
+			$stats = $this->records->preflight_stats( ImageTagQueueRepository::STATE_KEY, PHP_INT_MAX - 2, $item, 0 );
+			$this->consume( $stats['record_count'], $stats['encoded_bytes'] );
+		}
+		$this->queue_transaction_start();
+		try {
+			$this->lock_identity( ImageTagQueueRepository::STATE_KEY ); $this->queue_build_unchanged( $build );
+			$shadow = $this->queue_build_head( $build );
+			foreach ( $items as $item ) {
+				if ( ! is_array( $item ) || ! isset( $item['attachment_id'] ) || ! is_int( $item['attachment_id'] ) || $item['attachment_id'] < 1 ) { $this->fail( 'Invalid engine-computed attachment.' ); }
+				$id = $item['attachment_id']; $dedupe = $this->queue_attachment_hash( $id );
+				$existing = $this->queue_dedupe_rows( $build, $id );
+				if ( count( $existing ) ) {
+					$tree = $this->tree_hash( ImageTagQueueRepository::STATE_KEY, $shadow, $this->hex( $existing[0]['node_hash'] ) );
+					if ( false === $tree || ! is_array( $tree['value'] ) || ! isset( $tree['value']['attachment_id'] ) || $tree['value']['attachment_id'] !== $id ) { $this->fail( 'Queue dedupe collision.' ); }
+					$order = $tree['order'];
+					foreach ( $tree['rows'] as $row ) {
+						if ( 1 !== $this->write( $this->db->prepare( 'DELETE FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d AND id = %d',
+							array( $this->blog, $build['id'], $build['generation'], $this->number( $row['id'] ) ) ) ) ) { $this->fail( 'Staged queue row disappeared.' ); }
+					}
+				} else { $order = $this->queue_next_order( $build ); }
+				$repo = $this; $root = true;
+				$this->records->flatten_tree( ImageTagQueueRepository::STATE_KEY, $order, $item, $order, function ( $row ) use ( $repo, $shadow, $dedupe, &$root ) {
+					if ( $root ) { $row['dedupe_hash'] = $dedupe; $root = false; }
+					$repo->insert_record( $shadow, $row );
+				} );
+				$check = $this->tree( ImageTagQueueRepository::STATE_KEY, $shadow, $order, false );
+				if ( false === $check || $this->codec->snapshot_digest( $check['value'] ) !== $this->codec->snapshot_digest( $item ) ) { $this->fail( 'Staged queue item read-back failed.' ); }
+			}
+			// The per-page retained work was admitted above. Aggregate queue size
+			// is not an affected-operation limit; a later page must not make an
+			// otherwise valid staged queue unusable solely because it grew.
+			$this->queue_build_unchanged( $build ); $this->queue_transaction_finish(); return true;
+		} catch ( \Exception $error ) { $this->queue_transaction_rollback( $error ); }
+		catch ( \Throwable $error ) { $this->queue_transaction_rollback( $error ); }
+	}
+
+	/** Publish page-read-back staged rows under the established dirty-digest contract. */
+	public function image_tag_queue_finalize( $summary ) {
+		if ( ! is_array( $summary ) || array_key_exists( 'items', $summary ) ) { $this->fail( 'Invalid queue summary.' ); }
+		$this->start_budget(); $build = $this->queue_build_context(); $this->queue_transaction_start();
+		try {
+			$this->lock_identity( ImageTagQueueRepository::STATE_KEY ); $this->queue_build_unchanged( $build );
+			if ( 1 !== $this->write( $this->db->prepare( 'DELETE FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d '
+				. 'AND node_hash = UNHEX(%s) AND payload_hash = UNHEX(%s)',
+				array( $this->blog, $build['id'], $build['generation'], $this->queue_sentinel_node(), $build['sentinel_hash'] ) ) ) ) { $this->fail( 'Queue build owner disappeared.' ); }
+			$stats = $this->queue_generation_stats( $build );
+			$empty = array_merge( array( 'items' => array() ), $summary );
+			$root = ( new LegacyCollectionEnvelope( $this->codec ) )->split( ImageTagQueueRepository::STATE_KEY, 'map', $empty )['root'];
+			$root['root_count'] = $stats['root_count']; ( new LegacyCollectionEnvelope( $this->codec ) )->validate( $root, ImageTagQueueRepository::STATE_KEY );
+			$encoded = $this->codec->encode_collection_root( $root );
+			if ( strlen( $encoded ) > LegacyTableReader::MAX_RECORD_BYTES || strlen( $encoded ) > $this->max_bytes ) { $this->fail( 'Queue summary exceeds finite byte budget.' ); }
+			// Every affected tree was read back in its page transaction. The
+			// established dirty-digest contract defers whole-collection logical
+			// proof to maintenance/reversal instead of rehydrating this queue here.
+			if ( $stats['root_count'] !== $stats['distinct_orders'] || ( $stats['root_count'] &&
+				( 0 !== $stats['first_order'] || $stats['last_order'] !== $stats['root_count'] - 1 ) ) ||
+				$stats['missing_dedupe'] ) { $this->fail( 'Staged queue order/statistics changed.' ); }
+			$revision = $build['revision'] + 1; $now = gmdate( 'Y-m-d H:i:s' );
+			$sql = 'UPDATE `' . $this->state . '` SET active_generation = %d, revision = %d, state_kind = \'map\', record_count = %d, payload_bytes = %d, '
+				. "snapshot_digest = NULL, digest_revision = 0, digest_status = 'dirty', root_payload = %s, updated_gmt = %s "
+				. 'WHERE blog_id = %d AND id = %d AND active_generation = %d AND revision = %d';
+			if ( 1 !== $this->write( $this->db->prepare( $sql, array( $build['generation'], $revision, $stats['record_count'],
+				$this->add( $stats['payload_bytes'], strlen( $encoded ) ), $encoded, $now,
+				$this->blog, $build['id'], $build['generation'] - 1, $build['revision'] ) ) ) ) { $this->fail( 'Queue publication compare-and-swap failed.' ); }
+			$head = $this->head( ImageTagQueueRepository::STATE_KEY );
+			if ( $head['active_generation'] !== $build['generation'] || $head['revision'] !== $revision ||
+				$head['record_count'] !== $stats['record_count'] || $this->collection( $head ) !== $root ) { $this->fail( 'Published queue read-back failed.' ); }
+			$this->queue_transaction_finish(); $this->image_tag_build = null; return true;
+		} catch ( \Exception $error ) { $this->queue_transaction_rollback( $error ); }
+		catch ( \Throwable $error ) { $this->queue_transaction_rollback( $error ); }
+	}
+
+	public function image_tag_queue_summary() {
+		$this->start_budget(); $key = ImageTagQueueRepository::STATE_KEY;
+		$raw = $this->read( $this->db->prepare( 'SELECT id, active_generation, revision, state_kind, '
+			. 'CASE WHEN OCTET_LENGTH(state_key_value) <= %d THEN state_key_value ELSE NULL END AS state_key_value '
+			. 'FROM `' . $this->state . '` WHERE blog_id = %d AND state_key_hash = UNHEX(%s) LIMIT 2',
+			array( strlen( $this->codec->key_value( $key ) ), $this->blog, $this->codec->key_hash( $key ) ) ) );
+		if ( count( $raw ) > 1 || ( count( $raw ) && $raw[0]['state_key_value'] !== $this->codec->key_value( $key ) ) ) { $this->fail( 'Queue state identity corrupt.' ); }
+		if ( count( $raw ) && 0 === $this->number( $raw[0]['active_generation'] ) ) {
+			if ( 0 !== $this->number( $raw[0]['revision'] ) || 'staging' !== $raw[0]['state_kind'] ) { $this->fail( 'Malformed absent queue staging head.' ); }
+			$marker = $this->read( $this->db->prepare( 'SELECT id FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = 1 '
+				. 'AND node_hash = UNHEX(%s) LIMIT 2', array( $this->blog, $this->number( $raw[0]['id'] ), $this->queue_sentinel_node() ) ) );
+			if ( count( $marker ) !== 1 ) { $this->fail( 'Unowned absent queue staging head.' ); }
+			return array( 'found' => false, 'summary' => array(), 'revision' => null );
+		}
+		$head = $this->reader->head( $key );
+		if ( false === $head ) { return array( 'found' => false, 'summary' => array(), 'revision' => null ); }
+		if ( 'map' !== $head['state_kind'] ) { $this->fail( 'Indexed image-tag queue required; old scalar must be explicitly replaced.' ); }
+		$root = $this->collection( $head );
+		if ( ! isset( $root['wrapper']['image_tag_queue'] ) ) { $this->fail( 'Queue envelope missing.' ); }
+		$this->unchanged( $key, $head );
+		return array( 'found' => true, 'summary' => $root['wrapper']['values'], 'revision' => $head['revision'], 'total' => $root['root_count'] );
+	}
+	public function image_tag_queue_clear() {
+		$this->start_budget(); $key = ImageTagQueueRepository::STATE_KEY; $this->queue_transaction_start();
+		try {
+			$id = $this->lock_identity( $key, true );
+			if ( false === $id ) { $this->queue_transaction_finish(); return true; }
+			$raw = $this->queue_raw_head( $id );
+			if ( 0 === $raw['active_generation'] || ! in_array( $raw['state_kind'], array( 'scalar', 'map' ), true ) ) { $this->fail( 'Cannot clear an active or malformed queue replacement.' ); }
+			$inactive = $this->read( $this->db->prepare( 'SELECT id FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d '
+				. 'AND generation > %d LIMIT 1', array( $this->blog, $id, $raw['active_generation'] ) ) );
+			if ( count( $inactive ) ) { $this->fail( 'Queue has retained or in-progress generations; use owned maintenance cleanup.' ); }
+			$head = $this->head( $key );
+			if ( 'scalar' === $head['state_kind'] ) { $root = $this->root_metadata( $head ); $this->verify_scalar( $head, $root['value'] ); }
+			else { $root = $this->collection( $head ); if ( ! isset( $root['wrapper']['image_tag_queue'] ) ) { $this->fail( 'Invalid queue envelope.' ); } }
+			$this->write( $this->db->prepare( 'DELETE FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d', array( $this->blog, $id ) ) );
+			if ( 1 !== $this->write( $this->db->prepare( 'DELETE FROM `' . $this->state . '` WHERE blog_id = %d AND id = %d AND revision = %d AND active_generation = %d',
+				array( $this->blog, $id, $head['revision'], $head['active_generation'] ) ) ) ) { $this->fail( 'Queue clear compare-and-delete failed.' ); }
+			$this->queue_transaction_finish(); return true;
+		} catch ( \Exception $error ) { $this->queue_transaction_rollback( $error ); }
+		catch ( \Throwable $error ) { $this->queue_transaction_rollback( $error ); }
+	}
+	public function image_tag_queue_page( $limit, $cursor = null ) {
+		$summary = $this->image_tag_queue_summary();
+		if ( ! $summary['found'] ) {
+			if ( null !== $cursor ) { $this->fail( 'Queue disappeared before bound batch.' ); }
+			return array( 'rows' => array(), 'cursor' => null, 'revision' => null );
+		}
+		if ( ! is_int( $limit ) || $limit < 1 || $limit > 100 ) { $this->fail( 'Invalid queue batch limit.' ); }
+		if ( is_array( $cursor ) ) {
+			if ( array_keys( $cursor ) !== array( 'position', 'revision', 'generation' ) ||
+				! is_int( $cursor['position'] ) || $cursor['position'] < 0 ||
+				! is_int( $cursor['revision'] ) || $cursor['revision'] < 1 ||
+				! is_int( $cursor['generation'] ) || $cursor['generation'] < 1 ) { $this->fail( 'Invalid bound queue cursor.' ); }
+		} elseif ( null !== $cursor && ( ! is_int( $cursor ) || $cursor < 0 ) ) { $this->fail( 'Invalid queue batch cursor.' ); }
+		$this->start_budget(); $key = ImageTagQueueRepository::STATE_KEY; $head = $this->head( $key ); $root = $this->collection( $head );
+		if ( $head['revision'] !== $summary['revision'] || ! isset( $root['wrapper']['image_tag_queue'] ) ) { $this->fail( 'Queue changed between summary and batch.' ); }
+		if ( is_array( $cursor ) && ( $cursor['revision'] !== $head['revision'] || $cursor['generation'] !== $head['active_generation'] ) ) { $this->fail( 'Stale queue batch cursor.' ); }
+		$headers = $root['wrapper']['values'];
+		$total = isset( $headers['total'] ) ? absint( $headers['total'] ) : $root['root_count'];
+		$position = null === $cursor ? 0 : ( is_array( $cursor ) ? $cursor['position'] : $cursor );
+		if ( $position > $total ) { $this->fail( 'Queue cursor exceeds total.' ); }
+		$end = min( $total, $this->add( $position, $limit ) ); $rows = array();
+		for ( $i = $position; $i < $end; ++$i ) {
+			$tree = $this->tree( $key, $head, $i );
+			// Legacy continue uses isset($items[$processed]) && is_array(...).
+			// Stored null is therefore a missing effective slot; false and scalar
+			// values remain present but yield an empty executable item. Export keeps
+			// their exact raw values independently of this runtime batch view.
+			$present = false !== $tree && null !== $tree['value'];
+			$rows[] = array( 'key' => $i, 'found' => $present,
+				'value' => $present && is_array( $tree['value'] ) ? $tree['value'] : array() );
+		}
+		$this->unchanged( $key, $head );
+		return array( 'rows' => $rows, 'cursor' => $end >= $total ? null : array( 'position' => $end,
+			'revision' => $head['revision'], 'generation' => $head['active_generation'] ), 'revision' => $head['revision'] );
+	}
+	public function image_tag_queue_checkpoint( $changes, $summary, $revision ) {
+		if ( ! is_array( $changes ) || count( $changes ) > 100 || ! is_array( $summary ) || array_key_exists( 'items', $summary ) ||
+			! is_int( $revision ) || $revision < 1 ) { $this->fail( 'Invalid queue checkpoint.' ); }
+		$patches = array(); foreach ( $changes as $change ) {
+			if ( ! is_array( $change ) || array_keys( $change ) !== array( 'key', 'value' ) ) { $this->fail( 'Invalid queue item change.' ); }
+			$this->typed_key( $change['key'] ); $patches[] = $change;
+		}
+		$this->patch( array( array( 'key' => ImageTagQueueRepository::STATE_KEY, 'expected_revision' => $revision,
+			'patches' => $patches, 'queue_summary' => $summary ) ), false ); return true;
+	}
+
+	private function queue_build_context() {
+		if ( ! is_array( $this->image_tag_build ) ) { $this->fail( 'No owned image-tag queue replacement.' ); }
+		return $this->image_tag_build;
+	}
+	private function queue_build_head( $build ) {
+		return array( 'id' => $build['id'], 'active_generation' => $build['generation'],
+			'state_key_value' => $this->codec->key_value( ImageTagQueueRepository::STATE_KEY ) );
+	}
+	private function queue_attachment_hash( $id ) {
+		if ( ! is_int( $id ) || $id < 1 ) { $this->fail( 'Invalid queue attachment ID.' ); }
+		return hash( 'sha256', $this->codec->key_value( $id ) );
+	}
+	private function queue_next_order( $build ) {
+		$rows = $this->read( $this->db->prepare( 'SELECT item_order FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d '
+			. 'AND parent_node_hash IS NULL AND node_hash <> UNHEX(%s) ORDER BY item_order DESC, id DESC LIMIT 1',
+			array( $this->blog, $build['id'], $build['generation'], $this->queue_sentinel_node() ) ) );
+		$next = count( $rows ) ? $this->add( $this->number( $rows[0]['item_order'] ), 1 ) : 0;
+		if ( $next >= PHP_INT_MAX - 1 ) { $this->fail( 'Queue item order exhausted.' ); }
+		return $next;
+	}
+	private function queue_dedupe_rows( $build, $id ) {
+		$rows = $this->read( $this->db->prepare( 'SELECT HEX(node_hash) AS node_hash FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d '
+			. 'AND parent_node_hash IS NULL AND dedupe_hash = UNHEX(%s) LIMIT 2',
+			array( $this->blog, $build['id'], $build['generation'], $this->queue_attachment_hash( $id ) ) ) );
+		if ( count( $rows ) > 1 ) { $this->fail( 'Duplicate staged attachment identity.' ); }
+		return $rows;
+	}
+	private function queue_raw_head( $id ) {
+		$value = $this->codec->key_value( ImageTagQueueRepository::STATE_KEY );
+		$rows = $this->read( $this->db->prepare( 'SELECT id, active_generation, revision, state_kind, codec_version, '
+			. 'CASE WHEN OCTET_LENGTH(state_key_value) <= %d THEN state_key_value ELSE NULL END AS state_key_value '
+			. 'FROM `' . $this->state . '` WHERE blog_id = %d AND id = %d LIMIT 1', array( strlen( $value ), $this->blog, $id ) ) );
+		if ( count( $rows ) !== 1 || $rows[0]['state_key_value'] !== $this->codec->key_value( ImageTagQueueRepository::STATE_KEY ) ||
+			$this->number( $rows[0]['codec_version'] ) !== LegacyStateCodec::VERSION ) { $this->fail( 'Queue head identity changed.' ); }
+		return array( 'id' => $this->number( $rows[0]['id'] ), 'active_generation' => $this->number( $rows[0]['active_generation'] ),
+			'revision' => $this->number( $rows[0]['revision'] ), 'state_kind' => $rows[0]['state_kind'] );
+	}
+	private function queue_build_unchanged( $build, $abort = false ) {
+		$raw = $this->queue_raw_head( $build['id'] );
+		if ( $raw['active_generation'] !== $build['generation'] - 1 ||
+			( false === $build['head'] && ( 0 !== $raw['revision'] || 'staging' !== $raw['state_kind'] ) ) ) { $this->fail( 'Queue generation changed during replacement.' ); }
+		if ( ! $abort && ( $raw['revision'] !== $build['revision'] ||
+			( false !== $build['head'] && ( $raw['state_kind'] !== $build['head']['state_kind'] ||
+				$this->reader->head( ImageTagQueueRepository::STATE_KEY ) !== $build['head'] ) ) ) ) { $this->fail( 'Queue head changed during replacement.' ); }
+		$rows = $this->read( $this->db->prepare( 'SELECT HEX(payload_hash) AS payload_hash FROM `' . $this->table . '` '
+			. 'WHERE blog_id = %d AND state_id = %d AND generation = %d AND node_hash = UNHEX(%s) LIMIT 2',
+			array( $this->blog, $build['id'], $build['generation'], $this->queue_sentinel_node() ) ) );
+		if ( count( $rows ) !== 1 || $this->hex( $rows[0]['payload_hash'] ) !== $build['sentinel_hash'] ) { $this->fail( 'Queue build owner changed.' ); }
+	}
+	private function queue_sentinel_node() {
+		return $this->codec->node_hash( $this->codec->key_hash( ImageTagQueueRepository::STATE_KEY ), null, "\0image-tag-build" );
+	}
+	private function queue_generation_stats( $build ) {
+		$rows = $this->read( $this->db->prepare( 'SELECT COUNT(*) AS record_count, COALESCE(SUM(payload_bytes),0) AS payload_bytes, '
+			. 'COALESCE(SUM(' . $this->record_bytes() . '),0) AS encoded_bytes, '
+			. 'COALESCE(SUM(CASE WHEN parent_node_hash IS NULL THEN 1 ELSE 0 END),0) AS root_count, '
+			. 'COUNT(DISTINCT CASE WHEN parent_node_hash IS NULL THEN item_order ELSE NULL END) AS distinct_orders, '
+			. 'MIN(CASE WHEN parent_node_hash IS NULL THEN item_order ELSE NULL END) AS first_order, '
+			. 'MAX(CASE WHEN parent_node_hash IS NULL THEN item_order ELSE NULL END) AS last_order, '
+			. 'COALESCE(SUM(CASE WHEN parent_node_hash IS NULL AND dedupe_hash IS NULL THEN 1 ELSE 0 END),0) AS missing_dedupe '
+			. 'FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d',
+			array( $this->blog, $build['id'], $build['generation'] ) ) );
+		if ( count( $rows ) !== 1 ) { $this->fail( 'Queue generation statistics failed.' ); }
+		$result = array(); foreach ( array( 'record_count', 'payload_bytes', 'encoded_bytes', 'root_count', 'distinct_orders', 'first_order', 'last_order', 'missing_dedupe' ) as $field ) {
+			$result[$field] = null === $rows[0][$field] ? 0 : $this->number( $rows[0][$field] );
+		} return $result;
+	}
+	private function queue_transaction_start() {
+		if ( $this->busy || $this->tainted ) { $this->fail( 'Queue transaction is busy or uncertain.' ); }
+		( new LegacyStorageSchema( $this->db ) )->verify();
+		$mode = $this->read( 'SELECT @@SESSION.autocommit AS autocommit' );
+		if ( count( $mode ) !== 1 || $this->number( $mode[0]['autocommit'] ) !== 1 ) { $this->fail( 'Idle autocommit connection required.' ); }
+		$this->write( 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ' ); $this->busy = true;
+		try { $this->write( 'START TRANSACTION' ); }
+		catch ( \Exception $error ) { $this->busy = false; $this->tainted = true; $this->fail( 'Queue transaction start uncertain.' ); }
+	}
+	private function queue_transaction_finish() {
+		$this->tick();
+		try { $ok = $this->db->query( 'COMMIT' ); }
+		catch ( \Exception $error ) { $this->busy = false; $this->tainted = true; $this->fail( 'Queue commit uncertain; reconcile on a fresh connection.' ); }
+		catch ( \Throwable $error ) { $this->busy = false; $this->tainted = true; $this->fail( 'Queue commit uncertain; reconcile on a fresh connection.' ); }
+		if ( false === $ok || ! empty( $this->db->last_error ) ) { $this->busy = false; $this->tainted = true; $this->fail( 'Queue commit uncertain; reconcile on a fresh connection.' ); }
+		$this->busy = false;
+	}
+	private function queue_transaction_rollback( $error ) {
+		if ( ! $this->busy ) { throw $error; }
+		$ok = $this->db->query( 'ROLLBACK' ); $this->busy = false;
+		if ( false === $ok || ! empty( $this->db->last_error ) ) { $this->tainted = true; $this->fail( 'Queue rollback uncertain; reconcile on a fresh connection.' ); }
+		throw $error;
+	}
 
 	private function partial_state_context( $key, $content ) {
 		$guards = array(); $head = $this->reader->head( $key ); $this->tick();
@@ -1851,6 +2189,15 @@ class LegacyTableRepository {
 						if ( ! isset( $root['wrapper']['content'] ) ) { $this->fail( 'Content envelope required.' ); }
 						$root['wrapper']['values']['progress'] = $change['content_progress'];
 					}
+					if ( array_key_exists( 'queue_summary', $change ) ) {
+						if ( ! isset( $root['wrapper']['image_tag_queue'] ) ) { $this->fail( 'Image-tag queue envelope required.' ); }
+						foreach ( $change['queue_summary'] as $name => $value ) {
+							$this->typed_key( $name );
+							if ( ! array_key_exists( $name, $root['wrapper']['values'] ) ) { $root['wrapper']['field_order'][] = $name; }
+							$root['wrapper']['values'][$name] = $value;
+						}
+						( new LegacyCollectionEnvelope( $this->codec ) )->validate( $root, $change['key'] );
+					}
 					$envelope = new LegacyCollectionEnvelope();
 					foreach ( $change['patches'] as $patch ) {
 						if ( array_key_exists( 'value', $patch ) ) {
@@ -1860,6 +2207,15 @@ class LegacyTableRepository {
 							$envelope->digest_item( $admission, $root, $patch['key'], $patch['value'] ); hash_final( $admission );
 						}
 						$old = $this->tree( $change['key'], $head, $patch['key'] );
+						if ( array_key_exists( 'queue_summary', $change ) && false === $old ) { $this->fail( 'Queue checkpoint target is missing.' ); }
+						if ( array_key_exists( 'queue_summary', $change ) && false !== $old && null !== $old['rows'][0]['dedupe_hash'] ) {
+							$before = $old['value']; $after = isset( $patch['value'] ) ? $patch['value'] : null;
+							if ( ! is_array( $before ) || ! isset( $before['attachment_id'] ) || ! is_int( $before['attachment_id'] ) || $before['attachment_id'] < 1 ||
+								! is_array( $after ) || ! isset( $after['attachment_id'] ) || $after['attachment_id'] !== $before['attachment_id'] ||
+								$this->hex( $old['rows'][0]['dedupe_hash'] ) !== $this->queue_attachment_hash( $before['attachment_id'] ) ) {
+								$this->fail( 'Indexed queue attachment identity changed.' );
+							}
+						}
 						$order = false === $old ? $this->append_order( $head ) : $old['order'];
 						if ( $lists && ( $patch['key'] > $root['root_count'] || $order !== $patch['key'] ||
 							( false === $old ) !== ( $patch['key'] === $root['root_count'] ) ) ) { $this->fail( 'Sparse or corrupt list; replacement required.' ); }
@@ -1871,8 +2227,12 @@ class LegacyTableRepository {
 							$count -= count( $old['rows'] ); $bytes -= $old['payload_bytes']; $root['root_count']--;
 						}
 						if ( array_key_exists( 'value', $patch ) ) {
-							$repo = $this;
-							$stats = $this->records->flatten_tree( $change['key'], $patch['key'], $patch['value'], $order, function ( $row ) use ( $repo, $head ) { $repo->insert_record( $head, $row ); } );
+							$repo = $this; $dedupe = array_key_exists( 'queue_summary', $change ) && false !== $old ? $old['rows'][0]['dedupe_hash'] : null;
+							$first_row = true;
+							$stats = $this->records->flatten_tree( $change['key'], $patch['key'], $patch['value'], $order, function ( $row ) use ( $repo, $head, $dedupe, &$first_row ) {
+								if ( $first_row && null !== $dedupe ) { $row['dedupe_hash'] = $dedupe; } $first_row = false;
+								$repo->insert_record( $head, $row );
+							} );
 							$count = $this->add( $count, $stats['record_count'] ); $bytes = $this->add( $bytes, $stats['payload_bytes'] ); $root['root_count']++;
 							if ( isset( $root['wrapper']['content'] ) && is_int( $patch['key'] ) && $patch['key'] >= $root['wrapper']['next_key'] ) { $root['wrapper']['next_key'] = $this->add( $patch['key'], 1 ); }
 							// Verify canonical logical/projection parity before any head CAS.
@@ -1920,11 +2280,19 @@ class LegacyTableRepository {
 		if ( ! is_array( $changes ) || ! count( $changes ) || count( $changes ) > 100 ) { $this->fail( 'Need 1 to 100 changes.' ); }
 		$result = array();
 		foreach ( $changes as $change ) {
-			if ( ! is_array( $change ) || ! isset( $change['key'] ) || ! array_key_exists( 'expected_revision', $change ) || count( $change ) !== ( array_key_exists( 'content_progress', $change ) ? 4 : 3 ) ||
+			$extra = is_array( $change ) && ( array_key_exists( 'content_progress', $change ) || array_key_exists( 'queue_summary', $change ) );
+			if ( ! is_array( $change ) || ! isset( $change['key'] ) || ! array_key_exists( 'expected_revision', $change ) || count( $change ) !== ( $extra ? 4 : 3 ) ||
 				( null === $change['expected_revision'] ? ( ! $queue || ! array_key_exists( 'value', $change ) || ! in_array( $change['key'], array( 'galleries-state', 'albums-state' ), true ) ) :
 				( ! is_int( $change['expected_revision'] ) || $change['expected_revision'] < 1 || $change['expected_revision'] >= PHP_INT_MAX ) ) ) { $this->fail( 'Invalid change or revision.' ); }
 			$this->typed_key( $change['key'] ); $hash = $this->codec->key_hash( $change['key'] );
 			if ( array_key_exists( 'content_progress', $change ) && ( ContentScanRepository::STATE_KEY !== $change['key'] || ! is_array( $change['content_progress'] ) || array_key_exists( 'value', $change ) ) ) { $this->fail( 'Invalid content checkpoint patch.' ); }
+			if ( array_key_exists( 'queue_summary', $change ) && ( ImageTagQueueRepository::STATE_KEY !== $change['key'] || ! is_array( $change['queue_summary'] ) ||
+				array_key_exists( 'items', $change['queue_summary'] ) || array_key_exists( 'value', $change ) || array_key_exists( 'content_progress', $change ) ) ) { $this->fail( 'Invalid image-tag queue checkpoint.' ); }
+			if ( array_key_exists( 'queue_summary', $change ) ) {
+				$summary_bytes = strlen( $this->codec->encode( $change['queue_summary'] ) );
+				if ( $summary_bytes > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Queue summary exceeds record byte budget.' ); }
+				$this->consume( 0, $summary_bytes );
+			}
 			if ( isset( $result[$hash] ) ) { $this->fail( 'Duplicate state change.' ); }
 			$this->consume( 0, strlen( $this->codec->key_value( $change['key'] ) ) );
 			if ( array_key_exists( 'value', $change ) ) {
@@ -1932,7 +2300,7 @@ class LegacyTableRepository {
 				if ( strlen( $encoded ) > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Scalar row byte budget exceeded.' ); }
 				$this->consume( 0, strlen( $encoded ) );
 			} else {
-				if ( ! isset( $change['patches'] ) || ! is_array( $change['patches'] ) || ( ! count( $change['patches'] ) && ! array_key_exists( 'content_progress', $change ) ) || count( $change['patches'] ) > $this->max_rows ) { $this->fail( 'Invalid affected patches.' ); }
+				if ( ! isset( $change['patches'] ) || ! is_array( $change['patches'] ) || ( ! count( $change['patches'] ) && ! $extra ) || count( $change['patches'] ) > $this->max_rows ) { $this->fail( 'Invalid affected patches.' ); }
 				$seen = array();
 				foreach ( $change['patches'] as $patch ) {
 					if ( ! is_array( $patch ) || ! isset( $patch['key'] ) || count( $patch ) !== 2 ||

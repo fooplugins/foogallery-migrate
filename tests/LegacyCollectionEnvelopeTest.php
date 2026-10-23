@@ -2,6 +2,7 @@
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
 use FooPlugins\FooGalleryMigrate\LegacyCollectionEnvelope;
+use FooPlugins\FooGalleryMigrate\ImageTagQueueRepository;
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
 use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
@@ -30,6 +31,35 @@ class LegacyCollectionEnvelopeTest extends TestCase {
 		$this->assertArrayNotHasKey( 'items', $split['root']['wrapper']['values'] );
 		$this->assertSame( serialize( $value ), serialize( $codec->rebuild( $split['root'], $split['items'] ) ) );
 		$this->assertSame( ( new LegacyStateCodec() )->snapshot_digest( $value ), $this->digest( $split['root'], $split['items'] ) );
+	}
+	public function test_image_tag_queue_preserves_unknown_headers_sparse_typed_keys_and_duplicates(): void {
+		$items = array( '09' => array( 'attachment_id' => 7, 'tags' => array( 'a' ) ),
+			9 => array( 'attachment_id' => 7, 'tags' => array( 'b' ) ), 31 => false );
+		$value = array( 'future-before' => "\xff\x00", 'items' => $items, 'processed' => 4,
+			'errors' => array( 9 => 'retain' ), 'future-after' => array( '09' => null, 9 => false ) );
+		$envelope = new LegacyCollectionEnvelope();
+		$split = $envelope->split( ImageTagQueueRepository::STATE_KEY, 'map', $value );
+		$this->assertSame( $items, $split['items'] );
+		$this->assertSame( array_keys( $value ), $split['root']['wrapper']['field_order'] );
+		$this->assertSame( serialize( $value ), serialize( $envelope->rebuild( $split['root'], $split['items'] ) ) );
+		$this->assertSame( ( new LegacyStateCodec() )->snapshot_digest( $value ), $this->digest( $split['root'], $split['items'] ) );
+		$bad = $split['root']; $bad['wrapper']['image_tag_queue'] = 0;
+		try { $envelope->validate( $bad, ImageTagQueueRepository::STATE_KEY ); $this->fail( 'Malformed queue marker accepted.' ); }
+		catch ( \RuntimeException $error ) { $this->assertNotEmpty( $error->getMessage() ); }
+	}
+	public function test_large_saved_queue_preflights_as_independent_roots_without_deduping_legacy_duplicates(): void {
+		$items = array(); for ( $i = 0; $i < 205; ++$i ) { $items[$i] = array( 'attachment_id' => 7, 'tags' => array( 'tag-' . $i ) ); }
+		$value = array( 'items' => $items, 'total' => 205, 'unknown' => array( '09' => false, 9 => true ) );
+		$db = new EnvelopeNoSqlConnection(); $snapshot = new LegacyTableSnapshot( $db, 1 );
+		$preflight = new \ReflectionMethod( $snapshot, 'preflight' ); $preflight->setAccessible( true );
+		$prepared = $preflight->invoke( $snapshot, array( array( 'key' => ImageTagQueueRepository::STATE_KEY,
+			'order' => 0, 'kind' => 'map', 'value' => $value, 'expected_revision' => null ) ) );
+		$entry = reset( $prepared );
+		$this->assertSame( 205, $entry['stats']['record_count'] );
+		$this->assertSame( 205, count( $entry['items'] ) );
+		$this->assertSame( serialize( $value ), serialize( ( new LegacyCollectionEnvelope() )->rebuild(
+			( new LegacyStateCodec() )->decode_collection_root( $entry['root_payload'] ), $entry['items'] ) ) );
+		$this->assertSame( array(), $db->queries );
 	}
 	public function test_raw_maps_unknown_states_lists_and_empty_wrappers_keep_their_contract(): void {
 		$codec = new LegacyCollectionEnvelope();

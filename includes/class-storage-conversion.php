@@ -301,13 +301,14 @@ class StorageConversion {
 				if ( ! count( $heads ) && count( $source['value'] ) ) {
 					$changes = array(); $order = 0;
 					foreach ( $source['value'] as $key => $value ) {
-						// Existing runtime checkpoints/queues are bounded scalar heads,
-						// even when their logical value is an array. Keep conversion
-						// compatible with their readers and atomic companion writes.
-						$checkpoint = in_array( $key, array( MigratorSettings::KEY_GALLERIES . '-state', MigratorSettings::KEY_ALBUMS . '-state', ImageTagQueueRepository::STATE_KEY ), true );
+						// Saved queues with an items array become lossless indexed records.
+						// Invalid/nonqueue legacy values remain exact scalar heads.
+						$queue = ImageTagQueueRepository::STATE_KEY === $key && is_array( $value ) &&
+							array_key_exists( 'items', $value ) && is_array( $value['items'] );
+						$checkpoint = in_array( $key, array( MigratorSettings::KEY_GALLERIES . '-state', MigratorSettings::KEY_ALBUMS . '-state', ImageTagQueueRepository::STATE_KEY ), true ) && ! $queue;
 						// Preserve the false invalidation sentinel as scalar for exact roundtrip.
 						// Scalar table heads still require explicit reset before bounded access.
-						$kind = ContentScanRepository::STATE_KEY === $key && is_array( $value ) ? 'map' : ( $checkpoint || ! is_array( $value ) ? 'scalar' : ( $value === array_values( $value ) ? 'list' : 'map' ) );
+						$kind = ( ContentScanRepository::STATE_KEY === $key || $queue ) && is_array( $value ) ? 'map' : ( $checkpoint || ! is_array( $value ) ? 'scalar' : ( $value === array_values( $value ) ? 'list' : 'map' ) );
 						$changes[] = array( 'key' => $key, 'order' => $order++, 'kind' => $kind, 'value' => $value, 'expected_revision' => null );
 					}
 					$this->snapshot->replace_many( $changes );

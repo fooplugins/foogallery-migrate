@@ -118,7 +118,7 @@ class LegacyTableSnapshot {
 			$start = $c; $batch_rows = 0; $batch_bytes = 0; $ordinal = 0;
 			foreach ( $value as $key => $state ) {
 				if ( $ordinal < $start['state_order'] ) { ++$ordinal; continue; }
-				$shape = $this->conversion_shape( $key, $state );
+				$shape = $this->conversion_shape( $key, $state, 'scalar' === $heads[$ordinal]['state_kind'] );
 				if ( 'scalar' === $shape['kind'] && $ordinal === $start['state_order'] &&
 					( $start['next_root_ordinal'] || $start['next_node_ordinal'] ) ) { $this->fail( 'Scalar verification cursor has child position.' ); }
 				$root_order = 0; $finished = true;
@@ -301,14 +301,16 @@ class LegacyTableSnapshot {
 		} unset( $head ); return $heads;
 	}
 	/** The existing scalar snapshot envelope has no record rows or collection root. */
-	private function conversion_shape( $key, $state ) {
-		// Existing runtime checkpoints/queues are scalar heads even when their
-		// logical value is an array. Match the earlier conversion path and the
-		// ordinary scalar/companion writers without changing their wire format.
+	private function conversion_shape( $key, $state, $persisted_scalar = false ) {
+		// Valid saved image-tag queues become independently indexed items. A
+		// malformed or nonqueue legacy value stays an exact scalar, never a
+		// guessed/discarded queue. Legacy duplicate attachments retain NULL dedupe.
+		$queue = ! $persisted_scalar && ImageTagQueueRepository::STATE_KEY === $key && is_array( $state ) &&
+			array_key_exists( 'items', $state ) && is_array( $state['items'] );
 		$checkpoint = in_array( $key, array( MigratorSettings::KEY_GALLERIES . '-state',
-			MigratorSettings::KEY_ALBUMS . '-state', ImageTagQueueRepository::STATE_KEY ), true );
+			MigratorSettings::KEY_ALBUMS . '-state', ImageTagQueueRepository::STATE_KEY ), true ) && ! $queue;
 		if ( is_array( $state ) && ! $checkpoint ) {
-			$kind = $this->is_list( $state ) ? 'list' : 'map';
+			$kind = $queue ? 'map' : ( $this->is_list( $state ) ? 'list' : 'map' );
 			$split = ( new LegacyCollectionEnvelope( $this->codec ) )->split( $key, $kind, $state );
 			return array( 'kind' => $kind, 'root' => $this->codec->encode_collection_root( $split['root'] ),
 				'items' => $split['items'] );
@@ -318,7 +320,10 @@ class LegacyTableSnapshot {
 			'items' => array() );
 	}
 	private function copy_prove_head( $head, $key, $state, $ordinal, $complete, $cursor, &$totals, $proof_start, $fast, $prove_logical = true ) {
-		$shape = $this->conversion_shape( $key, $state );
+		// A v4 copy started by an older release may already have committed a
+		// queue as a scalar. Its exact persisted shape remains authoritative for
+		// reproof; only a new copy selects the indexed representation.
+		$shape = $this->conversion_shape( $key, $state, 'scalar' === $head['state_kind'] );
 		$kind = $shape['kind']; $root = $shape['root'];
 		// A scalar is committed with its empty generation in one transaction;
 		// there is no legitimate staged scalar cursor to resume.
@@ -655,9 +660,16 @@ class LegacyTableSnapshot {
 		if ( count( $rows ) !== 1 || ! in_array( $rows[0]['digest_status'], array( 'dirty', 'current' ), true ) ) { $this->fail( 'Missing or invalid digest metadata.' ); }
 		$this->admit_memory( $head['payload_bytes'] + $key_bytes );
 		$fields = $rows[0]; $fields['digest_revision'] = $this->number( $fields['digest_revision'] );
-		if ( ! is_string( $fields['logical_digest'] ) || ! preg_match( '/^[a-f0-9]{64}$/Di', $fields['logical_digest'] ) || $fields['digest_revision'] > $head['revision'] ||
-			( 'current' === $fields['digest_status'] && $fields['digest_revision'] !== $head['revision'] ) ) { $this->fail( 'Invalid digest revision/hash.' ); }
-		$fields['logical_digest'] = strtolower( $fields['logical_digest'] ); return array_merge( $head, $fields );
+		$digest = $fields['logical_digest']; $has_digest = is_string( $digest ) && preg_match( '/^[a-f0-9]{64}$/Di', $digest );
+		if ( 'current' === $fields['digest_status'] ) {
+			if ( ! $has_digest || $fields['digest_revision'] !== $head['revision'] ) { $this->fail( 'Invalid digest revision/hash.' ); }
+		} elseif ( ( 0 === $fields['digest_revision'] && null !== $digest ) ||
+			( 0 < $fields['digest_revision'] && ( ! $has_digest || $fields['digest_revision'] >= $head['revision'] ) ) ) {
+			// A first dirty publication has never had a logical digest. Later
+			// dirty revisions may retain only an older, previously proved hash.
+			$this->fail( 'Invalid digest revision/hash.' );
+		}
+		$fields['logical_digest'] = null === $digest ? null : strtolower( $digest ); return array_merge( $head, $fields );
 	}
 
 

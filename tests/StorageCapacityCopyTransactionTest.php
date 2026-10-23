@@ -181,6 +181,62 @@ class StorageCapacityCopyTransactionTest extends TestCase {
 			$this->assertTrue( $this->verify_batch( $db, $value, $r, $scale )['already_complete'] );
 		}
 	}
+	public function test_valid_saved_image_tag_queue_has_lossless_indexed_conversion_shape(): void {
+		list( $db, $source, $record, $scale ) = $this->setup_copy();
+		$snapshot = new LegacyTableSnapshot( $db, 1, 24576, 16777216, null, null, $scale );
+		$shape = new \ReflectionMethod( $snapshot, 'conversion_shape' ); $shape->setAccessible( true );
+		$value = array( 'future' => "\xff\x00", 'items' => array( '09' => array( 'attachment_id' => 3 ),
+			9 => array( 'attachment_id' => 3 ), 20 => false ), 'processed' => 7 );
+		$result = $shape->invoke( $snapshot, ImageTagQueueRepository::STATE_KEY, $value );
+		$this->assertSame( 'map', $result['kind'] );
+		$this->assertSame( $value['items'], $result['items'] );
+		$root = ( new LegacyStateCodec() )->decode_collection_root( $result['root'] );
+		$this->assertSame( $value, ( new \FooPlugins\FooGalleryMigrate\LegacyCollectionEnvelope() )->rebuild( $root, $result['items'] ) );
+		$this->assertSame( 'scalar', $shape->invoke( $snapshot, ImageTagQueueRepository::STATE_KEY, array( 'opaque' => false ) )['kind'] );
+	}
+	public function test_saved_queue_copy_and_exact_verification_keep_typed_sparse_items_as_rows(): void {
+		$queue = array( 'future' => false, 'items' => array( '09' => false, 9 => null, 20 => 0 ), 'total' => 3 );
+		list( $db, $value, $r, $scale ) = $this->setup_copy( '', array( ImageTagQueueRepository::STATE_KEY => $queue ) );
+		for ( $i = 0; $i < 5 && $r['copy_cursor']['state_order'] < 1; ++$i ) { $r = $this->batch( $db, $value, $r, $scale )['record']; }
+		$this->assertSame( 1, $r['copy_cursor']['state_order'] );
+		$this->assertSame( 'map', $db->heads[0]['state_kind'] );
+		$this->assertSame( 3, $db->heads[0]['record_count'] );
+		$codec = new LegacyStateCodec(); $state_hash = $codec->key_hash( ImageTagQueueRepository::STATE_KEY );
+		$this->assertSame( array_map( function ( $key ) use ( $codec, $state_hash ) { return $codec->node_hash( $state_hash, null, $key ); },
+			array( '09', 9, 20 ) ), array_map( function ( $row ) { return bin2hex( $row['node_hash'] ); }, $db->records ) );
+		$r['phase'] = 'verified'; $r['copy_cursor'] = null; $db->control = json_encode( $r );
+		for ( $i = 0; $i < 5; ++$i ) {
+			$r = $this->verify_batch( $db, $value, $r, $scale )['record'];
+			if ( 1 === $r['verify_cursor']['state_order'] ) { break; }
+		}
+		$this->assertSame( 1, $r['verify_cursor']['state_order'] );
+		$this->assertTrue( $this->verify_batch( $db, $value, $r, $scale )['already_complete'] );
+	}
+	public function test_older_v4_scalar_queue_head_reproves_without_reinterpreting_saved_items(): void {
+		$key = ImageTagQueueRepository::STATE_KEY;
+		$queue = array( 'items' => array( array( 'attachment_id' => 7 ) ), 'total' => 1 );
+		list( $db, $value, $r, $scale ) = $this->setup_copy( '', array( $key => $queue ) );
+		$codec = new LegacyStateCodec();
+		$root = $codec->encode( array( 'version' => 1, 'kind' => 'scalar', 'value' => $queue ) );
+		$db->heads[] = array( 'id' => 10, 'blog_id' => 1, 'state_key_hash' => hex2bin( $codec->key_hash( $key ) ),
+			'state_key_value' => $codec->key_value( $key ), 'state_order' => 0, 'state_kind' => 'scalar',
+			'active_generation' => 1, 'revision' => 1, 'codec_version' => LegacyStateCodec::VERSION,
+			'record_count' => 0, 'payload_bytes' => strlen( $root ), 'digest_revision' => 1,
+			'digest_status' => 'current', 'root_payload' => $root,
+			'snapshot_digest' => hex2bin( $codec->snapshot_digest( $queue ) ) );
+		$snapshot = new LegacyTableSnapshot( $db, 1, 24576, 16777216, null, null, $scale );
+		$heads = new \ReflectionMethod( $snapshot, 'copy_heads' ); $heads->setAccessible( true );
+		$r['copy_cursor']['state_order'] = 1;
+		$r['copy_cursor']['completed_heads_digest'] = hash( 'sha256',
+			$r['copy_cursor']['completed_heads_digest'] . json_encode( $heads->invoke( $snapshot )[0] ) );
+		$db->control = json_encode( $r );
+		$this->assertTrue( $this->batch( $db, $value, $r, $scale )['complete'] );
+		$r['phase'] = 'verified'; $r['copy_cursor'] = null; $db->control = json_encode( $r );
+		$r = $this->verify_batch( $db, $value, $r, $scale )['record'];
+		$this->assertSame( 1, $r['verify_cursor']['state_order'] );
+		$this->assertSame( 0, $r['verify_cursor']['verified_rows'] );
+		$this->assertTrue( $this->verify_batch( $db, $value, $r, $scale )['already_complete'] );
+	}
 	public function test_content_scan_array_and_false_sentinel_keep_distinct_existing_shapes(): void {
 		list( $db, $value, $r, $scale ) = $this->setup_copy();
 		$repo = new LegacyTableSnapshot( $db, 1, 24576, 16777216, null, null, $scale );

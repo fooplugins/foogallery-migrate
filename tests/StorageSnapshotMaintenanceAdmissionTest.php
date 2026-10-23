@@ -49,6 +49,60 @@ class StorageSnapshotMaintenanceAdmissionTest extends TestCase {
 			if ( 0 === strpos( $sql, 'SELECT' ) && false !== strpos( $sql, ' FROM ' ) ) { $this->assertStringContainsString( 'blog_id = 7', $sql ); }
 		}
 	}
+	public function test_never_proved_dirty_head_is_verified_before_bounded_reverse_read(): void {
+		$db = new MaintenanceAdmissionWpdb();
+		$snapshot = new LegacyTableSnapshot( $db, 7, 100, 1048576 );
+		$verified = $snapshot->verify_digest( 'bucket', 1 );
+		$this->assertTrue( $db->published );
+		$this->assertSame( 1, $verified['digest_revision'] );
+		$this->assertSame( ( new LegacyStateCodec() )->snapshot_digest( $db->value ), $verified['logical_digest'] );
+		$this->assertSame( $db->value, $snapshot->read_bounded( 'bucket' ) );
+	}
+	public function test_dirty_head_can_retain_only_a_previously_proved_hash(): void {
+		$db = new MaintenanceAdmissionWpdb(); ++$db->head['revision'];
+		$old_digest = ( new LegacyStateCodec() )->snapshot_digest( $db->value );
+		$db->maintenance_digest_fields = array( 'digest_status' => 'dirty', 'digest_revision' => 1,
+			'logical_digest' => strtoupper( $old_digest ) );
+		$snapshot = new LegacyTableSnapshot( $db, 7, 100, 1048576 );
+		$method = new \ReflectionMethod( $snapshot, 'maintenance_head' );
+		$head = $method->invoke( $snapshot, 'bucket' );
+		$this->assertSame( 2, $head['revision'] ); $this->assertSame( 1, $head['digest_revision'] );
+		$this->assertSame( $old_digest, $head['logical_digest'] );
+	}
+	/** @dataProvider inconsistentDigestMetadata */
+	public function test_dirty_and_current_digest_metadata_must_be_coherent( $status, $revision, $digest ): void {
+		$db = new MaintenanceAdmissionWpdb(); $db->maintenance_digest_fields = array( 'digest_status' => $status,
+			'digest_revision' => $revision, 'logical_digest' => $digest );
+		$snapshot = new LegacyTableSnapshot( $db, 7, 100, 1048576 );
+		try { $snapshot->verify_digest( 'bucket', 1 ); $this->fail( 'Malformed digest metadata was accepted.' ); }
+		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'Invalid digest revision/hash', $error->getMessage() ); }
+		$this->assertFalse( $db->records_fetched ); $this->assertFalse( $db->published );
+		$this->assertNotContains( 'START TRANSACTION', $db->queries );
+	}
+	public static function inconsistentDigestMetadata(): array {
+		$hash = str_repeat( 'a', 64 );
+		return array( array( 'dirty', 1, null ), array( 'dirty', 0, $hash ),
+			array( 'dirty', 1, $hash ), array( 'dirty', 0, 'not-a-hash' ),
+			array( 'current', 1, null ), array( 'current', 0, $hash ) );
+	}
+	public function test_current_digest_mismatch_refuses_instead_of_recertifying(): void {
+		$db = new MaintenanceAdmissionWpdb(); $db->published = true;
+		$db->maintenance_digest_fields = array( 'digest_status' => 'current', 'digest_revision' => 1,
+			'logical_digest' => str_repeat( '0', 64 ) );
+		$snapshot = new LegacyTableSnapshot( $db, 7, 100, 1048576 );
+		try { $snapshot->verify_digest( 'bucket', 1 ); $this->fail( 'Changed current digest accepted.' ); }
+		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'Current logical digest mismatch', $error->getMessage() ); }
+		$this->assertNotContains( 'COMMIT', $db->queries );
+	}
+	public function test_never_proved_dirty_head_refuses_corrupt_physical_record(): void {
+		$db = new MaintenanceAdmissionWpdb();
+		$records = new \ReflectionProperty( $db, 'rows' ); $rows = $records->getValue( $db );
+		$rows[0]['payload'] .= 'X'; $records->setValue( $db, $rows );
+		$snapshot = new LegacyTableSnapshot( $db, 7, 100, 1048576 );
+		try { $snapshot->verify_digest( 'bucket', 1 ); $this->fail( 'Corrupt dirty row was certified.' ); }
+		catch ( \RuntimeException $error ) { $this->assertNotEmpty( $error->getMessage() ); }
+		$this->assertFalse( $db->published ); $this->assertNotContains( 'COMMIT', $db->queries );
+	}
 	public function test_owning_metadata_reads_real_bounded_snapshot(): void {
 		$db = new MaintenanceAdmissionWpdb(); $memory = new SnapshotAdmissionBaseline();
 		$manager = $this->coordinator( $db, $memory ); $db->published = true;
@@ -154,6 +208,7 @@ class MaintenanceAdmissionWpdb extends SnapshotTestWpdb {
 	public $records_fetched = false;
 	public $stats_fetched = false;
 	public $published = false;
+	public $maintenance_digest_fields = null;
 	private $root;
 	private $rows = array();
 	private $stats;
@@ -182,8 +237,10 @@ class MaintenanceAdmissionWpdb extends SnapshotTestWpdb {
 		if ( false !== strpos( $sql, 'AS root_payload_bytes' ) ) { return array( $this->head ); }
 		if ( false !== strpos( $sql, 'SELECT root_payload, digest_status' ) ) {
 			$this->payload_fetched = true;
-			return array( array( 'root_payload' => $this->root, 'digest_status' => $this->published ? 'current' : 'dirty',
-				'digest_revision' => $this->published ? 1 : 0, 'logical_digest' => ( new LegacyStateCodec() )->snapshot_digest( $this->value ) ) );
+			$fields = array( 'root_payload' => $this->root, 'digest_status' => $this->published ? 'current' : 'dirty',
+				'digest_revision' => $this->published ? 1 : 0,
+				'logical_digest' => $this->published ? ( new LegacyStateCodec() )->snapshot_digest( $this->value ) : null );
+			return array( null === $this->maintenance_digest_fields ? $fields : array_replace( $fields, $this->maintenance_digest_fields ) );
 		}
 		if ( false !== strpos( $sql, 'AS snapshot_digest' ) ) {
 			return array( array( 'snapshot_digest' => ( new LegacyStateCodec() )->snapshot_digest( $this->value ), 'digest_revision' => 1, 'digest_status' => 'current' ) );

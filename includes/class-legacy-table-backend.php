@@ -48,6 +48,15 @@ class LegacyTableBackend {
 	public function content_scan_state() { return $this->repository()->content_scan_state(); }
 	public function change_content_scan( $change ) { return $this->repository( true )->change_content_scan( $change ); }
 	public function change_image_tag_queue( $change ) { return $this->repository( true )->change_image_tag_queue( $change ); }
+	public function image_tag_queue_begin() { return $this->repository( true )->image_tag_queue_begin(); }
+	public function image_tag_queue_abort() { return $this->repository( true )->image_tag_queue_abort(); }
+	public function image_tag_queue_build_rows( $keys ) { return $this->repository()->image_tag_queue_build_rows( $keys ); }
+	public function image_tag_queue_build_page( $rows ) { return $this->repository( true )->image_tag_queue_build_page( $rows ); }
+	public function image_tag_queue_finalize( $summary ) { return $this->repository( true )->image_tag_queue_finalize( $summary ); }
+	public function image_tag_queue_page( $limit, $cursor = null ) { return $this->repository()->image_tag_queue_page( $limit, $cursor ); }
+	public function image_tag_queue_checkpoint( $changes, $summary, $revision ) { return $this->repository( true )->image_tag_queue_checkpoint( $changes, $summary, $revision ); }
+	public function image_tag_queue_summary() { return $this->repository()->image_tag_queue_summary(); }
+	public function image_tag_queue_clear() { return $this->repository( true )->image_tag_queue_clear(); }
 	public function read_scalars( $keys ) { return $this->repository()->read_scalars( $keys ); }
 	public function collection_snapshot( $key ) { return $this->repository()->collection_snapshot( $key ); }
 	public function read_collection( $key ) { return $this->repository()->read_collection( $key ); }
