@@ -40,7 +40,11 @@ class CollectionDeadlineConnection extends LegacyTransactionConnection {
 /** Inject one server-style failure during an affected-root/checkpoint transaction. */
 class CollectionQueueFaultConnection extends LegacyTransactionConnection {
 	public $state_table;
+	public $records_table;
 	public $fail_insert = false;
+	public $fail_state_update_id = null;
+	public $record_inserts = 0;
+	public $record_inserts_at_fault = 0;
 	public $after_identity_read;
 	public function get_results( $sql, $format ) {
 		$rows = parent::get_results( $sql, $format );
@@ -53,7 +57,14 @@ class CollectionQueueFaultConnection extends LegacyTransactionConnection {
 		if ( $this->fail_insert && 0 === strpos( $sql, 'INSERT INTO `' . $this->state_table . '`' ) ) {
 			$this->fail_insert = false; $this->last_error = 'Injected checkpoint insert failure.'; return false;
 		}
-		return parent::query( $sql );
+		if ( null !== $this->fail_state_update_id && 0 === strpos( $sql, 'UPDATE `' . $this->state_table . '` SET ' ) &&
+			preg_match( '/ WHERE blog_id = [0-9]+ AND id = ' . preg_quote( (string) $this->fail_state_update_id, '/' ) . ' AND active_generation = [0-9]+ AND revision = [0-9]+$/', $sql ) ) {
+			$this->record_inserts_at_fault = $this->record_inserts; $this->fail_state_update_id = null;
+			$this->last_error = 'Injected late collection head failure.'; return false;
+		}
+		$result = parent::query( $sql );
+		if ( false !== $result && $this->records_table && 0 === strpos( $sql, 'INSERT INTO `' . $this->records_table . '` ' ) ) { ++$this->record_inserts; }
+		return $result;
 	}
 }
 
@@ -92,8 +103,23 @@ try {
 	$changes = array(); $order = 0; foreach ( $data as $key => $value ) { $changes[] = array( 'key' => $key, 'order' => $order++, 'kind' => in_array( $key, array( 'galleries', 'albums', 'migrated' ), true ) ? 'map' : 'scalar', 'value' => $value, 'expected_revision' => null ); }
 	$snapshot->replace_many( $changes ); ( new LegacyOptionBackend() )->replace_all( $data );
 	$option = new MigratableCollectionRepository( new LegacyOptionBackend(), $settings ); $table = new MigratableCollectionRepository( $backend, $settings );
+	$prepare_checked = function ( $repository, $context ) {
+		foreach ( array_keys( $context['objects'] ) as $index ) {
+			$context = $repository->append_checked( 'galleries', $context, $index, $context['objects'][$index] );
+		}
+		return $repository->prepare_checked( 'galleries', $context );
+	};
 	$check( serialize( $option->read_snapshot( 'galleries' ) ) === serialize( $table->read_snapshot( 'galleries' ) ), 'typed gallery/child snapshot parity' );
 	$compare = function ( $label, $bucket = 'galleries' ) use ( $backend, $check ) { $raw = get_option( FOOGALLERY_MIGRATE_OPTION_DATA ); $check( serialize( $backend->collection_snapshot( $bucket ) ) === serialize( $raw[$bucket] ), $label . ': exact compact collection parity' ); $check( $backend->read( $bucket . '-state' )['value'] === $raw[$bucket . '-state'], $label . ': companion parity' ); };
+	$checked_map = $table->checked_context( 'galleries', '' );
+	$check( $checked_map['found'] && array( '09', 9 ) === array( $checked_map['roots'][0]['key'], $checked_map['roots'][1]['key'] ),
+		'checked map retains string and integer root keys in source order' );
+	$checked_map['objects'][0]->title = 'Checked typed map';
+	$prepared_map = $prepare_checked( $table, $checked_map );
+	$check( $table->checkpoint_checked( 'galleries', $prepared_map ), 'typed-map checked root checkpoint succeeds' );
+	$option_checked_map = $option->read_snapshot( 'galleries' ); $option_checked_map['09']->title = 'Checked typed map';
+	$check( $option->replace_snapshot( 'galleries', $option_checked_map ), 'option typed-map result retained for parity' );
+	$compare( 'checked typed map' );
 	$gallery->migrated_id = 91; $locator = array( 'root' => '09', 'path' => array( 9 ) );
 	$codec = new LegacyStateCodec(); $node = $codec->node_hash( $codec->key_hash( 'albums' ), null, 9 );
 	$untouched = function () use ( $wpdb, $tables, $node ) { return $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM `' . $tables[1] . '` WHERE node_hash = UNHEX(%s) ORDER BY id', $node ), ARRAY_A ); };
@@ -229,6 +255,92 @@ try {
 		$backend->checkpoint_migration_turn( 'galleries', $stale_turn, null === $stale_turn['root'] ? null : $stale_turn['root']['value'], $turn_summary );
 	}, 'turn checkpoint refuses stale head after external work' );
 	$check( $before_stale_turn === $physical(), 'stale turn checkpoint leaves both collection and companion untouched' );
+	// Check-all reads only affected bounded trees and publishes one collection CAS
+	// after the caller's separate history batch. UID collisions are not split.
+	$checked = $table->checked_context( 'galleries', '' );
+	$check( $checked['found'] && 121 === count( $checked['objects'] ) && 0 === $checked['roots'][0]['key'] &&
+		120 === $checked['roots'][120]['key'], '121 checked roots retain persisted order and typed keys' );
+	$before_unrelated = $unrelated(); $checked['objects'][120]->migration_status = 'error';
+	$prepared = $prepare_checked( $table, $checked );
+	$check( $prepared['budget']['seconds'] > $checked['budget']['seconds'] &&
+		1 === count( $prepared['patches'] ) && 120 === $prepared['patches'][0]['key'] &&
+		$table->checkpoint_checked( 'galleries', $prepared ), '121-root check prepares one affected patch and one collection CAS' );
+	$check( $before_unrelated === $unrelated() && 'error' === $backend->roots( 'galleries', array( 120 ) )[0]['value']['migration_status'],
+		'check-all leaves unrelated physical root bytes untouched' );
+	$large = $backend->roots( 'galleries', array( 0 ) )[0]['value']; $large['children'] = array();
+	for ( $i = 0; $i < 204; ++$i ) {
+		$child = new Image( $plugin ); $child->source_url = 'https://example.test/checked-large-' . $i . '.jpg';
+		$large['children'][$i] = $settings->compact_migrated_object( $child );
+	}
+	$check( $backend->update_collection_record( 'galleries', array( 'root' => 0, 'path' => array() ), $large ), '204-image root prepared in owned SQL collection' );
+	$checked = $table->checked_context( 'galleries', $many[0]->unique_identifier() );
+	$check( 1 === count( $checked['objects'] ) && 204 === count( $checked['objects'][0]->children ),
+		'explicit UID check hydrates one 204-image affected root without unrelated roots' );
+	$checked['objects'][0]->migration_status = 'error';
+	$prepared = $prepare_checked( $table, $checked );
+	$check( $table->checkpoint_checked( 'galleries', $prepared ) && 'error' === $backend->roots( 'galleries', array( 0 ) )[0]['value']['migration_status'],
+		'204-image checked root publishes one affected collection patch' );
+	$duplicate = $backend->roots( 'galleries', array( 120 ) )[0]['value']; $duplicate['ID'] = $many[0]->ID;
+	$check( $backend->update_collection_record( 'galleries', array( 'root' => 120, 'path' => array() ), $duplicate ), 'distinct typed root with colliding reconstructed UID prepared' );
+	$matches = $table->checked_context( 'galleries', $many[0]->unique_identifier() );
+	$first = $table->targeted_context( 'galleries', $many[0]->unique_identifier() );
+	$check( 2 === count( $matches['objects'] ) && 0 === $matches['roots'][0]['key'] && 120 === $matches['roots'][1]['key'] &&
+		$first['found'] && 0 === $first['root']['key'], 'check visits both duplicate UIDs in order; retry selects first' );
+	$stale_check = $prepare_checked( $table, $matches );
+	$interleaved = $backend->roots( 'galleries', array( 1 ) )[0]['value']; $interleaved['title'] = 'Interleaved after checked read';
+	$check( $backend->update_collection_record( 'galleries', array( 'root' => 1, 'path' => array() ), $interleaved ), 'checked head changed between preparation and checkpoint' );
+	$after_interleaved = $physical();
+	$refuses( function () use ( $table, $stale_check ) { $table->checkpoint_checked( 'galleries', $stale_check ); }, 'checked collection refuses stale head after separate work' );
+	$check( $after_interleaved === $physical(), 'stale checked checkpoint leaves every head and record unchanged' );
+	$limited = new LegacyTableBackend( new LegacyTransactionConnection( $wpdb ), $blog, 121 );
+	$limited_table = new MigratableCollectionRepository( $limited, $settings ); $before_limited = $physical();
+	$refuses( function () use ( $limited_table ) { $limited_table->checked_context( 'galleries', '' ); },
+		'checked roots refuse a reduced shared affected-row budget before history publication' );
+	$check( $before_limited === $physical(), 'oversized checked read leaves history and collection unchanged' );
+	$fault_connection = new CollectionQueueFaultConnection( $wpdb );
+	$fault_connection->state_table = $tables[0]; $fault_connection->records_table = $tables[1];
+	$fault_backend = new LegacyTableBackend( $fault_connection, $blog );
+	$fault_table = new MigratableCollectionRepository( $fault_backend, $settings );
+	$fault_context = $fault_table->checked_context( 'galleries', $many[0]->unique_identifier() );
+	$fault_context['objects'][0]->title = 'Late collection fault';
+	$fault_prepared = $prepare_checked( $fault_table, $fault_context );
+	$fault_connection->fail_state_update_id = $fault_prepared['head']['id']; $before_fault = $physical();
+	$refuses( function () use ( $fault_table, $fault_prepared ) { $fault_table->checkpoint_checked( 'galleries', $fault_prepared ); },
+		'late checked collection head failure rolls back affected roots' );
+	$check( null === $fault_connection->fail_state_update_id && $fault_connection->record_inserts_at_fault > 0 &&
+		$before_fault === $physical(), 'late collection fault follows record inserts yet preserves every physical head and row' );
+	$retained = $table->checked_context( 'galleries', $many[0]->unique_identifier() );
+	$retained_gallery = $retained['objects'][0];
+	$checked_child = new Image( $plugin ); $checked_child->source_url = 'https://example.test/checked-error.jpg';
+	$checked_child->error = new WP_Error( 'checked', 'Checked child error.' ); $checked_child->migration_status = 'error';
+	$unmigrated_child = new Image( $plugin ); $unmigrated_child->source_url = 'https://example.test/checked-unmigrated.jpg';
+	$retained_gallery->children = array( $checked_child, $unmigrated_child ); $retained_gallery->children_count = 2;
+	$before_release = $settings->compact_migrated_object( $retained_gallery ); $before_child_count = $retained_gallery->children_count;
+	$retained = $table->append_checked( 'galleries', $retained, 0, $retained_gallery );
+	$check( array() === $retained_gallery->children && $retained_gallery->children_count === $before_child_count &&
+		$before_release === $settings->compact_migrated_object( $retained_gallery ),
+		'checked gallery releases unmigrated child cache without changing pending compact history' );
+	$refreshed = new Gallery( $plugin ); $refreshed->ID = 777; $refreshed->title = 'Fresh forced discovery';
+	$forced = new MigratableCollectionRepository( new LegacyTableBackend( new LegacyTransactionConnection( $wpdb ), $blog, 20 ), $settings );
+	$forced_context = $forced->view_context( 'galleries' );
+	$check( $forced->replace_discovered( 'galleries', array( $refreshed ), $forced_context ) &&
+		1 === $backend->count_roots( 'galleries' ) && 777 === $backend->roots( 'galleries', array( 0 ) )[0]['value']['ID'],
+		'forced discovery replaces 121 discarded roots without reading their payloads under 20-row budget' );
+	$stale_discovery = $forced->view_context( 'galleries' );
+	$interleaved_root = $backend->roots( 'galleries', array( 0 ) )[0]['value']; $interleaved_root['title'] = 'Changed during discovery';
+	$check( $backend->update_collection_record( 'galleries', array( 'root' => 0, 'path' => array() ), $interleaved_root ), 'interleaved discovery head change' );
+	$before_stale_discovery = $physical();
+	$refuses( function () use ( $forced, $refreshed, $stale_discovery ) { $forced->replace_discovered( 'galleries', array( $refreshed ), $stale_discovery ); },
+		'forced discovery refuses changed collection head' );
+	$check( $before_stale_discovery === $physical(), 'changed-head discovery refusal leaves every row unchanged' );
+	$other_blog = new MigratableCollectionRepository( new LegacyTableBackend( new LegacyTransactionConnection( $wpdb ), $blog + 1000, 20 ), $settings );
+	$absent_discovery = $other_blog->view_context( 'galleries' );
+	$check( false === $absent_discovery['found'] && $other_blog->replace_discovered( 'galleries', array( $refreshed ), $absent_discovery ),
+		'owned synthetic blog starts with absent collection and creates one discovered root' );
+	$before_present_discovery = $physical();
+	$refuses( function () use ( $other_blog, $refreshed, $absent_discovery ) { $other_blog->replace_discovered( 'galleries', array( $refreshed ), $absent_discovery ); },
+		'forced discovery refuses absent-to-present head race' );
+	$check( $before_present_discovery === $physical(), 'absent-to-present discovery refusal leaves every row unchanged' );
 	echo wp_json_encode( array( 'ok' => true, 'blog_id' => $blog, 'check_count' => count( $checks ), 'checks' => $checks ) );
 } finally {
 	foreach ( array_reverse( $created ) as $table_name ) { $wpdb->query( 'DROP TABLE IF EXISTS `' . $table_name . '`' ); }

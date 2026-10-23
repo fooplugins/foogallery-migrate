@@ -8,11 +8,11 @@ use PHPUnit\Framework\TestCase;
 
 /** Queue identity selection never fetches unrelated root payloads. */
 class CollectionQueueSelectorTest extends TestCase {
-	private function select( $db, $selection, $bytes = 16777216 ) {
+	private function select( $db, $selection, $bytes = 16777216, $matched_only = false, $all = false ) {
 		$repo = new LegacyTableRepository( $db, 1, 10000, $bytes );
 		$begin = new \ReflectionMethod( $repo, 'start_budget' ); $begin->setAccessible( true ); $begin->invoke( $repo );
 		$method = new \ReflectionMethod( $repo, 'queue_root_selector' ); $method->setAccessible( true );
-		return $method->invoke( $repo, 'galleries', array( 'id' => 1, 'active_generation' => 1 ), array( 'root_count' => count( $db->roots ) ), $selection );
+		return $method->invoke( $repo, 'galleries', array( 'id' => 1, 'active_generation' => 1 ), array( 'root_count' => count( $db->roots ) ), $selection, $matched_only, $all );
 	}
 	public function test_one_of_121_and_previous_selection_use_two_projection_pages_without_tree_payload(): void {
 		$db = new QueueSelectorConnection( 121 );
@@ -32,6 +32,16 @@ class CollectionQueueSelectorTest extends TestCase {
 		$db->roots[1]['identity_hash'] = $db->roots[0]['identity_hash'];
 		$matches = $this->select( $db, array( 'gallery_P_A_1_2_0' => array( 'title' => 'Both' ) ) );
 		$this->assertSame( array( 0, 1 ), array_column( $matches, 'order' ) );
+	}
+	public function test_reversed_sized_sql_rows_still_follow_persisted_order_for_all_and_duplicate_uid(): void {
+		$db = new QueueSelectorConnection( 121 ); $db->mode = 'reverse_raw';
+		$db->roots[99]['source_id_value'] = $db->roots[0]['source_id_value'];
+		$db->roots[99]['identity_hash'] = $db->roots[0]['identity_hash'];
+		$uid = 'gallery_P_A_1_2_0';
+		$this->assertSame( array( 0, 99 ), array_column( $this->select( $db, array( $uid => true ), 16777216, true ), 'order' ) );
+		$this->assertSame( range( 0, 120 ), array_column( $this->select( $db, array(), 16777216, true, true ), 'order' ) );
+		$this->assertSame( array( 100, 21, 100, 21 ), $db->raw_pages );
+		$this->assertSame( 0, $db->payload_reads + $db->writes );
 	}
 	public function test_false_like_and_missing_mutable_defaults_are_selected_for_legacy_normalization(): void {
 		$db = new QueueSelectorConnection( 6 );
@@ -118,6 +128,7 @@ class QueueSelectorConnection extends LegacyTransactionConnection {
 				$result[] = array( 'id' => $row['id'], 'source_plugin_value' => $row['source_plugin_value'], 'source_id_value' => $row['source_id_value'], 'mutable_payload' => $row['mutable_payload'] );
 			} }
 			if ( 'missing' === $this->mode ) { array_pop( $result ); }
+			if ( 'reverse_raw' === $this->mode ) { $result = array_reverse( $result ); }
 			return $result;
 		}
 		++$this->payload_reads; throw new \RuntimeException( 'Unexpected payload query.' );

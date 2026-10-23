@@ -41,6 +41,9 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
 
         /** @var array Records queued for one request-level upsert. */
         protected $pending_migrated_objects = array();
+		/** Table batches retain one compact-request byte ledger while objects arrive. */
+		private $pending_migrated_entry_bytes = array();
+		private $pending_migrated_request_bytes = 0;
 
         /** @var bool */
         protected $migrated_batch_active = false;
@@ -1008,6 +1011,21 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
             );
 
             if ( $this->migrated_batch_active ) {
+				$store = $this->migrated_store();
+				if ( $store instanceof MigratedHistoryRepository && $store->state_backend() instanceof LegacyTableBackend ) {
+					$entry = array( 'key' => array_keys( array( $key => true ) )[0],
+						'value' => $this->settings()->compact_migrated_object( $object ),
+						'parent' => ! empty( $record['parent_key'] ) ? (string) $record['parent_key'] : null,
+						'fallback_parent' => ! empty( $object->migration_parent_key ) ? (string) $object->migration_parent_key : null );
+					$bytes = strlen( ( new LegacyStateCodec() )->encode( $entry ) );
+					$old_bytes = isset( $this->pending_migrated_entry_bytes[$key] ) ? $this->pending_migrated_entry_bytes[$key] : 0;
+					if ( ( ! isset( $this->pending_migrated_objects[$key] ) && count( $this->pending_migrated_objects ) >= 10000 ) ||
+						$bytes > 16777216 - ( $this->pending_migrated_request_bytes - $old_bytes ) ) {
+						throw new \RuntimeException( 'Pending table history exceeds the bounded operation size.' );
+					}
+					$this->pending_migrated_request_bytes += $bytes - $old_bytes;
+					$this->pending_migrated_entry_bytes[$key] = $bytes;
+				}
                 $this->pending_migrated_objects[ $key ] = $record;
                 return true;
             }
@@ -1029,6 +1047,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         public function begin_migrated_object_batch() {
             $this->assert_storage_writer();
             $this->pending_migrated_objects = array();
+			$this->pending_migrated_entry_bytes = array(); $this->pending_migrated_request_bytes = 0;
             $this->migrated_batch_active = true;
         }
 
@@ -1063,6 +1082,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
 			}
 
 			$this->pending_migrated_objects = array();
+			$this->pending_migrated_entry_bytes = array(); $this->pending_migrated_request_bytes = 0;
 			$this->migrated_batch_active = false;
 			return true;
         }
@@ -1456,18 +1476,26 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         private function check_for_migration_errors_admitted( $unique_identifier ) {
             $this->assert_storage_writer();
             $gallery_migrator = $this->get_gallery_migrator();
-            $table = '' !== $unique_identifier ? $this->table_collection_repository() : null;
+            $table = $this->table_collection_repository();
             $target = null;
             if ( null !== $table ) {
-                $target = $this->targeted_gallery_context( $table, $gallery_migrator, $unique_identifier );
-                $galleries = $target['found'] ? array( $target['object'] ) : array();
+                $target = $table->checked_context( self::KEY_GALLERIES, $unique_identifier );
+                if ( ! empty( $target['absent'] ) ) {
+                    $gallery_migrator->get_objects_to_migrate();
+                    $target = $table->checked_context( self::KEY_GALLERIES, $unique_identifier );
+                    if ( ! empty( $target['absent'] ) ) { throw new \RuntimeException( 'Discovered gallery collection was not persisted.' ); }
+                }
+                $galleries = $target['objects'];
             } else { $galleries = $gallery_migrator->get_objects_to_migrate(); }
             $checked = 0;
             $errors = 0;
             $found_gallery = false;
 			$this->begin_migrated_object_batch();
 
-            foreach ( $galleries as $index => $gallery ) {
+			// Iterate keys, not a copied object array: checked table roots can
+			// expand lazy source children, and each must be released promptly.
+			foreach ( array_keys( $galleries ) as $index ) {
+				$gallery = $galleries[$index];
                 if ( ! is_object( $gallery ) || ! method_exists( $gallery, 'unique_identifier' ) ) {
                     continue;
                 }
@@ -1480,22 +1508,31 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
 				$gallery->ensure_children_loaded();
 				$this->apply_migrated_children( $gallery );
                 $result = $this->check_gallery_for_missing_files( $gallery );
-                $galleries[ $index ] = $result['gallery'];
+				if ( null !== $table ) {
+					$target = $table->append_checked( self::KEY_GALLERIES, $target, $index, $result['gallery'] );
+					unset( $galleries[$index] );
+				} else { $galleries[ $index ] = $result['gallery']; }
                 $checked += $result['checked'];
                 $errors += $result['errors'];
             }
+			unset( $gallery, $result );
 
             if ( '' !== $unique_identifier && ! $found_gallery ) {
 				$this->flush_migrated_object_batch();
                 return new \WP_Error( 'foogallery_migrate_missing_gallery', __( 'Gallery not found.', 'foogallery-migrate' ) );
             }
 
+			if ( null !== $table ) {
+				// Prove the affected collection patch is admissible and still pinned
+				// before publishing the separate logical history batch.
+				$target = $table->prepare_checked( self::KEY_GALLERIES, $target );
+			}
+
 			if ( ! $this->flush_migrated_object_batch() ) {
 				return new \WP_Error( 'foogallery_migrate_store_write_failed', __( 'Migrated gallery state could not be saved.', 'foogallery-migrate' ) );
 			}
 			if ( null !== $table ) {
-				$target['object'] = $galleries[0];
-				$saved = $table->checkpoint_targeted( self::KEY_GALLERIES, $target );
+				$saved = $table->checkpoint_checked( self::KEY_GALLERIES, $target );
 			} else { $saved = $this->set_migrator_setting( self::KEY_GALLERIES, $galleries ); }
 			if ( ! $saved ) {
 				return new \WP_Error( 'foogallery_migrate_store_write_failed', __( 'Migrated gallery state could not be saved.', 'foogallery-migrate' ) );

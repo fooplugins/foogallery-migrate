@@ -778,6 +778,27 @@ class LegacyTableRepository {
 		return ( new LegacyCollectionEnvelope() )->rebuild( $entry['root'], $items );
 	}
 
+	/** Forced source discovery replaces discarded roots without hydrating them. */
+	public function replace_discovered_collection( $key, $value, $expected_head ) {
+		if ( ! in_array( $key, array( 'galleries', 'albums' ), true ) || $this->history_read_active ) { $this->fail( 'Invalid discovered collection replacement.' ); }
+		$this->start_budget(); $this->history_read_active = true;
+		try {
+			$head = $this->reader->head( $key ); $this->tick();
+			if ( $head !== $expected_head ) { $this->fail( 'Discovered collection changed during source discovery.' ); }
+			if ( false === $head ) { $kind = 'map'; $order = $this->next_state_order(); $revision = null; }
+			else {
+				$root = $this->collection( $head );
+				if ( ! in_array( $head['state_kind'], array( 'map', 'list' ), true ) || ! isset( $root['wrapper'] ) ) { $this->fail( 'Indexed discovered collection required.' ); }
+				$kind = $head['state_kind']; $order = $head['state_order']; $revision = $head['revision'];
+			}
+			( new LegacyCollectionEnvelope() )->split( $key, $kind, $value );
+			$this->replace_bounded( array( array( 'key' => $key, 'kind' => $kind, 'order' => $order, 'value' => $value,
+				'expected_revision' => $revision ) ), array( array( 'key' => $key, 'head' => $expected_head ) ) );
+			return $this->finish_history_read( true );
+		} catch ( \Exception $error ) { $this->history_read_active = false; throw $error; }
+		catch ( \Throwable $error ) { $this->history_read_active = false; throw $error; }
+	}
+
 	/** Existing caller replacement: affected-root patches when order is stable,
 	 * otherwise bounded staged replacement with the same atomic checkpoint.
 	 */
@@ -1417,7 +1438,8 @@ class LegacyTableRepository {
 		$head = $this->head( $state_key ); $root = $this->collection( $head );
 		if ( ! isset( $root['wrapper'] ) || ! in_array( $head['state_kind'], array( 'map', 'list' ), true ) ) { $this->fail( 'Indexed migratable collection required.' ); }
 		$matches = $this->queue_root_selector( $state_key, $head, $root, array( $uid => true ), true );
-		if ( count( $matches ) > 1 ) { $this->fail( 'Duplicate collection UID.' ); }
+		// Legacy retry selects the first matching root in persisted order. A UID
+		// is reconstructed from typed fields and is not necessarily unique.
 		$row = null;
 		if ( count( $matches ) ) {
 			$target = $matches[0]; $tree = $this->tree_hash( $state_key, $head, $target['node'] );
@@ -1431,6 +1453,84 @@ class LegacyTableRepository {
 		$spent = microtime( true ) - ( $this->deadline - $this->max_seconds );
 		return array( 'found' => null !== $row, 'absent' => false, 'head' => $head, 'root' => $row,
 			'budget' => array( 'rows' => $this->used_rows, 'bytes' => $this->used_bytes, 'seconds' => $spent ) );
+	}
+
+	/** All roots, or every exact UID match, in persisted order under one budget. */
+	public function checked_collection_context( $state_key, $uid ) {
+		$this->collection_key( $state_key ); $this->start_budget(); $this->typed_key( $state_key );
+		if ( 'galleries' !== $state_key || ! is_string( $uid ) ) { $this->fail( 'Invalid checked gallery selector.' ); }
+		$this->consume( 0, strlen( $uid ) );
+		if ( false === $this->reader->head( $state_key ) ) {
+			if ( false !== $this->reader->head( $state_key ) ) { $this->fail( 'Absent checked collection changed.' ); }
+			return array( 'found' => false, 'absent' => true );
+		}
+		$head = $this->head( $state_key ); $root = $this->collection( $head );
+		if ( ! isset( $root['wrapper'] ) || ! in_array( $head['state_kind'], array( 'map', 'list' ), true ) ) { $this->fail( 'Indexed checked gallery collection required.' ); }
+		$targets = $this->queue_root_selector( $state_key, $head, $root, '' === $uid ? array() : array( $uid => true ), true, '' === $uid );
+		$rows = array();
+		foreach ( $targets as $target ) {
+			$tree = $this->tree_hash( $state_key, $head, $target['node'] );
+			if ( false === $tree || $this->number( $tree['rows'][0]['id'] ) !== $target['id'] || $tree['order'] !== $target['order'] ||
+				! is_array( $tree['value'] ) || ! isset( $tree['value']['object_type'], $tree['value']['plugin_name'] ) ||
+				! array_key_exists( 'ID', $tree['value'] ) || $tree['value']['object_type'] !== $target['type'] ||
+				$tree['value']['plugin_name'] !== $target['plugin'] || (string) $tree['value']['ID'] !== $target['source_id'] ) {
+				$this->fail( 'Checked gallery identity changed.' );
+			}
+			$rows[] = array( 'key' => $tree['key'], 'value' => $tree['value'] );
+		}
+		$this->unchanged( $state_key, $head ); $this->tick();
+		$spent = microtime( true ) - ( $this->deadline - $this->max_seconds );
+		return array( 'found' => true, 'absent' => false, 'head' => $head, 'roots' => $rows,
+			'budget' => array( 'rows' => $this->used_rows, 'bytes' => $this->used_bytes, 'seconds' => $spent ) );
+	}
+
+	private function checked_collection_changes( $state_key, $context, $patches ) {
+		if ( ! is_array( $context ) || ! isset( $context['head'], $context['roots'], $context['budget'] ) ||
+			! is_array( $context['roots'] ) || ! is_array( $patches ) || count( $patches ) > $this->max_rows ||
+			! isset( $context['head']['revision'], $context['head']['state_kind'] ) ||
+			! in_array( $context['head']['state_kind'], array( 'map', 'list' ), true ) ) { $this->fail( 'Invalid checked collection context.' ); }
+		$originals = array();
+		foreach ( $context['roots'] as $row ) {
+			if ( ! is_array( $row ) || array_keys( $row ) !== array( 'key', 'value' ) || ! is_array( $row['value'] ) ) { $this->fail( 'Invalid checked collection root.' ); }
+			$this->typed_key( $row['key'] ); $hash = $this->codec->key_hash( $row['key'] );
+			if ( isset( $originals[$hash] ) ) { $this->fail( 'Duplicate checked collection root.' ); }
+			$originals[$hash] = $row;
+		}
+		$seen = array();
+		foreach ( $patches as $patch ) {
+			if ( ! is_array( $patch ) || array_keys( $patch ) !== array( 'key', 'value' ) || ! is_array( $patch['value'] ) ) { $this->fail( 'Invalid checked collection patch.' ); }
+			$this->typed_key( $patch['key'] ); $hash = $this->codec->key_hash( $patch['key'] );
+			if ( ! isset( $originals[$hash] ) || isset( $seen[$hash] ) || $originals[$hash]['key'] !== $patch['key'] ) { $this->fail( 'Unknown or duplicate checked collection patch.' ); }
+			$seen[$hash] = true;
+		}
+		return count( $patches ) ? array( array( 'key' => $state_key, 'expected_revision' => $context['head']['revision'], 'patches' => $patches ) ) : array();
+	}
+
+	/** Reject affected-root storage overflow before the caller publishes history. */
+	public function prepare_checked_collection( $state_key, $context, $patches ) {
+		$this->collection_key( $state_key ); $this->start_budget();
+		$changes = $this->checked_collection_changes( $state_key, $context, $patches );
+		$this->resume_retained_budget( $context['budget'] ); $this->unchanged( $state_key, $context['head'] );
+		if ( ! count( $changes ) ) { $this->tick(); return microtime( true ) - ( $this->deadline - $this->max_seconds ); }
+		$this->preflight( $changes, true );
+		$originals = array();
+		foreach ( $context['roots'] as $row ) { $originals[$this->codec->key_hash( $row['key'] )] = $row['value']; }
+		foreach ( $patches as $patch ) {
+			$old = $this->tree( $state_key, $context['head'], $patch['key'] );
+			if ( false === $old || $old['value'] !== $originals[$this->codec->key_hash( $patch['key'] )] ) { $this->fail( 'Checked collection root changed before history publication.' ); }
+		}
+		$this->unchanged( $state_key, $context['head'] ); $this->tick();
+		return microtime( true ) - ( $this->deadline - $this->max_seconds );
+	}
+
+	/** One collection CAS after the separate, already-admitted history batch. */
+	public function checkpoint_checked_collection( $state_key, $context, $patches ) {
+		$this->collection_key( $state_key ); $this->start_budget();
+		$changes = $this->checked_collection_changes( $state_key, $context, $patches );
+		$this->resume_retained_budget( $context['budget'] ); $this->unchanged( $state_key, $context['head'] );
+		if ( ! count( $changes ) ) { return true; }
+		$this->patch( $changes, 'list' === $context['head']['state_kind'], array( array( 'key' => $state_key, 'head' => $context['head'] ) ), true );
+		return true;
 	}
 
 	/** History/output may have used this repository; restore the original affected-tree budget before CAS. */
@@ -1599,7 +1699,7 @@ class LegacyTableRepository {
 	}
 
 	/** Fixed metadata pages, then exact-size projection pages; no unrelated tree payload. */
-	private function queue_root_selector( $state_key, $head, $root, $selection, $matched_only = false ) {
+	private function queue_root_selector( $state_key, $head, $root, $selection, $matched_only = false, $all = false ) {
 		if ( $root['root_count'] > $this->max_rows ) { $this->fail( 'Collection root count exceeds operation budget.' ); }
 		$targets = array(); $count = 0; $last_order = -1;
 		$expected_type = MigratorSettings::KEY_GALLERIES === $state_key ? 'gallery' : 'album';
@@ -1629,10 +1729,19 @@ class LegacyTableRepository {
 				$raw = $this->read( $this->db->prepare( 'SELECT id, source_plugin_value, source_id_value, mutable_payload FROM `' . $this->table . '` '
 					. 'WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL AND (' . implode( ' OR ', $where ) . ') LIMIT 100', $args ) );
 				if ( count( $raw ) !== count( $meta ) ) { $this->fail( 'Sized collection identity changed.' ); }
+				$raw_by_id = array();
 				foreach ( $raw as $entry ) {
 					$id = $this->number( $entry['id'] );
-					if ( ! isset( $indexed[$id] ) || ! is_string( $entry['source_plugin_value'] ) || ! is_string( $entry['source_id_value'] ) || ! is_string( $entry['mutable_payload'] ) ) { $this->fail( 'Duplicate or missing collection identity.' ); }
-					$row = $indexed[$id]; unset( $indexed[$id] );
+					if ( ! isset( $indexed[$id] ) || isset( $raw_by_id[$id] ) || ! is_string( $entry['source_plugin_value'] ) ||
+						! is_string( $entry['source_id_value'] ) || ! is_string( $entry['mutable_payload'] ) ) { $this->fail( 'Duplicate or missing collection identity.' ); }
+					$raw_by_id[$id] = $entry;
+				}
+				// The sized payload SELECT has no SQL order guarantee. Identity and
+				// target order must follow the admitted item_order metadata page.
+				foreach ( $meta as $ordered ) {
+					$id = $this->number( $ordered['id'] );
+					if ( ! isset( $raw_by_id[$id], $indexed[$id] ) ) { $this->fail( 'Missing collection identity projection.' ); }
+					$entry = $raw_by_id[$id]; $row = $indexed[$id]; unset( $raw_by_id[$id], $indexed[$id] );
 					$plugin = $this->codec->decode( $entry['source_plugin_value'] ); $source_id = $this->codec->decode( $entry['source_id_value'] );
 					$mutable = $this->codec->decode( $entry['mutable_payload'] );
 					if ( ! is_array( $mutable ) || $this->codec->encode( $mutable ) !== $entry['mutable_payload'] ||
@@ -1643,14 +1752,14 @@ class LegacyTableRepository {
 						$this->hex( $row['identity_hash'] ) !== $this->codec->snapshot_digest( array( 'source-exact-v1', $expected_type, $plugin, $source_id ) ) ) { $this->fail( 'Collection identity projection mismatch.' ); }
 					$uid = $expected_type . '_' . $plugin . '_' . $source_id;
 					$matched = array_key_exists( $uid, $selection );
-					if ( $matched || ( ! $matched_only && ( $this->number( $row['is_selected'] ) === 1 || 'queued' === $row['migration_status'] ||
+					if ( $all || $matched || ( ! $matched_only && ( $this->number( $row['is_selected'] ) === 1 || 'queued' === $row['migration_status'] ||
 						! array_key_exists( 'part_of_migration', $mutable ) || false !== $mutable['part_of_migration'] ||
 						! array_key_exists( 'migration_status', $mutable ) ) ) ) {
 						$targets[] = array( 'id' => $id, 'order' => $this->number( $row['item_order'] ), 'node' => $this->hex( $row['node_hash'] ),
 							'type' => $expected_type, 'plugin' => $plugin, 'source_id' => $source_id, 'uid' => $uid, 'matched' => $matched );
 					}
 				}
-				if ( count( $indexed ) ) { $this->fail( 'Missing collection identity projection.' ); }
+				if ( count( $indexed ) || count( $raw_by_id ) ) { $this->fail( 'Missing collection identity projection.' ); }
 			}
 		} while ( count( $meta ) === 100 );
 		if ( $count !== $root['root_count'] ) { $this->fail( 'Collection root count changed.' ); }

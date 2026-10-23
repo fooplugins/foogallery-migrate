@@ -106,10 +106,19 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
 		}
 
         private function get_objects_to_migrate_admitted( $force ) {
-            $objects = $this->get_setting( $this->type );
+            // A forced source refresh replaces the old collection; reading its
+            // potentially large table snapshot first serves no purpose.
+            $objects = $force ? false : $this->get_setting( $this->type );
 
             if ( $objects === false || $force ) {
                 $this->migrator_engine->assert_storage_writer();
+				$table = $this->table_collection_repository();
+				// Source callbacks run outside the storage deadline. Pin the exact
+				// head (including absence) before they can interleave with a writer.
+				$discovery_context = null !== $table ? $table->view_context( $this->type ) : null;
+				if ( null !== $table && ! $force && $discovery_context['found'] ) {
+					throw new \RuntimeException( 'Absent collection changed before lazy discovery.' );
+				}
                 $objects = array();
                 foreach ( $this->migrator_engine->get_plugins() as $plugin ) {
                     if ( $plugin->is_detected ) {
@@ -122,7 +131,11 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
                         }
                     }
                 }
-                $this->set_setting( $this->type, $objects );
+				if ( null !== $table ) {
+					// Replacement of a discovered table collection has no need to
+					// decode the discarded roots merely to calculate a diff.
+					$table->replace_discovered( $this->type, $objects, $discovery_context );
+				} else { $this->set_setting( $this->type, $objects ); }
             }
 
             return $objects;

@@ -77,6 +77,67 @@ class MigratableCollectionRepository extends ScalarStateRepository {
 		$context['object'] = $hydrated['value'];
 		return $context;
 	}
+	/** Table error-check roots in persisted order; no unrelated tree for a UID check. */
+	public function checked_context( $bucket, $uid ) {
+		$bucket = $this->bucket( $bucket );
+		if ( MigratorSettings::KEY_GALLERIES !== $bucket || ! $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table gallery check required.' ); }
+		$context = $this->backend->checked_collection_context( $bucket, $uid );
+		if ( ! $context['found'] ) { return $context; }
+		$objects = array();
+		foreach ( $context['roots'] as $row ) {
+			$hydrated = $this->hydrate_view_record( $bucket, $row );
+			if ( ! is_object( $hydrated['value'] ) || ! method_exists( $hydrated['value'], 'unique_identifier' ) ||
+				( '' !== $uid && $hydrated['value']->unique_identifier() !== $uid ) ) { throw new \RuntimeException( 'Checked gallery root could not hydrate.' ); }
+			$objects[] = $hydrated['value'];
+		}
+		$context['objects'] = $objects; $context['patches'] = array();
+		$context['pending_rows'] = 0; $context['pending_bytes'] = 0; $context['processed'] = 0;
+		return $context;
+	}
+	/** Release each expanded source tree after its compact patch is admitted. */
+	public function append_checked( $bucket, $context, $index, $object ) {
+		$bucket = $this->bucket( $bucket );
+		if ( MigratorSettings::KEY_GALLERIES !== $bucket || ! $this->backend instanceof LegacyTableBackend ||
+			! is_array( $context ) || ! isset( $context['roots'], $context['objects'], $context['patches'], $context['pending_rows'], $context['pending_bytes'], $context['processed'] ) ||
+			! is_int( $index ) || ! isset( $context['objects'][$index], $context['roots'][$index] ) || ! is_object( $object ) ) {
+			throw new \RuntimeException( 'Invalid checked gallery append.' );
+		}
+		$original = $context['roots'][$index];
+		$compact = $this->encode( $bucket, array( $object ) );
+		if ( ! isset( $compact['items'][0] ) || ! is_array( $compact['items'][0] ) ) { throw new \RuntimeException( 'Invalid checked gallery encoding.' ); }
+		$value = $this->merge_turn_record( $original['value'], $compact['items'][0] );
+		if ( $value !== $original['value'] ) {
+			$stats = ( new LegacyRecordCodec() )->flatten_tree( $bucket, $original['key'], $value, 0, function () {} );
+			if ( $stats['record_count'] > 10000 - $context['pending_rows'] || $stats['encoded_bytes'] > 16777216 - $context['pending_bytes'] ) {
+				throw new \RuntimeException( 'Checked gallery affected roots exceed the shared storage budget.' );
+			}
+			$context['pending_rows'] += $stats['record_count']; $context['pending_bytes'] += $stats['encoded_bytes'];
+			$context['patches'][] = array( 'key' => $original['key'], 'value' => $value );
+		}
+		// A failed gallery is also retained by the pending history batch. Its
+		// compact record stores child errors, not the complete checked children.
+		// Preserve that exact fallback before releasing this table-only cache.
+		if ( method_exists( $object, 'get_children_errors' ) && isset( $object->children ) && is_array( $object->children ) ) {
+			$object->children_errors = $object->get_children_errors();
+			$object->children = array();
+		}
+		unset( $context['objects'][$index] ); ++$context['processed']; return $context;
+	}
+	/** Validate the complete affected patch before publishing logical history. */
+	public function prepare_checked( $bucket, $context ) {
+		$bucket = $this->bucket( $bucket );
+		if ( MigratorSettings::KEY_GALLERIES !== $bucket || ! $this->backend instanceof LegacyTableBackend ||
+			! is_array( $context ) || ! isset( $context['roots'], $context['objects'], $context['patches'], $context['processed'] ) ||
+			count( $context['objects'] ) || $context['processed'] !== count( $context['roots'] ) ) { throw new \RuntimeException( 'Incomplete checked gallery preparation.' ); }
+		$context['budget']['seconds'] = $this->backend->prepare_checked_collection( $bucket, $context, $context['patches'] );
+		return $context;
+	}
+	public function checkpoint_checked( $bucket, $context ) {
+		$bucket = $this->bucket( $bucket );
+		if ( MigratorSettings::KEY_GALLERIES !== $bucket || ! $this->backend instanceof LegacyTableBackend ||
+			! is_array( $context ) || ! isset( $context['patches'] ) ) { throw new \RuntimeException( 'Invalid checked gallery checkpoint.' ); }
+		return $this->backend->checkpoint_checked_collection( $bucket, $context, $context['patches'] );
+	}
 	/** Save only the affected root; retry/error callers own their legacy history and queue decisions. */
 	public function checkpoint_targeted( $bucket, $context ) {
 		$bucket = $this->bucket( $bucket );
@@ -159,6 +220,16 @@ class MigratableCollectionRepository extends ScalarStateRepository {
 			return $this->backend->replace_collection( $bucket, $this->encode( $bucket, $objects ) );
 		}
 		return $this->write_values( array( $this->bucket( $bucket ) => $objects ) );
+	}
+	/** Forced source discovery discards old roots under one pinned table-head CAS. */
+	public function replace_discovered( $bucket, $objects, $context ) {
+		if ( ! is_array( $objects ) || ! $this->backend instanceof LegacyTableBackend || ! is_array( $context ) ||
+			array_keys( $context ) !== array( 'found', 'total', 'head' ) || ! is_bool( $context['found'] ) ||
+			( $context['found'] && ! is_array( $context['head'] ) ) || ( ! $context['found'] && false !== $context['head'] ) ) {
+			throw new \RuntimeException( 'Invalid pinned discovery context.' );
+		}
+		$bucket = $this->bucket( $bucket );
+		return $this->backend->replace_discovered_collection( $bucket, $this->encode( $bucket, $objects ), $context['head'] );
 	}
 	public function update_with_state( $bucket, $objects, $state ) {
 		if ( ! is_array( $objects ) ) { return false; }

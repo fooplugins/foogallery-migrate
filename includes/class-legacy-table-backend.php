@@ -52,6 +52,7 @@ class LegacyTableBackend {
 	public function collection_snapshot( $key ) { return $this->repository()->collection_snapshot( $key ); }
 	public function read_collection( $key ) { return $this->repository()->read_collection( $key ); }
 	public function replace_collection( $key, $value, $companions = array() ) { return $this->repository( true )->replace_collection( $key, $value, $companions ); }
+	public function replace_discovered_collection( $key, $value, $expected_head ) { return $this->repository( true )->replace_discovered_collection( $key, $value, $expected_head ); }
 	public function update_collection_record( $key, $locator, $value ) { return $this->repository( true )->update_collection_record( $key, $locator, $value ); }
 	public function history_page( $key, $limit, $filters, $cursor = null ) { return $this->repository()->history_page( $key, $limit, $filters, $cursor ); }
 	public function history_source_identity( $type, $plugin, $id ) { return $this->repository()->history_source_identity( $type, $plugin, $id ); }
@@ -62,6 +63,9 @@ class LegacyTableBackend {
 	public function collection_view_page( $key, $offset, $limit ) { return $this->repository()->collection_view_page( $key, $offset, $limit ); }
 	public function queue_collection( $key, $selection, $transition, $summarize ) { return $this->repository( true )->queue_collection( $key, $selection, $transition, $summarize ); }
 	public function targeted_collection_context( $key, $uid ) { return $this->repository( true )->targeted_collection_context( $key, $uid ); }
+	public function checked_collection_context( $key, $uid ) { return $this->repository( true )->checked_collection_context( $key, $uid ); }
+	public function prepare_checked_collection( $key, $context, $patches ) { return $this->repository( true )->prepare_checked_collection( $key, $context, $patches ); }
+	public function checkpoint_checked_collection( $key, $context, $patches ) { return $this->repository( true )->checkpoint_checked_collection( $key, $context, $patches ); }
 	public function checkpoint_targeted_collection( $key, $context, $value ) { return $this->repository( true )->checkpoint_targeted_collection( $key, $context, $value ); }
 	public function migration_turn_context( $key ) { return $this->repository( true )->migration_turn_context( $key ); }
 	public function checkpoint_migration_turn( $key, $context, $value, $summary ) { return $this->repository( true )->checkpoint_migration_turn( $key, $context, $value, $summary ); }
