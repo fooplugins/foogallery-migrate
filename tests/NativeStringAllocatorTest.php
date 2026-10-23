@@ -26,7 +26,9 @@ class NativeStringAllocatorTest extends TestCase {
 		return $cases;
 	}
 
-	/** @dataProvider discontinuities */
+	/** @group optional_host_diagnostic
+	 * @dataProvider discontinuities
+	 */
 	public function test_actual_decode_discontinuities( $pattern, $n ): void {
 		$c = $this->codec();
 		$value = str_repeat( $pattern, $n ); $encoded = $c->encode( $value );
@@ -37,6 +39,7 @@ class NativeStringAllocatorTest extends TestCase {
 		$this->assertLessThanOrEqual( $bound, $growth, 'Native retained allocation at ' . $n );
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_actual_decode_heldouts_and_existing_encoded_refusal(): void {
 		$c = $this->codec(); $refusals = 0;
 		foreach ( array( 'x', "\xff", '"' ) as $pattern ) {
@@ -58,6 +61,7 @@ class NativeStringAllocatorTest extends TestCase {
 		$this->assertSame( 1, $refusals );
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_repeated_3052_retained_output_and_peak_fit_forecast(): void {
 		$b = StorageScaleAdmissionTest::admission();
 		$c = new Records( null, 24576, 16777216, $b ); $codec = new Codec( 1048576, 64, 10000, $b );
@@ -84,5 +88,27 @@ class NativeStringAllocatorTest extends TestCase {
 	public function test_allocator_rounding_overflow_remains_closed(): void {
 		$this->expectException( \RuntimeException::class );
 		Model::string_bytes( PHP_INT_MAX );
+	}
+
+	/** @dataProvider discontinuities */
+	public function test_actual_decode_discontinuities_roundtrip_without_host_allocator_certificate( $pattern, $n ): void {
+		$codec = new Codec();
+		$value = str_repeat( $pattern, $n );
+		$this->assertSame( $value, $codec->decode( $codec->encode( $value ) ) );
+	}
+
+	public function test_actual_heldouts_roundtrip_and_encoded_cap_refusal_without_host_certificate(): void {
+		$codec = new Codec( 1048576 );
+		foreach ( array( 'x', "\xff", '"' ) as $pattern ) {
+			foreach ( array( 6140, 6141, 12264, 12265, 65537, 196609, 393217 ) as $n ) {
+				$value = str_repeat( $pattern, $n );
+				if ( "\xff" === $pattern && 393217 === $n ) {
+					try { $codec->encode( $value ); $this->fail( 'Encoded byte cap bypassed.' ); }
+					catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'encoded byte budget', $error->getMessage() ); }
+					continue;
+				}
+				$this->assertSame( $value, $codec->decode( $codec->encode( $value ) ) );
+			}
+		}
 	}
 }

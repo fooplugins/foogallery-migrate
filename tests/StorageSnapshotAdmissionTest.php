@@ -8,6 +8,7 @@ use FooPlugins\FooGalleryMigrate\StorageMemoryBaseline;
 use PHPUnit\Framework\TestCase;
 
 require_once __DIR__ . '/LegacyTableSnapshotTest.php';
+require_once __DIR__ . '/support/SnapshotScaleConnection.php';
 
 /** Executed phase/rollback ordering with a query spy, NOT native SQL evidence. */
 class StorageSnapshotAdmissionTest extends TestCase {
@@ -135,6 +136,48 @@ class StorageSnapshotAdmissionTest extends TestCase {
 		try { $repo->replace_many( array( $this->change() ) ); $this->fail( 'Nonaffirmative admission accepted.' ); }
 		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'memory admission', $error->getMessage() ); }
 		$this->assertSame( array(), $db->queries );
+	}
+
+	public function test_mutated_later_source_during_first_insert_rolls_back_without_publishing(): void {
+		$db = new SnapshotScaleConnection();
+		$repo = new LegacyTableSnapshot( $db, 7, 100, 1048576 );
+		$last = array( 'title' => 'original' );
+		$first = array( 'title' => 'before' );
+		$value = array( 'root' => array( 'children' => array( 'first' => $first, 'last' => &$last ) ) );
+		$change = array( 'key' => 'bucket', 'order' => 0, 'kind' => 'map', 'value' => $value, 'expected_revision' => null );
+		$repo->replace_many( array( $change ) );
+		$original = $repo->read_bounded( 'bucket' );
+		$heads = $db->heads; $rows = $db->records;
+		$commits = $db->events['commit']; $publishes = $db->events['publish'];
+		$rollbacks = isset( $db->events['rollback'] ) ? $db->events['rollback'] : 0;
+		$inserts = $db->events['record-insert'];
+
+		$first['title'] = 'candidate';
+		$value['root']['children']['first'] = $first;
+		$change['value'] = $value; $change['expected_revision'] = 1;
+		$mutated = false;
+		$db->after_event = function ( $event, $connection ) use ( &$last, &$mutated, $inserts ) {
+			if ( 'record-insert' === $event && ! $mutated && $connection->events['record-insert'] === $inserts + 1 ) {
+				$last['title'] = 'altered!'; $mutated = true;
+			}
+		};
+		try { $repo->replace_many( array( $change ) ); $this->fail( 'Mutated source published.' ); }
+		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'hash mismatch', $error->getMessage() ); }
+		$db->after_event = null;
+		$this->assertTrue( $mutated, 'The query spy must alter the referenced later input after the first staged insert.' );
+		$this->assertSame( 'altered!', $last['title'] );
+		$this->assertSame( $rollbacks + 1, $db->events['rollback'] );
+		$this->assertSame( $commits, $db->events['commit'] );
+		$this->assertSame( $publishes, $db->events['publish'] );
+		$this->assertSame( $heads, $db->heads );
+		$this->assertEquals( $rows, $db->records );
+		$this->assertSame( $original, $repo->read_bounded( 'bucket' ) );
+
+		$last['title'] = 'original';
+		$change['value'] = $value;
+		$result = $repo->replace_many( array( $change ) );
+		$this->assertSame( 2, $result[0]['revision'] );
+		$this->assertSame( $change['value'], $repo->read_bounded( 'bucket' ) );
 	}
 }
 

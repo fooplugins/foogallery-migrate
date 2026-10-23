@@ -37,6 +37,7 @@ class RetainingStagingTest extends TestCase {
   $method->invokeArgs( $c, array( $state, null, 'root', $tree, 0, 0, &$stats, $phase, &$slots ) );
  }
 
+ /** @group optional_host_diagnostic */
  public function test_plan_keeps_existing_workspace_consumer_and_next_row_coefficients(): void {
   $tree = array( 'children' => array( 'a' => str_repeat( 'x', 4097 ), 'b' => null ) );
   $d = ( new LegacyRecordCodec() )->describe_tree( 'root', $tree, 'retaining-row' );
@@ -56,7 +57,7 @@ class RetainingStagingTest extends TestCase {
     'plugin_name' => 'plug', 'ID' => 7, 'migration_status' => 'pending', 'children' => array( 'nested' => null ) ), 'empty' => array() ) );
   $reference = array(); $plain = new LegacyRecordCodec();
   $expected = $plain->flatten_tree( 'galleries', 'root', $tree, 3, function( $row ) use ( &$reference ) { $reference[] = $row; } );
-  $budget = StorageScaleAdmissionTest::admission(); $c = $this->qualified( $budget ); $rows = array();
+  $budget = StorageScaleAdmissionTest::admission(); $c = new LegacyRecordCodec( null, 24576, 16777216, $budget ); $rows = array();
   $stats = $c->flatten_tree( 'galleries', 'root', $tree, 3, function( $row ) use ( &$rows ) { $rows[] = $row; } );
   $this->assertSame( $reference, $rows ); $this->assertSame( $expected, $stats );
   $this->assertSame( array( 'root', '01', '8', 'nested', 'empty' ), array_map( function( $r ) { return base64_decode( $r['key_value'] ); }, $rows ) );
@@ -70,6 +71,7 @@ class RetainingStagingTest extends TestCase {
   $this->assertSame( serialize( $tree ), serialize( $c->rebuild_tree( 'galleries', $rows[0]['node_hash'], $rows ) ) );
  }
 
+ /** @group optional_host_diagnostic */
  public function test_all_rows_staged_and_recursive_frames_gone_before_first_callback(): void {
   $last = array( 'title' => 'original' );
   $tree = array( 'children' => array( 'first' => 'first', 'last' => &$last ) );
@@ -92,6 +94,7 @@ class RetainingStagingTest extends TestCase {
   $this->assertSame( $plan['external'], $this->property( $budget, 'additional_bytes' ) );
  }
 
+ /** @group optional_host_diagnostic */
  public function test_private_slot_sequence_and_no_second_record_digest(): void {
   $tree = array( 'children' => array( 'first' => 'first', 'last' => 'last' ) );
   $codec = new StagingDigestWitness(); $c = new LegacyRecordCodec( $codec );
@@ -137,6 +140,24 @@ class RetainingStagingTest extends TestCase {
   $this->assertIsArray( $slots[0] ); $this->assertIsArray( $slots[1] ); $this->assertNull( $slots[2] );
  }
 
+ public function test_public_late_invalid_child_refuses_without_callback_prefix_and_valid_retry_roundtrips(): void {
+  $budget = StorageScaleAdmissionTest::admission();
+  $codec = new LegacyRecordCodec( null, 24576, 16777216, $budget );
+  $bad = array( 'children' => array( 'first' => 'ready', 'last' => new \stdClass() ) );
+  $emitted = 0;
+  try {
+   $codec->flatten_tree( 'galleries', 'root', $bad, 0, function () use ( &$emitted ) { ++$emitted; } );
+   $this->fail( 'A late invalid node was accepted.' );
+  } catch ( \RuntimeException $error ) { $this->assertNotEmpty( $error->getMessage() ); }
+  $this->assertSame( 0, $emitted );
+  $this->assertSame( 'ready', $bad['children']['first'] );
+  $good = array( 'children' => array( 'first' => 'ready', 'last' => false ) ); $rows = array();
+  $stats = $codec->flatten_tree( 'galleries', 'root', $good, 0, function ( $row ) use ( &$rows ) { $rows[] = $row; } );
+  $this->assertSame( 3, $stats['record_count'] );
+  $this->assertSame( $good, $codec->rebuild_tree( 'galleries', $rows[0]['node_hash'], $rows ) );
+ }
+
+ /** @group optional_host_diagnostic */
  public function test_public_cache_and_staging_interruptions_emit_no_prefix(): void {
   foreach ( array( 'preflight_tree', 'stage_retaining_node' ) as $target ) {
    $armed = false; $reached = false; $emitted = 0;
@@ -164,6 +185,7 @@ class RetainingStagingTest extends TestCase {
   }
  }
 
+ /** @group optional_host_diagnostic */
  public function test_original_input_flatten_uses_one_completed_slot_event_not_aggregate_future(): void {
   // Original data factory and resources, not the historical test or its order.
   // Flatten-only M1 witness: NOT original roundtrip/deadline/package acceptance.

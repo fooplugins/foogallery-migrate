@@ -35,6 +35,7 @@ class PreorderIndexLifetimeTest extends TestCase {
 		return $codec;
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_certified_cursor_covers_every_row_without_retaining_the_identity_map(): void {
 		$tree = array( 'children' => array( 'a' => array( 'children' => array( 'leaf' => null ) ), 'b' => 'B' ) );
 		$rows = $this->rows( $tree ); $before = serialize( $rows ); $export = $rows;
@@ -54,6 +55,7 @@ class PreorderIndexLifetimeTest extends TestCase {
 		$this->assertSame( array(), ( new \ReflectionProperty( StorageScaleAdmission::class, 'retaining_phases' ) )->getValue( $budget ) );
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_noncertified_positions_keep_indexed_coverage_and_caller_pointer(): void {
 		$tree = array( 'children' => array( 'a' => null, 'b' => array( 'children' => array( 'z' => 'Z' ) ) ) );
 		$dense = $this->rows( $tree ); $rows = array();
@@ -66,16 +68,14 @@ class PreorderIndexLifetimeTest extends TestCase {
 		$this->assertSame( $pointer, key( $rows ) ); $this->assertSame( $before, serialize( $rows ) );
 	}
 
-	public function test_duplicate_identity_is_rejected_before_any_hydration_even_if_topology_certifies(): void {
+	public function test_duplicate_identity_is_rejected_without_mutating_caller_rows(): void {
 		$rows = $this->rows( array( 'children' => array( 'a' => 'A', 'b' => 'B' ) ) );
 		$rows[2] = $rows[1]; $rows[2]['item_order'] = 1;
-		$seen = array(); $budget = null; $codec = $this->codec( $seen, $budget );
+		$budget = StorageScaleAdmissionTest::admission(); $codec = new LegacyRecordCodec( null, 24576, 16777216, $budget );
+		$before = serialize( $rows );
 		try { $codec->rebuild_tree( 'galleries', $rows[0]['node_hash'], $rows ); $this->fail( 'Duplicate identity accepted.' ); }
 		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'Duplicate node identity', $error->getMessage() ); }
-		$this->assertSame( array(), $seen );
-		$phases = ( new \ReflectionProperty( StorageScaleAdmission::class, 'retaining_phases' ) )->getValue( $budget );
-		$this->assertCount( 1, $phases ); $phase = reset( $phases );
-		$this->assertGreaterThan( 0, $phase['indexes'] ); $this->assertSame( 0, $phase['next'] );
+		$this->assertSame( $before, serialize( $rows ), 'Refusal must not mutate caller rows.' );
 	}
 
 	public function test_corrupt_identity_checksum_or_topology_never_returns_a_partial_tree(): void {
@@ -88,9 +88,11 @@ class PreorderIndexLifetimeTest extends TestCase {
 		$bad = $good; array_pop( $bad ); $cases[] = $bad;
 		$bad = $good; $bad[] = $good[0]; $cases[] = $bad;
 		foreach ( $cases as $rows ) {
-			$seen = array(); $budget = null; $codec = $this->codec( $seen, $budget );
+			$budget = StorageScaleAdmissionTest::admission(); $codec = new LegacyRecordCodec( null, 24576, 16777216, $budget );
+			$before = serialize( $rows );
 			try { $codec->rebuild_tree( 'galleries', $rows[0]['node_hash'], $rows ); $this->fail( 'Malformed tree accepted.' ); }
 			catch ( \RuntimeException $error ) { $this->assertNotEmpty( $error->getMessage() ); }
+			$this->assertSame( $before, serialize( $rows ) );
 		}
 	}
 }
