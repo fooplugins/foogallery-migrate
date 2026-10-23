@@ -5,6 +5,8 @@
 **Scope:** Storage and storage lifecycle for the existing migration engine  
 **Related future work:** [GitHub issue #14](https://github.com/fooplugins/foogallery-migrate/issues/14), which is deliberately not part of this design
 
+**Planning references:** [Separate v2/config plan](v2-migration-engine-plan.md) and [tracked storage follow-ups](pr15-follow-up-backlog.md). This file is the original proposal on `develop`; PR #15 records the subsequently narrowed storage scope and QA. V2 implementation must wait for Brad's testing and manual merge of PR #15.
+
 ## Decision
 
 Upgrade storage before undertaking any new migration-engine work.
