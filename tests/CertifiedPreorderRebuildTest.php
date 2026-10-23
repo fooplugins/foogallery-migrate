@@ -31,7 +31,6 @@ class CertifiedPreorderRebuildTest extends TestCase {
   $this->fail('Malformed rows accepted.');
  }
  public function test_dense_position_certificate_and_indexed_fallback_preserve_order_pointer_exports(): void {
-  $this->supported();
   foreach(array(0,1,8,9,16,17) as $n) {
    $children=array();for($i=0;$i<$n;++$i){$children[$i%2?'key-'.$i:$i]=array('title'=>'v'.$i,'unknown'=>array(false,null,"\xff"));}
    $tree=array('children'=>$children,'title'=>'root');$rows=$this->rows($tree);$root=$rows[0]['node_hash'];
@@ -54,7 +53,7 @@ class CertifiedPreorderRebuildTest extends TestCase {
   $empty=array();$this->refused(function()use($empty){$this->subject()->rebuild_tree('galleries',str_repeat('0',64),$empty);});
  }
  public function test_deep_nested_wide_and_database_scalars_match_fallback(): void {
-  $this->supported();$tree=array('children'=>array('wide'=>array('children'=>array_fill(0,17,'v')),'empty'=>array('children'=>array()),'scalar'=>false));
+  $tree=array('children'=>array('wide'=>array('children'=>array_fill(0,17,'v')),'empty'=>array('children'=>array()),'scalar'=>false));
   for($i=0;$i<20;++$i){$tree=array('children'=>array('next'=>$tree,'sibling'=>'s'));}
   $rows=$this->rows($tree);$root=$rows[0]['node_hash'];
   foreach($rows as &$r){foreach(array('depth','item_order','payload_bytes') as $f){$r[$f]=(string)$r[$f];}foreach(array('node_hash','parent_node_hash','logical_hash','payload_hash') as $f){if(null!==$r[$f]){$r[$f]=strtoupper($r[$f]);}}}unset($r);
@@ -62,13 +61,13 @@ class CertifiedPreorderRebuildTest extends TestCase {
   foreach(array($rows,$this->sparse(array_reverse($rows))) as $input){$this->assertSame(serialize($tree),serialize($this->subject()->rebuild_tree('galleries',$root,$input)));}
  }
  public function test_breadth_first_dense_input_is_not_preorder_and_is_not_rejected(): void {
-  $this->supported();$tree=array('children'=>array('a'=>array('children'=>array('nested'=>'n')),'b'=>'b'));
+  $tree=array('children'=>array('a'=>array('children'=>array('nested'=>'n')),'b'=>'b'));
   $rows=$this->rows($tree);$root=$rows[0]['node_hash'];$breadth=array($rows[0],$rows[1],$rows[3],$rows[2]);
   $this->assertFalse($this->eligible($this->subject(),$breadth,$root));
   $this->assertSame($tree,$this->subject()->rebuild_tree('galleries',$root,$breadth));
  }
  public function test_bad_topology_envelopes_keys_and_integrity_remain_refused_on_both_paths(): void {
-  $this->supported();$original=$this->rows(array('children'=>array('a'=>'A','b'=>'B'),'title'=>'root'));$root=$original[0]['node_hash'];$s=new LegacyStateCodec();
+  $original=$this->rows(array('children'=>array('a'=>'A','b'=>'B'),'title'=>'root'));$root=$original[0]['node_hash'];$s=new LegacyStateCodec();
   foreach(array('duplicate','orphan','cycle','missing','extra','unrelated-root','order','depth','checksum','digest','projection','coercible','duplicate-key','envelope','count','fields') as $fault) {
    $rows=$original;
    switch($fault) {
@@ -94,7 +93,7 @@ class CertifiedPreorderRebuildTest extends TestCase {
   }
  }
  public function test_plan_only_omits_absent_adjacency_and_explicitly_adds_metadata(): void {
-  $this->supported();$rows=$this->rows(array('children'=>array_fill(0,17,'v')));$b=StorageScaleAdmissionTest::admission();$c=$this->subject($b);$s=new LegacyStateCodec(1048576,64,10000,$b);$d=$c->describe_rows($rows,'caller-rows-rebuild');
+  $rows=$this->rows(array('children'=>array_fill(0,17,'v')));$b=StorageScaleAdmissionTest::admission();$c=$this->subject($b);$s=new LegacyStateCodec(1048576,64,10000,$b);$d=$c->describe_rows($rows,'caller-rows-rebuild');
   $old=Model::rebuild_plan($rows,$d,$s,$b);$new=Model::rebuild_plan($rows,$d,$s,$b,true);
   foreach(array('future','external','events','after_indexes') as $f){$this->assertSame($old[$f],$new[$f]);}
   foreach(array('row_workspace','output_children_growth','visited_growth','sibling_sort_cow') as $f){$this->assertSame($old['parts'][$f],$new['parts'][$f]);}
@@ -110,6 +109,7 @@ class CertifiedPreorderRebuildTest extends TestCase {
   $this->refused(function()use($c,$rows,$root){$c->rebuild_tree('galleries',$root,$rows);});
   $this->assertGreaterThan(10,$calls);
  }
+ /** @group optional_host_diagnostic */
  public function test_actual_private_index_allocation_savings_and_certifier_metadata_bound(): void {
   $this->supported();$rows=$this->rows(array('children'=>array_fill(0,4097,'v')));$root=$rows[0]['node_hash'];$sparse=$this->sparse($rows);
   $c=$this->subject();memory_reset_peak_usage();$before=memory_get_usage(false);

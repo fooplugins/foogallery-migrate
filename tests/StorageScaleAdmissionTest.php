@@ -55,11 +55,13 @@ class StorageScaleAdmissionTest extends TestCase {
 	}
 	/**
 	 * @runInSeparateProcess
-	 * @preserveGlobalState enabled
+	 * @preserveGlobalState disabled
 	 */
 	public function test_original_20k_tree_roundtrip_and_shared_mid_traversal_deadline(): void {
 		// Unrelated suite allocator backing must not preempt this finite deadline scenario.
-		// Preserve parent globals/INI (including its finite budget), not allocator backing.
+		// PHPUnit's child starts at the host default, not the parent's -d limit.
+		ini_set( 'memory_limit', '256M' );
+		$this->assertSame( '256M', ini_get( 'memory_limit' ) );
 		$value = StorageA7Fixture::value( 20000 ); $tree = $value['galleries']['items']['gallery-009'];
 		$budget = self::admission();
 		$codec = new \FooPlugins\FooGalleryMigrate\LegacyRecordCodec( null, 24576, 16777216, $budget );

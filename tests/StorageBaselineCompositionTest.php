@@ -61,7 +61,12 @@ class StorageBaselineCompositionTest extends TestCase {
 		$this->assertIsArray( StoragePreflight::decode_budget( 1, (string) ( $high + 2 ), $baseline->sample(), $policy ) );
 		$this->assertSame( 'foogallery_migrate_storage_decode_refused', StoragePreflight::decode_budget( 1, (string) ( $high + 1 ), $baseline->sample(), $policy )->get_error_code() );
 	}
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
 	public function test_actual_dispatch_preflight_carries_release_policy_entry_sample_across_size_sql() {
+		ini_set( 'memory_limit', '256M' ); $this->assertSame( '256M', ini_get( 'memory_limit' ) );
 		$r = $this->request();
 		$live = str_repeat( 'c', 8 * 1048576 ); $entry = memory_get_usage( true );
 		$GLOBALS['wpdb']->on_size_query = function () use ( &$live ) { $live = null; };
@@ -72,7 +77,12 @@ class StorageBaselineCompositionTest extends TestCase {
 		$this->assertFalse( $result['conversion_ready'] );
 		$this->assertCount( 1, $GLOBALS['wpdb']->sql );
 	}
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
 	public function test_actual_handle_carries_the_pre_unslash_sample_to_release_preflight() {
+		ini_set( 'memory_limit', '256M' ); $this->assertSame( '256M', ini_get( 'memory_limit' ) );
 		$r = $this->request();
 		$_POST = array_merge( $r, array( 'action' => 'foogallery_migrate_storage', 'operation' => 'preflight' ) );
 		$live = str_repeat( 'h', 8 * 1048576 ); $entry = memory_get_usage( true );

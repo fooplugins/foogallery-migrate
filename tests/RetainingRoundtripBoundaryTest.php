@@ -3,7 +3,10 @@ namespace FooPlugins\FooGalleryMigrate\Tests;
 
 use PHPUnit\Framework\TestCase;
 
-/** Finite incompatibility evidence only. NEVER a substitute for original20K. */
+/**
+ * Finite incompatibility evidence only. NEVER a substitute for original20K.
+ * @group optional_host_diagnostic
+ */
 class RetainingRoundtripBoundaryTest extends TestCase {
 	protected function setUp(): void {
 		if ( PHP_VERSION !== '8.5.11' || PHP_OS !== 'Darwin' || php_uname( 'm' ) !== 'arm64' ||

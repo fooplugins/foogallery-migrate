@@ -1789,7 +1789,7 @@ class LegacyTableRepository {
 		}
 		$head = $this->head( $state_key ); $root = $this->collection( $head );
 		if ( ! isset( $root['wrapper'] ) || ! in_array( $head['state_kind'], array( 'map', 'list' ), true ) ) { $this->fail( 'Indexed migratable collection required.' ); }
-		$matches = $this->queue_root_selector( $state_key, $head, $root, array( $uid => true ), true );
+		$matches = $this->exact_collection_targets( $state_key, $head, $root, $uid, true );
 		// Legacy retry selects the first matching root in persisted order. A UID
 		// is reconstructed from typed fields and is not necessarily unique.
 		$row = null;
@@ -1818,7 +1818,8 @@ class LegacyTableRepository {
 		}
 		$head = $this->head( $state_key ); $root = $this->collection( $head );
 		if ( ! isset( $root['wrapper'] ) || ! in_array( $head['state_kind'], array( 'map', 'list' ), true ) ) { $this->fail( 'Indexed checked gallery collection required.' ); }
-		$targets = $this->queue_root_selector( $state_key, $head, $root, '' === $uid ? array() : array( $uid => true ), true, '' === $uid );
+		$targets = '' === $uid ? $this->queue_root_selector( $state_key, $head, $root, array(), true, true )
+			: $this->exact_collection_targets( $state_key, $head, $root, $uid, false );
 		$rows = array();
 		foreach ( $targets as $target ) {
 			$tree = $this->tree_hash( $state_key, $head, $target['node'] );
@@ -2048,6 +2049,111 @@ class LegacyTableRepository {
 		foreach ( $changed['value'] as $field => $value ) {
 			if ( ! array_key_exists( $field, $original ) && ! in_array( $field, array( 'part_of_migration', 'migration_status', 'migrated_title' ), true ) ) { $this->fail( 'Queue transition introduced an unrelated field.' ); }
 		}
+	}
+
+	/**
+	 * A UID contains an unescaped plugin and source ID. Probe every possible
+	 * underscore split through the exact identity index, under the call budget.
+	 * Both migrated flags are probed separately so the first-root lookup uses
+	 * the index order even when a hash has arbitrarily many duplicate roots.
+	 */
+	private function exact_collection_targets( $state_key, $head, $root, $uid, $first_only ) {
+		$type = MigratorSettings::KEY_GALLERIES === $state_key ? 'gallery' : 'album';
+		$prefix = $type . '_';
+		if ( 0 !== strpos( $uid, $prefix ) ) { return array(); }
+		$tail = substr( $uid, strlen( $prefix ) ); $tail_bytes = strlen( $tail ); $position = -1; $splits = 0; $meta = array();
+		while ( false !== ( $position = strpos( $tail, '_', $position + 1 ) ) ) {
+			if ( ++$splits > $this->max_rows ) { $this->fail( 'Collection UID split budget exceeded.' ); }
+			// Each split copies and hashes the complete tail. Charge that work
+			// before creating either substring, even when no indexed row exists.
+			$this->consume( 0, $this->add( $tail_bytes, 64 ) );
+			$plugin = substr( $tail, 0, $position ); $source_id = substr( $tail, $position + 1 );
+			$hash = $this->codec->snapshot_digest( array( 'source-exact-v1', $type, $plugin, $source_id ) );
+			$invalid = $this->read( $this->db->prepare( 'SELECT id FROM `' . $this->table . '` FORCE INDEX (`source_identity`) '
+				. 'WHERE blog_id = %d AND state_id = %d AND generation = %d AND source_identity_hash = UNHEX(%s) '
+				. 'AND is_migrated NOT IN (0,1) AND parent_node_hash IS NULL LIMIT 1',
+				array( $this->blog, $head['id'], $head['active_generation'], $hash ) ) );
+			if ( count( $invalid ) ) { $this->fail( 'Invalid indexed collection migrated flag.' ); }
+			foreach ( array( 0, 1 ) as $flag ) {
+				$last_order = -1; $last_id = 0;
+				do {
+					$args = array( $this->blog, $head['id'], $head['active_generation'], $hash, $flag );
+					$cursor = $first_only ? '' : ' AND (item_order > %d OR (item_order = %d AND id > %d))';
+					if ( ! $first_only ) { $args = array_merge( $args, array( $last_order, $last_order, $last_id ) ); }
+					$args[] = $first_only ? 1 : 100;
+					$page = $this->read( $this->db->prepare( 'SELECT id, item_order, HEX(node_hash) AS node_hash, object_type, migration_status, is_selected, is_migrated, '
+						. 'OCTET_LENGTH(source_plugin_value) AS plugin_bytes, OCTET_LENGTH(source_id_value) AS id_bytes, OCTET_LENGTH(mutable_payload) AS mutable_bytes, '
+						. 'HEX(source_plugin_hash) AS plugin_hash, HEX(source_identity_hash) AS identity_hash FROM `' . $this->table . '` FORCE INDEX (`source_identity`) '
+						. 'WHERE blog_id = %d AND state_id = %d AND generation = %d AND source_identity_hash = UNHEX(%s) AND is_migrated = %d '
+						. 'AND parent_node_hash IS NULL' . $cursor . ' ORDER BY item_order ASC, id ASC LIMIT %d', $args ) );
+					if ( count( $page ) > ( $first_only ? 1 : 100 ) ) { $this->fail( 'Invalid indexed collection page.' ); }
+					foreach ( $page as $row ) {
+						$id = $this->number( $row['id'] ); $order = $this->number( $row['item_order'] );
+						$plugin_bytes = $this->number( $row['plugin_bytes'] ); $id_bytes = $this->number( $row['id_bytes'] );
+						$mutable_bytes = $this->number( $row['mutable_bytes'] );
+						if ( $id < 1 || $order < $last_order || ( $order === $last_order && $id <= $last_id ) ||
+							$row['object_type'] !== $type || $this->number( $row['is_migrated'] ) !== $flag ||
+							$this->hex( $row['identity_hash'] ) !== $hash ||
+							$plugin_bytes > LegacyTableReader::MAX_RECORD_BYTES || $id_bytes > LegacyTableReader::MAX_RECORD_BYTES ||
+							$mutable_bytes > LegacyTableReader::MAX_RECORD_BYTES ||
+							! in_array( $this->number( $row['is_selected'] ), array( 0, 1 ), true ) || ! is_string( $row['migration_status'] ) ) {
+							$this->fail( 'Invalid indexed collection identity metadata.' );
+						}
+						$this->hex( $row['node_hash'] ); $this->hex( $row['plugin_hash'] );
+						$this->consume( 1, $this->add( $this->add( $plugin_bytes, $id_bytes ), $mutable_bytes ) );
+						$meta[] = $row; $last_order = $order; $last_id = $id;
+						if ( count( $meta ) > $root['root_count'] ) { $this->fail( 'Extra indexed collection roots.' ); }
+					}
+				} while ( ! $first_only && count( $page ) === 100 );
+			}
+		}
+		if ( ! count( $meta ) ) { return array(); }
+		usort( $meta, function ( $a, $b ) {
+			$left = (int) $a['item_order']; $right = (int) $b['item_order'];
+			if ( $left !== $right ) { return $left < $right ? -1 : 1; }
+			$left = (int) $a['id']; $right = (int) $b['id'];
+			return $left === $right ? 0 : ( $left < $right ? -1 : 1 );
+		} );
+		if ( $first_only ) { $meta = array( $meta[0] ); }
+		$targets = array(); $seen = array(); $previous_order = -1;
+		foreach ( array_chunk( $meta, 100 ) as $batch ) {
+			$where = array(); $args = array( $this->blog, $head['id'], $head['active_generation'] ); $indexed = array();
+			foreach ( $batch as $row ) {
+				$id = $this->number( $row['id'] ); $order = $this->number( $row['item_order'] );
+				if ( isset( $seen[$id] ) || $order <= $previous_order ) { $this->fail( 'Duplicate indexed collection root/order.' ); }
+				$seen[$id] = true; $previous_order = $order; $indexed[$id] = $row;
+				$where[] = '(id = %d AND OCTET_LENGTH(source_plugin_value) = %d AND OCTET_LENGTH(source_id_value) = %d AND OCTET_LENGTH(mutable_payload) = %d)';
+				$args = array_merge( $args, array( $id, $this->number( $row['plugin_bytes'] ), $this->number( $row['id_bytes'] ), $this->number( $row['mutable_bytes'] ) ) );
+			}
+			$raw = $this->read( $this->db->prepare( 'SELECT id, source_plugin_value, source_id_value, mutable_payload FROM `' . $this->table . '` '
+				. 'WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL AND (' . implode( ' OR ', $where ) . ') LIMIT 100', $args ) );
+			if ( count( $raw ) !== count( $batch ) ) { $this->fail( 'Sized indexed collection identity changed.' ); }
+			$raw_by_id = array();
+			foreach ( $raw as $entry ) {
+				$id = $this->number( $entry['id'] );
+				if ( ! isset( $indexed[$id] ) || isset( $raw_by_id[$id] ) || ! is_string( $entry['source_plugin_value'] ) ||
+					! is_string( $entry['source_id_value'] ) || ! is_string( $entry['mutable_payload'] ) ) { $this->fail( 'Duplicate or missing indexed collection identity.' ); }
+				$raw_by_id[$id] = $entry;
+			}
+			foreach ( $batch as $row ) {
+				$id = $this->number( $row['id'] );
+				if ( ! isset( $raw_by_id[$id] ) ) { $this->fail( 'Missing indexed collection identity.' ); }
+				$entry = $raw_by_id[$id]; $plugin = $this->codec->decode( $entry['source_plugin_value'] );
+				$source_id = $this->codec->decode( $entry['source_id_value'] ); $mutable = $this->codec->decode( $entry['mutable_payload'] );
+				if ( ! is_string( $plugin ) || ! is_string( $source_id ) || ! is_array( $mutable ) ||
+					$this->codec->encode( $plugin ) !== $entry['source_plugin_value'] || $this->codec->encode( $source_id ) !== $entry['source_id_value'] ||
+					$this->codec->encode( $mutable ) !== $entry['mutable_payload'] ||
+					$this->hex( $row['plugin_hash'] ) !== $this->codec->key_hash( $plugin ) ||
+					$this->hex( $row['identity_hash'] ) !== $this->codec->snapshot_digest( array( 'source-exact-v1', $type, $plugin, $source_id ) ) ||
+					$this->number( $row['is_selected'] ) !== ( empty( $mutable['part_of_migration'] ) ? 0 : 1 ) ||
+					$this->number( $row['is_migrated'] ) !== ( empty( $mutable['migrated'] ) ? 0 : 1 ) ||
+					$row['migration_status'] !== ( isset( $mutable['migration_status'] ) ? $mutable['migration_status'] : '' ) ||
+					$uid !== $type . '_' . $plugin . '_' . $source_id ) { $this->fail( 'Indexed collection identity projection mismatch.' ); }
+				$targets[] = array( 'id' => $id, 'order' => $this->number( $row['item_order'] ), 'node' => $this->hex( $row['node_hash'] ),
+					'type' => $type, 'plugin' => $plugin, 'source_id' => $source_id, 'uid' => $uid, 'matched' => true );
+			}
+		}
+		return $targets;
 	}
 
 	/** Fixed metadata pages, then exact-size projection pages; no unrelated tree payload. */

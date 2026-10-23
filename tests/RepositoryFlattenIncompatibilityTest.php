@@ -15,6 +15,7 @@ class RepositoryFlattenIncompatibilityTest extends TestCase {
 		$this->assertTrue( is_wp_error( StoragePreflight::decode_budget( 12582913, '128M', 0, $policy ) ) );
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_explicit_legacy_fallback_original20k_and_model_pending_keep_aggregate_refusal(): void {
 		// The subprocess deliberately has NO wp_json_encode, unlike this bootstrap.
 		if ( PHP_VERSION !== '8.5.11' || PHP_OS !== 'Darwin' || php_uname( 'm' ) !== 'arm64' ||

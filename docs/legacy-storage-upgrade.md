@@ -1,6 +1,8 @@
 # Legacy storage upgrade for large sites
 
-**Status:** Integrated candidate, supported storage paths and basic administration validated; final qualification remains. Not release-ready.
+**Status:** Single-site first-release candidate passed scoped implementation and independent QA; final local commit pending. Not published or approved for release.
+
+**Qualification:** 2026-10-23; current results, package identity and retained evidence are in [the final acceptance closure](dev-plan.md#final-acceptance-closure). Runtime validation is complete within the documented limits; historical PR inventory below is not the remaining backlog.
 
 **Design date:** 2026-08-28
 
@@ -24,6 +26,8 @@ This project does **not** create or redesign a migration engine. It preserves th
 
 Table mode is an administrator-confirmed storage choice. It is never enabled automatically.
 
+Redis is not a third storage mode or a dependency. A site may use Redis through WordPress's optional persistent object cache; the option or MySQL tables remain authoritative. Caching a large serialized option does not avoid its PHP decode-memory cost. Validation includes persistent caching so authority switches and cleanup cannot leave stale owned cache entries.
+
 ## Approved first-release boundary
 
 On 2026-10-22 Brad approved all five cuts in the [October 20 PR simplification proposal](https://github.com/fooplugins/foogallery-migrate/pull/15#issuecomment-6287530658). That approval supersedes the broader original design and the S0–S9 plan committed in `cb8aa51` where they conflict with this boundary. The initial approval covered documentation; Brad's subsequent development request authorizes implementation within this boundary, **not public release**. Historical checkpoint “not waived” statements remain historical, not authority to undo these approved amendments.
@@ -38,7 +42,7 @@ Authorization, default option behavior, identities/edits, one authoritative back
 
 ### Two delivery milestones
 
-- **M1 — Testable integrated candidate:** In a disposable single-site environment, use production entry points to enable tables, run a representative large migration, edit table-backed state, reverse from current data, and clean up/uninstall without touching output. Prove the journey on the runtime floor and a matching ZIP without dev dependencies. Begin trying it in R0; repair the first failing step in R1. M1 is controlled-test evidence, not permission for general use.
+- **M1 — Testable integrated candidate:** In a disposable single-site environment, use production entry points to enable tables, run a representative large migration, edit table-backed state, and clean up/uninstall without touching output. Separately prove successful reversal from current edited data when it fits safely, and refusal without authority/data changes when oversized. Exercise the supported journeys on the runtime floor and a matching ZIP without dev dependencies. Begin trying them in R0; repair the first failing step in R1. M1 is controlled-test evidence, not permission for general use.
 - **M2 — First-release readiness:** Finish all supported bounded paths, parity, fault/recovery/cleanup checks and basic recommendations; pass the maintained release suite and source/package validation. Deferred features do not block M2. Publishing still requires explicit approval.
 
 [dev-plan.md](dev-plan.md) is the sole execution tracker, including test classification and the workflow rules for avoiding repeated blockers. Later sections retain detailed storage contracts; any network or advanced-advisor material explicitly marked deferred is reference only. New requirements outside this approved boundary require a new scope decision.
@@ -64,7 +68,7 @@ Source entry points: [table repository](../includes/class-legacy-table-repositor
 
 ### Implementation priorities at the reviewed PR revision
 
-This list records the original blockers at `206655c`, not the current remaining backlog. R0–R3 have since been implemented and validated in scoped commits; **R4 final maintained-suite and package qualification** is the remaining priority. Current evidence, exceptions and commit identities live only in [the execution tracker](dev-plan.md), not this historical inventory.
+This list records the original blockers at `206655c`, not the current remaining backlog. R0–R4 implementation and qualification have since passed within the approved scope; final local commit is pending. Current evidence, limits and commit identities live in [the execution tracker](dev-plan.md), not this historical inventory. Deferred network/engine/advisor work is not an unfinished first-release requirement.
 
 1. **Run the journey and classify the baseline (R0).** Prepare one owned disposable runner and attempt the public customer path immediately. Record its first failure and classify suite failures as product/safety/performance, environment, or superseded implementation diagnostics. Historical focused passes do not certify this head.
 2. **Make one integrated candidate testable (R1 / M1).** The shipped [capacity policy](../includes/storage-capacity-policy.json) has empty classes and null digests, so public conversion refuses. Establish a small evidenced release policy without customer calibration, then fix the first failing migration/edit/reversal/cleanup step. [Uninstall](../uninstall.php) still requires excluded `vendor/autoload.php`; [MigratedStore](../includes/class-migrated-store.php) targets the older table layout. Complete essential single-site cleanup/package loading as part of the journey, not after UI polish. Use real SQL/runtime-floor/source+ZIP evidence, not an injected policy.
@@ -75,6 +79,8 @@ This list records the original blockers at `206655c`, not the current remaining 
 Multisite table enablement, network lifecycle and advanced advisor/convenience features are **deferred**, not R5 or another required release task. The [ordered plan](dev-plan.md#ordered-work) supersedes the previous full-roadmap sequence.
 
 ### Evidence and scope qualifications
+
+These bullets describe the reviewed PR and original checkpoints. Current candidate acceptance is recorded separately above; retain their original limitations rather than treating an old source review as proof of the final source.
 
 - [The October 20 review checkpoint](pr15-review-checkpoint-2026-10-20.md) records a failing/timed-out full PHPUnit run and explicitly incomplete release acceptance. Its focused passes and package checks apply to that checkpoint, not automatically to this reviewed head.
 - [The single-site release scope](storage-single-site-release-scope.md) records empty-policy admission and outstanding positive native 20K / actual 10K AIGPL journeys. Retain realistic positive workload coverage; classify historical exact-byte/host-qualification evidence under the approved native-text vs codec/refusal split. A fixture double or injected policy is not a production release pass.
@@ -552,6 +558,8 @@ Those limitations must be visible in release notes and benchmarks. Fixing them w
 
 Image-tag fallback resolves at most 100 requested URLs against revision-pinned history pages. It retains only the current requested set and results, but an unresolved URL can require a full history scan for each fallback page. This is a bounded-memory path, not an indexed-URL or constant-time claim; source adapters may still return their full fallback array.
 
+Table storage does not make every bulk action unlimited. The shared repository operation budget remains 10,000 admitted rows, 16 MiB of admitted bytes and 10 seconds by default, including applicable old/new affected trees. Whole-collection queue changes and the global gallery check may refuse when that operation cannot fit; the collection-wide root selector also retains its 10,000-root cap. Fixed-page reads and exact-gallery actions must not inherit that cap merely because unrelated roots exist. A successful 20,000-record conversion or fixed-page benchmark is not a promise that a 20,000-root bulk queue/check action fits one request.
+
 ## Storage recommendation policy
 
 The first release includes a basic size-based suggestion, not an advanced notification system.
@@ -889,7 +897,8 @@ The **first release** is ready at M2 when the following pass. Deferred network/a
 - Upgrade/activation remain option-backed and storage-neutral without an explicit administrator choice; multisite options remain compatible and table operations refuse safely.
 - Existing compact and pre-compaction state remains readable in option mode; unsupported conversion shapes refuse without silent normalization or data loss.
 - Existing source adapters, identities, ordering, queue/status/retry semantics, output, content behavior and AJAX flow remain unchanged.
-- A representative large real WordPress migration can enable tables, migrate, edit, reverse from current data and clean up on the runtime floor and matching production ZIP without dev dependencies.
+- A representative large real WordPress migration can enable tables, migrate, edit and clean up on the runtime floor and matching production ZIP without dev dependencies.
+- A fitting current-data reversal preserves table edits (the final PHP5.4 ZIP proves1K); oversized reversal refuses without changing authority or data (the modern10K journey proves refusal, not successful reversal). These are separate size/runtime receipts, not a claim that the large10K journey positively reversed on the floor.
 - Supported native-text conversion produces equivalent logical state/runtime objects; arbitrary-byte codec/refusal coverage is separate and does not weaken integrity.
 - Table-mode list/log/content/history/queue/next-object operations do not rebuild unrelated state. Mutations affect only required records/trees; content and tag queue checkpoints remain atomic.
 - Show-all uses internal batches with its documented O(N) output limitation; source-discovery and largest-active-tree limits are measured and disclosed.

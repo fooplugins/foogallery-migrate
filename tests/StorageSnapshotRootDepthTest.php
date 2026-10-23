@@ -107,7 +107,12 @@ class StorageSnapshotRootDepthTest extends TestCase {
 			catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'depth', $error->getMessage() ); }
 		}
 	}
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
 	public function test_original20k_with_logical8_unknown_header_write_and_authentic_read(): void {
+		ini_set( 'memory_limit', '256M' ); $this->assertSame( '256M', ini_get( 'memory_limit' ) );
 		$original = StorageA7Fixture::value( 20000 );
 		$this->assertSame( '6022f4ad5a1e8ef9a39a5b5284dc576c7eb75d02a0d69949a58e3967ca9dd4be', hash( 'sha256', serialize( $original ) ) );
 		$value = $original['galleries']; $value['unknown'] = $this->wrapper( 8 )['unknown'];

@@ -93,7 +93,6 @@ class GenericRetainingPhaseTest extends TestCase {
   $b=StorageScaleAdmissionTest::admission();
   $c=new \FooPlugins\FooGalleryMigrate\LegacyRecordCodec(null,24576,16777216,$b);
   $codec=new \FooPlugins\FooGalleryMigrate\LegacyStateCodec(1048576,64,10000,$b);
-  if(!\FooPlugins\FooGalleryMigrate\GenericRetainingModel::supports($c,$codec,$b)){$this->markTestSkipped('Finite native retaining profile unsupported.');}
   $b->admit_additional(100);
   $retained=array();
   $this->refused(function()use($b,$c,&$retained){
@@ -101,17 +100,25 @@ class GenericRetainingPhaseTest extends TestCase {
     $retained[]=$row; $b->admit_additional(50); throw new \RuntimeException('Caller interruption.');
    });
   });
+  $legacy=new \ReflectionProperty(Admission::class,'additional_bytes');
+  $this->assertSame(1,count($retained)); $this->assertSame(150,$legacy->getValue($b));
+ }
+ /** @group optional_host_diagnostic */
+ public function test_qualified_interrupted_callback_keeps_retaining_phase_pending(): void {
+  $b=StorageScaleAdmissionTest::admission();
+  $c=new \FooPlugins\FooGalleryMigrate\LegacyRecordCodec(null,24576,16777216,$b);
+  $codec=new \FooPlugins\FooGalleryMigrate\LegacyStateCodec(1048576,64,10000,$b);
+  if(!\FooPlugins\FooGalleryMigrate\GenericRetainingModel::supports($c,$codec,$b)){$this->markTestSkipped('Finite native retaining profile unsupported.');}
+  $this->refused(function()use($c,$b){$c->flatten_tree('galleries','k',array('children'=>array('one'=>'x')),0,function()use($b){$b->admit_additional(50);throw new \RuntimeException('Caller interruption.');});});
   $pending=new \ReflectionProperty(Admission::class,'retaining_pending');
   $phases=new \ReflectionProperty(Admission::class,'retaining_phases');
-  $legacy=new \ReflectionProperty(Admission::class,'additional_bytes');
-  $this->assertSame(1,count($retained)); $this->assertSame(1,count($phases->getValue($b)));
-  $this->assertGreaterThan(0,$pending->getValue($b)); $this->assertSame(150,$legacy->getValue($b));
+  $this->assertSame(1,count($phases->getValue($b)));
+  $this->assertGreaterThan(0,$pending->getValue($b));
  }
  public function test_declared_topology_is_authenticated_before_child_bucket_growth(): void {
   $b=StorageScaleAdmissionTest::admission();
   $c=new \FooPlugins\FooGalleryMigrate\LegacyRecordCodec(null,24576,16777216,$b);
   $codec=new \FooPlugins\FooGalleryMigrate\LegacyStateCodec(1048576,64,10000,$b);
-  if(!\FooPlugins\FooGalleryMigrate\GenericRetainingModel::supports($c,$codec,$b)){$this->markTestSkipped('Finite native retaining profile unsupported.');}
   $rows=array(); $tree=array('children'=>array('one'=>'x','two'=>'y'));
   $c->flatten_tree('galleries','k',$tree,0,function($row)use(&$rows){$rows[]=$row;});
   $reordered=array_reverse($rows);
@@ -119,6 +126,20 @@ class GenericRetainingPhaseTest extends TestCase {
   $base=$codec->decode_record_payload($rows[0]['payload']); $base['child_count']=0;
   $rows[0]['payload']=$codec->encode_record_payload($base);
   $rows[0]['payload_hash']=hash('sha256',$rows[0]['payload']);
+  $before=serialize($rows);
+  try{$c->rebuild_tree('galleries',$rows[0]['node_hash'],$rows);$this->fail('Untrusted child count admitted growth.');}
+  catch(\RuntimeException $e){$this->assertNotEmpty($e->getMessage());}
+  $this->assertSame($before,serialize($rows));
+ }
+ /** @group optional_host_diagnostic */
+ public function test_qualified_declared_topology_refuses_before_child_bucket_growth(): void {
+  $b=StorageScaleAdmissionTest::admission();
+  $c=new \FooPlugins\FooGalleryMigrate\LegacyRecordCodec(null,24576,16777216,$b);
+  $codec=new \FooPlugins\FooGalleryMigrate\LegacyStateCodec(1048576,64,10000,$b);
+  if(!\FooPlugins\FooGalleryMigrate\GenericRetainingModel::supports($c,$codec,$b)){$this->markTestSkipped('Finite native retaining profile unsupported.');}
+  $rows=array();$c->flatten_tree('galleries','k',array('children'=>array('one'=>'x','two'=>'y')),0,function($row)use(&$rows){$rows[]=$row;});
+  $base=$codec->decode_record_payload($rows[0]['payload']);$base['child_count']=0;
+  $rows[0]['payload']=$codec->encode_record_payload($base);$rows[0]['payload_hash']=hash('sha256',$rows[0]['payload']);
   try{$c->rebuild_tree('galleries',$rows[0]['node_hash'],$rows);$this->fail('Untrusted child count admitted growth.');}
   catch(\RuntimeException $e){$this->assertStringContainsString('Child bucket exceeds declared bound',$e->getMessage());}
  }

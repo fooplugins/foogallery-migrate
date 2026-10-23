@@ -81,6 +81,15 @@ class RebuildLifetimeTest extends TestCase {
   $this->assertSame($before,serialize($export));
   $this->assertSame(serialize($tree),serialize($c->rebuild_tree('galleries',$root,$reordered)));
  }
+ public function test_orphan_row_refuses_without_mutating_caller_rows(): void {
+  $b=StorageScaleAdmissionTest::admission();
+  $c=new \FooPlugins\FooGalleryMigrate\LegacyRecordCodec(null,24576,16777216,$b);
+  $rows=array();$c->flatten_tree('galleries','k',array('children'=>array('one'=>'v')),0,function($r)use(&$rows){$rows[]=$r;});
+  $rows[1]['parent_node_hash']=str_repeat('f',64);$before=serialize($rows);
+  $this->refused(function()use($c,$rows){$c->rebuild_tree('galleries',$rows[0]['node_hash'],$rows);});
+  $this->assertSame($before,serialize($rows));
+ }
+ /** @group optional_host_diagnostic */
  public function test_interrupted_index_construction_keeps_all_uncompleted_growth_pending(): void {
   $b=StorageScaleAdmissionTest::admission();
   $c=new \FooPlugins\FooGalleryMigrate\LegacyRecordCodec(null,24576,16777216,$b);

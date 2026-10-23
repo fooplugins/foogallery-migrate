@@ -4,7 +4,10 @@ namespace FooPlugins\FooGalleryMigrate\Tests;
 use FooPlugins\FooGalleryMigrate\GenericRetainingModel;
 use PHPUnit\Framework\TestCase;
 
-/** Finite host qualification only. Does not skip or replace original acceptance. */
+/**
+ * Finite host qualification only. Does not skip or replace original acceptance.
+ * @group optional_host_diagnostic
+ */
 class GenericRetainingProducerTest extends TestCase {
  protected function setUp(): void {
   if ( PHP_VERSION !== '8.5.11' || PHP_OS !== 'Darwin' || php_uname( 'm' ) !== 'arm64' ||

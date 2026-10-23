@@ -47,10 +47,16 @@ class StorageSnapshotScaleTest extends TestCase {
 			$this->assertTrue( $refused ); $this->assertSame( array(), $db->queries ); $this->assertSame( array(), $db->events );
 		}
 	}
-	/** @dataProvider postStageFailures */
+	/**
+	 * @dataProvider postStageFailures
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
 	public function test_original20k_failed_replacement_restores_existing_head_and_authority( $fault ): void {
+		ini_set( 'memory_limit', '256M' ); $this->assertSame( '256M', ini_get( 'memory_limit' ) );
 		$value = StorageA7Fixture::value( 20000 ); $db = new SnapshotScaleConnection();
-		$this->snapshot( $db, StorageScaleAdmissionTest::admission() )->replace_many( $this->changes( $value ) );
+		// The existing generation is setup for fault semantics, not a wall-time benchmark.
+		$this->snapshot( $db, StorageScaleAdmissionTest::admission( null, function () { return 100.0; } ) )->replace_many( $this->changes( StorageA7Fixture::value( 1000 ) ) );
 		$heads = $db->heads; $records = $db->records; $db->events = array(); $db->emitted = 0; $db->fetches = 0;
 		$authority = $GLOBALS['foogallery_migrate_test_options'];
 		$now = 100.0; $read_samples = 0; $read_started = false;
@@ -65,19 +71,24 @@ class StorageSnapshotScaleTest extends TestCase {
 			return array( ini_get( 'memory_limit' ), memory_get_usage( true ) );
 		};
 		$b = StorageScaleAdmissionTest::admission( null, function () use ( &$now ) { return $now; }, $memory );
-		$changes = $this->changes( $value ); $changes[0]['expected_revision'] = 1; $refused = false;
+		$changes = $this->changes( $value ); $changes[0]['expected_revision'] = 1; $refused = false; $reason = '';
 		try { $this->snapshot( $db, $b )->replace_many( $changes ); }
-		catch ( \RuntimeException $error ) { $refused = true; }
+		catch ( \RuntimeException $error ) { $refused = true; $reason = $error->getMessage(); }
 		$this->assertTrue( $refused ); $this->assertSame( $heads, $db->heads ); $this->assertSame( $records, $db->records );
 		$this->assertSame( $authority, $GLOBALS['foogallery_migrate_test_options'] );
 		$this->assertSame( 1, $db->events['rollback'] );
-		if ( 'after-publish' === $fault ) { $this->assertSame( 1, $db->events['publish'] ); } else { $this->assertArrayNotHasKey( 'publish', $db->events ); }
+		if ( 'after-publish' === $fault ) { $this->assertSame( 1, isset( $db->events['publish'] ) ? $db->events['publish'] : 0, $reason ); } else { $this->assertArrayNotHasKey( 'publish', $db->events ); }
 		$this->assertArrayNotHasKey( 'commit', $db->events );
 		$this->assertSame( 'stage-deadline' === $fault ? 100 : 20208, $db->emitted );
-		if ( 'readback-deadline' === $fault ) { $this->assertSame( 3, $read_samples ); $this->assertSame( 1, $db->fetches ); }
+		if ( 'readback-deadline' === $fault ) { $this->assertSame( 3, $read_samples, $reason ); $this->assertSame( 1, $db->fetches ); }
 	}
 	public static function postStageFailures(): array { return array( array( 'stage-deadline' ), array( 'readback-deadline' ), array( 'missing-row' ), array( 'after-publish' ) ); }
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
 	public function test_original20k_read_bounded_obeys_lower_policy_and_does_not_reset_domain(): void {
+		ini_set( 'memory_limit', '256M' ); $this->assertSame( '256M', ini_get( 'memory_limit' ) );
 		$value = StorageA7Fixture::value( 20000 ); $db = new SnapshotScaleConnection();
 		$b = StorageScaleAdmissionTest::admission( self::exact_policy(), function () { return 100.0; } );
 		$this->snapshot( $db, $b )->replace_many( $this->changes( $value ) ); $heads = $db->heads; $records = $db->records;
@@ -133,11 +144,12 @@ class StorageSnapshotScaleTest extends TestCase {
 	}
 	/**
 	 * @runInSeparateProcess
-	 * @preserveGlobalState enabled
+	 * @preserveGlobalState disabled
 	 */
 	public function test_original20k_shared_deadline_expires_mid_stage_and_rolls_back(): void {
 		// Unrelated suite allocator backing must not preempt this finite deadline scenario.
-		// Preserve parent globals/INI (including its finite budget), not allocator backing.
+		// PHPUnit's child starts at the host default, not the parent's -d limit.
+		ini_set( 'memory_limit', '256M' ); $this->assertSame( '256M', ini_get( 'memory_limit' ) );
 		$value = StorageA7Fixture::value( 20000 ); $db = new SnapshotScaleConnection(); $now = 100.0;
 		$budget = StorageScaleAdmissionTest::admission( null, function () use ( &$now ) { return $now; } );
 		$db->after_event = function ( $event, $db ) use ( &$now ) { if ( 'record-insert' === $event && 100 === $db->emitted ) { $now = 111.0; } };
@@ -154,7 +166,12 @@ class StorageSnapshotScaleTest extends TestCase {
 		try { $this->snapshot( $db, StorageScaleAdmissionTest::admission( $p ) )->replace_many( $this->changes( StorageA7Fixture::value( 20000 ) ) ); $this->fail( 'Lower scale depth was ignored.' ); }
 		catch ( \RuntimeException $error ) { $this->assertSame( array(), $db->events ); $this->assertSame( array(), $db->queries ); }
 	}
+	/**
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
 	public function test_original20k_actual_snapshot_replace_and_readback(): void {
+		ini_set( 'memory_limit', '256M' ); $this->assertSame( '256M', ini_get( 'memory_limit' ) );
 		$value = StorageA7Fixture::value( 20000 ); $raw = serialize( $value );
 		$this->assertSame( '6022f4ad5a1e8ef9a39a5b5284dc576c7eb75d02a0d69949a58e3967ca9dd4be', hash( 'sha256', $raw ) );
 		$db = new SnapshotScaleConnection(); $phase = 'preflight'; $samples = array();
@@ -167,7 +184,8 @@ class StorageSnapshotScaleTest extends TestCase {
 			return array( ini_get( 'memory_limit' ), memory_get_usage( true ) );
 		};
 		$db->after_event = function ( $event ) use ( &$phase ) { if ( 'record-insert' === $event ) { $phase = 'stage'; } elseif ( 'fetch' === $event ) { $phase = 'driver-buffer/readback'; } };
-		$started = microtime( true ); $budget = StorageScaleAdmissionTest::admission( $p, null, $memory );
+		// Assert exact data/row/digest behavior; elapsed-time refusal has its own injected-clock test.
+		$started = microtime( true ); $budget = StorageScaleAdmissionTest::admission( $p, function () { return 100.0; }, $memory );
 		$this->assertSame( $raw, serialize( $budget->decoder( strlen( $raw ) )->decode( $raw ) ) );
 		$snapshot = $this->snapshot( $db, $budget );
 		$result = $snapshot->replace_many( $this->changes( $value ) );
@@ -182,6 +200,7 @@ class StorageSnapshotScaleTest extends TestCase {
 		$this->assertSame( 1, $db->events['commit'] ); $this->assertArrayNotHasKey( 'rollback', $db->events );
 		$budget->tick();
 		self::$receipt = array( 'host_only' => true, 'native_sql' => false, 'profile_approved' => false, 'method_approved' => false,
+			'clock' => 'controlled_for_semantics_not_elapsed_time_qualification',
 			'raw_sha256' => hash( 'sha256', $raw ), 'emitted_records' => $db->emitted, 'heads' => count( $db->heads ),
 			'encoded_record_bytes' => $bytes, 'root_bytes' => strlen( $head['root_payload'] ), 'key_bytes' => strlen( $head['state_key_value'] ),
 			'fetches' => $db->fetches, 'fetched_rows' => $db->fetched_rows, 'fetched_encoded_bytes' => $db->fetched_bytes,
