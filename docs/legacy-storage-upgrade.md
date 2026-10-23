@@ -1,6 +1,6 @@
 # Legacy storage upgrade for large sites
 
-**Status:** First-release scope approved; partially implemented by PR #15; not release-ready
+**Status:** Integrated candidate, supported storage paths and basic administration validated; final qualification remains. Not release-ready.
 
 **Design date:** 2026-08-28
 
@@ -8,7 +8,7 @@
 
 **Scope:** Single-site table storage and essential lifecycle for the existing migration engine
 
-**Scope approval:** Brad adopted the five simplification cuts on 2026-10-22; documentation only, implementation remains stopped.
+**Scope approval:** Brad adopted the five simplification cuts on 2026-10-22, then authorized development using the plan and instructed “dont worry about budget - just go”. Local development/validation/commits are authorized; publishing is not.
 
 **Execution tracker:** [Prioritised completion plan](dev-plan.md)
 
@@ -26,7 +26,7 @@ Table mode is an administrator-confirmed storage choice. It is never enabled aut
 
 ## Approved first-release boundary
 
-On 2026-10-22 Brad approved all five cuts in the [October 20 PR simplification proposal](https://github.com/fooplugins/foogallery-migrate/pull/15#issuecomment-6287530658). That approval supersedes the broader original design and the S0–S9 plan committed in `cb8aa51` where they conflict with this boundary. It authorizes this documentation update, **not implementation or release**. Historical checkpoint “not waived” statements remain historical, not authority to undo these approved amendments.
+On 2026-10-22 Brad approved all five cuts in the [October 20 PR simplification proposal](https://github.com/fooplugins/foogallery-migrate/pull/15#issuecomment-6287530658). That approval supersedes the broader original design and the S0–S9 plan committed in `cb8aa51` where they conflict with this boundary. The initial approval covered documentation; Brad's subsequent development request authorizes implementation within this boundary, **not public release**. Historical checkpoint “not waived” statements remain historical, not authority to undo these approved amendments.
 
 1. **Release-owned capacity policy, not customer calibration.** Ship a small tested policy with conservative limits/headroom and clear refusal conditions. Detailed allocator, binary/host identity and dataset qualification belong in engineering diagnostics, not customer prerequisites. Retain useful PR foundations; simplify obsolete machinery with reviewed replacement coverage.
 2. **Single-site table mode only.** Multisite continues on options, with table provisioning/conversion explicitly unavailable. Defer network registry/provisioning, shared-network lifecycle expansion, large-network uninstall preparation and the topology matrix. Existing shared table names/`blog_id` fields need not be rewritten merely to narrow the release.
@@ -62,7 +62,9 @@ This section is a source-review snapshot of [PR #15](https://github.com/fooplugi
 
 Source entry points: [table repository](../includes/class-legacy-table-repository.php), [history repository](../includes/class-migrated-history-repository.php), [content repository](../includes/class-content-scan-repository.php), [schema](../includes/class-legacy-storage-schema.php), [authority](../includes/class-storage-authority.php), and [storage operations](../includes/class-storage-operations.php).
 
-### Release blockers and remaining work, in priority order
+### Implementation priorities at the reviewed PR revision
+
+This list records the original blockers at `206655c`, not the current remaining backlog. R0–R3 have since been implemented and validated in scoped commits; **R4 final maintained-suite and package qualification** is the remaining priority. Current evidence, exceptions and commit identities live only in [the execution tracker](dev-plan.md), not this historical inventory.
 
 1. **Run the journey and classify the baseline (R0).** Prepare one owned disposable runner and attempt the public customer path immediately. Record its first failure and classify suite failures as product/safety/performance, environment, or superseded implementation diagnostics. Historical focused passes do not certify this head.
 2. **Make one integrated candidate testable (R1 / M1).** The shipped [capacity policy](../includes/storage-capacity-policy.json) has empty classes and null digests, so public conversion refuses. Establish a small evidenced release policy without customer calibration, then fix the first failing migration/edit/reversal/cleanup step. [Uninstall](../uninstall.php) still requires excluded `vendor/autoload.php`; [MigratedStore](../includes/class-migrated-store.php) targets the older table layout. Complete essential single-site cleanup/package loading as part of the journey, not after UI polish. Use real SQL/runtime-floor/source+ZIP evidence, not an injected policy.
@@ -548,12 +550,14 @@ Performance claims exclude initial/forced source refresh, adapter fallback scans
 
 Those limitations must be visible in release notes and benchmarks. Fixing them would require source/engine contract changes and belongs to separate future work.
 
+Image-tag fallback resolves at most 100 requested URLs against revision-pinned history pages. It retains only the current requested set and results, but an unresolved URL can require a full history scan for each fallback page. This is a bounded-memory path, not an indexed-URL or constant-time claim; source adapters may still return their full fallback array.
+
 ## Storage recommendation policy
 
 The first release includes a basic size-based suggestion, not an advanced notification system.
 
-- Observe serialized bytes using SQL `LENGTH()` on the fixed option name without hydrating its value. Reuse cheap existing metrics where available; do not invoke adapters or add source discovery merely to advise.
-- Use one filterable byte threshold, provisionally **1 MiB**, confirmed by R1/R4 measurements. Explain the observed size, expected benefit and largest-tree/no-pagination limitations.
+- Observe serialized bytes using SQL `OCTET_LENGTH()` on the fixed option name without hydrating its value. Reuse cheap existing metrics where available; do not invoke adapters or add source discovery merely to advise.
+- Use one byte threshold, default **1 MiB (1,048,576 bytes)**, through `foogallery_migrate_storage_advice_threshold_bytes`. Only a positive PHP integer is accepted; invalid types, zero, negatives and overflowing numeric values fall back to the default. The notice begins at the threshold. Explain the observed size, expected benefit and largest-tree/no-pagination limitations.
 - Link to the Storage screen; require explicit administrator confirmation. If switching is unsupported, explain the limit and safe next action rather than offering a broken enable button.
 - Do not auto-create tables, select a backend, or treat a recommendation threshold as permission to bypass admission. Reverse conversion is governed by measured safety limits, not this advisory threshold.
 
@@ -655,7 +659,9 @@ An option-to-table switch must deserialize the old WordPress option at least onc
 
 For a time-bounded web import, the maintenance gate keeps the source option immutable. Each resumed request may re-read that immutable snapshot, re-decode it, skip already verified destination records, and continue from the stored cursor. The cursor bounds database work and request time; it does not reduce the source option's decode-memory peak. Do not imply that a resumable web copy can deserialize once across separate PHP requests unless a separately designed internal staging resource actually owns the snapshot.
 
-Provide storage-only WP-CLI commands for those recovery cases, for example status, switch, verify, and purge commands that can run with an explicitly increased CLI memory limit. Do not implement a custom streaming PHP-serialization parser in the initial release. Never discard legacy history automatically to make a switch fit.
+The current candidate's release-owned policy admits at most 3 MiB of raw option data, forecasts 16× raw bytes for decoding, reserves 128 MiB, and requires 32 MiB phase headroom. These are admission inputs, not a guaranteed memory requirement or universal performance promise; structural limits and current process memory also apply. A suggestion at 1 MiB does not override them. Low-memory or oversized requests must refuse without changing authority. If the existing option exceeds the supported shape/size, retain it and its backup; do not delete history or edit the policy merely to force a pass.
+
+Use the existing storage-only WP-CLI commands for these cases: `status`, `preflight`, `provision`, `switch`, `recover`, `replace`, `discard`, `clear`, and `remove_all`. Verification is part of the recorded switch/recovery, not a separate new command. Requests can use explicitly configured additional CLI memory, within the same admission rules. Do not implement a custom streaming PHP-serialization parser in the initial release. Never discard legacy history automatically to make a switch fit.
 
 ## Storage and cleanup administration
 
@@ -664,11 +670,10 @@ Use the existing storage admin/CLI entry points for one minimal Storage & Cleanu
 It displays:
 
 - Active backend and whether it is recommended for the observed size.
-- Option bytes and relevant existing size/limit information; extra diagnostics are optional, not a release gate.
-- Option bytes and table row/payload bytes.
-- Schema and codec versions and health.
+- Option bytes and the site table-record count, including retained copies. Additional payload/codec diagnostics are optional, not a release gate.
+- Schema readiness and health.
 - In-progress or failed switch status with resume/discard actions.
-- Stale option/table copies and their size.
+- Whether a previous table copy is retained after reversal; do not add a separate stale-copy inspector.
 - A clear explanation that storage cleanup does not undo migrations.
 
 Every mutating admin action requires `manage_options`, a dedicated nonce, exact target resolution, and scope-appropriate confirmation; CLI requires equivalent authorization and explicit confirmation through the shared service.

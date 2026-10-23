@@ -61,7 +61,11 @@ class StorageSingleSitePolicyTest extends TestCase {
 				$this->assertSame( array(), StorageAdmin::actions( $s ) );
 				ob_start(); StorageAdmin::render( $s ); $html = ob_get_clean();
 				$this->assertStringNotContainsString( '<form', $html );
-				$this->assertStringContainsString( 'Multisite continues to use options', $html );
+				$this->assertStringContainsString( 'Multisite option mode remains supported', $html );
+				$this->assertStringContainsString( 'Multisite table operations are unsupported', $html );
+				$this->assertStringContainsString( 'this screen does not change storage authority', $html );
+				$this->assertStringNotContainsString( 'run the read-only decode-budget preflight', $html );
+				$this->assertStringNotContainsString( 'foogallery-migrate storage preflight --target=table', $html );
 			}
 		}
 	}
