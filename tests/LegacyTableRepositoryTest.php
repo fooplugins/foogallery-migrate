@@ -25,6 +25,7 @@ class LegacyTableRepositoryTest extends TestCase {
 		foreach ( array( 'key' => true, 'expected_revision' => 0, 'patches' => array() ) as $field => $value ) {
 			$bad = $change; $bad[$field] = $value; $cases[] = array( $bad );
 		}
+		$cases[] = array( array( 'key' => 'galleries-state', 'expected_revision' => null, 'value' => array() ) );
 		foreach ( array( array( 'key' => true, 'value' => false ), array( 'key' => 'a', 'value' => new \stdClass() ),
 			array( 'key' => 'a', 'delete' => false ), array( 'key' => 'a', 'value' => false, 'delete' => true ),
 			array( 'key' => 'a' ) ) as $patch ) {
@@ -64,6 +65,28 @@ class LegacyTableRepositoryTest extends TestCase {
 		}
 		$this->assertSame( array(), $repo->roots( 'history', array() ) );
 		$this->assertSame( array(), $db->queries );
+	}
+	public function test_invalid_queue_selection_refuses_before_sql(): void {
+		$db = new RepositoryTestConnection(); $repo = new LegacyTableRepository( $db, 7, 100 );
+		foreach ( array( 'not-an-array', array_fill( 0, 101, array( 'title' => 'x' ) ) ) as $selection ) {
+			try { $repo->queue_collection( 'galleries', $selection, function () {}, function () {} ); $this->fail( 'Expected selection refusal.' ); }
+			catch ( \RuntimeException $error ) { $this->assertSame( array(), $db->queries ); }
+		}
+	}
+	public function test_queue_validation_retains_only_preexisting_null_status_without_writes(): void {
+		$db = new RepositoryTestConnection(); $repo = new LegacyTableRepository( $db, 7 );
+		$validate = new \ReflectionMethod( $repo, 'validate_queue_transition' ); $validate->setAccessible( true );
+		$matched_migrated = array( 'migration_status' => null, 'part_of_migration' => true, 'migrated' => true, 'opaque' => 'keep' );
+		$this->assertNull( $validate->invoke( $repo, $matched_migrated,
+			array( 'value' => $matched_migrated, 'selected' => true, 'completed' => true, 'error' => false ) ) );
+		$unmatched = array( 'migration_status' => null, 'part_of_migration' => true, 'migrated' => false, 'opaque' => 'keep' );
+		$after = $unmatched; $after['part_of_migration'] = false;
+		$this->assertNull( $validate->invoke( $repo, $unmatched,
+			array( 'value' => $after, 'selected' => false, 'completed' => false, 'error' => false ) ) );
+		$changed = $after; $changed['migration_status'] = null;
+		try { $validate->invoke( $repo, array( 'migration_status' => 'not_started', 'part_of_migration' => true, 'migrated' => false, 'opaque' => 'keep' ),
+			array( 'value' => $changed, 'selected' => false, 'completed' => false, 'error' => false ) ); $this->fail( 'New null status must refuse.' ); }
+		catch ( \RuntimeException $error ) { $this->assertSame( array(), $db->queries ); }
 	}
 }
 

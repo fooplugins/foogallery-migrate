@@ -17,6 +17,7 @@ use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\MigratableCollectionRepository;
 use FooPlugins\FooGalleryMigrate\MigratedHistoryRepository;
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
+use FooPlugins\FooGalleryMigrate\Migrators\MigratorBase;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
 use FooPlugins\FooGalleryMigrate\ScalarStateRepository;
 use FooPlugins\FooGalleryMigrate\Objects\Gallery;
@@ -36,6 +37,26 @@ class CollectionDeadlineConnection extends LegacyTransactionConnection {
 	public function get_results( $sql, $format ) { if ( $this->delay_reads ) { $this->delay( $sql ); } return parent::get_results( $sql, $format ); }
 }
 
+/** Inject one server-style failure during an affected-root/checkpoint transaction. */
+class CollectionQueueFaultConnection extends LegacyTransactionConnection {
+	public $state_table;
+	public $fail_insert = false;
+	public $after_identity_read;
+	public function get_results( $sql, $format ) {
+		$rows = parent::get_results( $sql, $format );
+		if ( $this->after_identity_read && false !== strpos( $sql, 'SELECT id, source_plugin_value, source_id_value' ) ) {
+			$call = $this->after_identity_read; $this->after_identity_read = null; call_user_func( $call );
+		}
+		return $rows;
+	}
+	public function query( $sql ) {
+		if ( $this->fail_insert && 0 === strpos( $sql, 'INSERT INTO `' . $this->state_table . '`' ) ) {
+			$this->fail_insert = false; $this->last_error = 'Injected checkpoint insert failure.'; return false;
+		}
+		return parent::query( $sql );
+	}
+}
+
 global $wpdb;
 $schema = new LegacyStorageSchema( $wpdb ); $tables = array_keys( $schema->definitions() );
 foreach ( $tables as $table ) {
@@ -53,13 +74,19 @@ try {
 	$check( $schema->verify(), 'schema v1 unchanged' );
 	$db = new LegacyTransactionConnection( $wpdb ); $backend = new LegacyTableBackend( $db, $blog ); $snapshot = new LegacyTableSnapshot( $db, $blog );
 	$settings = new MigratorSettings(); $plugin = new \FooPlugins\FooGalleryMigrate\Plugins\Aigpl();
+	$queue = function ( $store, $bucket, $selection ) use ( $settings ) {
+		return ( new MigratableCollectionRepository( $store, $settings ) )->queue_selected( $bucket, $selection,
+			array( 'FooPlugins\\FooGalleryMigrate\\Migrators\\MigratorBase', 'queue_transition' ),
+			array( 'FooPlugins\\FooGalleryMigrate\\Migrators\\MigratorBase', 'queue_summary' ) );
+	};
 	$image = new Image( $plugin ); $image->source_url = 'typed-child'; $image->data = array( 'opaque' => "\xff\x00" );
 	$gallery = new Gallery( $plugin ); $gallery->ID = 101; $gallery->children = array( '09' => $image, 9 => clone $image );
 	$other = new Gallery( $plugin ); $other->ID = 102;
 	$objects = array( '09' => $gallery, 9 => $other );
-	$album = new Album( $plugin ); $album->children = array( '09' => clone $gallery, 9 => clone $gallery );
+	$album = new Album( $plugin ); $album->ID = 201; $album->children = array( '09' => clone $gallery, 9 => clone $gallery );
+	$second_album = new Album( $plugin ); $second_album->ID = 202;
 	( new LegacyOptionBackend() )->replace_all( array() );
-	$settings->set_migrator_settings( array( 'galleries' => $objects, 'galleries-state' => null, 'albums' => array( '09' => $album, 9 => new Album( $plugin ) ), 'albums-state' => null,
+	$settings->set_migrator_settings( array( 'galleries' => $objects, 'galleries-state' => null, 'albums' => array( '09' => $album, 9 => $second_album ), 'albums-state' => null,
 		'queue' => false, 'image_tag_sync_queue' => array(), 'migrated' => array( '09' => $image ) ) );
 	$data = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
 	$changes = array(); $order = 0; foreach ( $data as $key => $value ) { $changes[] = array( 'key' => $key, 'order' => $order++, 'kind' => in_array( $key, array( 'galleries', 'albums', 'migrated' ), true ) ? 'map' : 'scalar', 'value' => $value, 'expected_revision' => null ); }
@@ -104,6 +131,60 @@ try {
 	$check( $backend->history_mutate( 'clear', array() ), 'normal shared-deadline clear succeeds' );
 	$check( array() === $snapshot->read_bounded( 'migrated' )['items'] && $logical_revision + 1 === $backend->read( 'migrated-revision' )['value'], 'clear and logical revision companion publication explicitly read back' );
 	$check( $option_before === get_option( FOOGALLERY_MIGRATE_OPTION_DATA ), 'table clear/timeout paths retain option authority bytes' );
+	// Queue/cancel must patch only affected roots, including a missing companion.
+	$many = array(); $selection = array();
+	for ( $i = 0; $i < 121; ++$i ) {
+		$item = new Gallery( $plugin ); $item->ID = 1000 + $i; $item->title = 'Queue root ' . $i;
+		$many[$i] = $item; $selection[$item->unique_identifier()] = array( 'title' => 'Target ' . $i );
+	}
+	$check( $backend->replace_collection( 'galleries', $settings->compact_state_value( 'galleries', $many ) ), '121 small roots prepared' );
+	$check( $backend->delete_scalar( 'galleries-state' ), 'queue companion absent for atomic-create test' );
+	$root_node = $codec->node_hash( $codec->key_hash( 'galleries' ), null, 0 );
+	$unrelated = function () use ( $wpdb, $tables, $root_node ) { return $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM `' . $tables[1] . '` WHERE node_hash = UNHEX(%s)', $root_node ), ARRAY_A ); };
+	$unrelated_before = $unrelated(); $before_failure = $physical();
+	$fault = new CollectionQueueFaultConnection( $wpdb ); $fault->state_table = $tables[0]; $fault->fail_insert = true;
+	$refuses( function () use ( $fault, $blog, $many, $queue ) { $queue( new LegacyTableBackend( $fault, $blog ), 'galleries',
+		array( $many[120]->unique_identifier() => array( 'title' => 'Last' ) ) ); }, 'absent checkpoint insert failure rolls back affected root' );
+	$check( $before_failure === $physical(), 'failed checkpoint publication restores exact physical state' );
+	$stale = new CollectionQueueFaultConnection( $wpdb ); $stale->after_identity_read = function () use ( $backend ) {
+		$row = $backend->roots( 'galleries', array( 2 ) )[0]['value']; $row['title'] = 'Concurrent writer';
+		$backend->update_collection_record( 'galleries', array( 'root' => 2, 'path' => array() ), $row );
+	};
+	$refuses( function () use ( $stale, $blog, $many, $queue ) { $queue( new LegacyTableBackend( $stale, $blog ), 'galleries',
+		array( $many[120]->unique_identifier() => array( 'title' => 'Last' ) ) ); }, 'head change during identity selection refuses queue' );
+	$check( ! $backend->read( 'galleries-state' )['found'] &&
+		! $backend->roots( 'galleries', array( 120 ) )[0]['value']['part_of_migration'], 'stale selector leaves queue and companion unpublished' );
+	$check( $queue( $backend, 'galleries', array( $many[120]->unique_identifier() => array( 'title' => 'Last' ) ) ), 'one of 121 roots queued' );
+	$check( $unrelated_before === $unrelated(), 'unrelated root physical payload untouched' );
+	$last = $backend->roots( 'galleries', array( 120 ) )[0]['value'];
+	$check( true === $last['part_of_migration'] && 'queued' === $last['migration_status'] && 'Last' === $last['migrated_title'] &&
+		$backend->read( 'galleries-state' )['value'] === array( 'queued' => 1, 'completed' => 0, 'progress' => 0 ), 'created summary and exact selected root parity' );
+	$last_node = $codec->node_hash( $codec->key_hash( 'galleries' ), null, 120 );
+	$last_physical = $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM `' . $tables[1] . '` WHERE node_hash = UNHEX(%s)', $last_node ), ARRAY_A );
+	$queued_again = $queue( $backend, 'galleries', array( $many[120]->unique_identifier() => array( 'title' => 'Last' ) ) );
+	$last_physical_again = $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM `' . $tables[1] . '` WHERE node_hash = UNHEX(%s)', $last_node ), ARRAY_A );
+	$check( $queued_again && $last_physical === $last_physical_again, 'identical selected root is not rewritten' );
+	$check( $queue( $backend, 'galleries', array() ) &&
+		$backend->read( 'galleries-state' )['value'] === array( 'queued' => 0, 'completed' => 0, 'progress' => 0 ), 'cancel previous selection' );
+	$check( $queue( $backend, 'galleries', $selection ) &&
+		$backend->read( 'galleries-state' )['value'] === array( 'queued' => 121, 'completed' => 0, 'progress' => 0 ), '121 affected roots share one atomic budget' );
+	$completed_error = $backend->roots( 'galleries', array( 0 ) )[0]['value'];
+	$completed_error['migrated'] = true; $completed_error['migration_status'] = 'error';
+	$check( $backend->update_collection_record( 'galleries', array( 'root' => 0, 'path' => array() ), $completed_error ) &&
+		$queue( $backend, 'galleries', $selection ), 'selected migrated error retains status' );
+	$summary = $backend->read( 'galleries-state' )['value'];
+	$check( $summary['queued'] === 121 && $summary['completed'] === 1 && abs( $summary['progress'] - 200 / 121 ) < 0.000001,
+		'progress counts selected migration_status error independently of has_error' );
+	$album_other = $backend->roots( 'albums', array( 9 ) )[0]['value'];
+	$check( $queue( $backend, 'albums', array( $album->unique_identifier() => array( 'title' => 'Selected album' ) ) ), 'typed album queue succeeds' );
+	$album_queued = $backend->roots( 'albums', array( '09' ) )[0]['value'];
+	$check( true === $album_queued['part_of_migration'] && 'queued' === $album_queued['migration_status'] &&
+		'Selected album' === $album_queued['migrated_title'] && $album_other === $backend->roots( 'albums', array( 9 ) )[0]['value'] &&
+		$backend->read( 'albums-state' )['value'] === array( 'queued' => 1, 'completed' => 0, 'progress' => 0 ), 'typed album queue changes only selected root and state' );
+	$check( $queue( $backend, 'albums', array() ), 'typed album cancel succeeds' );
+	$album_cancelled = $backend->roots( 'albums', array( '09' ) )[0]['value'];
+	$check( false === $album_cancelled['part_of_migration'] && 'not_started' === $album_cancelled['migration_status'] &&
+		$backend->read( 'albums-state' )['value'] === array( 'queued' => 0, 'completed' => 0, 'progress' => 0 ), 'typed album cancel restores status and summary' );
 	echo wp_json_encode( array( 'ok' => true, 'blog_id' => $blog, 'check_count' => count( $checks ), 'checks' => $checks ) );
 } finally {
 	foreach ( array_reverse( $created ) as $table_name ) { $wpdb->query( 'DROP TABLE IF EXISTS `' . $table_name . '`' ); }

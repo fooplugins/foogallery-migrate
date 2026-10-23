@@ -1399,6 +1399,131 @@ class LegacyTableRepository {
 		return array( 'rows' => $rows, 'head' => $head );
 	}
 
+	/** Queue/cancel only the affected gallery/album roots, with one read/write budget. */
+	public function queue_collection( $state_key, $selection, $transition, $summarize ) {
+		$this->collection_key( $state_key );
+		if ( $this->history_read_active ) { $this->fail( 'Reentrant collection queue.' ); }
+		if ( ! is_callable( $transition ) || ! is_callable( $summarize ) ) { $this->fail( 'Queue transition and summary required.' ); }
+		$this->start_budget(); $this->typed_key( $state_key );
+		if ( ! is_array( $selection ) || count( $selection ) > $this->max_rows ) { $this->fail( 'Invalid collection selection.' ); }
+		foreach ( $selection as $uid => $entry ) {
+			if ( ! is_string( $uid ) && ! is_int( $uid ) ) { $this->fail( 'Invalid collection UID.' ); }
+			$this->consume( 0, strlen( (string) $uid ) );
+		}
+		$head = $this->head( $state_key ); $root = $this->collection( $head );
+		if ( ! isset( $root['wrapper'] ) || ! in_array( $head['state_kind'], array( 'map', 'list' ), true ) ) { $this->fail( 'Indexed migratable collection required.' ); }
+		$targets = $this->queue_root_selector( $state_key, $head, $root, $selection );
+		$patches = array(); $queued = 0; $completed = 0; $errors = 0;
+		foreach ( $targets as $target ) {
+			$tree = $this->tree_hash( $state_key, $head, $target['node'] );
+			if ( false === $tree || $this->number( $tree['rows'][0]['id'] ) !== $target['id'] || $tree['order'] !== $target['order'] ) { $this->fail( 'Selected collection root changed.' ); }
+			$key = $tree['key']; $value = $tree['value']; unset( $tree );
+			if ( ! is_array( $value ) || ! isset( $value['object_type'], $value['plugin_name'] ) || ! array_key_exists( 'ID', $value ) ||
+				$value['object_type'] !== $target['type'] || $value['plugin_name'] !== $target['plugin'] || (string) $value['ID'] !== $target['source_id'] ) { $this->fail( 'Collection identity changed.' ); }
+			$entry = $target['matched'] ? $selection[$target['uid']] : null;
+			$changed = call_user_func( $transition, array( 'key' => $key, 'value' => $value ), $target['matched'], $entry );
+			$this->validate_queue_transition( $value, $changed );
+			if ( $changed['selected'] ) {
+				++$queued;
+				if ( $changed['completed'] ) { ++$completed; }
+				if ( $changed['error'] ) { ++$errors; }
+			}
+			if ( $changed['value'] !== $value ) {
+				$patches[] = array( 'key' => $key, 'value' => $changed['value'] );
+			}
+		}
+		$this->unchanged( $state_key, $head );
+		$state_key_companion = $state_key . '-state';
+		$state_head = $this->reader->head( $state_key_companion );
+		$summary = call_user_func( $summarize, $queued, $completed, $errors );
+		if ( ! is_array( $summary ) || array_keys( $summary ) !== array( 'queued', 'completed', 'progress' ) ||
+			$summary['queued'] !== $queued || $summary['completed'] !== $completed || ! is_numeric( $summary['progress'] ) ) { $this->fail( 'Invalid queue summary.' ); }
+		$changes = array();
+		if ( count( $patches ) ) { $changes[] = array( 'key' => $state_key, 'expected_revision' => $head['revision'], 'patches' => $patches ); }
+		$changes[] = array( 'key' => $state_key_companion, 'expected_revision' => false === $state_head ? null : $state_head['revision'], 'value' => $summary );
+		$this->patch( $changes, 'list' === $head['state_kind'], array( array( 'key' => $state_key, 'head' => $head ) ), true );
+		return true;
+	}
+
+	/** Check a trusted domain result without rewriting unrelated source fields. */
+	private function validate_queue_transition( $original, $changed ) {
+		if ( ! is_array( $changed ) || array_keys( $changed ) !== array( 'value', 'selected', 'completed', 'error' ) ||
+			! is_array( $changed['value'] ) || ! is_bool( $changed['selected'] ) || ! is_bool( $changed['completed'] ) || ! is_bool( $changed['error'] ) ) { $this->fail( 'Invalid queue transition.' ); }
+		$status = array_key_exists( 'migration_status', $changed['value'] ) ? $changed['value']['migration_status'] : false;
+		$old_null = array_key_exists( 'migration_status', $original ) && null === $original['migration_status'];
+		if ( ! array_key_exists( 'part_of_migration', $changed['value'] ) ||
+			( ! is_string( $status ) && ! ( $old_null && null === $status ) ) ||
+			(bool) $changed['value']['part_of_migration'] !== $changed['selected'] ||
+			! empty( $changed['value']['migrated'] ) !== $changed['completed'] ||
+			( 'error' === $status ) !== $changed['error'] ) { $this->fail( 'Queue transition summary mismatch.' ); }
+		foreach ( $original as $field => $value ) {
+			if ( ! in_array( $field, array( 'part_of_migration', 'migration_status', 'migrated_title' ), true ) &&
+				( ! array_key_exists( $field, $changed['value'] ) || $changed['value'][$field] !== $value ) ) { $this->fail( 'Queue transition changed an unrelated field.' ); }
+		}
+		foreach ( $changed['value'] as $field => $value ) {
+			if ( ! array_key_exists( $field, $original ) && ! in_array( $field, array( 'part_of_migration', 'migration_status', 'migrated_title' ), true ) ) { $this->fail( 'Queue transition introduced an unrelated field.' ); }
+		}
+	}
+
+	/** Fixed metadata pages, then exact-size projection pages; no unrelated tree payload. */
+	private function queue_root_selector( $state_key, $head, $root, $selection ) {
+		if ( $root['root_count'] > $this->max_rows ) { $this->fail( 'Collection root count exceeds operation budget.' ); }
+		$targets = array(); $count = 0; $last_order = -1;
+		$expected_type = MigratorSettings::KEY_GALLERIES === $state_key ? 'gallery' : 'album';
+		do {
+			$meta = $this->read( $this->db->prepare( 'SELECT id, item_order, HEX(node_hash) AS node_hash, object_type, migration_status, is_selected, '
+				. 'OCTET_LENGTH(source_plugin_value) AS plugin_bytes, OCTET_LENGTH(source_id_value) AS id_bytes, OCTET_LENGTH(mutable_payload) AS mutable_bytes, '
+				. 'HEX(source_plugin_hash) AS plugin_hash, HEX(source_identity_hash) AS identity_hash FROM `' . $this->table . '` '
+				. 'WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL AND item_order > %d '
+				. 'ORDER BY item_order ASC, id ASC LIMIT 100', array( $this->blog, $head['id'], $head['active_generation'], $last_order ) ) );
+			if ( count( $meta ) > $root['root_count'] - $count ) { $this->fail( 'Extra collection roots.' ); }
+			$where = array(); $args = array( $this->blog, $head['id'], $head['active_generation'] ); $indexed = array();
+			foreach ( $meta as $row ) {
+				$id = $this->number( $row['id'] ); $order = $this->number( $row['item_order'] );
+				$plugin_bytes = $this->number( $row['plugin_bytes'] ); $id_bytes = $this->number( $row['id_bytes'] );
+				$mutable_bytes = $this->number( $row['mutable_bytes'] );
+				if ( $id < 1 || $order <= $last_order || $row['object_type'] !== $expected_type ||
+					$plugin_bytes > LegacyTableReader::MAX_RECORD_BYTES || $id_bytes > LegacyTableReader::MAX_RECORD_BYTES ||
+					$mutable_bytes > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Invalid collection identity metadata.' ); }
+				$this->hex( $row['node_hash'] ); $this->hex( $row['plugin_hash'] ); $this->hex( $row['identity_hash'] );
+				if ( ! in_array( $this->number( $row['is_selected'] ), array( 0, 1 ), true ) || ! is_string( $row['migration_status'] ) ) { $this->fail( 'Invalid queue projection.' ); }
+				$this->consume( 1, $this->add( $this->add( $plugin_bytes, $id_bytes ), $mutable_bytes ) );
+				$where[] = '(id = %d AND OCTET_LENGTH(source_plugin_value) = %d AND OCTET_LENGTH(source_id_value) = %d AND OCTET_LENGTH(mutable_payload) = %d)';
+				$args = array_merge( $args, array( $id, $plugin_bytes, $id_bytes, $mutable_bytes ) );
+				$indexed[$id] = $row; $last_order = $order; ++$count;
+			}
+			if ( count( $meta ) ) {
+				$raw = $this->read( $this->db->prepare( 'SELECT id, source_plugin_value, source_id_value, mutable_payload FROM `' . $this->table . '` '
+					. 'WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL AND (' . implode( ' OR ', $where ) . ') LIMIT 100', $args ) );
+				if ( count( $raw ) !== count( $meta ) ) { $this->fail( 'Sized collection identity changed.' ); }
+				foreach ( $raw as $entry ) {
+					$id = $this->number( $entry['id'] );
+					if ( ! isset( $indexed[$id] ) || ! is_string( $entry['source_plugin_value'] ) || ! is_string( $entry['source_id_value'] ) || ! is_string( $entry['mutable_payload'] ) ) { $this->fail( 'Duplicate or missing collection identity.' ); }
+					$row = $indexed[$id]; unset( $indexed[$id] );
+					$plugin = $this->codec->decode( $entry['source_plugin_value'] ); $source_id = $this->codec->decode( $entry['source_id_value'] );
+					$mutable = $this->codec->decode( $entry['mutable_payload'] );
+					if ( ! is_array( $mutable ) || $this->codec->encode( $mutable ) !== $entry['mutable_payload'] ||
+						$this->number( $row['is_selected'] ) !== ( empty( $mutable['part_of_migration'] ) ? 0 : 1 ) ||
+						$row['migration_status'] !== ( isset( $mutable['migration_status'] ) ? $mutable['migration_status'] : '' ) ) { $this->fail( 'Collection mutable projection mismatch.' ); }
+					if ( ! is_string( $plugin ) || ! is_string( $source_id ) || $this->codec->encode( $plugin ) !== $entry['source_plugin_value'] ||
+						$this->codec->encode( $source_id ) !== $entry['source_id_value'] || $this->hex( $row['plugin_hash'] ) !== $this->codec->key_hash( $plugin ) ||
+						$this->hex( $row['identity_hash'] ) !== $this->codec->snapshot_digest( array( 'source-exact-v1', $expected_type, $plugin, $source_id ) ) ) { $this->fail( 'Collection identity projection mismatch.' ); }
+					$uid = $expected_type . '_' . $plugin . '_' . $source_id;
+					$matched = array_key_exists( $uid, $selection );
+					if ( $matched || $this->number( $row['is_selected'] ) === 1 || 'queued' === $row['migration_status'] ||
+						! array_key_exists( 'part_of_migration', $mutable ) || false !== $mutable['part_of_migration'] ||
+						! array_key_exists( 'migration_status', $mutable ) ) {
+						$targets[] = array( 'id' => $id, 'order' => $this->number( $row['item_order'] ), 'node' => $this->hex( $row['node_hash'] ),
+							'type' => $expected_type, 'plugin' => $plugin, 'source_id' => $source_id, 'uid' => $uid, 'matched' => $matched );
+					}
+				}
+				if ( count( $indexed ) ) { $this->fail( 'Missing collection identity projection.' ); }
+			}
+		} while ( count( $meta ) === 100 );
+		if ( $count !== $root['root_count'] ) { $this->fail( 'Collection root count changed.' ); }
+		return $targets;
+	}
+
 	/**
 	 * Existing heads only. Changes are {key, expected_revision, patches} for
 	 * maps, with each patch {key, value} OR {key, delete:true}; scalar changes
@@ -1412,8 +1537,9 @@ class LegacyTableRepository {
 	/** List updates/appends only; deletion/reindexing requires bounded staged replacement. */
 	public function patch_lists_and_scalars( $changes ) { return $this->patch( $changes, true ); }
 
-	private function patch( $changes, $lists, $guards = array() ) {
-		$this->start_budget(); $prepared = $this->preflight( $changes );
+	private function patch( $changes, $lists, $guards = array(), $queue = false ) {
+		if ( ! $queue ) { $this->start_budget(); }
+		$prepared = $this->preflight( $changes, $queue );
 		if ( $lists ) {
 			foreach ( $prepared as $change ) {
 				if ( array_key_exists( 'value', $change ) ) { continue; }
@@ -1441,15 +1567,35 @@ class LegacyTableRepository {
 			// earlier snapshot (including unchanged read-only companions).
 			$locked_ids = array();
 			foreach ( $locks as $hash => $change ) {
-				$locked_ids[$hash] = $this->lock_identity( $change['key'] );
+				$locked_ids[$hash] = $this->lock_identity( $change['key'], $queue && null === $change['expected_revision'] );
 			}
 			foreach ( $locks as $hash => $change ) {
-				$heads[$hash] = $this->head( $change['key'] );
-				if ( $heads[$hash]['id'] !== $locked_ids[$hash] || $heads[$hash]['revision'] !== $change['expected_revision'] || $heads[$hash]['revision'] >= PHP_INT_MAX ) { $this->fail( 'Stale or exhausted revision.' ); }
+				$heads[$hash] = null === $change['expected_revision'] ? $this->reader->head( $change['key'] ) : $this->head( $change['key'] );
+				if ( null === $change['expected_revision'] ) {
+					if ( false !== $heads[$hash] || false !== $locked_ids[$hash] ) { $this->fail( 'Expected absent scalar head changed.' ); }
+				} else if ( $heads[$hash]['id'] !== $locked_ids[$hash] || $heads[$hash]['revision'] !== $change['expected_revision'] || $heads[$hash]['revision'] >= PHP_INT_MAX ) { $this->fail( 'Stale or exhausted revision.' ); }
 				if ( isset( $expected[$hash] ) && $heads[$hash] !== $expected[$hash] ) { $this->fail( 'History mutation read dependency changed.' ); }
 			}
 			$result = array();
 			foreach ( $prepared as $hash => $change ) {
+				if ( false === $heads[$hash] ) {
+					$root = array( 'version' => 1, 'kind' => 'scalar', 'value' => $change['value'] );
+					$encoded = $this->codec->encode( $root ); $digest = $this->codec->snapshot_digest( $change['value'] );
+					$order_rows = $this->read( $this->db->prepare( 'SELECT state_order FROM `' . $this->state . '` WHERE blog_id = %d ORDER BY state_order DESC LIMIT 1', array( $this->blog ) ) );
+					$order = count( $order_rows ) ? $this->add( $this->number( $order_rows[0]['state_order'] ), 1 ) : 0;
+					$now = gmdate( 'Y-m-d H:i:s' );
+					$sql = 'INSERT INTO `' . $this->state . '` (blog_id, state_key_hash, state_key_value, state_order, state_kind, active_generation, revision, codec_version, '
+						. 'record_count, payload_bytes, snapshot_digest, digest_revision, digest_status, root_payload, created_gmt, updated_gmt) '
+						. "VALUES (%d, UNHEX(%s), %s, %d, 'scalar', 1, 1, %d, 0, %d, UNHEX(%s), 1, 'current', %s, %s, %s)";
+					if ( 1 !== $this->write( $this->db->prepare( $sql, array( $this->blog, $hash, $this->codec->key_value( $change['key'] ), $order,
+						LegacyStateCodec::VERSION, strlen( $encoded ), $digest, $encoded, $now, $now ) ) ) ) { $this->fail( 'Absent scalar insertion failed.' ); }
+					$check = $this->head( $change['key'] );
+					if ( 1 !== $check['revision'] || 'scalar' !== $check['state_kind'] || 0 !== $check['record_count'] ||
+						$check['payload_bytes'] !== strlen( $encoded ) || $this->root_metadata( $check ) !== $root ) { $this->fail( 'Created scalar read-back failed.' ); }
+					$this->verify_scalar( $check, $change['value'] );
+					$result[] = array( 'key' => $change['key'], 'revision' => 1 );
+					continue;
+				}
 				$head = $heads[$hash]; $root = $this->root_metadata( $head );
 				$count = $head['record_count']; $bytes = $head['payload_bytes'] - $head['root_payload_bytes'];
 				if ( array_key_exists( 'value', $change ) ) {
@@ -1510,9 +1656,15 @@ class LegacyTableRepository {
 				if ( 1 !== $this->write( $this->db->prepare( $sql, $args ) ) ) { $this->fail( 'Head compare-and-swap failed.' ); }
 				$check = $this->head( $change['key'] );
 				if ( $check['revision'] !== $head['revision'] + 1 || $check['record_count'] !== $count || $this->root_metadata( $check ) !== $root ) { $this->fail( 'Head read-back failed.' ); }
+				if ( 'scalar' === $head['state_kind'] ) { $this->verify_scalar( $check, $root['value'] ); }
 				$result[] = array( 'key' => $change['key'], 'revision' => $head['revision'] + 1 );
 			}
+			$this->tick();
 		} catch ( \Exception $error ) {
+			$ok = $this->db->query( 'ROLLBACK' ); $this->busy = false;
+			if ( false === $ok || ! empty( $this->db->last_error ) ) { $this->tainted = true; $this->fail( 'Rollback uncertain; reconcile on a fresh connection.' ); }
+			throw $error;
+		} catch ( \Throwable $error ) {
 			$ok = $this->db->query( 'ROLLBACK' ); $this->busy = false;
 			if ( false === $ok || ! empty( $this->db->last_error ) ) { $this->tainted = true; $this->fail( 'Rollback uncertain; reconcile on a fresh connection.' ); }
 			throw $error;
@@ -1522,12 +1674,13 @@ class LegacyTableRepository {
 		$this->busy = false; return $result;
 	}
 
-	private function preflight( $changes ) {
+	private function preflight( $changes, $queue = false ) {
 		if ( ! is_array( $changes ) || ! count( $changes ) || count( $changes ) > 100 ) { $this->fail( 'Need 1 to 100 changes.' ); }
 		$result = array();
 		foreach ( $changes as $change ) {
-			if ( ! is_array( $change ) || ! isset( $change['key'], $change['expected_revision'] ) || count( $change ) !== ( array_key_exists( 'content_progress', $change ) ? 4 : 3 ) ||
-				! is_int( $change['expected_revision'] ) || $change['expected_revision'] < 1 || $change['expected_revision'] >= PHP_INT_MAX ) { $this->fail( 'Invalid change or revision.' ); }
+			if ( ! is_array( $change ) || ! isset( $change['key'] ) || ! array_key_exists( 'expected_revision', $change ) || count( $change ) !== ( array_key_exists( 'content_progress', $change ) ? 4 : 3 ) ||
+				( null === $change['expected_revision'] ? ( ! $queue || ! array_key_exists( 'value', $change ) || ! in_array( $change['key'], array( 'galleries-state', 'albums-state' ), true ) ) :
+				( ! is_int( $change['expected_revision'] ) || $change['expected_revision'] < 1 || $change['expected_revision'] >= PHP_INT_MAX ) ) ) { $this->fail( 'Invalid change or revision.' ); }
 			$this->typed_key( $change['key'] ); $hash = $this->codec->key_hash( $change['key'] );
 			if ( array_key_exists( 'content_progress', $change ) && ( ContentScanRepository::STATE_KEY !== $change['key'] || ! is_array( $change['content_progress'] ) || array_key_exists( 'value', $change ) ) ) { $this->fail( 'Invalid content checkpoint patch.' ); }
 			if ( isset( $result[$hash] ) ) { $this->fail( 'Duplicate state change.' ); }
@@ -1557,10 +1710,11 @@ class LegacyTableRepository {
 		return $result;
 	}
 
-	private function lock_identity( $key ) {
+	private function lock_identity( $key, $allow_missing = false ) {
 		$value = $this->codec->key_value( $key );
 		$rows = $this->read( $this->db->prepare( 'SELECT id, CASE WHEN OCTET_LENGTH(state_key_value) <= %d THEN state_key_value ELSE NULL END AS state_key_value '
 			. 'FROM `' . $this->state . '` WHERE blog_id = %d AND state_key_hash = UNHEX(%s) LIMIT 2 FOR UPDATE', array( strlen( $value ), $this->blog, $this->codec->key_hash( $key ) ) ) );
+		if ( $allow_missing && ! count( $rows ) ) { return false; }
 		if ( count( $rows ) !== 1 || $rows[0]['state_key_value'] !== $value ) { $this->fail( 'Missing/colliding locked head.' ); }
 		return $this->number( $rows[0]['id'] );
 	}

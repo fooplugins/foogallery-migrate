@@ -60,6 +60,7 @@ class LegacyTableBackend {
 	public function count_roots( $key ) { return $this->repository()->count_roots( $key ); }
 	public function collection_view_context( $key ) { return $this->repository()->collection_view_context( $key ); }
 	public function collection_view_page( $key, $offset, $limit ) { return $this->repository()->collection_view_page( $key, $offset, $limit ); }
+	public function queue_collection( $key, $selection, $transition, $summarize ) { return $this->repository( true )->queue_collection( $key, $selection, $transition, $summarize ); }
 	public function identifiers( $key, $identifiers ) { return $this->repository()->identifiers( $key, $identifiers ); }
 	public function identifier_presence( $key, $identifiers ) { return $this->repository()->identifier_presence( $key, $identifiers ); }
 	public function source_identities( $key, $identities, $numeric = false ) { return $this->repository()->source_identities( $key, $identities, $numeric ); }

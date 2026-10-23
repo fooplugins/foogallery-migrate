@@ -109,6 +109,17 @@ class CollectionFormReadTest extends TestCase {
 			$this->assertSame( array(), $repository->pages );
 		}
 	}
+	public function test_table_queue_and_cancel_dispatch_without_full_collection_read(): void {
+		$objects = $this->objects( 'galleries' ); $repository = new CollectionFormRepository( $objects );
+		$engine = new CollectionFormEngine( $repository, $objects, 'galleries', 20 );
+		$migrator = new GalleryMigrator( $engine, 'galleries' );
+		$uid = $objects[120]->unique_identifier();
+		$this->assertTrue( $migrator->queue_objects_for_migration( array( $uid => array( 'title' => 'Selected' ) ) ) );
+		$migrator->cancel_migration();
+		$this->assertSame( array( array( 'galleries', array( $uid => array( 'title' => 'Selected' ) ) ),
+			array( 'galleries', array() ) ), $repository->queues );
+		$this->assertSame( array(), $repository->pages );
+	}
 }
 
 class CollectionFormPlugin {
@@ -119,6 +130,7 @@ class CollectionFormPlugin {
 
 class CollectionFormRepository {
 	public $pages = array();
+	public $queues = array();
 	public $started_reads = 0;
 	public $change_after_page = false;
 	public $short_page = false;
@@ -127,6 +139,7 @@ class CollectionFormRepository {
 	private $head;
 	public function __construct( $objects ) { $this->objects = $objects; $this->head = array( 'id' => 1, 'revision' => 1 ); }
 	public function view_context( $bucket ) { return array( 'found' => true, 'total' => count( $this->objects ), 'head' => $this->head ); }
+	public function queue_selected( $bucket, $selection ) { $this->queues[] = array( $bucket, $selection ); return true; }
 	public function view_page( $bucket, $offset, $limit ) {
 		if ( $limit > 100 ) { throw new \RuntimeException( 'Unbounded page.' ); }
 		$this->pages[] = array( $offset, $limit ); $rows = array();

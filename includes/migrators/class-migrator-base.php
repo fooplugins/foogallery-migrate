@@ -140,29 +140,20 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
 
         private function queue_objects_for_migration_admitted( $id_array ) {
             $this->migrator_engine->assert_storage_writer();
+			$table = $this->table_collection_repository();
+			if ( null !== $table ) {
+				// An absent collection still follows ordinary lazy discovery. Once
+				// present, queue/cancel never hydrate unrelated collection roots.
+				$context = $table->view_context( $this->type );
+				if ( ! $context['found'] ) { $this->get_objects_to_migrate(); }
+				return $table->queue_selected( $this->type, $id_array, array( $this, 'queue_transition' ), array( $this, 'queue_summary' ) );
+			}
 
             $objects = $this->get_objects_to_migrate();
-            $queued_object_count = 0;
-
             foreach ( $objects as $object ) {
-                if ( array_key_exists( $object->unique_identifier(), $id_array ) ) {
-                    // Only queue an object if it has not been migrated previously.
-					$must_migrate = !$object->migrated;
-
-                    if ( $must_migrate ) {
-                        $queued_object_count++;
-                        $object->part_of_migration = true;
-                        $object->migration_status = Migratable::PROGRESS_QUEUED;
-                        if ( 0 === $object->migrated_id ) {
-                            $object->migrated_title = $id_array[$object->unique_identifier()]['title'];
-                        }
-                    }
-                } else {
-                    $object->part_of_migration = false;
-                    if ( $object->migration_status === Migratable::PROGRESS_QUEUED ) {
-                        $object->migration_status = Migratable::PROGRESS_NOT_STARTED;
-                    }
-                }
+				$uid = $object->unique_identifier();
+				$this->queue_transition( $object, array_key_exists( $uid, $id_array ),
+					array_key_exists( $uid, $id_array ) ? $id_array[$uid] : null );
             }
 
             $state_saved = $this->calculate_migration_state( $objects );
@@ -172,6 +163,25 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
 
 			return $state_saved && $objects_saved;
         }
+
+		/** One logical queue transition, shared by option and bounded table callers. */
+		public static function queue_transition( $object, $matched, $entry ) {
+			if ( $matched ) {
+				if ( ! $object->migrated ) {
+					$object->part_of_migration = true;
+					$object->migration_status = Migratable::PROGRESS_QUEUED;
+					if ( 0 === $object->migrated_id ) {
+						$object->migrated_title = $entry['title'];
+					}
+				}
+			} else {
+				$object->part_of_migration = false;
+				if ( $object->migration_status === Migratable::PROGRESS_QUEUED ) {
+					$object->migration_status = Migratable::PROGRESS_NOT_STARTED;
+				}
+			}
+			return $object;
+		}
 
         /**
          * Calculates the state of the current migration.
@@ -197,17 +207,14 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
                 }
             }
 
-            $progress = 0;
-            if ( $queued_count > 0 ) {
-                $progress = ( $completed_count + $error_count ) / $queued_count * 100;
-            }
-
-            return $this->set_state( array(
-                'queued' => $queued_count,
-                'completed' => $completed_count,
-                'progress' => $progress
-            ) );
+			return $this->set_state( self::queue_summary( $queued_count, $completed_count, $error_count ) );
         }
+
+		/** Summary for the same selected-object predicate in either backend. */
+		public static function queue_summary( $queued, $completed, $errors ) {
+			return array( 'queued' => $queued, 'completed' => $completed,
+				'progress' => $queued > 0 ? ( $completed + $errors ) / $queued * 100 : 0 );
+		}
 
         /**
          * Cancels the current gallery migration.

@@ -38,6 +38,33 @@ class MigratableCollectionRepository extends ScalarStateRepository {
 		foreach ( $page['rows'] as $row ) { $rows[] = $this->hydrate_view_record( $bucket, $row ); }
 		return array( 'rows' => $rows, 'head' => $page['head'] );
 	}
+	/** Table-only atomic queue/cancel; the option path keeps its original loop. */
+	public function queue_selected( $bucket, $selection, $transition, $summarize ) {
+		$bucket = $this->bucket( $bucket );
+		if ( ! $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table collection queue required.' ); }
+		if ( ! is_callable( $transition ) || ! is_callable( $summarize ) ) { throw new \RuntimeException( 'Queue transition and summary required.' ); }
+		$repository = $this;
+		return $this->backend->queue_collection( $bucket, $selection, function ( $row, $matched, $entry ) use ( $repository, $bucket, $transition ) {
+			$hydrated = $repository->hydrate_view_record( $bucket, $row );
+			$object = $hydrated['value'];
+			if ( ! is_object( $object ) || ! method_exists( $object, 'unique_identifier' ) ) { throw new \RuntimeException( 'Collection root could not hydrate.' ); }
+			if ( $matched && ! $object->migrated && 0 === $object->migrated_id &&
+				( ! is_array( $entry ) || ! array_key_exists( 'title', $entry ) ||
+				( ! is_scalar( $entry['title'] ) && null !== $entry['title'] ) ) ) { throw new \RuntimeException( 'Selected title is invalid.' ); }
+			$set_title = $matched && ! $object->migrated && 0 === $object->migrated_id;
+			call_user_func( $transition, $object, $matched, $entry );
+			$compact = $repository->settings->compact_migrated_object( $object );
+			if ( ! is_array( $row['value'] ) ) { throw new \RuntimeException( 'Invalid collection root.' ); }
+			if ( ! is_array( $compact ) || ! array_key_exists( 'part_of_migration', $compact ) || ! array_key_exists( 'migration_status', $compact ) ) { throw new \RuntimeException( 'Invalid compact queue root.' ); }
+			$value = $row['value'];
+			$value['part_of_migration'] = $compact['part_of_migration'];
+			$value['migration_status'] = $compact['migration_status'];
+			if ( $set_title ) { $value['migrated_title'] = $compact['migrated_title']; }
+			return array( 'value' => $value, 'selected' => (bool) $object->part_of_migration,
+				'completed' => (bool) $object->migrated,
+				'error' => 'error' === $object->migration_status );
+		}, $summarize );
+	}
 	public function first_started( $bucket ) {
 		$bucket = $this->bucket( $bucket );
 		if ( ! $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table collection view required.' ); }
