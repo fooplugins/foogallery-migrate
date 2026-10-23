@@ -1,6 +1,6 @@
 # Legacy storage upgrade for large sites
 
-**Status:** Single-site first-release candidate passed scoped implementation and independent QA; final local commit pending. Not published or approved for release.
+**Status:** Single-site first-release candidate passed scoped implementation and independent QA; committed locally in `57103ca`. Not published or approved for release.
 
 **Qualification:** 2026-10-23; current results, package identity and retained evidence are in [the final acceptance closure](dev-plan.md#final-acceptance-closure). Runtime validation is complete within the documented limits; historical PR inventory below is not the remaining backlog.
 
@@ -68,7 +68,7 @@ Source entry points: [table repository](../includes/class-legacy-table-repositor
 
 ### Implementation priorities at the reviewed PR revision
 
-This list records the original blockers at `206655c`, not the current remaining backlog. R0–R4 implementation and qualification have since passed within the approved scope; final local commit is pending. Current evidence, limits and commit identities live in [the execution tracker](dev-plan.md), not this historical inventory. Deferred network/engine/advisor work is not an unfinished first-release requirement.
+This list records the original blockers at `206655c`, not the current remaining backlog. R0–R4 implementation and qualification have since passed within the approved scope; final implementation is committed locally in `57103ca`. Current evidence, limits and commit identities live in [the execution tracker](dev-plan.md), not this historical inventory. Deferred network/engine/advisor work is not an unfinished first-release requirement.
 
 1. **Run the journey and classify the baseline (R0).** Prepare one owned disposable runner and attempt the public customer path immediately. Record its first failure and classify suite failures as product/safety/performance, environment, or superseded implementation diagnostics. Historical focused passes do not certify this head.
 2. **Make one integrated candidate testable (R1 / M1).** The shipped [capacity policy](../includes/storage-capacity-policy.json) has empty classes and null digests, so public conversion refuses. Establish a small evidenced release policy without customer calibration, then fix the first failing migration/edit/reversal/cleanup step. [Uninstall](../uninstall.php) still requires excluded `vendor/autoload.php`; [MigratedStore](../includes/class-migrated-store.php) targets the older table layout. Complete essential single-site cleanup/package loading as part of the journey, not after UI polish. Use real SQL/runtime-floor/source+ZIP evidence, not an injected policy.
