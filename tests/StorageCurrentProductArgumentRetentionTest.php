@@ -40,6 +40,7 @@ class StorageCurrentProductArgumentRetentionTest extends TestCase {
 			'source' => array( 'array_capacity_upper' => 8, 'string_extra_upper' => 0 ) );
 	}
 	private function decoder_failure( $source ) { ( new LegacyOptionDecoder( 60000 ) )->decode( 'a:1:{' ); }
+	/** @group optional_host_diagnostic */
 	public function test_modern_decoder_exception_retains_preexisting_nested_argument_after_unwind() {
 		// Real decoder; this test wrapper is NOT an executed product receiver.
 		$this->assertSame( 'ff82db7eda0be9999675b94c1e7561ab009579b4f57540d2b6a47a0df331b474', hash_file( 'sha256', dirname( __DIR__ ) . '/includes/class-legacy-state-codec.php' ) );
@@ -56,6 +57,7 @@ class StorageCurrentProductArgumentRetentionTest extends TestCase {
 		}
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_all_actual_suffixes_capture_only_concurrent_argument_roots() {
 		foreach ( array( '5.4.0', '5.6.20' ) as $version ) {
 			$t = new StorageProductCallerTraceV3( $version ); $m = new StorageProductArgumentRetentionV3( $version );
@@ -79,6 +81,7 @@ class StorageCurrentProductArgumentRetentionTest extends TestCase {
 		}
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_nested_sharing_is_not_deep_copy_delta_or_zero_sized_existing_graph() {
 		$m = new StorageProductArgumentRetentionV3( '5.4.0' ); $t = new StorageProductCallerTraceV3( '5.4.0' );
 		$shared = str_repeat( 'x', 70000 ); $v = array( $shared, $shared );
@@ -92,6 +95,7 @@ class StorageCurrentProductArgumentRetentionTest extends TestCase {
 		$this->assertSame( 2 * ( $t->nominal( 70001 + 20000 ) - $t->nominal( 70001 ) ), $m->extent( $v, 8, 20000 ) - $m->extent( $v, 8 ) );
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_historical_sparse_and_empty_array_capacity_is_not_element_count() {
 		$m = new StorageProductArgumentRetentionV3( '5.6.20' ); $t = new StorageProductCallerTraceV3( '5.6.20' );
 		$this->assertSame( $t->nominal( 256 ) - $t->nominal( 64 ), $m->extent( array(), 32 ) - $m->extent( array(), 8 ) );
@@ -101,6 +105,7 @@ class StorageCurrentProductArgumentRetentionTest extends TestCase {
 		$this->assertGreaterThan( 0, $m->extent( $v, 8 ) );
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_composition_reuses_one_joined_vector_and_keeps_frontiers_unresolved() {
 		foreach ( array( '5.4.0', '5.6.20' ) as $version ) {
 			$t = new StorageProductCallerTraceV3( $version ); $m = new StorageProductArgumentRetentionV3( $version );
@@ -124,6 +129,7 @@ class StorageCurrentProductArgumentRetentionTest extends TestCase {
 		}
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_unbounded_request_string_is_parameterized_not_capped_by_current_raw() {
 		$t = new StorageProductCallerTraceV3( '5.4.0' ); $m = new StorageProductArgumentRetentionV3( '5.4.0' );
 		$args = $this->arguments( $t->paths()[0] ); $small = $m->retention( 0, $args, $this->capacities() );
@@ -131,6 +137,7 @@ class StorageCurrentProductArgumentRetentionTest extends TestCase {
 		$this->assertSame( $t->nominal( 100001 ) - $t->nominal( 6 ), $large['existing_argument_graph_nominal_upper'] - $small['existing_argument_graph_nominal_upper'] );
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_v1_record_does_not_require_v2_field_or_duplicate_request_per_frame() {
 		$t = new StorageProductCallerTraceV3( '5.6.20' ); $m = new StorageProductArgumentRetentionV3( '5.6.20' );
 		$args = $this->arguments( $t->paths()[2] ); $args['record']['version'] = 1; unset( $args['record']['retained_digest'] );
@@ -142,6 +149,7 @@ class StorageCurrentProductArgumentRetentionTest extends TestCase {
 		$this->assertGreaterThan( $r['existing_argument_graph_nominal_upper'], $m->retention( 2, $args, $contracts )['existing_argument_graph_nominal_upper'] );
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_unsupported_domains_fail_before_composition() {
 		$m = new StorageProductArgumentRetentionV3( '5.4.0' );
 		foreach ( array( 0, 7, 9, 1048576, '8', -1 ) as $capacity ) {
@@ -157,6 +165,7 @@ class StorageCurrentProductArgumentRetentionTest extends TestCase {
 		catch ( \InvalidArgumentException $e ) { $this->assertSame( 'product_argument_domain', $e->getMessage() ); }
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_impossible_null_source_and_incomplete_roots_are_not_zero() {
 		$t = new StorageProductCallerTraceV3( '5.4.0' ); $m = new StorageProductArgumentRetentionV3( '5.4.0' );
 		foreach ( array( 'source', 'record', 'request' ) as $key ) {
@@ -167,6 +176,7 @@ class StorageCurrentProductArgumentRetentionTest extends TestCase {
 		$args = $this->arguments( $t->paths()[2] ); $args['source'] = null;
 		$this->expectException( \InvalidArgumentException::class ); $m->retention( 2, $args, $this->capacities() );
 	}
+	/** @group optional_host_diagnostic */
 	public function test_hidden_backing_contract_is_mandatory_not_observed_from_modern_value() {
 		$t = new StorageProductCallerTraceV3( '5.4.0' ); $m = new StorageProductArgumentRetentionV3( '5.4.0' );
 		$args = $this->arguments( $t->paths()[2] );
@@ -177,6 +187,7 @@ class StorageCurrentProductArgumentRetentionTest extends TestCase {
 			catch ( \InvalidArgumentException $e ) { $this->assertSame( 'product_argument_domain', $e->getMessage() ); }
 		}
 	}
+	/** @group optional_host_diagnostic */
 	public function test_unsupported_record_root_is_rejected_before_field_access() {
 		$t = new StorageProductCallerTraceV3( '5.4.0' ); $m = new StorageProductArgumentRetentionV3( '5.4.0' );
 		foreach ( array( new \stdClass(), 'not-a-record', null ) as $bad ) {

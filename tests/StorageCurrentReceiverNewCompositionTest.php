@@ -7,6 +7,7 @@ require_once __DIR__ . '/support/StorageReceiverNewCompositionV3.php';
 
 /** Selected NEW-copy families only; neither an ingress cap nor admission. */
 class StorageCurrentReceiverNewCompositionTest extends TestCase {
+	/** @group optional_host_diagnostic */
 	public function test_input_length_not_normalized_length_owns_the_duplicate_buffer() {
 		foreach ( array( '5.4.0', '5.6.20' ) as $version ) {
 			$m = new StorageReceiverNewCompositionV3( $version );
@@ -21,6 +22,7 @@ class StorageCurrentReceiverNewCompositionTest extends TestCase {
 			$this->assertFalse( $r['original_freed'] );
 		}
 	}
+	/** @group optional_host_diagnostic */
 	public function test_empty_trailing_slash_and_nul_relations_include_the_terminator() {
 		$m = new StorageReceiverNewCompositionV3( '5.4.0' );
 		foreach ( array( '', '\\', '\\0', '\\a\\', "a\0b", '\\\\' ) as $input ) {
@@ -30,6 +32,7 @@ class StorageCurrentReceiverNewCompositionTest extends TestCase {
 			$this->assertGreaterThanOrEqual( 32, $r['duplicate_nominal'] );
 		}
 	}
+	/** @group optional_host_diagnostic */
 	public function test_shallow_cow_uses_new_current_elements_not_original_capacity() {
 		foreach ( array( '5.4.0', '5.6.20' ) as $version ) {
 			$m = new StorageReceiverNewCompositionV3( $version );
@@ -46,6 +49,7 @@ class StorageCurrentReceiverNewCompositionTest extends TestCase {
 			$this->assertSame( 0, $m->shallow_copy( array() )['child_addrefs'] );
 		}
 	}
+	/** @group optional_host_diagnostic */
 	public function test_composition_keeps_unproved_families_null_not_zero_or_a_policy() {
 		$m = new StorageReceiverNewCompositionV3( '5.6.20' );
 		$r = $m->compose( array( array( '\\q', 'q' ), array( '\\q', 'q' ) ), array( array( 'nonce' ), array( 0 ) ) );
@@ -63,6 +67,7 @@ class StorageCurrentReceiverNewCompositionTest extends TestCase {
 			$this->assertSame( $hash, hash_file( 'sha256', dirname( __DIR__ ) . '/' . $file ) );
 		}
 	}
+	/** @group optional_host_diagnostic */
 	public function test_incorrect_normalization_is_not_an_observed_transform() {
 		$this->expectException( \InvalidArgumentException::class );
 		( new StorageReceiverNewCompositionV3( '5.4.0' ) )->string_copy( '\\q', 'different' );

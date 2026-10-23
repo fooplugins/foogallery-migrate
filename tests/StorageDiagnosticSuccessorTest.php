@@ -9,6 +9,7 @@ require_once __DIR__ . '/support/StorageReceiverNewCompositionV2.php';
 
 /** Fresh modern diagnostic only. No SQL, calibrated admission or PHP5 claim. */
 class StorageDiagnosticSuccessorTest extends TestCase {
+	/** @group optional_host_diagnostic */
 	public function test_originals_and_provenance_remain_historical_not_current_acceptance() {
 		$originals = array(
 			'StorageProductCallerTrace.php' => 'f7d2eb510f87fa02e4d8a7da474a94caaab42f6297b14fc445b7c70442243ac9',
@@ -22,7 +23,9 @@ class StorageDiagnosticSuccessorTest extends TestCase {
 		$this->expectExceptionMessage( 'diagnostic_binding:includes/class-storage-operations.php' );
 		$new->assert_witness( $old->paths(), $old->bindings(), dirname( __DIR__ ) );
 	}
-	/** @dataProvider misbound_evidence */
+	/** @dataProvider misbound_evidence
+	 * @group optional_host_diagnostic
+	 */
 	public function test_hash_only_rebinding_stale_lines_and_wrong_argument_edges_are_rejected( $mutation ) {
 		$m = new StorageProductCallerTraceV2( '5.4.0' ); $paths = $m->paths();
 		if ( 'historical_lines' === $mutation ) { $paths = ( new StorageProductCallerTrace( '5.4.0' ) )->paths(); }
@@ -33,6 +36,7 @@ class StorageDiagnosticSuccessorTest extends TestCase {
 		$m->assert_witness( $paths, $m->bindings(), dirname( __DIR__ ) );
 	}
 	public static function misbound_evidence() { return array_map( function ( $v ) { return array( $v ); }, array( 'historical_lines', 'argument', 'callee', 'line' ) ); }
+	/** @group optional_host_diagnostic */
 	public function test_both_dependent_compositions_inherit_the_exact_successor() {
 		foreach ( array( '5.4.0', '5.6.20' ) as $version ) {
 			$t = new StorageProductCallerTraceV2( $version ); $a = new StorageProductArgumentRetentionV2( $version ); $r = new StorageReceiverNewCompositionV2( $version );
@@ -43,7 +47,9 @@ class StorageDiagnosticSuccessorTest extends TestCase {
 			$this->assertCount( 18, $t->paths() );
 		}
 	}
-	/** @dataProvider receiver_entries */
+	/** @dataProvider receiver_entries
+	 * @group optional_host_diagnostic
+	 */
 	public function test_fresh_actual_builtin_receiver_caller_suffix_at_begin_without_sql( $operation, $handle ) {
 		$names = array( 'wpdb', 'wp_version', 'foogallery_migrate_test_blog_id', 'foogallery_migrate_test_capabilities', 'foogallery_migrate_test_nonce', 'foogallery_migrate_test_filters' );
 		$saved = array(); foreach ( $names as $name ) { $saved[$name] = array( array_key_exists( $name, $GLOBALS ), isset( $GLOBALS[$name] ) ? $GLOBALS[$name] : null ); }

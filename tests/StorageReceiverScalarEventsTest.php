@@ -75,6 +75,7 @@ class StorageReceiverScalarEventsTest extends TestCase {
 		( new StorageOperations( $this->profile() ) )->dispatch( 'switch', $post );
 		$this->assertNull( $GLOBALS['wpdb']->memory->receiver_events() );
 	}
+	/** @group optional_host_diagnostic */
 	public function test_actual_handle_carries_pre_unslash_events_to_real_coordinator_begin() {
 		$_POST = $this->post(); // bootstrap wp_unslash is an identity fixture.
 		// Original high-capacity root remains outside this NEW-event projection.
@@ -112,6 +113,7 @@ class StorageReceiverScalarEventsTest extends TestCase {
 		$this->expectException( \InvalidArgumentException::class );
 		( new StorageReceiverNewCompositionV2( '5.4.0' ) )->receiver_events( $m->receiver_events() );
 	}
+	/** @group optional_host_diagnostic */
 	public function test_scalar_types_integer_keys_and_each_string_visit_reuse_existing_copy_helpers() {
 		$post = array( '', '\\', null, false, 1, 1.5, '\\0' );
 		$m = new StorageMemoryBaseline(); $m->observe_receiver( $post ); $events = $m->receiver_events();

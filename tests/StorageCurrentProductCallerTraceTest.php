@@ -10,6 +10,7 @@ require_once __DIR__ . '/support/StorageProductCallerTraceV3.php';
 
 /** Modern executable source-bound prerequisite, not executed production endpoints/PHP5. */
 class StorageCurrentProductCallerTraceTest extends TestCase {
+	/** @group optional_host_diagnostic */
 	public function test_exact_product_bindings_formal_arities_and_callsite_edges() {
 		$m = new StorageProductCallerTraceV3( '5.4.0' );
 		$root = dirname( __DIR__ );
@@ -29,6 +30,7 @@ class StorageCurrentProductCallerTraceTest extends TestCase {
 		}
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_shapes_are_existing_closed_product_arrays_not_deep_copies() {
 		$m = new StorageProductCallerTraceV3( '5.6.20' ); $s = $m->shapes();
 		$this->assertSame( array( 'blog_id', 'scope', 'target', 'confirmation', 'nonce' ), $s['request'] );
@@ -46,6 +48,7 @@ class StorageCurrentProductCallerTraceTest extends TestCase {
 		$this->assertNull( $r['whole_operation_nominal_upper'] );
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_mutable_slots_not_zval_alias_or_repeated_visit_determine_separation() {
 		$m = new StorageProductCallerTraceV3( '5.4.0' );
 		$a = array( 'slot' => 'dispatch:1', 'identity' => 'request', 'kind' => 'request', 'refcount' => 4, 'is_ref' => false );
@@ -57,6 +60,7 @@ class StorageCurrentProductCallerTraceTest extends TestCase {
 		$this->assertSame( 0, $m->visit( array( $a, $b ) )['backing_nominal'] );
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_joined_trace_vector_is_one_growth_sequence_not_two_rounded_vectors() {
 		$m = new StorageProductCallerTraceV3( '5.6.20' ); $local = new StorageScannerTraceCapacityV2( '5.6.20' );
 		foreach ( array( array( 8, 1 ), array( 16, 1 ), array( 32, 1 ), array( 7, 1 ), array( 21, 6 ) ) as $pair ) {
@@ -69,6 +73,7 @@ class StorageCurrentProductCallerTraceTest extends TestCase {
 		$this->assertSame( 64, $m->join_vector( 8, 1 )['catch_delta'] );
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_every_local_case_is_joined_with_every_finite_suffix_and_no_proof_flags() {
 		foreach ( array( '5.4.0', '5.6.20' ) as $v ) {
 			$m = new StorageProductCallerTraceV3( $v ); $local = new StorageScannerTraceCapacityV2( $v );
@@ -86,6 +91,7 @@ class StorageCurrentProductCallerTraceTest extends TestCase {
 		}
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_recovery_advance_and_replacement_keep_distinct_source_identities() {
 		$m = new StorageProductCallerTraceV3( '5.4.0' );
 		foreach ( $m->paths() as $path ) {
@@ -103,6 +109,7 @@ class StorageCurrentProductCallerTraceTest extends TestCase {
 		}
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_conditional_file_extent_is_not_a_shipped_256_byte_cap() {
 		$m = new StorageProductCallerTraceV3( '5.6.20' );
 		$a = $m->envelope( 60000, 16, 255 ); $b = $m->envelope( 60000, 16, 4096 );
@@ -110,6 +117,7 @@ class StorageCurrentProductCallerTraceTest extends TestCase {
 		$this->assertFalse( $b['filename_extent_proven'] );
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_array_copy_uses_number_of_elements_not_historical_capacity() {
 		$m = new StorageProductCallerTraceV3( '5.4.0' );
 		$keys = $m->shapes()['record'];

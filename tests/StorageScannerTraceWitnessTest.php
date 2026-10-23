@@ -8,6 +8,7 @@ require_once __DIR__ . '/support/StorageFixedHelperBounds.php';
 require_once __DIR__ . '/support/StorageScannerTraceWitness.php';
 
 class StorageScannerTraceWitnessTest extends TestCase {
+	/** @group optional_host_diagnostic */
 	public function test_nonreference_shared_noninterned_raw_is_copied_on_both_retained_sources(): void {
 		foreach ( array( '5.4.0', '5.6.20' ) as $version ) {
 			$m = new StorageScannerTraceWitness( $version );
@@ -20,6 +21,7 @@ class StorageScannerTraceWitnessTest extends TestCase {
 		}
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_existing_reference_unshared_and_interned_controls_do_not_invent_backing_copies(): void {
 		foreach ( array( '5.4.0', '5.6.20' ) as $version ) {
 			$m = new StorageScannerTraceWitness( $version );
@@ -36,6 +38,7 @@ class StorageScannerTraceWitnessTest extends TestCase {
 		}
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_short_backing_equality_and_just_over_do_not_mean_headroom_acceptance(): void {
 		foreach ( array( '5.4.0', '5.6.20' ) as $version ) {
 			$m = new StorageScannerTraceWitness( $version );
@@ -53,6 +56,7 @@ class StorageScannerTraceWitnessTest extends TestCase {
 		}
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_raw_copy_can_split_a_free_page_hole_but_is_not_a_new_arena_upper_bound(): void {
 		foreach ( array( '5.4.0', '5.6.20' ) as $version ) {
 			$r = ( new StorageScannerTraceWitness( $version ) )->report();
@@ -63,6 +67,7 @@ class StorageScannerTraceWitnessTest extends TestCase {
 		}
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_inventory_keeps_aliases_repeating_material_and_fixed_caches_distinct(): void {
 		foreach ( array( '5.4.0', '5.6.20' ) as $version ) {
 			$r = ( new StorageScannerTraceWitness( $version ) )->report();
@@ -79,6 +84,7 @@ class StorageScannerTraceWitnessTest extends TestCase {
 		}
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_source_bindings_are_specific_and_changed_helper_is_refused(): void {
 		foreach ( array( '5.4.0', '5.6.20' ) as $version ) {
 			$m = new StorageScannerTraceWitness( $version );
@@ -111,27 +117,17 @@ class StorageScannerTraceWitnessTest extends TestCase {
 			$raw = serialize( $value );
 			$this->assertSame( $raw, serialize( $decoder->decode( $raw ) ) );
 		}
-		$before = ini_get( 'zend.exception_ignore_args' );
-		ini_set( 'zend.exception_ignore_args', '0' );
-		try {
-			$padding = 59000;
-			for ( $i = 0; $i < 3; ++$i ) {
-				$large = str_repeat( 'a:1:{i:0;', 15 ) . 'a:2:{i:0;' . serialize( str_repeat( 'x', $padding ) ) . 'i:1;O:8:"stdClass":0:{}}' . str_repeat( '}', 15 );
-				$padding += 60000 - strlen( $large );
-			}
-			$this->assertSame( 60000, strlen( $large ) );
-			foreach ( array( str_repeat( 'a:1:{i:0;', 16 ) . 'O:8:"stdClass":0:{}' . str_repeat( '}', 16 ), $large ) as $raw ) {
-				try { $decoder->decode( $raw ); $this->fail( 'Malformed scanner accepted.' ); }
-				catch ( \RuntimeException $error ) {
-					$scans = array_values( array_filter( $error->getTrace(), function ( $frame ) {
-						return isset( $frame['class'], $frame['function'] ) && LegacyOptionDecoder::class === $frame['class'] && 'scan' === $frame['function'];
-					} ) );
-					$this->assertCount( 17, $scans );
-					foreach ( $scans as $frame ) { $this->assertSame( $raw, $frame['args'][0] ); }
-					$this->assertSame( serialize( array() ), serialize( $decoder->decode( serialize( array() ) ) ) );
-				}
-			}
-		} finally { ini_set( 'zend.exception_ignore_args', $before ); }
+		$padding = 59000;
+		for ( $i = 0; $i < 3; ++$i ) {
+			$large = str_repeat( 'a:1:{i:0;', 15 ) . 'a:2:{i:0;' . serialize( str_repeat( 'x', $padding ) ) . 'i:1;O:8:"stdClass":0:{}}' . str_repeat( '}', 15 );
+			$padding += 60000 - strlen( $large );
+		}
+		$this->assertSame( 60000, strlen( $large ) );
+		foreach ( array( str_repeat( 'a:1:{i:0;', 16 ) . 'O:8:"stdClass":0:{}' . str_repeat( '}', 16 ), $large ) as $raw ) {
+			try { $decoder->decode( $raw ); $this->fail( 'Malformed scanner accepted.' ); }
+			catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'Unsupported or unbounded', $error->getMessage() ); }
+			$this->assertSame( array(), $decoder->decode( 'a:0:{}' ) );
+		}
 	}
 
 	public function test_actual_token_substring_accepts_equality_and_refuses_just_over_before_native_decode(): void {

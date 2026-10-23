@@ -163,6 +163,19 @@ R4 preparatory read-only review (Sol Medium `/root/r0_qa`, no test retirement): 
 
 ## Workflow to avoid repeated blockers
 
+R4c classification accepted after `9702717` (Sol High `/root/r0_journey`; independent Sol Medium `/root/r0_qa`; repairs0). The17 Current/predecessor families annotate individual methods with `optional_host_diagnostic`; default PHPUnit excludes only this explicit group, not files. Dispositions apply to both generations:
+
+| Family / original requirements | Release coverage retained or replacement | Optional engineering evidence |
+|---|---|---|
+| ReceiverScalarEvents | Eight existing cases per generation retain private value-free projection, no graph traversal, no evidence/no credit, malformed domains; R4b actual handle alias/privacy/scalar types and R4a entry sampling | Two mixed fixed-helper/copy-math methods per generation |
+| ScannerTraceWitness | Nine cases per generation retain domain refusal, dense/nested/sibling/malformed/reuse and128/129 token limits | First six source/backing/page/cache/argument-retention methods; exact exception frame counts removed from mixed portable method |
+| CurrentDiagnosticNativeScale | Ordinary/deep/sibling/malformed decoder reuse and high-water remain in the renamed portable method; CapacityPolicy/ScaleAdmission/Operations retain finite memory/work/deadline refusal | Frame-layout refusal cases and observer/domain/model joins |
+| ScannerTraceCapacity, FixedHelperBounds | R4b16/17 and64/65, malformed/sibling/reuse and LegacyOptionDecoder dense/high-node cases replace mixed decoder assertions | Zend page/CV reservations, source hashes, exact path/frame/argument vectors |
+| ProductArgumentRetention, ProductCallerTrace | R4b malformed refusal; Control/Authority/Conversion identity and R4a high-water/no-credit remain | Historical backing capacities, argument retention, source SHA/call-edge/slot/composition models (including model-only recovery source identities) |
+| ReceiverNewComposition, DiagnosticSuccessor | R4a/R4b and Operations retain strict actual receiver authorization/privacy/nonmutation/low-memory/no-SQL and entry high-water | V2/V3 COW/normalization/callsite/line/frame binding and mixed receiver-suffix certificates |
+
+Supervisor affected regression117 tests/780 assertions passes; independent retained families35/86 pass. Optional diagnostics are still runnable with `php -d memory_limit=256M vendor/bin/phpunit --no-configuration --bootstrap tests/bootstrap.php --group optional_host_diagnostic tests`; a selected pure normalization case passes1/1, while QA's selected historical binding case fails `fixed_helper_domain` as expected on the unqualified host. This is explicit optional evidence, not green certification. Other allocator/snapshot families and obsolete calibration/provenance/startup expectations remain open; full release discovery is not yet accepted.
+
 Development is now authorized. Apply these rules with Brad's explicit no-budget-stop instruction; do not reopen the settled scope or request a usage allowance again.
 
 1. **One supervisor, one tracker, one settled release contract.** This file is the forward tracker; no per-worker plans or parallel acceptance ledgers. Old checkpoints are historical evidence. Record new decisions here without reopening the five approved cuts.

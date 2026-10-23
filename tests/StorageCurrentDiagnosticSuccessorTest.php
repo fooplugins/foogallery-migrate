@@ -9,6 +9,7 @@ require_once __DIR__ . '/support/StorageReceiverNewCompositionV3.php';
 
 /** Fresh modern diagnostic only. No SQL, calibrated admission or PHP5 claim. */
 class StorageCurrentDiagnosticSuccessorTest extends TestCase {
+	/** @group optional_host_diagnostic */
 	public function test_originals_and_provenance_remain_historical_not_current_acceptance() {
 		$originals = array(
 			'StorageProductCallerTrace.php' => 'f7d2eb510f87fa02e4d8a7da474a94caaab42f6297b14fc445b7c70442243ac9',
@@ -23,7 +24,9 @@ class StorageCurrentDiagnosticSuccessorTest extends TestCase {
 		$b = $new->bindings(); $b['product_files']['includes/class-storage-operations.php'] = '957291fa4d17323fd877e0d11045a042afe17f962b58148a5e7bd5d07f6d89b8';
 		$new->assert_witness( $old->paths(), $b, dirname( __DIR__ ) );
 	}
-	/** @dataProvider misbound_evidence */
+	/** @dataProvider misbound_evidence
+	 * @group optional_host_diagnostic
+	 */
 	public function test_hash_only_rebinding_stale_lines_and_wrong_argument_edges_are_rejected( $mutation ) {
 		$m = new StorageProductCallerTraceV3( '5.4.0' ); $paths = $m->paths();
 		if ( 'historical_lines' === $mutation ) { $paths = ( new \ReflectionClass( StorageProductCallerTrace::class ) )->newInstanceWithoutConstructor()->paths(); }
@@ -35,6 +38,7 @@ class StorageCurrentDiagnosticSuccessorTest extends TestCase {
 		$m->assert_witness( $paths, $m->bindings(), dirname( __DIR__ ) );
 	}
 	public static function misbound_evidence() { return array_map( function ( $v ) { return array( $v ); }, array( 'historical_lines', 'argument', 'callee', 'line', 'receiver' ) ); }
+	/** @group optional_host_diagnostic */
 	public function test_both_dependent_compositions_inherit_the_exact_successor() {
 		foreach ( array( '5.4.0', '5.6.20' ) as $version ) {
 			$t = new StorageProductCallerTraceV3( $version ); $a = new StorageProductArgumentRetentionV3( $version ); $r = new StorageReceiverNewCompositionV3( $version );
@@ -45,7 +49,9 @@ class StorageCurrentDiagnosticSuccessorTest extends TestCase {
 			$this->assertCount( 18, $t->paths() );
 		}
 	}
-	/** @dataProvider receiver_entries */
+	/** @dataProvider receiver_entries
+	 * @group optional_host_diagnostic
+	 */
 	public function test_fresh_actual_builtin_receiver_caller_suffix_at_begin_without_sql( $operation, $handle ) {
 		$names = array( 'wpdb', 'wp_version', 'foogallery_migrate_test_blog_id', 'foogallery_migrate_test_capabilities', 'foogallery_migrate_test_nonce', 'foogallery_migrate_test_filters' );
 		$saved = array(); foreach ( $names as $name ) { $saved[$name] = array( array_key_exists( $name, $GLOBALS ), isset( $GLOBALS[$name] ) ? $GLOBALS[$name] : null ); }

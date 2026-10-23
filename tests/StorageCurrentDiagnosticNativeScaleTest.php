@@ -34,33 +34,23 @@ class StorageCurrentDiagnosticNativeScaleTest extends TestCase {
 		}
 		return $out;
 	}
-	public function test_native_scale_ordinary_depth_sibling_and_retained_decoder_failure_reuse() {
-		StorageNativeScaleTrace::assert_domain();
+	public function test_native_scale_ordinary_depth_sibling_and_decoder_failure_reuse() {
 		$baseline = new StorageMemoryBaseline(); $before = $baseline->sample();
 		$scale = $this->scale( null, null, $baseline ); $decoder = $scale->decoder( 60000 );
 		$nested = null; for ( $i = 0; $i < 16; ++$i ) { $nested = array( $nested ); }
 		foreach ( array( array(), array( 'x' ), $nested, array( array(), array(), array() ) ) as $value ) {
 			$this->assertSame( serialize( $value ), serialize( $decoder->decode( serialize( $value ) ) ) );
 		}
-		$retained = array();
-		$old = ini_get( 'zend.exception_ignore_args' ); ini_set( 'zend.exception_ignore_args', '0' );
-		try {
-			foreach ( array( 'a:x:{}', 'a:1:{i:0;N!}', str_repeat( 'a:1:{i:0;', 65 ) . 'N;' . str_repeat( '}', 65 ) ) as $raw ) {
-				try { $decoder->decode( $raw ); $this->fail( 'Malformed/depth input accepted' ); }
-				catch ( \RuntimeException $e ) {
-					$retained[] = $e; $trace = $this->trace( $e );
-					$this->assertStringContainsString( 'Unsupported or unbounded', $e->getMessage() );
-					$this->assertNotContains( 'LegacyOptionDecoder::tick', $trace );
-					$this->assertNotContains( 'StorageScaleAdmission::decoder', $trace );
-					$this->assertNotContains( 'StorageScaleAdmission::tick', $trace );
-				}
-				$this->assertSame( array(), $decoder->decode( 'a:0:{}' ) );
-			}
-			foreach ( $retained as $e ) { $this->assertNotEmpty( $e->getTrace() ); }
-		} finally { ini_set( 'zend.exception_ignore_args', $old ); }
+		foreach ( array( 'a:x:{}', 'a:1:{i:0;N!}', str_repeat( 'a:1:{i:0;', 65 ) . 'N;' . str_repeat( '}', 65 ) ) as $raw ) {
+			try { $decoder->decode( $raw ); $this->fail( 'Malformed/depth input accepted' ); }
+			catch ( \RuntimeException $e ) { $this->assertStringContainsString( 'Unsupported or unbounded', $e->getMessage() ); }
+			$this->assertSame( array(), $decoder->decode( 'a:0:{}' ) );
+		}
 		$this->assertGreaterThanOrEqual( $before, $baseline->sample() );
 	}
-	/** @dataProvider refusal_sites */
+	/** @dataProvider refusal_sites
+	 * @group optional_host_diagnostic
+	 */
 	public function test_native_work_deadline_and_memory_refusal_frames_are_not_decoder_failure( $site ) {
 		StorageNativeScaleTrace::assert_domain();
 		$limits = $this->limits(); $deadline = null;
@@ -95,6 +85,7 @@ class StorageCurrentDiagnosticNativeScaleTest extends TestCase {
 		} finally { ini_set( 'zend.exception_ignore_args', $old ); }
 	}
 	public static function refusal_sites() { return array_map( function ( $x ) { return array( $x ); }, array( 'entry', 'admission-tick', 'scan', 'deadline', 'memory' ) ); }
+	/** @group optional_host_diagnostic */
 	public function test_enabled_observer_does_not_silently_enter_the_disabled_native_domain() {
 		foreach ( array( 'enabled', 'milestones_enabled' ) as $name ) {
 			$p = new \ReflectionProperty( StorageScalarObserver::class, $name ); $old = $p->getValue();
@@ -105,6 +96,7 @@ class StorageCurrentDiagnosticNativeScaleTest extends TestCase {
 			} finally { $p->setValue( null, $old ); }
 		}
 	}
+	/** @group optional_host_diagnostic */
 	public function test_zero_arg_tick_material_has_no_raw_slot_and_receiver_joins_scale_origin_once() {
 		$m = new StorageScannerTraceCapacityV2( '5.4.0' );
 		$entry = StorageNativeScaleTrace::cases( $m, 60000, 16, 256 )[0];

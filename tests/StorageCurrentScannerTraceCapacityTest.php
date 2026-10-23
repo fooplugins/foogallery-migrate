@@ -6,6 +6,7 @@ use PHPUnit\Framework\TestCase;
 
 /** Offline source envelopes are not PHP5 runtime or arena measurements. */
 class StorageCurrentScannerTraceCapacityTest extends TestCase {
+	/** @group optional_host_diagnostic */
 	public function test_every_fail_edge_and_failing_child_are_enumerated() {
 		foreach ( array( '5.4.0', '5.6.20' ) as $v ) {
 			$m = new StorageScannerTraceCapacityV2( $v );
@@ -26,6 +27,7 @@ class StorageCurrentScannerTraceCapacityTest extends TestCase {
 		}
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_growth_and_alignment_equal_and_just_over_boundaries() {
 		$m = new StorageScannerTraceCapacityV2( '5.4.0' );
 		$this->assertSame( 32, $m->nominal( 16 ) );
@@ -40,6 +42,7 @@ class StorageCurrentScannerTraceCapacityTest extends TestCase {
 		$this->assertGreaterThan( $a['construction_nominal_upper'], $b['construction_nominal_upper'] );
 	}
 
+	/** @group optional_host_diagnostic */
 	public function test_separation_is_per_distinct_slot_not_alias_or_historical_visit() {
 		$m = new StorageScannerTraceCapacityV2( '5.6.20' );
 		$slots = array(
@@ -56,7 +59,9 @@ class StorageCurrentScannerTraceCapacityTest extends TestCase {
 		$this->assertSame( 0, $m->visit( $slots )['backing_nominal'] );
 	}
 
-	/** @dataProvider scanner_cases */
+	/** @dataProvider scanner_cases
+	 * @group optional_host_diagnostic
+	 */
 	public function test_modern_control_flow_trace_catch_unwind_and_reuse( $raw, $valid, $depth ) {
 		$m = new StorageScannerTraceCapacityV2( '5.4.0' );
 		$decoder = new LegacyOptionDecoder( 60000, $depth, 8003 );
@@ -93,6 +98,7 @@ class StorageCurrentScannerTraceCapacityTest extends TestCase {
 			'rejected depth64' => array( str_repeat( 'a:1:{i:0;', 65 ) . 'i:1;' . str_repeat( '}', 65 ), false, 64 ),
 		);
 	}
+	/** @group optional_host_diagnostic */
 	public function test_explicit_suffix_and_object_store_terms_are_not_zeroed() {
 		$m = new StorageScannerTraceCapacityV2( '5.6.20' );
 		$a = $m->envelope( 60000, 16, 256 );
@@ -102,6 +108,7 @@ class StorageCurrentScannerTraceCapacityTest extends TestCase {
 		$this->assertSame( $a['construction_nominal_upper'] + 1234 + 24608, $b['parameterized_construction_nominal_upper'] );
 		$this->assertFalse( $b['complete_trace_capacity_proven'] );
 	}
+	/** @group optional_host_diagnostic */
 	public function test_each_path_covers_the_exact_bound_method_argument_counts() {
 		$m = new StorageScannerTraceCapacityV2( '5.4.0' );
 		foreach ( $m->envelope( 60000, 16, 256 )['cases'] as $case ) {

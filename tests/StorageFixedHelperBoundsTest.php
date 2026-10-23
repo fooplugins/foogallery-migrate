@@ -11,7 +11,9 @@ class StorageFixedHelperBoundsTest extends TestCase {
 		return new StorageFixedHelperBounds( $version );
 	}
 	public static function versions(): array { return array( array( '5.4.0' ), array( '5.6.20' ) ); }
-	/** @dataProvider versions */
+	/** @dataProvider versions
+	 * @group optional_host_diagnostic
+	 */
 	public function test_six_fixed_source_descriptors_have_evaluated_distinct_reservations( $version ): void {
 		$m = $this->model( $version ); $d = $m->descriptors();
 		$this->assertSame( array( 'decode', 'scan', 'unsigned', 'token', 'literal', 'fail' ), array_keys( $d ) );
@@ -26,7 +28,9 @@ class StorageFixedHelperBoundsTest extends TestCase {
 		$this->assertSame( 11, $d['scan']['CV_upper'] );
 		$this->assertSame( 2, $d['literal']['call_slots_upper'] );
 	}
-	/** @dataProvider versions */
+	/** @dataProvider versions
+	 * @group optional_host_diagnostic
+	 */
 	public function test_frame_residual_equality_just_over_and_repeated_siblings( $version ): void {
 		$m = $this->model( $version );
 		foreach ( $m->descriptors() as $name => $d ) {
@@ -45,6 +49,7 @@ class StorageFixedHelperBoundsTest extends TestCase {
 		$this->assertSame( $r['per_iteration_acquisitions'] * 8, $r['acquisitions'] );
 		$this->assertSame( 0, $r['remaining_added_pages'] );
 	}
+	/** @group optional_host_diagnostic */
 	public function test_php54_arguments_transfer_a_split_pack_and_free_its_page(): void {
 		$m = $this->model();
 		// An argument push consumes the final parent slot; remaining args cross
@@ -58,6 +63,7 @@ class StorageFixedHelperBoundsTest extends TestCase {
 		$this->assertSame( 0, $m->arguments54( 48, 5 )['acquisitions'] );
 		$this->assertSame( 1, $m->arguments54( 40, 5 )['acquisitions'] );
 	}
+	/** @group optional_host_diagnostic */
 	public function test_php54_argument_boundaries_across_all_parent_residuals(): void {
 		$m = $this->model(); $peak = 0;
 		for ( $argc = 0; $argc <= 5; ++$argc ) {
@@ -68,7 +74,9 @@ class StorageFixedHelperBoundsTest extends TestCase {
 		}
 		$this->assertSame( 2, $peak );
 	}
-	/** @dataProvider versions */
+	/** @dataProvider versions
+	 * @group optional_host_diagnostic
+	 */
 	public function test_deep_failure_and_sibling_paths_sweep_every_parent_residual( $version ): void {
 		$m = $this->model( $version ); $peak = 0;
 		foreach ( array( 16, 64 ) as $depth ) {
@@ -81,7 +89,9 @@ class StorageFixedHelperBoundsTest extends TestCase {
 		}
 		$this->assertGreaterThan( 0, $peak );
 	}
-	/** @dataProvider versions */
+	/** @dataProvider versions
+	 * @group optional_host_diagnostic
+	 */
 	public function test_actual_maximum_depth_graph_and_failure_chain_are_bounded_not_certified( $version ): void {
 		$m = $this->model( $version );
 		$r = $m->envelope( 16 );
@@ -103,6 +113,7 @@ class StorageFixedHelperBoundsTest extends TestCase {
 			$this->assertSame( array(), $decoder->decode( 'a:0:{}' ) );
 		}
 	}
+	/** @group optional_host_diagnostic */
 	public function test_fixed_hash_and_call_graph_refuse_new_constructs(): void {
 		$m = $this->model();
 		foreach ( array( array( 'encode' ), array( 'scan', 'decode' ) ) as $path ) {
@@ -112,11 +123,14 @@ class StorageFixedHelperBoundsTest extends TestCase {
 		$this->expectException( \InvalidArgumentException::class );
 		new StorageFixedHelperBounds( '5.5.0' );
 	}
+	/** @group optional_host_diagnostic */
 	public function test_unreviewed_helper_bytes_are_not_silently_lowered(): void {
 		$this->expectException( \InvalidArgumentException::class );
 		$this->model()->assert_helper_hash( str_repeat( '0', 64 ) );
 	}
-	/** @dataProvider versions */
+	/** @dataProvider versions
+	 * @group optional_host_diagnostic
+	 */
 	public function test_depth16_and_ceiling_inequalities_remain_separate_from_retention( $version ): void {
 		$m = $this->model( $version ); $small = $m->envelope( 16 ); $large = $m->envelope( 64 );
 		$this->assertLessThan( $small['noncurrent_page_minimum_fill'], $small['stack_payload_upper'] );
