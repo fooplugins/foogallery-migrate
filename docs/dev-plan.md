@@ -2,7 +2,55 @@
 
 **Updated:** 2026-10-23
 
-## Post-candidate usability amendment — storage in Settings
+## Current amendment — compact storage settings
+
+Brad approved the minimal UI proposal and authorized implementation, a validated
+commit, and deployment to the existing test site only. No public release, push,
+merge, version-floor change or v2 engine implementation is authorized.
+
+- Two labelled storage choices and **Change storage** replace the visible
+  operation forms and routine acknowledgements. The current selection disables
+  the button; selection alone makes no HTTP request. Size is human-readable;
+  table mode reports its record count rather than misleadingly showing zero data.
+- **Technical details** and **Reset & cleanup** are collapsed normally. Reset and
+  removal each prompt once; cancel sends no request. There are no backup-acceptance
+  checkboxes. Pending cleanup is expanded, and **Continue storage change** is
+  visible without opening details. Normal progress and success text is short.
+- The existing strict receiver requests, purpose-specific nonce/intent fields,
+  capabilities, preflight, ownership/capacity checks, bounded successful
+  continuations and failure-stop behavior remain unchanged. UI radio inputs sit
+  outside the strict action forms, retaining exactly seven posted fields. A failed
+  or uncertain response stops the spinner; uncertainty keeps controls locked until
+  reload. Technical errors stay expandable rather than dominating the main UI.
+- No new UI framework or CSS design system: native WordPress controls, accessible
+  HTML details/summary, labels, live status and a standard spinner. Translation
+  strings are regenerated, including the Layout terminology commit `0a3c7f1`.
+- Focused PHP presentation/policy checks: **20 tests / 215 assertions**. The
+  rendered-JavaScript runner passes **62 workflow checks**, plus assertions for
+  no confirmation on switching, one confirmation on destructive actions, cancelled
+  operations issuing no request, selection-only behavior, retained exact request
+  fields and stopped spinners after refused/uncertain requests.
+- Native isolated browser acceptance: **25 checks / 52 real HTTP operations** on
+  the retained owned fixture `/tmp/foogallery-migrate-r0.PAvhyx` (same container
+  identity; restart-assigned SQL port updated to 32774). A 912,960-byte typed option
+  converts to 2,002 table records and reverses exactly twice. Normal switching
+  has no dialog; cleanup cancellation/acceptance each prompts once; defaults are
+  collapsed; success survives reload; recovery stays visible; JS errors are zero.
+  Receipts: `ui-browser-compact-report.json`, `settings-options-compact.png` and
+  `settings-table-compact.png`. Screenshots were visually inspected.
+- The complete maintained PHP suite passes **1,583 tests / 311,526 assertions**
+  with zero skips, failures or errors, at 256 MiB (2m58.624s, 133.61 MiB peak).
+  PHP 5.4 syntax passes. The production ZIP passes CRC/path/source-parity checks:
+  89 product files, no development files, SHA-256
+  `1a1bcfef1506fd67d923e71048aa335de93ec5ae91b89b1651edd46b7262b0d1`;
+  canonical tree `cb54a67c0582bf1417f832a003c22eed7ccd71b61cfd2a3ebfc53380dbf6561a`.
+  Agent CI was attempted; there are no GitHub Actions workflows in this repository,
+  so no Agent CI pass is claimed. Test deployment uses a fresh quiescence check,
+  exact installed-file comparison and before/after hashes of migration options,
+  owned tables, posts and post metadata. It does not switch storage or run migrations;
+  the separately owned test-guide page is updated only after preservation checks.
+
+## Historical post-candidate usability amendment — storage in Settings
 
 Brad requested moving storage controls into the migrator's existing Settings tab
 and reducing table enablement to one confirmed action while testing PR #15.

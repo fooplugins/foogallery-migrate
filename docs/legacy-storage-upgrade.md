@@ -24,7 +24,7 @@ The existing option-backed behavior remains the default. Reuse the storage contr
 
 This project does **not** create or redesign a migration engine. It preserves the existing engine's sources, object model, identities, queue states, batching, AJAX flow, destination writes, content replacements, and retry behavior. Bounded persistence access may replace a whole-collection read with a page, count, aggregate, or single-record query so that table mode does not reconstruct every stored object. The existing engine continues to own every selection, transition, ordering, retry, title, and completion decision; storage only answers queries and applies engine-supplied patches.
 
-Table mode is an administrator-confirmed storage choice. It is never enabled automatically.
+Table mode is an administrator-selected storage choice. It is never enabled automatically.
 
 ### Storage controls in migration settings (23 October 2026 amendment)
 
@@ -33,7 +33,7 @@ Use **FooGallery → Migrate → Settings → Migration Storage**, at
 The former `options-general.php?page=foogallery-migrate-storage` bookmark redirects here;
 there is no separate WordPress Settings submenu. Recommendations link to this section.
 
-One confirmed **Switch this site to tables** action performs the existing guarded
+Select **Database tables** and choose **Change storage** to perform the existing guarded
 steps sequentially: read-only capacity preflight → provision/verify owned tables if
 needed → start conversion → continue successful bounded copy/verification phases
 until stable table authority. Keep the settings page open. Each request retains the
@@ -41,6 +41,18 @@ existing exact fields, purpose-specific nonce, permission checks and receiver sa
 checks. Provisioning alone does not select tables, and no prerequisite CLI command
 or separate provisioning button is required. CLI schema-only provisioning remains
 available for operators; the conversion coordinator and migration engine are unchanged.
+
+The normal section shows two labelled choices, a readable migration-data size
+(or record count in table mode), and one Change storage button. Selecting a mode
+alone performs no request; the button is disabled for the current mode. Routine
+switching has no acknowledgement checkbox, backup acceptance or confirmation
+dialog. A spinner reports progress and an inline success message survives reload.
+Technical details and Reset & cleanup are collapsed by default. Reset/removal
+each use one confirmation dialog describing retained galleries/media and the
+possibility of duplicates when migrating again; cancellation sends no request.
+Pending cleanup expands its section, and **Continue storage change** remains
+visible for interrupted switches. Underlying permissions, purpose-specific nonce
+and intent fields, strict request shapes and receiver checks are unchanged.
 
 Normal successful continuation is not error retry or ambiguous-owner takeover.
 An error, malformed reply, unexpected receipt, timeout or connection loss stops the

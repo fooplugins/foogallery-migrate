@@ -25,7 +25,8 @@ class StorageAdminTest extends TestCase {
 	public function test_read_only_view_escapes_status_and_emits_exact_site_scoped_post_controls(): void {
 		ob_start(); StorageAdmin::render( array( 'backend' => 'option', 'phase' => 'stable', 'target' => 'option', 'retained' => false, 'option_bytes' => '123', 'records' => null, 'schema' => 'not provisioned', 'problem' => '<script>bad</script>', 'calibrated' => false ) ); $html = ob_get_clean();
 		$this->assertStringNotContainsString( '<script>bad</script>', $html ); $this->assertStringContainsString( '&lt;script&gt;bad&lt;/script&gt;', $html );
-		foreach ( array( 'name="action" value="foogallery_migrate_storage"', 'name="operation" value="clear"', 'name="blog_id" value="7"', 'name="scope" value="site"', 'name="confirmation" value="clear-current-state"', 'name="nonce"', 'type="checkbox" required', 'admin-post.php', "form.getAttribute('action')", 'No approved release capacity decision', 'does not undo migrations' ) as $text ) { $this->assertStringContainsString( $text, $html ); }
+		foreach ( array( 'name="action" value="foogallery_migrate_storage"', 'name="operation" value="clear"', 'name="blog_id" value="7"', 'name="scope" value="site"', 'name="confirmation" value="clear-current-state"', 'name="nonce"', 'data-confirm=', 'admin-post.php', "form.getAttribute('action')", 'Storage needs attention', 'Galleries and media are kept' ) as $text ) { $this->assertStringContainsString( $text, $html ); }
+		$this->assertStringNotContainsString( 'type="checkbox"', $html );
 		$this->assertStringNotContainsString( 'name="operation" value="switch"', $html );
 	}
 	public function test_unauthorized_render_stops_before_status_sql(): void {
@@ -37,7 +38,7 @@ class StorageAdminTest extends TestCase {
 	public function test_single_table_action_includes_purpose_scoped_preparation_without_a_second_button(): void {
 		$s = array( 'backend' => 'option', 'phase' => 'stable', 'target' => 'option', 'retained' => false, 'option_bytes' => '0', 'records' => null, 'schema' => 'not ready', 'problem' => '', 'calibrated' => true );
 		ob_start(); StorageAdmin::render( $s ); $html = ob_get_clean();
-		foreach ( array( 'name="operation" value="switch"', 'data-preflight-nonce="nonce-foogallery_migrate_storage_option_import_7"', 'data-provision-nonce="nonce-foogallery_migrate_storage_provision_schema_7"', 'data-recover-nonce="nonce-foogallery_migrate_storage_recover_7"', 'confirm creating any required migration tables', 'if a step fails, later steps do not run' ) as $text ) { $this->assertStringContainsString( $text, $html ); }
+		foreach ( array( 'name="operation" value="switch"', 'data-preflight-nonce="nonce-foogallery_migrate_storage_option_import_7"', 'data-provision-nonce="nonce-foogallery_migrate_storage_provision_schema_7"', 'data-recover-nonce="nonce-foogallery_migrate_storage_recover_7"', 'Changing storage does not change your galleries or media.', 'form="foogm-storage-switch"', '>Change storage</button>' ) as $text ) { $this->assertStringContainsString( $text, $html ); }
 		$this->assertStringNotContainsString( 'name="operation" value="provision"', $html );
 		$this->assertSame( 1, substr_count( $html, 'name="confirmation" value="switch-to-table"' ) );
 		$s['schema'] = 'verified'; ob_start(); StorageAdmin::render( $s ); $html = ob_get_clean();
@@ -73,8 +74,8 @@ class StorageAdminTest extends TestCase {
 		$_GET['page'] = 'foogallery-migrate-storage'; ob_start(); StorageAdmin::recommendation_notice(); $html = ob_get_clean();
 		$this->assertSame( '', $html ); $this->assertSame( array(), $GLOBALS['wpdb']->queries );
 		$_GET['page'] = 'foogallery-migrate'; ob_start(); StorageAdmin::recommendation_notice(); $html = ob_get_clean();
-		$this->assertStringContainsString( '1048576 bytes', $html );
-		$this->assertStringContainsString( 'first copy still decodes the full option', $html );
+		$this->assertStringContainsString( '1 MB', $html );
+		$this->assertStringContainsString( 'we recommend database tables', $html );
 		$this->assertStringContainsString( 'edit.php?post_type=foogallery&amp;page=foogallery-migrate&amp;tab=settings#migration-storage', $html );
 		$this->assertStringContainsString( 'OCTET_LENGTH(option_value)', implode( ' ', $GLOBALS['wpdb']->queries ) );
 		$this->assertStringNotContainsString( 'SHOW TABLE STATUS', implode( ' ', $GLOBALS['wpdb']->queries ) );
@@ -83,6 +84,9 @@ class StorageAdminTest extends TestCase {
 		$this->assertSame( array(), $GLOBALS['foogallery_migrate_test_option_reads'] );
 		$this->assertSame( array(), $GLOBALS['wpdb']->writes );
 		$this->assertSame( array(), $GLOBALS['wpdb']->ddl );
+		$GLOBALS['wpdb']->queries = array(); $_GET['tab'] = 'settings';
+		ob_start(); StorageAdmin::recommendation_notice(); $html = ob_get_clean();
+		$this->assertSame( '', $html ); $this->assertSame( array(), $GLOBALS['wpdb']->queries, 'Settings renders its own recommendation without a duplicate global query.' );
 	}
 	public function test_main_advisor_checks_capability_before_any_sql(): void {
 		$GLOBALS['wpdb'] = new StorageAdminAdviceWpdb( '4096' ); $_GET['page'] = 'foogallery-migrate';
@@ -101,10 +105,8 @@ class StorageAdminTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_is_multisite'] = true;
 		$this->assertSame( array(), StorageAdmin::actions( array( 'backend' => 'option', 'phase' => 'stable', 'calibrated' => true ) ) );
 		ob_start(); StorageAdmin::render( array( 'backend' => 'option', 'phase' => 'stable', 'target' => 'option', 'retained' => false, 'option_bytes' => '100', 'records' => null, 'schema' => 'not ready', 'problem' => '', 'calibrated' => true ) ); $html = ob_get_clean();
-		$this->assertStringContainsString( 'Multisite option mode remains supported', $html );
-		$this->assertStringContainsString( 'admin.php?page=foogallery-migrate', $html );
-		$this->assertStringContainsString( 'Multisite table operations are unsupported', $html );
-		$this->assertStringContainsString( 'Existing option-mode flows remain supported', $html );
+		$this->assertStringContainsString( 'Table storage is not available on multisite', $html );
+		$this->assertStringContainsString( 'Continue using WordPress options', $html );
 		$this->assertStringNotContainsString( 'read-only decode-budget preflight', $html );
 		$this->assertStringNotContainsString( 'name="operation" value="switch"', $html );
 	}
@@ -113,19 +115,16 @@ class StorageAdminTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_filters']['foogallery_migrate_storage_advice_threshold_bytes'] = function () { return 2048; };
 		$s = array( 'backend' => 'option', 'phase' => 'stable', 'target' => 'option', 'retained' => false, 'option_bytes' => '2048', 'records' => null, 'schema' => 'verified', 'problem' => '', 'calibrated' => true );
 		ob_start(); StorageAdmin::render( $s ); $html = ob_get_clean();
-		$this->assertStringContainsString( 'Table storage recommendation', $html );
-		$this->assertStringContainsString( '2048 bytes', $html );
-		$this->assertStringContainsString( 'very large gallery or album tree', $html );
-		$this->assertStringContainsString( 'full source discovery remain limits', $html );
-		$this->assertStringContainsString( 'page_size = 0', $html );
-		$this->assertStringContainsString( 'output buffering can still use memory', $html );
+		$this->assertStringContainsString( 'we recommend database tables', $html );
+		$this->assertStringContainsString( '2 KB', $html );
+		$this->assertStringContainsString( 'Very large individual galleries and full source discovery', $html );
 		$this->assertStringNotContainsString( 'OCTET_LENGTH(option_value)', implode( ' ', $GLOBALS['wpdb']->queries ) );
 		$this->assertStringNotContainsString( 'COUNT(*)', implode( ' ', $GLOBALS['wpdb']->queries ) );
 		$s['calibrated'] = false;
 		ob_start(); StorageAdmin::render( $s ); $html = ob_get_clean();
-		$this->assertStringNotContainsString( '<strong>Table storage recommendation</strong>', $html );
-		$this->assertStringContainsString( 'Table storage recommendation and switching controls are unavailable', $html );
-		$this->assertStringContainsString( 'Current storage authority is unchanged', $html );
+		$this->assertStringNotContainsString( 'we recommend database tables', $html );
+		$this->assertStringContainsString( 'Storage switching is not available on this site', $html );
+		$this->assertStringNotContainsString( 'id="foogm-storage-change"', $html );
 	}
 	public function test_render_does_not_offer_other_cleanup_or_provision_controls_during_pending_clear(): void {
 		$GLOBALS['wpdb'] = new StorageAdminAdviceWpdb( '0' );
@@ -156,12 +155,32 @@ class StorageAdminTest extends TestCase {
 			$this->assertStringContainsString( 'id="migration-storage"', $html );
 			$this->assertStringContainsString( 'preferences are unavailable', $html );
 			$this->assertStringNotContainsString( 'foogallery_migrate_save_settings', $html );
-			$this->assertStringContainsString( 'copying' === $status['phase'] ? 'Recover recorded switch' : 'Remove all FooGallery Migrate internal data', $html );
+			$this->assertStringContainsString( 'copying' === $status['phase'] ? 'Continue storage change' : 'Remove all migration data', $html );
 		}
 		$healthy = array( 'backend' => 'option', 'phase' => 'stable', 'problem' => '' );
 		$this->assertTrue( StorageAdmin::settings_available( $healthy ) );
 		$GLOBALS['wpdb']->pending_scope = 'remove_all';
 		$this->assertFalse( StorageAdmin::settings_available( $healthy ) );
+	}
+	public function test_compact_picker_has_no_acknowledgements_and_exact_hidden_receiver_fields(): void {
+		$s = array( 'backend' => 'option', 'phase' => 'stable', 'target' => 'option', 'retained' => false, 'option_bytes' => '264453', 'records' => null, 'schema' => 'not ready', 'problem' => '', 'calibrated' => true );
+		ob_start(); StorageAdmin::render( $s ); $html = ob_get_clean();
+		$dom = new \DOMDocument(); @$dom->loadHTML( $html ); $xpath = new \DOMXPath( $dom );
+		$this->assertSame( 2, $xpath->query( '//input[@type="radio"]' )->length );
+		$this->assertSame( 0, $xpath->query( '//input[@type="checkbox"]' )->length );
+		$this->assertSame( 0, $xpath->query( '//form//input[@type="radio"]' )->length, 'The picker must not add fields to strict receiver requests.' );
+		$this->assertSame( 1, $xpath->query( '//button[@id="foogm-storage-change"][@disabled]' )->length );
+		$this->assertSame( 7, $xpath->query( '//form[@id="foogm-storage-switch"]//input[@name]' )->length );
+		$this->assertSame( 0, $xpath->query( '//form[@id="foogm-storage-switch"][@data-confirm]' )->length );
+		$this->assertSame( 2, $xpath->query( '//form[@data-confirm]' )->length );
+		$this->assertSame( 0, $xpath->query( '//details[@open]' )->length );
+		$this->assertStringContainsString( '258 KB', $html );
+		$this->assertStringNotContainsString( 'I have a backup', $html );
+		$this->assertStringNotContainsString( 'explicitly confirm', $html );
+		$s['backend'] = 'table'; $s['records'] = '1234'; $s['option_bytes'] = '0';
+		ob_start(); StorageAdmin::render( $s ); $html = ob_get_clean();
+		$this->assertStringContainsString( 'Migration records: 1234', strip_tags( $html ) );
+		$this->assertStringNotContainsString( 'Migration data: 0 B', strip_tags( $html ) );
 	}
 }
 
