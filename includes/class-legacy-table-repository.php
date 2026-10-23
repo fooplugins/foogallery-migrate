@@ -249,7 +249,7 @@ class LegacyTableRepository {
 				$this->consume( 0, strlen( $encoded ) ); $keys[] = $key;
 			}
 			if ( 'upsert' === $operation ) {
-				if ( count( $request ) > 100 ) { $this->fail( 'Need at most 100 history records.' ); }
+				if ( count( $request ) > $this->max_rows ) { $this->fail( 'History request exceeds the shared row budget.' ); }
 				foreach ( $request as $record ) {
 					if ( ! is_array( $record ) || array_keys( $record ) !== array( 'key', 'value', 'parent', 'fallback_parent' ) || ! is_array( $record['value'] ) ||
 						( null !== $record['parent'] && ! is_string( $record['parent'] ) ) || ( null !== $record['fallback_parent'] && ! is_string( $record['fallback_parent'] ) ) ) { $this->fail( 'Malformed compact history upsert.' ); }
@@ -304,7 +304,12 @@ class LegacyTableRepository {
 					$cursor = $page['cursor'];
 				} while ( null !== $cursor );
 				$old = array_values( $selected );
-			} else { $old = $this->identifiers( 'migrated', array_values( $identifiers ) ); }
+			} else {
+				$old = array();
+				foreach ( array_chunk( array_values( $identifiers ), LegacyTableReader::MAX_ROWS ) as $batch ) {
+					foreach ( $this->identifiers( 'migrated', $batch ) as $row ) { $old[] = $row; }
+				}
+			}
 			$working = array();
 			foreach ( $old as $row ) { $working[$row['key']] = $row; }
 			$result = 'upsert' === $operation ? count( $request ) : true;

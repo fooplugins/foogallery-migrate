@@ -17,12 +17,15 @@ use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\MigratedHistoryRepository;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
 use FooPlugins\FooGalleryMigrate\Objects\Image;
+use FooPlugins\FooGalleryMigrate\Objects\Gallery;
 use FooPlugins\FooGalleryMigrate\StorageAuthority;
 
 /** Pinned DB fault injection, not a fake database or synthesized response. */
 class HistoryMutationFaultConnection extends LegacyTransactionConnection {
-	public $after_record_read; public $before_start; public $before_queue_lock; public $fail_revision = false;
+	public $after_record_read; public $before_start; public $before_queue_lock; public $fail_revision = false; public $revision_fault_fired = 0; public $identifier_selects = 0;
+	public $fail_queue_head_id = null; public $record_writes = 0; public $record_writes_at_fault = 0;
 	public function get_results( $sql, $format ) {
+		if ( false !== strpos( $sql, 'AND legacy_identifier_hash = UNHEX(' ) ) { ++$this->identifier_selects; }
 		$queue = ( new \FooPlugins\FooGalleryMigrate\LegacyStateCodec() )->key_hash( 'queue' );
 		if ( $this->before_queue_lock && false !== strpos( $sql, 'FOR UPDATE' ) && false !== strpos( $sql, $queue ) ) {
 			$action = $this->before_queue_lock; $this->before_queue_lock = null; $action();
@@ -35,10 +38,18 @@ class HistoryMutationFaultConnection extends LegacyTransactionConnection {
 	}
 	public function query( $sql ) {
 		if ( $this->before_start && 'START TRANSACTION' === $sql ) { $action = $this->before_start; $this->before_start = null; $action(); }
-		if ( $this->fail_revision && 0 === strpos( $sql, 'UPDATE `' ) && false !== strpos( $sql, "digest_status = 'current'" ) ) {
-			$this->fail_revision = false; throw new RuntimeException( 'Injected scalar CAS failure.' );
+		if ( null !== $this->fail_queue_head_id && 0 === strpos( $sql, 'UPDATE `' . $this->base_prefix . 'foogallery_migrate_legacy_state` SET ' ) &&
+			false !== strpos( $sql, "digest_status = 'current'" ) &&
+			preg_match( '/ WHERE blog_id = [0-9]+ AND id = ' . preg_quote( (string) $this->fail_queue_head_id, '/' ) . ' AND active_generation = [0-9]+ AND revision = [0-9]+$/', $sql ) ) {
+			$this->fail_queue_head_id = null; $this->record_writes_at_fault = $this->record_writes;
+			++$this->revision_fault_fired; throw new RuntimeException( 'Injected pinned queue-head CAS failure.' );
 		}
-		return parent::query( $sql );
+		if ( $this->fail_revision && 0 === strpos( $sql, 'UPDATE `' ) && false !== strpos( $sql, "digest_status = 'current'" ) ) {
+			$this->fail_revision = false; ++$this->revision_fault_fired; throw new RuntimeException( 'Injected scalar CAS failure.' );
+		}
+		$result = parent::query( $sql );
+		if ( false !== $result && 0 === strpos( $sql, 'INSERT INTO `' . $this->base_prefix . 'foogallery_migrate_legacy_records` ' ) ) { ++$this->record_writes; }
+		return $result;
 	}
 }
 
@@ -57,6 +68,57 @@ $blog = (int) get_current_blog_id();
 try {
 	foreach ( $schema->statements() as $i => $ddl ) { $created[] = $tables[$i]; dbDelta( $ddl ); }
 	$check( $schema->verify(), 'unchanged schema v1' );
+	$empty_db = new LegacyTransactionConnection( $wpdb );
+	$empty_blog = $blog + 1; $empty_settings = new MigratorSettings();
+	$empty_history = new MigratedHistoryRepository( new LegacyTableBackend( $empty_db, $empty_blog ), $empty_settings );
+	$first_write = array();
+	for ( $i = 0; $i < 205; ++$i ) {
+		$child = new Image(); $child->source_url = 'https://example.test/First-' . $i . '.jpg'; $first_write[] = $child;
+	}
+	$empty_reader = new LegacyTableReader( $empty_db, $empty_blog );
+	$check( false === $empty_reader->head( 'migrated' ) && false === $empty_reader->head( 'migrated-revision' ), 'second owned blog starts with absent history pair' );
+	$check( 205 === $empty_history->upsert_batch( $first_write, array( 'first-checkpoint' => 1 ) ), 'first 205-record history write creates both heads and scalar companion atomically' );
+	$check( 205 === $empty_history->count() && 1 === $empty_history->revision() &&
+		1 === ( new LegacyTableBackend( $empty_db, $empty_blog ) )->read( 'first-checkpoint' )['value'] &&
+		205 === count( ( new LegacyTableSnapshot( $empty_db, $empty_blog ) )->read_bounded( 'migrated' )['items'] ),
+		'empty-history publication retains every requested record and one revision' );
+	// Mirror the targeted check caller's 204 error children plus parent through
+	// the real engine batch and table history facade, then its 205-record reset.
+	$caller_blog = $blog + 2;
+	$caller_history = new MigratedHistoryRepository( new LegacyTableBackend( $empty_db, $caller_blog ), $empty_settings );
+	$caller_engine = new \FooPlugins\FooGalleryMigrate\MigratorEngine( $caller_history );
+	$gallery = new Gallery( new \FooPlugins\FooGalleryMigrate\Plugins\Aigpl() ); $gallery->ID = 204;
+	$gallery->migration_status = 'error'; $gallery->migrated = true; $gallery->migrated_id = 777;
+	$gallery->error = new WP_Error( 'fixture_child_error', '204 images failed a targeted file check.' );
+	$gallery_uid = $gallery->unique_identifier(); $gallery->children = array();
+	$caller_engine->begin_migrated_object_batch();
+	for ( $i = 0; $i < 204; ++$i ) {
+		$child = new Image(); $child->source_url = 'https://example.test/Checked-' . $i . '.jpg';
+		$child->migration_parent_key = $gallery_uid; $child->migration_status = 'error';
+		$child->migrated = true; $child->migrated_id = 1000 + $i;
+		$child->error = new WP_Error( 'fixture_missing_file', 'Image missing after migration.' );
+		$gallery->children[] = $child;
+		$check( true === $caller_engine->add_migrated_object( $child ), 'targeted check queues one error child in engine batch' );
+	}
+	$check( true === $caller_engine->add_migrated_object( $gallery ) && true === $caller_engine->flush_migrated_object_batch(),
+		'engine flushes 204 checked images and parent through real table history' );
+	$check( 205 === $caller_history->count() && 1 === $caller_history->revision() &&
+		$caller_history->get( $gallery_uid )->migration_status === 'error' &&
+		$caller_history->get( 'https://example.test/Checked-203.jpg' )->migration_parent_key === $gallery_uid,
+		'engine check batch retains 205 exact parent/child history records' );
+	$reset = array();
+	foreach ( $gallery->children as $child ) {
+		$child->migration_status = 'not_started'; $child->migrated = false; $child->migrated_id = 0; $child->error = false;
+		$reset[] = array( 'object' => $child, 'parent_key' => $gallery_uid );
+	}
+	$gallery->migration_status = 'not_started'; $gallery->migrated = false; $gallery->migrated_id = 0; $gallery->error = false;
+	$reset[] = array( 'object' => $gallery, 'parent_key' => null );
+	$check( 205 === $caller_history->upsert_batch( $reset ) && 2 === $caller_history->revision() &&
+		205 === $caller_history->count() &&
+		$caller_history->get( 'https://example.test/Checked-0.jpg' )->migration_status === 'not_started' &&
+		$caller_history->get( 'https://example.test/Checked-203.jpg' )->migration_status === 'not_started' &&
+		$caller_history->get( $gallery_uid )->migration_status === 'not_started',
+		'targeted retry reset publishes all 204 image histories and parent in one logical revision' );
 	$db = new LegacyTransactionConnection( $wpdb ); $backend = new LegacyTableBackend( $db, $blog );
 	$snapshot = new LegacyTableSnapshot( $db, $blog ); $reader = new LegacyTableReader( $db, $blog );
 	$record = array( 'object_type' => 'future', 'migration_status' => 'custom', 'migration_parent_key' => 'Parent', 'opaque' => array( '09' => false, 9 => null, 'bytes' => "雪\x00" ) );
@@ -144,7 +206,11 @@ try {
 	add_action( 'updated_option', $observe ); add_action( 'added_option', $observe ); $option_before = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
 	$check( $logical->set_status( '09', 'error' ), 'explicit table status mutation without options' );
 	$check( 0 === $writes && $option_before === get_option( FOOGALLERY_MIGRATE_OPTION_DATA ), 'table operations never read/write fallback options' );
-	$refuses( function () use ( $db, $blog ) { ( new MigratedHistoryRepository( new LegacyTableBackend( $db, $blog + 1000 ), new MigratorSettings() ) )->delete( '09' ); }, 'wrong-blog mutation refuses' );
+	$wrong_blog = $blog + 1000; $wrong_reader = new LegacyTableReader( $db, $wrong_blog ); $before = $heads();
+	$check( false === $wrong_reader->head( 'migrated' ) && false === $wrong_reader->head( 'migrated-revision' ), 'wrong-blog history pair is absent before mutation' );
+	$check( false === ( new MigratedHistoryRepository( new LegacyTableBackend( $db, $wrong_blog ), new MigratorSettings() ) )->delete( '09' ) &&
+		false === $wrong_reader->head( 'migrated' ) && false === $wrong_reader->head( 'migrated-revision' ) && $heads() === $before,
+		'wrong-blog delete returns missing without creating heads or changing the owned history' );
 	// Explicit raw export is cursor-bound and does not hydrate or narrow opaque records.
 	$page = $logical->export_page( 2 ); $exported = array(); $export_root = $page['root'];
 	do {
@@ -161,6 +227,50 @@ try {
 	$unrelated = array();
 	for ( $i = 0; $i < 10; $i++ ) { $child = new Image(); $child->source_url = 'https://example.test/Unrelated-' . $i . '.jpg'; $child->migration_status = 'completed'; $unrelated[] = $child; }
 	$check( 10 === $option->upsert_batch( $unrelated ) && 10 === $logical->upsert_batch( $unrelated ), 'unrelated completed history seeded for bounded maintenance' );
+	$large = array();
+	for ( $i = 0; $i < 205; ++$i ) {
+		$child = new Image(); $child->source_url = 'https://example.test/Atomic-' . $i . '.jpg';
+		$child->migration_status = 'completed'; $large[] = array( 'object' => $child, 'parent_key' => 'atomic-parent' );
+	}
+	$last = clone $large[0]['object']; $last->migrated_id = 9101;
+	$large[204] = array( 'object' => $last, 'parent_key' => 'atomic-parent' );
+	$before = $heads();
+	$check( 205 === $option->upsert_batch( $large ) && 205 === $logical->upsert_batch( $large ), '205 logical history records publish in one bounded mutation' );
+	$after = $heads(); $check( $after[0]['head']['revision'] === $before[0]['head']['revision'] + 1 &&
+		$after[1]['root']['value'] === $before[1]['root']['value'] + 1, '205 records advance both history revisions exactly once' );
+	$verify( '205 atomic records and parent associations' );
+	$check( $logical->get( 'https://example.test/Atomic-203.jpg' )->migration_parent_key === 'atomic-parent' &&
+		$logical->get( 'https://example.test/Atomic-0.jpg' )->migrated_id === 9101,
+		'last history window retained parent association and duplicate last-write value' );
+	$large_changed = array();
+	foreach ( $large as $index => $entry ) {
+		$changed = clone $entry['object']; $changed->migrated_id = 9200 + $index;
+		$large_changed[] = array( 'object' => $changed, 'parent_key' => $entry['parent_key'] );
+	}
+	$limited_connection = new HistoryMutationFaultConnection( $wpdb );
+	$limited = new MigratedHistoryRepository( new LegacyTableBackend( $limited_connection, $blog, 300 ), $settings );
+	$before = $heads();
+	try { $limited->upsert_batch( $large_changed ); $check( false, 'cross-window cumulative row budget refuses' ); }
+	catch ( RuntimeException $error ) { $check( false !== strpos( $error->getMessage(), 'Operation row/encoded byte budget exceeded' ), 'cross-window cumulative row budget refusal is from shared admission' ); }
+	$check( $limited_connection->identifier_selects > 100 && 0 === $limited_connection->record_writes && $heads() === $before,
+		'old-root selector windows plus changed-root preflight retain one budget and refuse before writes' );
+	$rollback = array();
+	for ( $i = 0; $i < 101; ++$i ) {
+		$child = new Image(); $child->source_url = 'https://example.test/Rollback-' . $i . '.jpg'; $rollback[] = $child;
+	}
+	$rollback_connection = new HistoryMutationFaultConnection( $wpdb );
+	$rollback_connection->fail_queue_head_id = $before[2]['head']['id'];
+	$rollback_raw = serialize( $snapshot->read_bounded( 'migrated' ) );
+	$rollback_queue = serialize( $backend->read( 'queue' )['value'] );
+	$rollback_history = new MigratedHistoryRepository( new LegacyTableBackend( $rollback_connection, $blog ), $settings );
+	$refuses( function () use ( $rollback_history, $rollback ) { $rollback_history->upsert_batch( $rollback, array( 'queue' => 'must-not-commit' ) ); },
+		'late queue-head failure rolls back every inserted record in a 101-record logical batch' );
+	$check( $rollback_connection->revision_fault_fired === 1 && null === $rollback_connection->fail_queue_head_id &&
+		$rollback_connection->record_writes_at_fault > 0 &&
+		$heads() === $before && false === $logical->get( 'https://example.test/Rollback-0.jpg' ) &&
+		false === $logical->get( 'https://example.test/Rollback-100.jpg' ) &&
+		serialize( $snapshot->read_bounded( 'migrated' ) ) === $rollback_raw && serialize( $backend->read( 'queue' )['value'] ) === $rollback_queue,
+		'fault fires after record inserts; rollback preserves every history row, both revisions, and queue' );
 	$bounded = new MigratedHistoryRepository( new LegacyTableBackend( $db, $blog, 8 ), $settings );
 	$before = $heads(); $check( $bounded->delete_for_retry( 'absent-parent' ) && $heads() === $before, 'missing retry does not scan unrelated completed/opaque roots' );
 	$check( $option->clear() === $bounded->clear(), 'explicit clear publishes an empty generation without decoding unrelated roots' ); $verify( 'clear preserves wrapper headers' );

@@ -53,18 +53,21 @@ class MigratedHistoryRepository {
 		if ( null !== $this->store ) { return $this->store->upsert_batch( $records, $companions ); }
 		if ( ! is_array( $records ) || ! is_array( $companions ) || array_intersect( array_keys( $companions ),
 			array( MigratorSettings::KEY_MIGRATED, MigratorSettings::KEY_MIGRATED_REVISION, MigratorSettings::KEY_PLUGINS, MigratorSettings::KEY_GALLERIES, MigratorSettings::KEY_ALBUMS ) ) ) { return false; }
-		if ( count( $records ) > 100 || count( $companions ) > 98 ) { throw new \RuntimeException( 'History mutation exceeds the bounded batch size.' ); }
+		if ( count( $records ) > 10000 || count( $companions ) > 98 ) { throw new \RuntimeException( 'History mutation exceeds the bounded operation size.' ); }
 		if ( ! count( $records ) && ! count( $companions ) ) { return 0; }
-		$request = array();
+		$request = array(); $request_bytes = 0; $codec = new LegacyStateCodec();
 		foreach ( $records as $record ) {
 			$object = is_array( $record ) && isset( $record['object'] ) ? $record['object'] : $record;
 			if ( ! is_object( $object ) || ! method_exists( $object, 'unique_identifier' ) || ! method_exists( $object, 'type' ) ) { return false; }
 			$key = (string) $object->unique_identifier(); if ( '' === $key ) { return false; }
 			// Object identifiers use the existing option map's PHP key semantics.
 			$key = array_keys( array( $key => true ) )[0];
-			$request[] = array( 'key' => $key, 'value' => $this->settings->compact_migrated_object( $object ),
+			$entry = array( 'key' => $key, 'value' => $this->settings->compact_migrated_object( $object ),
 				'parent' => is_array( $record ) && ! empty( $record['parent_key'] ) ? (string) $record['parent_key'] : null,
 				'fallback_parent' => ! empty( $object->migration_parent_key ) ? (string) $object->migration_parent_key : null );
+			$bytes = strlen( $codec->encode( $entry ) );
+			if ( $bytes > 16777216 - $request_bytes ) { throw new \RuntimeException( 'History mutation request byte budget exceeded.' ); }
+			$request_bytes += $bytes; $request[] = $entry;
 		}
 		return $this->backend->history_mutate( 'upsert', $request, $companions );
 	}

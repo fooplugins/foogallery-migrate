@@ -58,6 +58,26 @@ class TargetedGalleryOperationTest extends TestCase {
 		$this->assertSame( 2, count( $store->records ) );
 		$this->assertSame( 0, $target->whole_reads );
 	}
+	public function test_targeted_check_and_retry_submit_204_images_plus_parent_as_one_logical_history_batch(): void {
+		list( $engine, $target, $store, $migrator, $events, $gallery ) = $this->fixture( false );
+		$gallery->children = array(); $gallery->children_count = 204;
+		for ( $i = 0; $i < 204; ++$i ) {
+			$child = new Image( new TargetOperationPlugin() );
+			$child->source_url = 'https://example.test/target-' . $i . '.jpg';
+			$child->migrated = true; $child->migrated_id = 1000 + $i;
+			$child->migration_status = Migratable::PROGRESS_COMPLETED;
+			$gallery->children[] = $child;
+		}
+		$this->assertSame( array( 'checked' => 204, 'errors' => 204 ),
+			$engine->check_gallery_migration_errors( $gallery->unique_identifier() ) );
+		$this->assertCount( 205, $store->records );
+		$this->assertSame( array( 'select', 'history', 'checkpoint' ), $target->events );
+		$this->assertTrue( $engine->retry_gallery_migration( $gallery->unique_identifier() ) );
+		$this->assertCount( 205, $store->records );
+		$this->assertSame( 'not_started', $store->records[0]['object']->migration_status );
+		$this->assertSame( 'not_started', $store->records[204]['object']->migration_status );
+		$this->assertSame( 0, $target->whole_reads );
+	}
 	public function test_missing_target_and_failed_history_never_checkpoint_or_queue(): void {
 		list( $engine, $target, $store, $migrator, $events, $gallery ) = $this->fixture();
 		$target->found = false;
