@@ -198,7 +198,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                                 <?php echo esc_html( $gallery->plugin->name() ); ?>
                             </td>
                             <td>
-                                <?php esc_html_e( 'Template : ', 'foogallery-migrate' ); ?>
+                                <?php esc_html_e( 'Layout : ', 'foogallery-migrate' ); ?>
                                 <?php echo esc_html( $gallery->plugin->get_migration_gallery_template( $gallery ) ); ?>
                                 <br />
                                 <?php esc_html_e( 'Images : ', 'foogallery-migrate' ); ?>

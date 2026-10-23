@@ -671,7 +671,7 @@ msgid "%s Name"
 msgstr ""
 
 #: includes/migrators/class-gallery-migrator.php:201
-msgid "Template : "
+msgid "Layout : "
 msgstr ""
 
 #: includes/migrators/class-gallery-migrator.php:208

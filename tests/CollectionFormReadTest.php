@@ -41,6 +41,10 @@ class CollectionFormReadTest extends TestCase {
 			$table = $this->render( $kind, $repository, $objects, 20, 2 );
 			$option = $this->render( $kind, null, $objects, 20, 2 );
 			$this->assertSame( preg_replace( '/\s+/', '', $option ), preg_replace( '/\s+/', '', $table ) );
+			if ( 'galleries' === $kind ) {
+				$this->assertStringContainsString( 'Layout : ', $table );
+				$this->assertStringNotContainsString( 'Template : ', $table );
+			}
 			$this->assertSame( array( array( 20, 20 ) ), $repository->pages );
 			$this->assertSame( 1, $repository->started_reads );
 			$this->assertStringContainsString( 'Item 20', $table );

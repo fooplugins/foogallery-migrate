@@ -141,7 +141,7 @@ Uninstall removes plugin-owned internal storage, including retained history and 
 
 = 1.9 =
 * Added Override Gallery Settings and Override Album Settings options to inherit settings from existing FooGallery galleries and albums during migration.
-* Migrated albums can now inherit album template, settings, sort order and custom CSS from a selected source album while preserving the migrated child gallery list.
+* Migrated albums can now inherit album layout, settings, sort order and custom CSS from a selected source album while preserving the migrated child gallery list.
 * Migrated galleries can now inherit settings and custom CSS from a selected source gallery while preserving migrated attachments and source-plugin migration mappings.
 * Fixed migrated albums so edited album names entered in the migration form are used for the created FooGallery album.
 
