@@ -2,7 +2,64 @@
 
 **Updated:** 2026-10-23
 
-**Current checkpoint, 2026-10-23.** Remaining storage fixes and validation are complete and committed locally in `57103ca`; independent source, modern native, PHP5.4 floor and final documentation QA pass. Full maintained discovery passes1,581 tests/311,477 assertions with no skips/errors/failures. The20,000-root targeted-write defect is fixed without changing engine/schema/policy/version bytes. No approved work remains. Nothing was pushed or released. Historical checkpoints below retain their original evidence and are not current worker status.
+## Post-candidate usability amendment — storage in Settings
+
+Brad requested moving storage controls into the migrator's existing Settings tab
+and reducing table enablement to one confirmed action while testing PR #15.
+This amendment supersedes the separate storage-screen/browser provisioning steps
+in historical R3/R4 receipts below. It does not reopen the engine or v2 scope.
+
+- Storage controls now appear in **FooGallery → Migrate → Settings**, before normal
+  preferences. Recommendations point there. The old storage URL redirects during
+  menu registration, before WordPress rejects an unregistered legacy page; no
+  separate WordPress Settings submenu remains.
+- One confirmed table action sequences existing authenticated preflight,
+  schema provisioning/verification if needed, conversion, and successful bounded
+  continuation requests through stable authority. Requests retain their exact
+  fields and purpose-specific nonces. No new receiver operation, coordinator,
+  schema, engine behavior, capacity override or background worker is introduced.
+- Failure/connection uncertainty stops the sequence; no failed request is retried.
+  Reload exposes recorded recovery/cleanup. Preferences are withheld while
+  authority is unhealthy or cleanup is pending, without hiding maintenance controls.
+- PHP coverage includes single-action rendering, separate nonce purposes,
+  recommendation links and unavailable-preferences recovery. The rendered-script
+  check (`node tests/storage-admin-workflow.js`) adds 54 DOM/HTTP-double checks for
+  sequencing, exact seven-field requests, current-data reversal/replacement,
+  denial/timeout/malformed-response stopping and the 256-turn continuation bound.
+- Native browser acceptance on owned `/tmp/foogallery-migrate-r0.PAvhyx`, SQL
+  `fgm_r0_pavhyx`, WordPress 7.1.3 / PHP 8.4.6 / FooGallery 3.3.8 with a 256 MiB
+  web limit passes **16 checks / 51 real HTTP operations**. A 912,960-byte typed
+  native-text option becomes 2,002 table records. Real checked-button table
+  enablement, reverse, retained replacement and recorded-phase recovery complete;
+  both reversals reproduce the exact typed option hash. Unchecked submission is
+  blocked, opening either route creates no tables, and browser JS errors are zero.
+  Private receipt: that fixture's `ui-browser-report.json`; screenshot:
+  `settings-table-final.png`. This is storage UI acceptance, not another 10K-image
+  migration or a new universal runtime qualification.
+- PHP 5.4 syntax checks pass for all three changed product PHP files. The complete
+  maintained PHP suite passes **1,582 tests / 311,496 assertions**, zero skips,
+  failures or errors, at 256 MiB (2m56.317s, 133.61 MiB peak) on the final source.
+  The rebuilt ZIP passes CRC/path/development-file/source-parity checks: 89 product
+  files, SHA-256 `ea9dcb8a1aff305c542fe8781548aeddbbc2d8c79ebf4d2a3413f6165aba0c0a`.
+  Agent CI
+  was attempted but this repository has no `.github/workflows`; native project
+  checks are the validation path, not a claimed Agent CI pass.
+
+Brad explicitly authorized installing the validated update on the prepared test
+site, with migrations stopped, without switching its mode or running migrations.
+The deployment must verify package identity and unchanged migration-state hashes.
+Public release/merge and v2 implementation remain unauthorized.
+
+**Test-site deployment accepted:** Installed the 89-file package above on
+`https://unique-skipper-82e1ab.instawp.co` after final QA and Brad's stopped-migration
+confirmation. Before/after hashes of all migration options and any owned tables,
+posts and post metadata are identical; table inventory stays absent and authority
+remains stable options (264,453 option bytes). No migration, provisioning or backend
+switch was run on that site. Its separately owned PR15 test-guide page is updated
+after this preservation check to describe the new settings location and one-action
+workflow. This is an authorized test deployment, not a push, merge or public release.
+
+**Historical pre-amendment checkpoint, 2026-10-23.** Remaining storage fixes and validation are complete and committed locally in `57103ca`; independent source, modern native, PHP5.4 floor and final documentation QA pass. Full maintained discovery passes1,581 tests/311,477 assertions with no skips/errors/failures. The20,000-root targeted-write defect is fixed without changing engine/schema/policy/version bytes. No approved work remains. Nothing was pushed or released. Historical checkpoints below retain their original evidence and are not current worker status.
 
 Restart preservation directory: `/Users/brad/.codex/fgm-pause.lIXo5T` contains copies of the three outstanding fixture filesystems and R4 receipts/scripts. These are private test artifacts, not release contents. Docker databases retain their original containers/volumes. qn2qf4 DB `0d43fe80192eb733b134170fabaefadb8f6cccea47865df5778e85be0df6e380`, its Redis `091d4c045d7a6b80dfabd24781ca38561e06bc26c07339a4cfb2db92ef1e370f`, and oUYQES DB `e340c4f4dbd2724cda260a4fae9e0b4e294c0b68284de2158007c605d9979a2d` were stopped explicitly; gNDBTm DB `da3bd976a46d76f8768b80c4fa8dbd3ce251b7ad39bf08d5a962bc4a44e354d1` was already stopped. Isolated browser closed. After restart verify backups/ownership/package identities, restore only missing original temporary fixture paths if needed, and inspect authority/journal before resuming; never reseed or replay completed phases. No unvalidated changes were committed.
 

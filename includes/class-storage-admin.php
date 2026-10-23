@@ -7,8 +7,28 @@ class StorageAdmin {
 	const ADVICE_THRESHOLD_BYTES = 1048576;
 
 	public static function register() {
-		add_options_page( __( 'FooGallery Migration Storage', 'foogallery-migrate' ), __( 'Migration Storage', 'foogallery-migrate' ), 'manage_options', 'foogallery-migrate-storage', array( __CLASS__, 'render' ) );
+		// Core checks page access while building menus, before admin_init.
+		self::redirect_legacy();
 		add_action( 'admin_notices', array( __CLASS__, 'recommendation_notice' ) );
+	}
+
+	public static function settings_url() {
+		return admin_url( 'edit.php?post_type=foogallery&page=foogallery-migrate&tab=settings#migration-storage' );
+	}
+
+	/** Old bookmarks remain useful; redirects never perform a storage operation. */
+	public static function redirect_legacy() {
+		if ( current_user_can( 'manage_options' ) && isset( $_SERVER['REQUEST_METHOD'], $_GET['page'] ) &&
+			'GET' === $_SERVER['REQUEST_METHOD'] && is_string( $_GET['page'] ) && 'foogallery-migrate-storage' === wp_unslash( $_GET['page'] ) ) {
+			wp_safe_redirect( self::settings_url() );
+			exit;
+		}
+	}
+
+	/** Settings must leave recovery/cleanup reachable without constructing an engine. */
+	public static function settings_available( $status ) {
+		return in_array( $status['backend'], array( 'option', 'table' ), true ) && 'stable' === $status['phase'] &&
+			'' === $status['problem'] && null === StorageCleanup::pending_scope();
 	}
 
 	/** A suggestion only; this value never changes conversion admission. */
@@ -27,7 +47,7 @@ class StorageAdmin {
 		}
 		$status = self::status( false );
 		if ( ! self::recommendation_eligible( $status ) ) { return; }
-		$url = admin_url( 'options-general.php?page=foogallery-migrate-storage' );
+		$url = self::settings_url();
 		echo '<div class="notice notice-info"><p>' . esc_html__( 'Migration state is ', 'foogallery-migrate' ) . '<strong>' . esc_html( self::format_bytes( $status['option_bytes'] ) ) . '</strong>' . esc_html__( '. Table storage can bound ordinary reads and updates to requested pages or affected records. The first copy still decodes the full option and remains subject to the release capacity and safety checks; this recommendation does not authorize a switch. ', 'foogallery-migrate' ) . '<a href="' . esc_url( $url ) . '">' . esc_html__( 'Review migration storage', 'foogallery-migrate' ) . '</a></p></div>';
 	}
 
@@ -112,7 +132,6 @@ class StorageAdmin {
 			$a[] = $remove_all;
 			return $a;
 		}
-		if ( 'option' === $s['backend'] && 'verified' !== $s['schema'] ) { return array( $clear, $remove_all ); }
 		if ( 'table' === $s['backend'] ) { return array( $clear, array( 'operation' => 'switch', 'target' => 'option', 'confirmation' => 'switch-to-option', 'purpose' => 'table_export', 'label' => __( 'Switch this site to options', 'foogallery-migrate' ) ), $remove_all ); }
 		if ( $s['retained'] ) { return array( $clear, array( 'operation' => 'replace', 'target' => 'table', 'confirmation' => 'replace-retained-with-table', 'purpose' => 'option_reimport', 'label' => __( 'Replace retained table copy and switch this site to tables', 'foogallery-migrate' ) ), $remove_all ); }
 		return array( $clear, array( 'operation' => 'switch', 'target' => 'table', 'confirmation' => 'switch-to-table', 'purpose' => 'option_import', 'label' => __( 'Switch this site to tables', 'foogallery-migrate' ) ), $remove_all );
@@ -122,8 +141,8 @@ class StorageAdmin {
 		if ( ! current_user_can( 'manage_options' ) ) { wp_die( __( 'Storage access denied.', 'foogallery-migrate' ) ); }
 		$s = is_array( $status ) ? $status : self::status();
 		$blog = get_current_blog_id();
-		echo '<div class="wrap"><h1>' . esc_html__( 'FooGallery Migration Storage', 'foogallery-migrate' ) . '</h1>';
-		echo '<p>' . esc_html__( 'Backend switches affect only this site. Schema provisioning creates shared installation tables but does not switch any site. Storage cleanup does not undo migrations or change galleries and attachments; clearing may allow duplicate output if you migrate again. Back up first. Opening this page never provisions or switches storage.', 'foogallery-migrate' ) . '</p><dl>';
+		echo '<section id="migration-storage" aria-labelledby="migration-storage-heading"><h2 id="migration-storage-heading">' . esc_html__( 'Migration Storage', 'foogallery-migrate' ) . '</h2>';
+		echo '<p>' . esc_html__( 'Options are the default. Table storage is available for larger migrations. Switching preserves migration state and does not change galleries or media. Stop running migrations before switching. Opening these settings never creates tables or changes storage.', 'foogallery-migrate' ) . '</p><dl>';
 		foreach ( array( __( 'Site ID', 'foogallery-migrate' ) => $blog, __( 'Backend', 'foogallery-migrate' ) => $s['backend'], __( 'Switch phase', 'foogallery-migrate' ) => $s['phase'], __( 'Shared schema', 'foogallery-migrate' ) => $s['schema'], __( 'Option bytes', 'foogallery-migrate' ) => $s['option_bytes'], __( 'Site table records (including retained copies)', 'foogallery-migrate' ) => $s['records'] ) as $label => $value ) {
 			echo '<dt><strong>' . esc_html( $label ) . '</strong></dt><dd>' . esc_html( null === $value ? __( 'Unavailable', 'foogallery-migrate' ) : $value ) . '</dd>';
 		}
@@ -139,7 +158,7 @@ class StorageAdmin {
 		if ( is_multisite() ) {
 			echo '<p>' . esc_html__( 'Table storage recommendations, provisioning, switching and recovery are unavailable on multisite. Existing option-mode flows remain supported, and this screen does not change storage authority.', 'foogallery-migrate' ) . '</p>';
 		} elseif ( ! empty( $s['calibrated'] ) ) {
-			echo '<p>' . esc_html__( 'Workflow: inspect the measured option size, explicitly provision the shared schema if needed, run the read-only decode-budget preflight with WP-CLI, then confirm copy, verification and switch here. Example: wp --user=admin foogallery-migrate storage preflight --target=table --confirm=switch-to-table. A passing preflight is not conversion authorization. Reversal uses current table data and the receiver still checks admission. A recommendation never changes operation limits.', 'foogallery-migrate' ) . '</p>';
+			echo '<p>' . esc_html__( 'Switch to tables checks capacity, creates and verifies the required tables if needed, then copies, verifies and switches migration storage in one action. Keep this page open until it finishes. Each step is separately authorized and rechecks safety; if a step fails, later steps do not run. Reversal uses current table data and remains subject to the size and memory limits.', 'foogallery-migrate' ) . '</p>';
 		} else {
 			echo '<p>' . esc_html__( 'Table switching, provisioning and recovery controls are unavailable on this runtime. Cleanup controls remain available when storage ownership permits them.', 'foogallery-migrate' ) . '</p>';
 		}
@@ -154,30 +173,72 @@ class StorageAdmin {
 		if ( $s['retained'] ) { echo '<p>' . esc_html__( 'A previous table copy is retained after reversing to options. Re-import explicitly replaces that inactive copy; it never merges both backends.', 'foogallery-migrate' ) . '</p>'; }
 		$pending_scope = is_multisite() ? null : StorageCleanup::pending_scope();
 		$actions = self::actions( $s, $pending_scope );
-		if ( ! is_multisite() && null === $pending_scope && ! empty( $s['calibrated'] ) && 'option' === $s['backend'] && 'stable' === $s['phase'] && 'verified' !== $s['schema'] ) {
-			array_unshift( $actions, array( 'operation' => 'provision', 'scope' => 'installation', 'target' => 'table', 'confirmation' => 'provision-shared-schema', 'purpose' => 'provision_schema', 'label' => __( 'Provision shared schema only (keep options)', 'foogallery-migrate' ) ) );
-		}
 		foreach ( $actions as $a ) {
-			echo '<form class="foogm-storage-form" method="post" action="' . esc_attr( admin_url( 'admin-post.php' ) ) . '">';
+			$to_tables = 'table' === $a['target'] && in_array( $a['operation'], array( 'switch', 'replace' ), true );
+			echo '<form class="foogm-storage-form" method="post" action="' . esc_attr( admin_url( 'admin-post.php' ) ) . '"';
+			if ( $to_tables ) {
+				echo ' data-preflight-nonce="' . esc_attr( wp_create_nonce( 'foogallery_migrate_storage_option_import_' . $blog ) ) . '"';
+				if ( 'verified' !== $s['schema'] ) { echo ' data-provision-nonce="' . esc_attr( wp_create_nonce( 'foogallery_migrate_storage_provision_schema_' . $blog ) ) . '"'; }
+			}
+			if ( in_array( $a['operation'], array( 'switch', 'replace', 'recover' ), true ) ) { echo ' data-recover-nonce="' . esc_attr( wp_create_nonce( 'foogallery_migrate_storage_recover_' . $blog ) ) . '"'; }
+			echo '>';
 			foreach ( array( 'action' => 'foogallery_migrate_storage', 'operation' => $a['operation'], 'blog_id' => $blog, 'scope' => isset( $a['scope'] ) ? $a['scope'] : 'site', 'target' => $a['target'], 'confirmation' => $a['confirmation'] ) as $key => $value ) { echo '<input type="hidden" name="' . esc_attr( $key ) . '" value="' . esc_attr( $value ) . '">'; }
 			wp_nonce_field( 'foogallery_migrate_storage_' . $a['purpose'] . '_' . $blog, 'nonce', false );
-			if ( 'provision' === $a['operation'] ) { $confirmation = __( 'I have a backup and explicitly confirm shared installation schema provisioning only; no site will switch backends.', 'foogallery-migrate' ); }
+			if ( $to_tables ) { $confirmation = __( 'I confirm creating any required migration tables and switching this site to table storage. I have stopped running migrations and understand that a backup is recommended.', 'foogallery-migrate' ); }
 			elseif ( 'clear' === $a['operation'] ) { $confirmation = __( 'I understand this clears migration state only and does not undo migrations; clearing may allow duplicate galleries and media.', 'foogallery-migrate' ); }
 			else { $confirmation = __( 'I have a backup and explicitly confirm this site-local storage operation.', 'foogallery-migrate' ); }
 			echo '<p><label><input type="checkbox" required> ' . esc_html( $confirmation ) . '</label></p><p><button type="submit" class="button button-secondary">' . esc_html( $a['label'] ) . '</button></p></form>';
 		}
-		echo '<p id="foogm-storage-result" role="status" aria-live="polite"></p></div>';
+		echo '<p>' . esc_html__( 'Storage cleanup does not undo migrations or delete galleries and media. Clearing state may allow duplicate output if you migrate again.', 'foogallery-migrate' ) . '</p>';
+		echo '<p id="foogm-storage-result" role="status" aria-live="polite"></p></section>';
 		?>
 		<script>
 		(function () {
-			var forms = document.querySelectorAll('.foogm-storage-form'), result = document.getElementById('foogm-storage-result');
+			var forms = document.querySelectorAll('.foogm-storage-form'), result = document.getElementById('foogm-storage-result'), busy = false;
+			function setBusy(value) {
+				busy = value;
+				for (var n = 0; n < forms.length; n++) { forms[n].querySelector('button').disabled = value; }
+			}
 			for (var i = 0; i < forms.length; i++) { forms[i].addEventListener('submit', function (event) {
-				event.preventDefault(); var form = this, button = form.querySelector('button'), xhr = new XMLHttpRequest();
-				button.disabled = true; result.textContent = '';
-				xhr.open('POST', form.getAttribute('action')); xhr.timeout = 30000;
-				xhr.onload = function () { button.disabled = false; try { var data = JSON.parse(xhr.responseText), detail = data.data || {}; result.textContent = (detail.message || '') + (detail.failed && detail.failed.length ? ' Failed: ' + detail.failed.join(', ') : '') + (detail.residual && detail.residual.length ? ' Still present: ' + detail.residual.join(', ') : ''); if (data.success && detail.complete !== false) { window.location.reload(); } } catch (error) { result.textContent = <?php echo wp_json_encode( __( 'The response could not be read. Reload to inspect the recorded phase before retrying; no automatic retry was sent.', 'foogallery-migrate' ) ); ?>; } };
-				xhr.onerror = xhr.ontimeout = function () { button.disabled = false; result.textContent = <?php echo wp_json_encode( __( 'The connection ended. Reload to inspect the recorded phase before retrying; the operation may have persisted.', 'foogallery-migrate' ) ); ?>; };
-				xhr.send(new FormData(form));
+				event.preventDefault();
+				if (busy) { return; }
+				var form = this, steps = [], turns = 0, recovery = form.getAttribute('data-recover-nonce'), preflight = form.getAttribute('data-preflight-nonce'), provision = form.getAttribute('data-provision-nonce');
+				if (preflight) { steps.push({ operation: 'preflight', scope: 'site', confirmation: 'switch-to-table', nonce: preflight }); }
+				if (provision) { steps.push({ operation: 'provision', scope: 'installation', confirmation: 'provision-shared-schema', nonce: provision }); }
+				steps.push(null); setBusy(true);
+				function sendStep() {
+					var step = steps.shift(), fields = new FormData(form), xhr = new XMLHttpRequest();
+					if (step) {
+						// Each request retains the receiver's exact seven fields and purpose-specific nonce.
+						fields.set('operation', step.operation); fields.set('scope', step.scope); fields.set('confirmation', step.confirmation); fields.set('nonce', step.nonce);
+					}
+					result.textContent = step && step.operation === 'preflight' ? <?php echo wp_json_encode( __( 'Checking storage capacity…', 'foogallery-migrate' ) ); ?> : (step ? <?php echo wp_json_encode( __( 'Preparing migration tables…', 'foogallery-migrate' ) ); ?> : <?php echo wp_json_encode( __( 'Applying storage operation…', 'foogallery-migrate' ) ); ?>);
+					xhr.open('POST', form.getAttribute('action')); xhr.timeout = 30000;
+					xhr.onload = function () {
+						var data, detail;
+						try { data = JSON.parse(xhr.responseText); if (!data || typeof data.success !== 'boolean' || !data.data || typeof data.data !== 'object') { throw new Error('Invalid response'); } detail = data.data; }
+						catch (error) { result.textContent = <?php echo wp_json_encode( __( 'The response could not be read. Reload to inspect the recorded phase before retrying; no automatic retry was sent.', 'foogallery-migrate' ) ); ?>; return; }
+						if (xhr.status >= 200 && xhr.status < 300 && data.success && detail.complete !== false) {
+							if (recovery && (!step || step.operation === 'recover')) {
+								if (String(detail.blog_id) !== fields.get('blog_id') || ['option', 'table'].indexOf(detail.backend) === -1 || ['stable', 'copying', 'verified', 'flipped'].indexOf(detail.phase) === -1 || (detail.phase === 'stable' && detail.backend !== fields.get('target'))) {
+									result.textContent = <?php echo wp_json_encode( __( 'Storage returned an unexpected status. Reload to inspect the recorded phase; no further request was sent.', 'foogallery-migrate' ) ); ?>; return;
+								}
+								if (detail.phase !== 'stable') {
+									if (++turns >= 256) { result.textContent = <?php echo wp_json_encode( __( 'Storage has saved its progress. Reload and use Recover recorded switch to continue.', 'foogallery-migrate' ) ); ?>; return; }
+									steps.push({ operation: 'recover', scope: 'site', confirmation: 'recover-storage', nonce: recovery });
+								}
+							}
+							if (steps.length) { sendStep(); } else { window.location.reload(); }
+							return;
+						}
+						result.textContent = (detail.message || <?php echo wp_json_encode( __( 'The storage operation did not complete. Reload to inspect its status.', 'foogallery-migrate' ) ); ?>) + (detail.failed && detail.failed.length ? ' Failed: ' + detail.failed.join(', ') : '') + (detail.residual && detail.residual.length ? ' Still present: ' + detail.residual.join(', ') : '');
+						setBusy(false);
+					};
+					xhr.onerror = xhr.ontimeout = function () { result.textContent = <?php echo wp_json_encode( __( 'The connection ended. Reload to inspect the recorded phase before retrying; the operation may have persisted.', 'foogallery-migrate' ) ); ?>; };
+					xhr.send(fields);
+				}
+				// No retry on errors, timeouts or malformed responses. Opening settings never calls this.
+				sendStep();
 			}); }
 		}());
 		</script>

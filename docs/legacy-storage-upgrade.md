@@ -26,6 +26,33 @@ This project does **not** create or redesign a migration engine. It preserves th
 
 Table mode is an administrator-confirmed storage choice. It is never enabled automatically.
 
+### Storage controls in migration settings (23 October 2026 amendment)
+
+Use **FooGallery → Migrate → Settings → Migration Storage**, at
+`edit.php?post_type=foogallery&page=foogallery-migrate&tab=settings#migration-storage`.
+The former `options-general.php?page=foogallery-migrate-storage` bookmark redirects here;
+there is no separate WordPress Settings submenu. Recommendations link to this section.
+
+One confirmed **Switch this site to tables** action performs the existing guarded
+steps sequentially: read-only capacity preflight → provision/verify owned tables if
+needed → start conversion → continue successful bounded copy/verification phases
+until stable table authority. Keep the settings page open. Each request retains the
+existing exact fields, purpose-specific nonce, permission checks and receiver safety
+checks. Provisioning alone does not select tables, and no prerequisite CLI command
+or separate provisioning button is required. CLI schema-only provisioning remains
+available for operators; the conversion coordinator and migration engine are unchanged.
+
+Normal successful continuation is not error retry or ambiguous-owner takeover.
+An error, malformed reply, unexpected receipt, timeout or connection loss stops the
+sequence. Reload to inspect durable status before explicitly continuing; a browser
+session sends at most 256 continuation turns. If preparation succeeded but conversion
+did not, options remain authoritative unless the recorded conversion phase says
+otherwise; prepared tables may remain for an explicit retry or owned-data cleanup.
+Switching back to options uses current table data and the same safety/size limits.
+The Settings tab keeps recovery and cleanup controls reachable even when normal
+preferences and the migration engine cannot safely load. Cleanup still preserves
+source/destination galleries, attachments and content.
+
 Redis is not a third storage mode or a dependency. A site may use Redis through WordPress's optional persistent object cache; the option or MySQL tables remain authoritative. Caching a large serialized option does not avoid its PHP decode-memory cost. Validation includes persistent caching so authority switches and cleanup cannot leave stale owned cache entries.
 
 ## Approved first-release boundary

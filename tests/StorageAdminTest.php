@@ -34,13 +34,15 @@ class StorageAdminTest extends TestCase {
 		try { StorageAdmin::render(); $this->fail( 'Unauthorized render must stop.' ); }
 		catch ( \FooGalleryMigrateTestDie $error ) { $this->assertSame( array(), $GLOBALS['wpdb']->queries ); }
 	}
-	public function test_schema_only_form_is_separate_from_conversion_and_disappears_when_ready(): void {
+	public function test_single_table_action_includes_purpose_scoped_preparation_without_a_second_button(): void {
 		$s = array( 'backend' => 'option', 'phase' => 'stable', 'target' => 'option', 'retained' => false, 'option_bytes' => '0', 'records' => null, 'schema' => 'not ready', 'problem' => '', 'calibrated' => true );
 		ob_start(); StorageAdmin::render( $s ); $html = ob_get_clean();
-		foreach ( array( 'name="operation" value="provision"', 'name="scope" value="installation"', 'name="confirmation" value="provision-shared-schema"', 'no site will switch backends' ) as $text ) { $this->assertStringContainsString( $text, $html ); }
-		$this->assertStringNotContainsString( 'name="operation" value="switch"', $html );
+		foreach ( array( 'name="operation" value="switch"', 'data-preflight-nonce="nonce-foogallery_migrate_storage_option_import_7"', 'data-provision-nonce="nonce-foogallery_migrate_storage_provision_schema_7"', 'data-recover-nonce="nonce-foogallery_migrate_storage_recover_7"', 'confirm creating any required migration tables', 'if a step fails, later steps do not run' ) as $text ) { $this->assertStringContainsString( $text, $html ); }
+		$this->assertStringNotContainsString( 'name="operation" value="provision"', $html );
+		$this->assertSame( 1, substr_count( $html, 'name="confirmation" value="switch-to-table"' ) );
 		$s['schema'] = 'verified'; ob_start(); StorageAdmin::render( $s ); $html = ob_get_clean();
 		$this->assertStringNotContainsString( 'name="operation" value="provision"', $html );
+		$this->assertStringNotContainsString( 'data-provision-nonce=', $html );
 		$this->assertStringContainsString( 'name="operation" value="switch"', $html );
 	}
 	public function test_threshold_filter_accepts_only_positive_integers_and_byte_comparison_includes_boundary(): void {
@@ -73,7 +75,7 @@ class StorageAdminTest extends TestCase {
 		$_GET['page'] = 'foogallery-migrate'; ob_start(); StorageAdmin::recommendation_notice(); $html = ob_get_clean();
 		$this->assertStringContainsString( '1048576 bytes', $html );
 		$this->assertStringContainsString( 'first copy still decodes the full option', $html );
-		$this->assertStringContainsString( 'options-general.php?page=foogallery-migrate-storage', $html );
+		$this->assertStringContainsString( 'edit.php?post_type=foogallery&amp;page=foogallery-migrate&amp;tab=settings#migration-storage', $html );
 		$this->assertStringContainsString( 'OCTET_LENGTH(option_value)', implode( ' ', $GLOBALS['wpdb']->queries ) );
 		$this->assertStringNotContainsString( 'SHOW TABLE STATUS', implode( ' ', $GLOBALS['wpdb']->queries ) );
 		$this->assertStringNotContainsString( 'SHOW COLUMNS', implode( ' ', $GLOBALS['wpdb']->queries ) );
@@ -133,11 +135,33 @@ class StorageAdminTest extends TestCase {
 		$this->assertStringContainsString( 'name="operation" value="clear"', $html );
 		$this->assertStringNotContainsString( 'name="operation" value="remove_all"', $html );
 		$this->assertStringNotContainsString( 'name="operation" value="provision"', $html );
+		$this->assertStringNotContainsString( 'data-provision-nonce=', $html );
 		$GLOBALS['wpdb']->pending_scope = 'remove_all';
 		ob_start(); StorageAdmin::render( $s ); $html = ob_get_clean();
 		$this->assertStringContainsString( 'name="operation" value="remove_all"', $html );
 		$this->assertStringNotContainsString( 'name="operation" value="clear"', $html );
 		$this->assertStringNotContainsString( 'name="operation" value="provision"', $html );
+		$this->assertStringNotContainsString( 'data-provision-nonce=', $html );
+	}
+	public function test_settings_keep_recovery_and_cleanup_reachable_without_engine_access(): void {
+		$GLOBALS['wpdb'] = new StorageAdminAdviceWpdb( '0' );
+		foreach ( array(
+			array( 'backend' => 'unavailable', 'phase' => 'unavailable', 'problem' => 'bad state' ),
+			array( 'backend' => 'option', 'phase' => 'copying', 'problem' => '' ),
+			array( 'backend' => 'table', 'phase' => 'stable', 'problem' => 'schema problem' )
+		) as $status ) {
+			$this->assertFalse( StorageAdmin::settings_available( $status ) );
+			$foogallery_migrate_storage_status = array_merge( array( 'target' => 'table', 'retained' => false, 'discardable' => true, 'option_bytes' => '0', 'records' => null, 'schema' => 'not ready', 'calibrated' => true ), $status );
+			ob_start(); include dirname( __DIR__ ) . '/includes/views/view-migrate-tab-settings.php'; $html = ob_get_clean();
+			$this->assertStringContainsString( 'id="migration-storage"', $html );
+			$this->assertStringContainsString( 'preferences are unavailable', $html );
+			$this->assertStringNotContainsString( 'foogallery_migrate_save_settings', $html );
+			$this->assertStringContainsString( 'copying' === $status['phase'] ? 'Recover recorded switch' : 'Remove all FooGallery Migrate internal data', $html );
+		}
+		$healthy = array( 'backend' => 'option', 'phase' => 'stable', 'problem' => '' );
+		$this->assertTrue( StorageAdmin::settings_available( $healthy ) );
+		$GLOBALS['wpdb']->pending_scope = 'remove_all';
+		$this->assertFalse( StorageAdmin::settings_available( $healthy ) );
 	}
 }
 
