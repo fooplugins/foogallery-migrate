@@ -480,6 +480,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array
          */
         public function get_image_tag_sync_status() {
+            if ( $this->uses_scoped_history() ) {
+                $entry = $this->image_tag_queue_repository()->summary();
+                return $this->format_image_tag_sync_state( $entry['found'] ? $entry['summary'] : $this->get_default_image_tag_sync_state() );
+            }
             return $this->format_image_tag_sync_state(
                 $this->get_migrator_setting(
                     self::KEY_IMAGE_TAG_SYNC,
@@ -505,7 +509,8 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 );
             }
 
-            $this->set_migrator_setting( self::KEY_IMAGE_TAG_SYNC, $this->build_image_tag_sync_state() );
+            if ( $this->uses_scoped_history() ) { $this->build_image_tag_sync_table(); }
+            else { $this->set_migrator_setting( self::KEY_IMAGE_TAG_SYNC, $this->build_image_tag_sync_state() ); }
 
             return $this->continue_image_tag_sync();
         }
@@ -526,6 +531,8 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                     __( 'FooGallery media tags are not available.', 'foogallery-migrate' )
                 );
             }
+
+            if ( $this->uses_scoped_history() ) { return $this->continue_image_tag_sync_table(); }
 
             $state = $this->get_migrator_setting( self::KEY_IMAGE_TAG_SYNC, false );
             if ( false === $state || ! is_array( $state ) ) {
@@ -575,6 +582,57 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
             return $this->format_image_tag_sync_state( $state );
         }
 
+        private function image_tag_queue_repository() {
+            return new ImageTagQueueRepository( $this->production_backend(), $this->settings() );
+        }
+
+        /** Existing term/output decisions; only queue reads/checkpoints are paged. */
+        private function continue_image_tag_sync_table() {
+            $queue = $this->image_tag_queue_repository(); $entry = $queue->summary();
+            if ( ! $entry['found'] ) {
+                return new \WP_Error( 'foogallery_migrate_image_tags_not_queued', __( 'No image tag sync is queued.', 'foogallery-migrate' ) );
+            }
+            $state = $entry['summary'];
+            $total = isset( $state['total'] ) ? absint( $state['total'] ) : $entry['total'];
+            $processed = isset( $state['processed'] ) ? absint( $state['processed'] ) : 0;
+            // Legacy continuation treats an already-past-total saved cursor as
+            // complete; it does not rewind the queue or replay term output.
+            $remaining = $processed >= $total ? 0 : min( $total - $processed, max( 1, $this->get_images_per_turn() ) );
+            $cursor = $processed;
+            while ( $remaining > 0 ) {
+                $limit = min( 100, $remaining ); $batch = $queue->nextBatch( $limit, $cursor );
+                if ( ! is_array( $batch ) || ! isset( $batch['rows'], $batch['revision'] ) ||
+                    $batch['revision'] !== $entry['revision'] || count( $batch['rows'] ) !== $limit ) {
+                    throw new \RuntimeException( 'Image-tag queue changed during the turn.' );
+                }
+                foreach ( $batch['rows'] as $row ) {
+                    if ( ! is_array( $row ) || ! isset( $row['key'] ) || $row['key'] !== $processed ) {
+                        throw new \RuntimeException( 'Image-tag queue order changed during the turn.' );
+                    }
+                    $item = $row['value']; ++$processed; --$remaining;
+                    $attachment_id = isset( $item['attachment_id'] ) ? absint( $item['attachment_id'] ) : 0;
+                    $tags = isset( $item['tags'] ) ? $this->normalize_image_tag_terms( $item['tags'] ) : array();
+                    if ( $attachment_id < 1 || empty( $tags ) ) {
+                        $state['skipped'] = isset( $state['skipped'] ) ? absint( $state['skipped'] ) + 1 : 1;
+                        continue;
+                    }
+                    $this->assert_storage_writer();
+                    $result = wp_set_object_terms( $attachment_id, $tags, FOOGALLERY_ATTACHMENT_TAXONOMY_TAG, true );
+                    $this->assert_storage_writer();
+                    if ( is_wp_error( $result ) ) { $this->add_image_tag_sync_error( $state, $item, $result->get_error_message() ); continue; }
+                    $state['updated'] = isset( $state['updated'] ) ? absint( $state['updated'] ) + 1 : 1;
+                }
+                $cursor = $batch['cursor'];
+                if ( $remaining > 0 && null === $cursor ) { throw new \RuntimeException( 'Image-tag queue ended before the requested turn.' ); }
+            }
+            $state['processed'] = $processed; $state['total'] = $total;
+            $state['complete'] = $processed >= $total;
+            $state['progress'] = $total > 0 ? min( 100, (int) floor( $processed / $total * 100 ) ) : 100;
+            $this->assert_storage_writer();
+            if ( ! $queue->applyBatchPatch( array(), $state, $entry['revision'] ) ) { throw new \RuntimeException( 'Image-tag queue checkpoint failed.' ); }
+            return $this->format_image_tag_sync_state( $state );
+        }
+
         /**
          * Returns true when FooGallery media tag terms can be assigned.
          *
@@ -585,6 +643,140 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 function_exists( 'taxonomy_exists' ) &&
                 taxonomy_exists( FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ) &&
                 function_exists( 'wp_set_object_terms' );
+        }
+
+        /** Build only table mode here; the option builder below is unchanged. */
+        private function build_image_tag_sync_table() {
+            $history = $this->migrated_store(); $queue = $this->image_tag_queue_repository();
+            $pin = $history->tag_build_identity(); $unmatched = 0; $total = 0;
+            if ( ! $queue->beginReplacement() ) { throw new \RuntimeException( 'Image-tag queue replacement could not begin.' ); }
+            try {
+                $cursor = null;
+                do {
+                    $this->assert_storage_writer();
+                    $page = $history->page_log( 'image', '', 100, $cursor );
+                    if ( $page['revision'] !== $pin['logical_revision'] || $history->tag_build_identity() !== $pin ) {
+                        throw new \RuntimeException( 'Migrated history changed during image-tag queue construction.' );
+                    }
+                    $items = array();
+                    foreach ( $page['rows'] as $row ) {
+                        $object = $row['value'];
+                        if ( ! is_object( $object ) || ! method_exists( $object, 'type' ) || 'image' !== $object->type() ) { continue; }
+                        $attachment_id = isset( $object->migrated_id ) ? absint( $object->migrated_id ) : 0;
+                        if ( $attachment_id < 1 ) { continue; }
+                        $tags = $this->get_migrated_object_image_tags( $object );
+                        if ( empty( $tags ) ) { continue; }
+                        $items[] = array( 'attachment_id' => $attachment_id,
+                            'plugin_name' => $this->get_migrated_object_plugin_name( $object ),
+                            'source_image_id' => isset( $object->ID ) ? absint( $object->ID ) : 0,
+                            'source_url' => isset( $object->source_url ) && is_scalar( $object->source_url ) ? (string) $object->source_url : '',
+                            'tags' => $tags, 'source' => 'state' );
+                    }
+                    $this->assert_storage_writer();
+                    if ( $history->tag_build_identity() !== $pin ) { throw new \RuntimeException( 'History changed during image-tag source callbacks.' ); }
+                    $this->append_image_tag_build_page( $queue, $items, $total );
+                    $cursor = $page['cursor'];
+                    if ( null !== $cursor && ! count( $page['rows'] ) ) { throw new \RuntimeException( 'Empty nonterminal image history page.' ); }
+                } while ( null !== $cursor );
+
+                foreach ( $this->get_plugins() as $plugin ) {
+                    if ( ! is_object( $plugin ) || empty( $plugin->is_detected ) || ! method_exists( $plugin, 'find_image_tag_sync_items' ) ) { continue; }
+                    $this->assert_storage_writer(); $fallback_items = $plugin->find_image_tag_sync_items(); $this->assert_storage_writer();
+                    if ( $history->tag_build_identity() !== $pin ) { throw new \RuntimeException( 'History changed during image-tag adapter scan.' ); }
+                    if ( ! is_array( $fallback_items ) ) { continue; }
+                    $page = array();
+                    foreach ( $fallback_items as $item ) {
+                        $page[] = $item;
+                        if ( count( $page ) === 100 ) { $unmatched += $this->append_image_tag_fallback_page( $history, $queue, $page, $pin, $total ); $page = array(); }
+                    }
+                    if ( count( $page ) ) { $unmatched += $this->append_image_tag_fallback_page( $history, $queue, $page, $pin, $total ); }
+                    unset( $fallback_items );
+                }
+                if ( $history->tag_build_identity() !== $pin ) { throw new \RuntimeException( 'History changed before image-tag queue publication.' ); }
+                // Staged rows are engine-computed and were read back page by page;
+                // the physical finalizer supplies their exact count atomically.
+                $summary = array( 'total' => $total, 'processed' => 0, 'updated' => 0, 'skipped' => 0, 'unmatched' => $unmatched,
+                    'error_count' => 0, 'errors' => array(), 'complete' => 0 === $total, 'progress' => 0 === $total ? 100 : 0 );
+                $this->assert_storage_writer();
+                if ( ! $queue->finalizeReplacement( $summary ) ) { throw new \RuntimeException( 'Image-tag queue publication failed.' ); }
+            } catch ( \Exception $error ) { $queue->abortReplacement(); throw $error; }
+            catch ( \Throwable $error ) { $queue->abortReplacement(); throw $error; }
+        }
+
+        /** Merge only current-page attachment IDs, retaining the first item's metadata. */
+        private function append_image_tag_build_page( $queue, $candidates, &$total ) {
+            if ( ! count( $candidates ) ) { return; }
+            $keys = array(); $positions = array();
+            foreach ( $candidates as $item ) {
+                $id = $item['attachment_id']; if ( ! isset( $positions[$id] ) ) { $positions[$id] = count( $keys ); $keys[] = $id; }
+            }
+            $existing = $queue->getManyBuildRowsByKeys( $keys );
+            if ( ! is_array( $existing ) || count( $existing ) !== count( $keys ) ) { throw new \RuntimeException( 'Staged image-tag lookup failed.' ); }
+            $items = array(); $seen = array(); $new = 0;
+            foreach ( $existing as $index => $row ) {
+                if ( ! is_array( $row ) || $row['key'] !== $keys[$index] ) { throw new \RuntimeException( 'Staged image-tag identity changed.' ); }
+                if ( $row['found'] ) {
+                    if ( ! is_array( $row['value'] ) || ! isset( $row['value']['attachment_id'] ) || $row['value']['attachment_id'] !== $row['key'] ) { throw new \RuntimeException( 'Staged image-tag row changed.' ); }
+                    $seen[(string) $row['key']] = count( $items ); $items[] = $row['value'];
+                } else { ++$new; }
+            }
+            foreach ( $candidates as $item ) { $this->add_image_tag_sync_item( $items, $seen, $item ); }
+            if ( count( $items ) > 100 || ! $queue->applyEngineComputedBuildPage( $items ) ) { throw new \RuntimeException( 'Bounded image-tag build page failed.' ); }
+            $total += $new;
+        }
+
+        /** Adapter output is existing source-owned memory; only its current page is resolved. */
+        private function append_image_tag_fallback_page( $history, $queue, $fallback_items, $pin, &$total ) {
+            $numeric = array(); $numeric_keys = array(); $source_id_map = array(); $source_url_map = array();
+            $eligible = array();
+            foreach ( $fallback_items as $item ) {
+                if ( ! is_array( $item ) ) { continue; }
+                $tags = isset( $item['tags'] ) ? $this->normalize_image_tag_terms( $item['tags'] ) : array();
+                if ( empty( $tags ) ) { continue; }
+                $item['tags'] = $tags; $eligible[] = $item;
+            }
+            foreach ( $eligible as $item ) {
+                if ( isset( $item['attachment_id'] ) && absint( $item['attachment_id'] ) > 0 ) { continue; }
+                $plugin = isset( $item['plugin_name'] ) && is_scalar( $item['plugin_name'] ) ? (string) $item['plugin_name'] : '';
+                $id = isset( $item['source_image_id'] ) ? absint( $item['source_image_id'] ) : 0;
+                if ( '' === $plugin || $id < 1 ) { continue; }
+                $key = serialize( array( $plugin, $id ) );
+                if ( ! isset( $numeric_keys[$key] ) ) { $numeric_keys[$key] = true; $numeric[] = array( 'type' => 'image', 'plugin' => $plugin, 'id' => $id ); }
+            }
+            if ( count( $numeric ) ) {
+                $targets = $history->tag_numeric_targets( $numeric, $pin );
+                if ( ! is_array( $targets ) || count( $targets ) !== count( $numeric ) ) { throw new \RuntimeException( 'Incomplete image source lookup.' ); }
+                foreach ( $numeric as $index => $identity ) {
+                    if ( $targets[$index] > 0 ) { $source_id_map[$identity['plugin']][$identity['id']] = $targets[$index]; }
+                }
+            }
+            $urls = array(); $url_seen = array();
+            foreach ( $eligible as $item ) {
+                if ( isset( $item['attachment_id'] ) && absint( $item['attachment_id'] ) > 0 ) { continue; }
+                $plugin = isset( $item['plugin_name'] ) && is_scalar( $item['plugin_name'] ) ? (string) $item['plugin_name'] : '';
+                $id = isset( $item['source_image_id'] ) ? absint( $item['source_image_id'] ) : 0;
+                if ( '' !== $plugin && $id > 0 && isset( $source_id_map[$plugin][$id] ) ) { continue; }
+                $url = isset( $item['source_url'] ) && is_scalar( $item['source_url'] ) ? (string) $item['source_url'] : '';
+                $key = base64_encode( $url );
+                if ( '' !== $url && ! isset( $url_seen[$key] ) ) { $url_seen[$key] = true; $urls[] = $url; }
+            }
+            if ( count( $urls ) ) {
+                $targets = $history->tag_source_urls( $urls, $pin );
+                if ( ! is_array( $targets ) || count( $targets ) !== count( $urls ) ) { throw new \RuntimeException( 'Incomplete image URL lookup.' ); }
+                foreach ( $urls as $index => $url ) { if ( $targets[$index] > 0 ) { $source_url_map[$url] = $targets[$index]; } }
+            }
+            $items = array(); $unmatched = 0;
+            foreach ( $eligible as $item ) {
+                $tags = $item['tags'];
+                $attachment_id = $this->resolve_image_tag_sync_attachment_id( $item, $source_url_map, $source_id_map );
+                if ( $attachment_id < 1 ) { ++$unmatched; continue; }
+                $item['attachment_id'] = $attachment_id; $item['tags'] = $tags;
+                $item['source'] = isset( $item['source'] ) ? $item['source'] : 'fallback'; $items[] = $item;
+            }
+            $this->assert_storage_writer();
+            if ( $history->tag_build_identity() !== $pin ) { throw new \RuntimeException( 'History changed during image-tag fallback callbacks.' ); }
+            $this->append_image_tag_build_page( $queue, $items, $total );
+            return $unmatched;
         }
 
         /**

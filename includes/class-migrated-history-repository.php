@@ -44,10 +44,60 @@ class MigratedHistoryRepository {
 	}
 	public function find_by_source_url( $type, $source_url ) {
 		if ( null !== $this->store ) { return $this->store->find_by_source_url( $type, $source_url ); }
-		// Option semantics can reject these inputs without consulting history.
 		if ( ! is_string( $source_url ) || '' === $source_url ) { return false; }
-		// Schema v1 has no URL projection/index. Do not scan, normalize or fall back.
-		throw new \RuntimeException( 'Unindexed table source URL lookup is not admitted. No option fallback.' );
+		if ( ! is_string( $type ) || '' === $type || strlen( $type ) > 32 ) { throw new \RuntimeException( 'Invalid bounded source URL type.' ); }
+		$result = $this->scan_source_urls( $type, array( $source_url ), $this->tag_build_identity(), true );
+		return $result[0];
+	}
+	/** Immutable logical and physical history identity for one tag build. */
+	public function tag_build_identity() {
+		if ( null !== $this->store ) { throw new \RuntimeException( 'Table history context required.' ); }
+		$read = $this->table_read( 'revision' ); $entries = $read['context'];
+		return array( 'history' => $entries[0]['head'], 'revision_head' => $entries[1]['head'],
+			'logical_revision' => $entries[1]['root']['value'] );
+	}
+	/** Positive image targets in first source order, ignoring the separate migrated flag. */
+	public function tag_numeric_targets( $identities, $pin ) {
+		if ( null !== $this->store || ! is_array( $identities ) || count( $identities ) > 100 || $this->tag_build_identity() !== $pin ) { throw new \RuntimeException( 'Stale or invalid tag numeric lookup.' ); }
+		$read = $this->table_read( 'tag_numeric', $identities );
+		if ( $this->tag_build_identity() !== $pin ) { throw new \RuntimeException( 'History changed during tag numeric lookup.' ); }
+		if ( ! is_array( $read['result'] ) || count( $read['result'] ) !== count( $identities ) ) { throw new \RuntimeException( 'Malformed tag numeric result.' ); }
+		$result = array(); foreach ( $read['result'] as $row ) {
+			if ( ! is_array( $row ) || ! isset( $row['found'] ) || ( $row['found'] && ( ! isset( $row['value'] ) || ! is_array( $row['value'] ) || ! isset( $row['value']['migrated_id'] ) || absint( $row['value']['migrated_id'] ) < 1 ) ) ) { throw new \RuntimeException( 'Malformed tag numeric target.' ); }
+			$result[] = $row['found'] ? absint( $row['value']['migrated_id'] ) : 0;
+		} return $result;
+	}
+	/** Exact/case-sensitive URL fallback, one bounded requested set at a time. */
+	public function tag_source_urls( $urls, $pin ) {
+		if ( null !== $this->store ) { throw new \RuntimeException( 'Table URL lookup required.' ); }
+		return $this->scan_source_urls( 'image', $urls, $pin, false );
+	}
+	private function scan_source_urls( $type, $urls, $pin, $objects ) {
+		if ( ! is_array( $urls ) || count( $urls ) > 100 || $this->tag_build_identity() !== $pin ) { throw new \RuntimeException( 'Stale or oversized tag URL lookup.' ); }
+		$needed = array(); $bytes = 0;
+		foreach ( $urls as $url ) {
+			if ( ! is_string( $url ) || '' === $url || strlen( $url ) > 1048576 || strlen( $url ) > 16777216 - $bytes ) { throw new \RuntimeException( 'Tag URL request exceeds bounded bytes.' ); }
+			$bytes += strlen( $url ); $needed[base64_encode( $url )] = true;
+		}
+		$found = array(); $cursor = null;
+		while ( count( $found ) < count( $needed ) ) {
+			$page = $this->page_log( $type, '', 100, $cursor );
+			if ( $this->tag_build_identity() !== $pin ) { throw new \RuntimeException( 'History changed during tag URL scan.' ); }
+			foreach ( $page['rows'] as $row ) {
+				$object = $row['value'];
+				if ( ! is_object( $object ) || ! isset( $object->migrated_id, $object->source_url ) ||
+					! is_scalar( $object->source_url ) || ( $objects && ! is_string( $object->source_url ) ) ||
+					absint( $object->migrated_id ) < 1 ) { continue; }
+				$key = base64_encode( (string) $object->source_url );
+				if ( isset( $needed[$key] ) && ! array_key_exists( $key, $found ) ) { $found[$key] = $objects ? $object : absint( $object->migrated_id ); }
+			}
+			$next = $page['cursor'];
+			if ( null !== $next && ( ! count( $page['rows'] ) || $next === $cursor ) ) { throw new \RuntimeException( 'Unadvanced bounded tag URL page.' ); }
+			$cursor = $next; if ( null === $cursor ) { break; }
+		}
+		if ( $this->tag_build_identity() !== $pin ) { throw new \RuntimeException( 'History changed before tag URL result.' ); }
+		$result = array(); foreach ( $urls as $url ) { $key = base64_encode( $url ); $result[] = isset( $found[$key] ) ? $found[$key] : ( $objects ? false : 0 ); }
+		return $result;
 	}
 	public function upsert_batch( $records, $companions = array() ) {
 		if ( null !== $this->store ) { return $this->store->upsert_batch( $records, $companions ); }

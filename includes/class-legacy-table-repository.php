@@ -82,7 +82,7 @@ class LegacyTableRepository {
 	 * Closed read primitives only: no callback or complete-history facade.
 	 */
 	public function history_read( $operation, $request = array() ) {
-		if ( $this->history_read_active || ! is_array( $request ) || ! in_array( $operation, array( 'identifiers', 'presence', 'children', 'source', 'page', 'export', 'count', 'revision', 'log_summary', 'summary' ), true ) ) { $this->fail( 'Unsupported history read.' ); }
+		if ( $this->history_read_active || ! is_array( $request ) || ! in_array( $operation, array( 'identifiers', 'presence', 'children', 'source', 'tag_numeric', 'page', 'export', 'count', 'revision', 'log_summary', 'summary' ), true ) ) { $this->fail( 'Unsupported history read.' ); }
 		if ( in_array( $operation, array( 'log_summary', 'summary' ), true ) && count( $request ) ) { $this->fail( 'Malformed logical summary request.' ); }
 		$this->start_budget(); $this->history_read_active = true;
 		try {
@@ -99,6 +99,8 @@ class LegacyTableRepository {
 				case 'source':
 					if ( array_keys( $request ) !== array( 'type', 'plugin', 'id' ) ) { $this->fail( 'Malformed source request.' ); }
 					$result = $this->history_source_identity( $request['type'], $request['plugin'], $request['id'] ); break;
+				case 'tag_numeric':
+					$result = $this->read_source_identities( 'migrated', $request, true, false, false ); break;
 				case 'children':
 					if ( array_keys( $request ) !== array( 'parent', 'keys' ) || ! is_array( $request['keys'] ) || count( $request['keys'] ) > $this->max_rows ) { $this->fail( 'Malformed child request.' ); }
 					$result = $this->history_children( $request['parent'], $request['keys'] );
@@ -169,6 +171,14 @@ class LegacyTableRepository {
 				}
 			}
 			$result = array();
+		} elseif ( 'tag_numeric' === $operation ) {
+			if ( count( $request ) > 100 ) { $this->fail( 'Too many empty-history image source identities.' ); }
+			$result = array(); foreach ( $request as $identity ) {
+				if ( ! is_array( $identity ) || array_keys( $identity ) !== array( 'type', 'plugin', 'id' ) ||
+					'image' !== $identity['type'] || ! is_string( $identity['plugin'] ) || ! is_scalar( $identity['id'] ) || absint( $identity['id'] ) < 1 ) { $this->fail( 'Invalid empty-history image source identity.' ); }
+				$this->consume( 0, strlen( $this->codec->encode( $identity ) ) );
+				$result[] = array( 'found' => false, 'key' => null, 'value' => null );
+			}
 		} elseif ( 'source' === $operation ) {
 			if ( array_keys( $request ) !== array( 'type', 'plugin', 'id' ) || ! is_string( $request['type'] ) || '' === $request['type'] ||
 				strlen( $request['type'] ) > 32 || ( null !== $request['plugin'] && ! is_string( $request['plugin'] ) ) || ! is_scalar( $request['id'] ) ) { $this->fail( 'Malformed empty-history source request.' ); }
@@ -1566,8 +1576,8 @@ class LegacyTableRepository {
 		$this->unchanged( 'migrated', $head ); return $result;
 	}
 
-	private function read_source_identities( $state_key, $identities, $numeric, $require_migrated ) {
-		$this->start_budget(); $this->typed_key( $state_key );
+	private function read_source_identities( $state_key, $identities, $numeric, $require_migrated, $start_budget = true ) {
+		if ( $start_budget ) { $this->start_budget(); } $this->typed_key( $state_key );
 		$this->consume( 0, strlen( $this->codec->key_value( $state_key ) ) );
 		if ( ! is_array( $identities ) || count( $identities ) > 100 || ! is_bool( $numeric ) ) { $this->fail( 'Need at most 100 source identities.' ); }
 		$prepared = array();
@@ -1585,13 +1595,17 @@ class LegacyTableRepository {
 			$hash = $this->codec->snapshot_digest( array( $numeric ? 'source-image-numeric-v1' : 'source-exact-v1', $identity['type'], $identity['plugin'], $identity['id'] ) );
 			$column = $numeric ? 'source_numeric_identity_hash' : 'source_identity_hash';
 			$rows = array();
-			// Exact-source index places is_migrated before insertion order. Two
-			// fixed-flag LIMIT 1 selectors avoid sorting all duplicate identities.
-			foreach ( $require_migrated ? array( 1 ) : array( 0, 1 ) as $flag ) {
-				$selected = $this->read( $this->db->prepare( 'SELECT id, item_order, HEX(node_hash) AS node_hash FROM `' . $this->table . '`'
-					. ( $require_migrated ? '' : ' FORCE INDEX (`source_identity`)' ) . ' WHERE blog_id = %d AND state_id = %d AND generation = %d '
-					. 'AND ' . $column . ' = UNHEX(%s) AND is_migrated = %d AND migrated_id > 0 AND parent_node_hash IS NULL ORDER BY item_order ASC, id ASC LIMIT 1',
-					array( $this->blog, $head['id'], $head['active_generation'], $hash, $flag ) ) );
+			// The tag path uses the numeric index in insertion order without the
+			// independent migrated flag. Exact-source callers keep their existing
+			// two fixed-flag selectors and semantics.
+			foreach ( $numeric && ! $require_migrated ? array( null ) : ( $require_migrated ? array( 1 ) : array( 0, 1 ) ) as $flag ) {
+				$sql = 'SELECT id, item_order, HEX(node_hash) AS node_hash FROM `' . $this->table . '`'
+					. ( $numeric && ! $require_migrated ? ' FORCE INDEX (`source_numeric`)' : ( $require_migrated ? '' : ' FORCE INDEX (`source_identity`)' ) )
+					. ' WHERE blog_id = %d AND state_id = %d AND generation = %d AND ' . $column . ' = UNHEX(%s) '
+					. ( null === $flag ? '' : 'AND is_migrated = %d ' ) . 'AND migrated_id > 0 AND parent_node_hash IS NULL ORDER BY item_order ASC, id ASC LIMIT 1';
+				$args = array( $this->blog, $head['id'], $head['active_generation'], $hash );
+				if ( null !== $flag ) { $args[] = $flag; }
+				$selected = $this->read( $this->db->prepare( $sql, $args ) );
 				if ( count( $selected ) > 1 ) { $this->fail( 'Source lookup exceeded row limit.' ); }
 				if ( count( $selected ) ) {
 					$selected[0]['id'] = $this->number( $selected[0]['id'] ); $selected[0]['item_order'] = $this->number( $selected[0]['item_order'] );

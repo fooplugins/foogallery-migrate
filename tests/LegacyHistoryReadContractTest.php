@@ -68,32 +68,31 @@ class LegacyHistoryReadContractTest extends TestCase {
 		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'changed', $error->getMessage() ); }
 	}
 
-	public function test_source_url_policy_is_explicit_and_never_reads_the_table_or_options(): void {
+	public function test_source_url_uses_bounded_exact_history_pages_without_option_fallback(): void {
 		$data = $this->data();
 		$GLOBALS['foogallery_migrate_test_options'][FOOGALLERY_MIGRATE_OPTION_DATA] = $data;
 		$settings = new MigratorSettings();
 		$option = new MigratedHistoryRepository( new LegacyOptionBackend(), $settings );
-		$db = new HistoryReadTestConnection();
-		$history = new MigratedHistoryRepository( new LegacyTableBackend( $db, 7 ), $settings );
+		$table = new HistoryReadTableBackend( $data );
+		$history = new MigratedHistoryRepository( $table, $settings );
 		foreach ( array( '', null, false, true, 0, 1.5, array(), new \stdClass() ) as $url ) {
 			$this->assertFalse( $option->find_by_source_url( 'image', $url ) );
 			$this->assertFalse( $history->find_by_source_url( 'image', $url ) );
 		}
 		$this->assertSame( 71, $option->find_by_source_url( 'image', 'https://example.test/Case.jpg' )->migrated_id );
 		$this->assertFalse( $option->find_by_source_url( 'image', 'https://example.test/case.jpg' ) );
-		foreach ( array( 'https://example.test/Case.jpg', 'https://example.test/case.jpg', ' ', "\xff\x00", str_repeat( 'u', 10000 ) ) as $url ) {
-			try { $history->find_by_source_url( 'image', $url ); $this->fail( 'Expected source URL policy refusal, not a negative match.' ); }
-			catch ( \RuntimeException $error ) { $this->assertSame( 'Unindexed table source URL lookup is not admitted. No option fallback.', $error->getMessage() ); }
-		}
-		$this->assertSame( array(), $db->queries );
+		$this->assertSame( 71, $history->find_by_source_url( 'image', 'https://example.test/Case.jpg' )->migrated_id );
+		$this->assertFalse( $history->find_by_source_url( 'image', 'https://example.test/case.jpg' ) );
+		$this->assertContains( 'history_page', $table->calls );
+		try { $history->find_by_source_url( 'image', str_repeat( 'u', 1048577 ) ); $this->fail( 'Oversized URL admitted.' ); }
+		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'bounded bytes', $error->getMessage() ); }
 		$this->assertSame( $data, get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) );
 		$this->assertSame( array(), $GLOBALS['foogallery_migrate_test_option_writes'] );
 	}
 
 	public function test_unimplemented_operations_refuse_without_fallback_or_writes(): void {
 		$table = new HistoryReadTableBackend( $this->data() ); $history = new MigratedHistoryRepository( $table, new MigratorSettings() );
-		foreach ( array( function () use ( $history ) { $history->find_by_source_url( 'image', 'https://example.test/image.jpg' ); },
-			function () use ( $history ) { $history->get_by_parent( 'gallery' ); },
+		foreach ( array( function () use ( $history ) { $history->get_by_parent( 'gallery' ); },
 			function () use ( $history ) { $history->get_all(); } ) as $call ) {
 			try { $call(); $this->fail( 'Expected unsupported operation refusal.' ); }
 			catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'not admitted', $error->getMessage() ); }
@@ -181,7 +180,11 @@ class HistoryReadTableBackend extends LegacyTableBackend {
 	public function identifier_presence( $key, $keys ) { $rows = $this->identifiers( $key, $keys ); foreach ( $rows as &$row ) { unset( $row['value'] ); } return $rows; }
 	public function count_roots( $key ) { return count( $this->data[$key]['items'] ); }
 	public function history_page( $key, $limit, $filters, $cursor = null ) {
-		$this->calls[] = 'history_page'; return array( 'rows' => array( array( 'key' => 'opaque', 'value' => false ) ), 'cursor' => null, 'revision' => $this->revision );
+		$this->calls[] = 'history_page';
+		if ( isset( $filters['object_type'] ) && 'image' === $filters['object_type'] ) {
+			return array( 'rows' => array( array( 'key' => '09', 'value' => $this->data['migrated']['items']['09'] ) ), 'cursor' => null, 'revision' => $this->revision );
+		}
+		return array( 'rows' => array( array( 'key' => 'opaque', 'value' => false ) ), 'cursor' => null, 'revision' => $this->revision );
 	}
 	public function history_source_identity( $type, $plugin, $id ) { return array( 'found' => true, 'key' => '09', 'value' => $this->data['migrated']['items']['09'] ); }
 }
