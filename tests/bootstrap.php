@@ -287,6 +287,10 @@ function wp_verify_nonce( $nonce, $action = -1 ) {
 }
 
 function wp_unslash( $value ) {
+	// Test-only receiver seam: model work released during WordPress unslashing.
+	if ( isset( $GLOBALS['foogallery_migrate_test_unslash_callback'] ) ) {
+		call_user_func( $GLOBALS['foogallery_migrate_test_unslash_callback'] );
+	}
 	return $value;
 }
 

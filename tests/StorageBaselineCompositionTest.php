@@ -1,7 +1,6 @@
 <?php
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
-use FooPlugins\FooGalleryMigrate\StorageCalibration;
 use FooPlugins\FooGalleryMigrate\StorageConversion;
 use FooPlugins\FooGalleryMigrate\StorageMemoryBaseline;
 use FooPlugins\FooGalleryMigrate\StorageOperations;
@@ -16,7 +15,7 @@ class StorageBaselineCompositionTest extends TestCase {
 
 	protected function setUp(): void {
 		$this->saved = array();
-		foreach ( array( 'wpdb', 'wp_version', 'foogallery_migrate_test_blog_id', 'foogallery_migrate_test_capabilities', 'foogallery_migrate_test_nonce', 'foogallery_migrate_test_filters' ) as $name ) {
+		foreach ( array( 'wpdb', 'wp_version', 'foogallery_migrate_test_blog_id', 'foogallery_migrate_test_capabilities', 'foogallery_migrate_test_nonce', 'foogallery_migrate_test_filters', 'foogallery_migrate_test_unslash_callback' ) as $name ) {
 			$this->saved[$name] = array( array_key_exists( $name, $GLOBALS ), isset( $GLOBALS[$name] ) ? $GLOBALS[$name] : null );
 		}
 		$this->post = $_POST; $this->server = $_SERVER;
@@ -45,11 +44,6 @@ class StorageBaselineCompositionTest extends TestCase {
 		return $r;
 	}
 	private function policy() { return array( 'max_raw_bytes' => 1048576, 'amplification' => 64, 'reserve_bytes' => 33554432 ); }
-	private function profile() {
-		// Trusted-injection fixture only, NOT an independently approved profile.
-		return array( 'version' => 1, 'status' => 'approved', 'fingerprint' => StorageCalibration::fingerprint(),
-			'evidence_sha256' => str_repeat( 'a', 64 ), 'policy' => $this->policy() );
-	}
 	private function property( $object, $name ) {
 		$p = new \ReflectionProperty( $object, $name );
 		return $p->getValue( $object );
@@ -67,10 +61,10 @@ class StorageBaselineCompositionTest extends TestCase {
 		$this->assertIsArray( StoragePreflight::decode_budget( 1, (string) ( $high + 2 ), $baseline->sample(), $policy ) );
 		$this->assertSame( 'foogallery_migrate_storage_decode_refused', StoragePreflight::decode_budget( 1, (string) ( $high + 1 ), $baseline->sample(), $policy )->get_error_code() );
 	}
-	public function test_actual_dispatch_preflight_carries_the_entry_sample_across_calibration_and_size_sql() {
-		$r = $this->request(); $profile = $this->profile();
+	public function test_actual_dispatch_preflight_carries_release_policy_entry_sample_across_size_sql() {
+		$r = $this->request();
 		$live = str_repeat( 'c', 8 * 1048576 ); $entry = memory_get_usage( true );
-		$GLOBALS['foogallery_migrate_test_filters']['foogallery_migrate_storage_calibration'] = function ( $default ) use ( $profile, &$live ) { $live = null; return $profile; };
+		$GLOBALS['wpdb']->on_size_query = function () use ( &$live ) { $live = null; };
 		$result = ( new StorageOperations() )->dispatch( 'preflight', $r );
 		$this->assertIsArray( $result );
 		$this->assertGreaterThanOrEqual( $entry, $result['memory_used_bytes'] );
@@ -78,31 +72,35 @@ class StorageBaselineCompositionTest extends TestCase {
 		$this->assertFalse( $result['conversion_ready'] );
 		$this->assertCount( 1, $GLOBALS['wpdb']->sql );
 	}
-	public function test_actual_handle_carries_the_pre_unslash_sample_to_preflight() {
-		$r = $this->request(); $profile = $this->profile();
+	public function test_actual_handle_carries_the_pre_unslash_sample_to_release_preflight() {
+		$r = $this->request();
 		$_POST = array_merge( $r, array( 'action' => 'foogallery_migrate_storage', 'operation' => 'preflight' ) );
 		$live = str_repeat( 'h', 8 * 1048576 ); $entry = memory_get_usage( true );
-		$GLOBALS['foogallery_migrate_test_filters']['foogallery_migrate_storage_calibration'] = function ( $default ) use ( $profile, &$live ) { $live = null; return $profile; };
+		$unslash_calls = 0;
+		$GLOBALS['foogallery_migrate_test_unslash_callback'] = function () use ( &$live, &$unslash_calls ) { ++$unslash_calls; $live = null; };
 		try { StorageOperations::handle(); $this->fail( 'Receiver did not terminate.' ); }
 		catch ( \FooGalleryMigrateTestJsonResponse $response ) {
 			$this->assertArrayNotHasKey( 'code', $response->data );
 			$this->assertGreaterThanOrEqual( $entry, $response->data['memory_used_bytes'] );
 			$this->assertFalse( $response->data['conversion_ready'] );
 		}
+		$this->assertSame( 1, $unslash_calls );
 		$this->assertLessThan( $entry, memory_get_usage( true ) );
 	}
 	public static function operations() {
 		return array( array( 'switch', 'table' ), array( 'switch', 'option' ), array( 'recover', 'table' ), array( 'recover', 'option' ), array( 'replace', 'table' ) );
 	}
 	/** @dataProvider operations */
-	public function test_actual_dispatch_carries_entry_through_calibration_to_coordinator_begin( $operation, $target ) {
-		$r = $this->request( $operation, $target ); $profile = $this->profile();
+	public function test_actual_dispatch_carries_release_entry_to_coordinator_begin( $operation, $target ) {
+		$r = $this->request( $operation, $target );
 		$live = str_repeat( 'd', 8 * 1048576 ); $entry = memory_get_usage( true );
-		$GLOBALS['foogallery_migrate_test_filters']['foogallery_migrate_storage_calibration'] = function ( $default ) use ( $profile, &$live ) { $live = null; return $profile; };
+		$connection_reads = 0;
+		$GLOBALS['wpdb']->on_connection = function () use ( &$live, &$connection_reads ) { ++$connection_reads; $live = null; };
 		$result = ( new StorageOperations() )->dispatch( $operation, $r );
 		$this->assertSame( 'foogallery_migrate_storage_recovery_required', $result->get_error_code() );
 		$this->assertInstanceOf( StorageMemoryBaseline::class, $GLOBALS['wpdb']->memory );
 		$this->assertGreaterThanOrEqual( $entry, $GLOBALS['wpdb']->memory->sample() );
+		$this->assertSame( 1, $connection_reads );
 		$this->assertLessThan( $entry, memory_get_usage( true ) );
 		$this->assertSame( array(), $GLOBALS['wpdb']->sql );
 	}
@@ -147,13 +145,21 @@ class BaselineCompositionWpdb {
 	public $last_error = '';
 	public $sql = array();
 	public $memory;
+	public $on_size_query;
+	public $on_connection;
 	public function prepare( $sql, $value ) { return str_replace( '%s', "'" . ( is_array( $value ) ? $value[0] : $value ) . "'", $sql ); }
 	public function get_var( $sql ) {
 		if ( false !== strpos( $sql, "CONCAT('v:'" ) ) { throw new \RuntimeException( 'advance control-read witness only' ); }
+		if ( false !== strpos( $sql, 'LENGTH(option_value)' ) && null !== $this->on_size_query ) {
+			$release = $this->on_size_query; $this->on_size_query = null; call_user_func( $release );
+		}
 		$this->sql[] = $sql; return '0';
 	}
 	public function __get( $name ) {
 		if ( 'dbh' !== $name ) { throw new \LogicException( 'Unexpected database property.' ); }
+		if ( null !== $this->on_connection ) {
+			$release = $this->on_connection; $this->on_connection = null; call_user_func( $release );
+		}
 		foreach ( debug_backtrace( DEBUG_BACKTRACE_PROVIDE_OBJECT ) as $frame ) {
 			if ( isset( $frame['object'] ) && $frame['object'] instanceof StorageConversion ) {
 				$p = new \ReflectionProperty( StorageConversion::class, 'memory' );

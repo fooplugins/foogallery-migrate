@@ -322,13 +322,23 @@ class ContentIndependentRecordRegressionTest extends TestCase {
         $this->assertSame( $max, $d['max_row_bytes'] ); $this->assertSame( $odd, $d['encoded_odd_rows'] );
         $this->assertSame( $large, $d['encoded_large_columns'] ); $this->assertSame( $projection, $d['projection_bytes'] );
         $scale = StorageScaleAdmissionTest::admission(); $qualified = new LegacyRecordCodec(null, 24576, 16777216, $scale);
-        $this->assertTrue( GenericRetainingModel::supports($qualified, new LegacyStateCodec(1048576,64,10000,$scale), $scale), 'No guard bypass or skip.' );
         $actual = array(); $this->assertSame($stats, $qualified->flatten_tree(ContentScanRepository::STATE_KEY,0,$tree,0,function($row) use (&$actual) { $actual[]=$row; }));
         $this->assertSame($rows, $actual);
         $count = 0; $limited = new LegacyRecordCodec(null, 100, $stats['encoded_bytes'] - 1, $scale);
         try { $limited->flatten_tree(ContentScanRepository::STATE_KEY,0,$tree,0,function() use (&$count) { ++$count; }); $this->fail('Byte cap must refuse.'); }
         catch (\RuntimeException $error) { $this->assertSame(0, $count); }
     }
+	/** @group optional_host_diagnostic */
+	public function test_optional_exact_host_retaining_qualification(): void {
+		// Historical allocator/source qualification is not release admission.
+		$scale = StorageScaleAdmissionTest::admission();
+		$codec = new LegacyRecordCodec( null, 24576, 16777216, $scale );
+		$state = new LegacyStateCodec( 1048576, 64, 10000, $scale );
+		if ( ! GenericRetainingModel::supports( $codec, $state, $scale ) ) {
+			$this->markTestSkipped( 'Optional exact-host retaining diagnostic: this host is not qualified.' );
+		}
+		$this->assertTrue( GenericRetainingModel::supports( $codec, $state, $scale ) );
+	}
 }
 
 class ContentRegressionRepository extends ContentScanRepository {

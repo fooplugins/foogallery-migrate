@@ -23,10 +23,35 @@ class StorageCliTest extends TestCase {
 		$this->error( 'invalid_request', 'status', array( 'force' => true ) );
 		$this->error( 'invalid_request', 'preflight', array( 'target' => 'option', 'confirm' => 'switch-to-option' ) );
 	}
-	public function test_cli_does_not_bypass_receiver_calibration(): void {
-		$GLOBALS['foogallery_migrate_test_nonce'] = array( 'action' => 'foogallery_migrate_storage_option_import_7', 'value' => 'nonce-foogallery_migrate_storage_option_import_7', 'result' => 1 );
-		$this->error( 'calibration_required', 'switch', array( 'target' => 'table', 'confirm' => 'switch-to-table' ) );
-		$GLOBALS['foogallery_migrate_test_nonce'] = array( 'action' => 'foogallery_migrate_storage_recover_7', 'value' => 'nonce-foogallery_migrate_storage_recover_7', 'result' => 1 );
-		$this->error( 'calibration_required', 'recover', array( 'target' => 'table', 'confirm' => 'recover-storage' ) );
+	/**
+	 * A prior suite's retained allocations can make PHP reject lowering its limit.
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_cli_cannot_bypass_release_memory_admission_before_sql(): void {
+		$old_limit = ini_get( 'memory_limit' );
+		$had_db = array_key_exists( 'wpdb', $GLOBALS );
+		$old_db = $had_db ? $GLOBALS['wpdb'] : null;
+		$GLOBALS['wpdb'] = new CliNoSqlWpdb();
+		try {
+			$this->assertNotFalse( ini_set( 'memory_limit', '128M' ) );
+			$this->assertSame( '128M', ini_get( 'memory_limit' ) );
+			$GLOBALS['foogallery_migrate_test_nonce'] = array( 'action' => 'foogallery_migrate_storage_option_import_7', 'value' => 'nonce-foogallery_migrate_storage_option_import_7', 'result' => 1 );
+			$this->error( 'decode_refused', 'switch', array( 'target' => 'table', 'confirm' => 'switch-to-table' ) );
+			$GLOBALS['foogallery_migrate_test_nonce'] = array( 'action' => 'foogallery_migrate_storage_recover_7', 'value' => 'nonce-foogallery_migrate_storage_recover_7', 'result' => 1 );
+			$this->error( 'decode_refused', 'recover', array( 'target' => 'table', 'confirm' => 'recover-storage' ) );
+			$this->assertSame( array(), $GLOBALS['wpdb']->calls );
+		} finally {
+			ini_set( 'memory_limit', $old_limit );
+			if ( $had_db ) { $GLOBALS['wpdb'] = $old_db; } else { unset( $GLOBALS['wpdb'] ); }
+		}
+	}
+}
+
+class CliNoSqlWpdb {
+	public $calls = array();
+	public function __call( $name, $args ) {
+		$this->calls[] = $name;
+		throw new \LogicException( 'Low-memory CLI admission reached SQL.' );
 	}
 }
