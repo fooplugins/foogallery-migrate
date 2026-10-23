@@ -46,10 +46,10 @@ class StorageReceiverProvenanceTest extends TestCase {
 		}
 		return $r;
 	}
-	private function profile() {
-		// Trusted-injection shape fixture only; not independently approved calibration.
+	private function obsoleteProfile() {
+		// A formerly trusted profile must not alter the public release receiver.
 		return array( 'version' => 1, 'status' => 'approved', 'fingerprint' => StorageCalibration::fingerprint(),
-			'evidence_sha256' => str_repeat( 'a', 64 ), 'policy' => array( 'max_raw_bytes' => 1048576, 'amplification' => 64, 'reserve_bytes' => 33554432 ) );
+			'evidence_sha256' => str_repeat( 'a', 64 ), 'policy' => array( 'max_raw_bytes' => 1048576, 'amplification' => 1, 'reserve_bytes' => 1 ) );
 	}
 	private function assertCoordinatorEntry( $operation, $target, $request, $handle ) {
 		$frames = $GLOBALS['wpdb']->frames;
@@ -67,7 +67,7 @@ class StorageReceiverProvenanceTest extends TestCase {
 		foreach ( array( false, true ) as $churn ) {
 			$request = $this->request( $operation, $target, $churn );
 			$this->assertTrue( StorageConversion::authorize_request( $request, 'recover' === $operation, 1, 'replace' === $operation ) );
-			$result = ( new StorageOperations( $this->profile() ) )->dispatch( $operation, $request );
+			$result = ( new StorageOperations() )->dispatch( $operation, $request );
 			$this->assertSame( 'foogallery_migrate_storage_recovery_required', $result->get_error_code() );
 			$this->assertCoordinatorEntry( $operation, $target, $request, false );
 		}
@@ -75,7 +75,7 @@ class StorageReceiverProvenanceTest extends TestCase {
 	/** @dataProvider operations */
 	public function test_handle_reaches_actual_dispatch_and_coordinator_without_a_test_product_subclass( $operation, $target ) {
 		$request = $this->request( $operation, $target, true );
-		$profile = $this->profile();
+		$profile = $this->obsoleteProfile();
 		$GLOBALS['foogallery_migrate_test_filters']['foogallery_migrate_storage_calibration'] = function ( $default ) use ( $profile ) { return $profile; };
 		$_POST = array_merge( $request, array( 'action' => 'foogallery_migrate_storage', 'operation' => $operation ) );
 		try { StorageOperations::handle(); $this->fail( 'Receiver did not terminate.' ); }
@@ -86,19 +86,42 @@ class StorageReceiverProvenanceTest extends TestCase {
 		$this->assertCoordinatorEntry( $operation, $target, $request, true );
 	}
 	/** @dataProvider operations */
-	public function test_missing_calibration_and_unauthorized_endpoint_never_enter_the_coordinator( $operation, $target ) {
+	public function test_release_policy_enters_coordinator_but_unauthorized_endpoint_does_not( $operation, $target ) {
 		$request = $this->request( $operation, $target, true );
 		$_POST = array_merge( $request, array( 'action' => 'foogallery_migrate_storage', 'operation' => $operation ) );
 		foreach ( array( true, false ) as $allowed ) {
+			$GLOBALS['wpdb']->frames = array();
 			$GLOBALS['foogallery_migrate_test_capabilities']['manage_options'] = $allowed;
 			try { StorageOperations::handle(); $this->fail( 'Receiver did not terminate.' ); }
 			catch ( \FooGalleryMigrateTestJsonResponse $response ) {
-				$this->assertSame( 'foogallery_migrate_storage_' . ( $allowed ? 'calibration_required' : 'forbidden' ), $response->data['code'] );
+				$this->assertSame( 'foogallery_migrate_storage_' . ( $allowed ? 'recovery_required' : 'forbidden' ), $response->data['code'] );
 				$this->assertSame( $allowed ? 409 : 403, $response->status_code );
+			}
+			if ( $allowed ) { $this->assertCoordinatorEntry( $operation, $target, $request, true ); }
+			else { $this->assertSame( array(), $GLOBALS['wpdb']->frames ); }
+			$this->assertSame( 0, $GLOBALS['wpdb']->sql_calls );
+		}
+	}
+	/** @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_low_memory_release_gate_refuses_untrusted_profile_before_connection_or_sql() {
+		$old_limit = ini_get( 'memory_limit' );
+		try {
+			$this->assertNotFalse( ini_set( 'memory_limit', '128M' ) );
+			$this->assertSame( '128M', ini_get( 'memory_limit' ) );
+			$profile = $this->obsoleteProfile();
+			$GLOBALS['foogallery_migrate_test_filters']['foogallery_migrate_storage_calibration'] = function () use ( $profile ) { return $profile; };
+			$request = $this->request( 'switch', 'table', true );
+			$_POST = array_merge( $request, array( 'action' => 'foogallery_migrate_storage', 'operation' => 'switch' ) );
+			try { StorageOperations::handle(); $this->fail( 'Receiver did not terminate.' ); }
+			catch ( \FooGalleryMigrateTestJsonResponse $response ) {
+				$this->assertSame( 'foogallery_migrate_storage_decode_refused', $response->data['code'] );
+				$this->assertSame( 409, $response->status_code );
 			}
 			$this->assertSame( array(), $GLOBALS['wpdb']->frames );
 			$this->assertSame( 0, $GLOBALS['wpdb']->sql_calls );
-		}
+		} finally { ini_set( 'memory_limit', $old_limit ); }
 	}
 }
 

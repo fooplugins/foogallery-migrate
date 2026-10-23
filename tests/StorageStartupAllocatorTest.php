@@ -19,7 +19,7 @@ final class StorageStartupAllocatorTest extends TestCase {
 		$this->assertSame( 'unknown' === $expected ? null : $expected, $r['observed'][0] );
 		$this->assertSame( array_fill( 0, 3, $r['observed'][0] ), $r['observed'] );
 		$this->assertSame( 0, $r['output_bytes'] ); $this->assertTrue( $r['buffer_restored'] );
-		$this->assertTrue( $r['shipping_classes_empty'] );
+		$this->assertTrue( $r['shipping_release_policy'] );
 	}
 	public function test_real_zend_mode_survives_conflicting_mutable_environment() { $this->process( '1', 'zend' ); }
 	public function test_real_disabled_mode_survives_conflicting_mutable_environment() { $this->process( '0', 'system' ); }
@@ -42,6 +42,10 @@ final class StorageStartupAllocatorTest extends TestCase {
 		$this->assertSame( 0, $called ); $this->assertSame( 'beforeafter', ob_get_clean() );
 		$this->assertSame( $level, ob_get_level() );
 		$this->assertContains( $facts['allocator'], array( 'zend', 'system', null ) );
-		$this->assertInstanceOf( WP_Error::class, StorageCapacityPolicy::resolve() );
+		$policy = StorageCapacityPolicy::resolve();
+		$this->assertIsArray( $policy );
+		$this->assertSame( 1, $policy['release_version'] );
+		$this->assertSame( 3145728, $policy['limits']['max_raw_bytes'] );
+		$this->assertSame( 134217728, $policy['reserve_bytes'] );
 	}
 }

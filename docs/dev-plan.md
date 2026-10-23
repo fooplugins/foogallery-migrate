@@ -161,7 +161,7 @@ R4 preparatory read-only review (Sol Medium `/root/r0_qa`, no test retirement): 
 - **Frozen cleanup harness pins accepted for commit:** Sol High `/root/r4_package`, independent Sol Medium `/root/r4_package_qa`, repairs0. Only two adopt-table ZIP/tree literals in each modern/floor cleanup runner change to the frozen candidate recorded below; owner/manifest/extracted-tree/live SQL/journal/protected-content guards are unchanged. Host and PHP5.4 lints, whitespace and nonowned-site refusal pass. Supervisor independently rechecks archive identity: ZIP `85872f60479cb08108a18c37ce67f43d46783ace3752df5eac2d2b726befc292`, tree `9bea2ccbf05342cbd8fc18f76131a7f22802002fdfcd3fb3ef338bb283213c24`.
 - **Final modern run in progress:** fresh `/private/tmp/foogallery-migrate-r0.qn2qf4`, DB `fgm_r0_qn2qf4` at127.0.0.1:32794, owned Docker `0d43fe80192eb733b134170fabaefadb8f6cccea47865df5778e85be0df6e380`, WP7.1.3/PHP8.4.6 and exact extracted frozen package. Cron disabled; native runner asserts256M. Dedicated Redis7 container `091d4c045d7a6b80dfabd24781ca38561e06bc26c07339a4cfb2db92ef1e370f` at127.0.0.1:32795, unique cache prefix, Redis Object Cache3.0.0/Predis; cache and journey qualification pending. Never mutate the Local foo database or replay historical failed fixtures. Package remains frozen.
 
-## Workflow to avoid repeated blockers
+### R4c — Explicit diagnostic dispositions
 
 R4c classification accepted after `9702717` (Sol High `/root/r0_journey`; independent Sol Medium `/root/r0_qa`; repairs0). The17 Current/predecessor families annotate individual methods with `optional_host_diagnostic`; default PHPUnit excludes only this explicit group, not files. Dispositions apply to both generations:
 
@@ -175,6 +175,12 @@ R4c classification accepted after `9702717` (Sol High `/root/r0_journey`; indepe
 | ReceiverNewComposition, DiagnosticSuccessor | R4a/R4b and Operations retain strict actual receiver authorization/privacy/nonmutation/low-memory/no-SQL and entry high-water | V2/V3 COW/normalization/callsite/line/frame binding and mixed receiver-suffix certificates |
 
 Supervisor affected regression117 tests/780 assertions passes; independent retained families35/86 pass. Optional diagnostics are still runnable with `php -d memory_limit=256M vendor/bin/phpunit --no-configuration --bootstrap tests/bootstrap.php --group optional_host_diagnostic tests`; a selected pure normalization case passes1/1, while QA's selected historical binding case fails `fixed_helper_domain` as expected on the unqualified host. This is explicit optional evidence, not green certification. Other allocator/snapshot families and obsolete calibration/provenance/startup expectations remain open; full release discovery is not yet accepted.
+
+### R4d — Release-policy expectations
+
+R4c is committed as `141a6f8`. R4d is accepted for commit: Sol High `/root/r0_journey`, independent Sol Medium `/root/r0_qa`, repairs0; four test/fixture files only. Calibration collection, receiver provenance and startup allocator tests now assert the shipped v1 policy (3MiB raw cap,16x,128MiB reserve,32MiB phase headroom) instead of the removed calibration gate/empty classes field. Untrusted legacy filter profiles cannot bypass actual128M refusal before connection/SQL; authorized requests at admitted memory still reach the real coordinator, unauthorized requests do not. Native startup allocator facts remain immune to mutable environment and preserve output-buffer privacy. Supervisor adjacent88 tests/1,108 assertions pass; QA focused30/308 and both separate-process tests with150MiB parent ballast2/28 pass. Four lints and diff-check pass. Remaining mixed allocator/snapshot diagnostics still require explicit classification and portable rollback/limit coverage before final discovery.
+
+## Workflow to avoid repeated blockers
 
 Development is now authorized. Apply these rules with Brad's explicit no-budget-stop instruction; do not reopen the settled scope or request a usage allowance again.
 

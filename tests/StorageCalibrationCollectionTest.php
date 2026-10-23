@@ -2,6 +2,7 @@
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
 use FooPlugins\FooGalleryMigrate\StorageCalibration;
+use FooPlugins\FooGalleryMigrate\StorageCapacityPolicy;
 use FooPlugins\FooGalleryMigrate\StorageOperations;
 use PHPUnit\Framework\TestCase;
 
@@ -50,35 +51,52 @@ class StorageCalibrationCollectionTest extends TestCase {
 		);
 	}
 
-	public function test_measurement_and_mismatched_profiles_still_refuse_the_actual_public_receiver_before_sql() {
+	/** A fresh process can lower the real limit even after another suite retained memory.
+	 * @runInSeparateProcess
+	 * @preserveGlobalState disabled
+	 */
+	public function test_untrusted_profiles_cannot_bypass_release_memory_refusal_before_sql() {
 		$names = array( 'wpdb', 'wp_version', 'foogallery_migrate_test_blog_id', 'foogallery_migrate_test_capabilities', 'foogallery_migrate_test_nonce', 'foogallery_migrate_test_filters' );
 		$saved = array();
 		foreach ( $names as $name ) { $saved[$name] = array( array_key_exists( $name, $GLOBALS ), isset( $GLOBALS[$name] ) ? $GLOBALS[$name] : null ); }
+		$old_limit = ini_get( 'memory_limit' );
 		try {
+			$this->assertNotFalse( ini_set( 'memory_limit', '128M' ) );
+			$this->assertSame( '128M', ini_get( 'memory_limit' ) );
 			$db = new CollectionNoSqlWpdb(); $GLOBALS['wpdb'] = $db;
 			$GLOBALS['wp_version'] = 'native-test-not-wordpress';
 			$GLOBALS['foogallery_migrate_test_blog_id'] = 1;
 			$GLOBALS['foogallery_migrate_test_capabilities'] = array( 'manage_options' => true );
 			$GLOBALS['foogallery_migrate_test_filters'] = array();
+			$release = StorageCapacityPolicy::resolve();
+			$this->assertIsArray( $release );
+			$this->assertSame( 1, $release['release_version'] );
+			$this->assertSame( 3145728, $release['limits']['max_raw_bytes'] );
+			$this->assertSame( 134217728, $release['reserve_bytes'] );
 			$profile = array( 'version' => 1, 'status' => 'measurement_only', 'fingerprint' => StorageCalibration::fingerprint(),
-				'evidence_sha256' => str_repeat( 'a', 64 ), 'policy' => array( 'max_raw_bytes' => 1048576, 'amplification' => 64, 'reserve_bytes' => 33554432 ) );
+				'evidence_sha256' => str_repeat( 'a', 64 ), 'policy' => array( 'max_raw_bytes' => 1048576, 'amplification' => 1, 'reserve_bytes' => 1 ) );
 			$wrong = $profile; $wrong['status'] = 'approved'; $wrong['fingerprint'] = str_repeat( '0', 64 );
 			foreach ( array( null, $profile, $wrong ) as $p ) {
+				$GLOBALS['foogallery_migrate_test_filters']['foogallery_migrate_storage_calibration'] = function () use ( $p ) { return $p; };
+				$this->assertSame( $release, StorageCapacityPolicy::resolve(), 'Legacy filter data must not change the shipped policy.' );
 				foreach ( array( 'preflight', 'switch', 'recover', 'replace' ) as $op ) {
 					$purpose = 'recover' === $op ? 'recover' : ( 'replace' === $op ? 'option_reimport' : 'option_import' );
 					$GLOBALS['foogallery_migrate_test_nonce'] = array( 'action' => 'foogallery_migrate_storage_' . $purpose . '_1', 'value' => 'valid', 'result' => 1 );
 					$r = array( 'blog_id' => 1, 'scope' => 'site', 'target' => 'table', 'confirmation' => 'recover' === $op ? 'recover-storage' : ( 'replace' === $op ? 'replace-retained-with-table' : 'switch-to-table' ), 'nonce' => 'valid' );
-					$this->assertSame( 'foogallery_migrate_storage_calibration_required', ( new StorageOperations( $p ) )->dispatch( $op, $r )->get_error_code() );
+					$this->assertSame( 'foogallery_migrate_storage_decode_refused', ( new StorageOperations() )->dispatch( $op, $r )->get_error_code() );
 				}
 			}
 			$this->assertSame( 0, $db->calls );
 		} catch ( \Exception $error ) {
+			ini_set( 'memory_limit', $old_limit );
 			foreach ( $saved as $name => $value ) { if ( $value[0] ) { $GLOBALS[$name] = $value[1]; } else { unset( $GLOBALS[$name] ); } }
 			throw $error;
 		} catch ( \Throwable $error ) {
+			ini_set( 'memory_limit', $old_limit );
 			foreach ( $saved as $name => $value ) { if ( $value[0] ) { $GLOBALS[$name] = $value[1]; } else { unset( $GLOBALS[$name] ); } }
 			throw $error;
 		}
+		ini_set( 'memory_limit', $old_limit );
 		foreach ( $saved as $name => $value ) { if ( $value[0] ) { $GLOBALS[$name] = $value[1]; } else { unset( $GLOBALS[$name] ); } }
 	}
 }
