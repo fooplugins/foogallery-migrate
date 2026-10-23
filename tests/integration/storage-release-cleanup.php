@@ -235,8 +235,8 @@ if ( 'adopt-table' === $step ) {
 		! file_exists( $media_dir ) && ! is_link( $media_dir ),
 		'Adoption refuses an existing lifecycle journal or unrelated protected posts.' );
 	cleanup_check( isset( $manifest['package']['zip_sha256'], $manifest['package']['tree_sha256'] ) &&
-		$manifest['package']['zip_sha256'] === '67489aa5f1849c9dc6e0c4e10911463338fbd2403797c2bcf565926409ed6379' &&
-		$manifest['package']['tree_sha256'] === 'd18c9a460fa4a5ebeaaf87087d59b0250b7501dd4f0cc24c791fc670de05644e',
+		$manifest['package']['zip_sha256'] === '85872f60479cb08108a18c37ce67f43d46783ace3752df5eac2d2b726befc292' &&
+		$manifest['package']['tree_sha256'] === '9bea2ccbf05342cbd8fc18f76131a7f22802002fdfcd3fb3ef338bb283213c24',
 		'Exact reviewed 10K package required for table adoption.' );
 	$real = get_option( 'fgm_real_owned_journey_v1', null );
 	$real_raw = $raw( 'fgm_real_owned_journey_v1' );
