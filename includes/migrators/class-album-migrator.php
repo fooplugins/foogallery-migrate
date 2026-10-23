@@ -30,10 +30,29 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
          * @return void
          */
         function render_album_form() {
-            $albums = $this->get_objects_to_migrate();
+            $repository = $this->table_collection_repository();
+            if ( null === $repository ) { $this->render_album_form_body( null ); return; }
+            ob_start();
+            try {
+                $context = $this->render_album_form_body( $repository );
+                if ( $repository->view_context( $this->type ) !== $context ) { throw new \RuntimeException( 'Albums changed during form rendering.' ); }
+                $html = ob_get_clean(); echo $html;
+            } catch ( \Exception $error ) { ob_end_clean(); throw $error; }
+            catch ( \Throwable $error ) { ob_end_clean(); throw $error; }
+        }
+
+        private function render_album_form_body( $repository ) {
+            $context = null;
+            if ( null === $repository ) { $albums = $this->get_objects_to_migrate(); $albums_count = count( $albums ); }
+            else {
+                $context = $repository->view_context( $this->type );
+                if ( ! $context['found'] ) { $this->get_objects_to_migrate(); $context = $repository->view_context( $this->type ); }
+                if ( ! $context['found'] ) { throw new \RuntimeException( 'Album discovery did not publish a collection.' ); }
+                $albums = array(); $albums_count = $context['total'];
+            }
             wp_nonce_field( 'foogallery_album_migrate', 'foogallery_album_migrate', false );
 
-            if ( count( $albums ) === 0 ) {
+            if ( $albums_count === 0 ) {
                 echo '<p>' . esc_html__( 'No albums found!', 'foogallery-migrate' ) . '</p>';
                 $show_refresh = true;
                 $migrating = false;
@@ -101,7 +120,6 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                         $page = absint( wp_unslash( $_GET['album_paged'] ) );
                     }
                     $url = add_query_arg( 'album_paged', $page, $url );
-                    $albums_count = count( $albums );
                     $preflight_album_count = 0;
                     $preflight_gallery_count = 0;
                     $preflight_image_count = 0;
@@ -123,11 +141,20 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                         $end = $albums_count - 1;
                     }
 
+                    $table_rows = array(); $table_end = $start;
                     for ($counter = $start; $counter <= $end; $counter++ ) {
                         if ( $counter >= $albums_count ) {
                             break;
                         }
-                        $album = $albums[$counter];
+                        if ( null !== $repository ) {
+                            if ( $counter >= $table_end ) {
+                                $take = min( 100, $end - $counter + 1, $albums_count - $counter );
+                                $chunk = $repository->view_page( $this->type, $counter, $take );
+                                if ( $chunk['head'] !== $context['head'] || count( $chunk['rows'] ) !== $take ) { throw new \RuntimeException( 'Album page changed during form rendering.' ); }
+                                $table_rows = $chunk['rows']; $table_end = $counter + $take;
+                            }
+                            $album = $table_rows[$counter - ( $table_end - count( $table_rows ) )]['value'];
+                        } else { $album = $albums[$counter]; }
                         $progress    = $album->progress;
                         $done        = $album->migrated;
                         $edit_link	 = '';
@@ -251,6 +278,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                     <span class="spinner shown"></span>
                 </div>
             <?php }
+            return $context;
         }
 	}
 }

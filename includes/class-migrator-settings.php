@@ -47,6 +47,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 			$this->state_backend = null === $backend ? new LegacyOptionBackend() : $backend;
 		}
 		public function content_scan_repository() { return new ContentScanRepository( $this->state_backend, $this ); }
+		public function table_collection_repository() { return $this->state_backend instanceof LegacyTableBackend ? new MigratableCollectionRepository( $this->state_backend, $this ) : null; }
 		public function can_clear_migrator_state() { return $this->state_backend instanceof LegacyOptionBackend; }
 
 		/**

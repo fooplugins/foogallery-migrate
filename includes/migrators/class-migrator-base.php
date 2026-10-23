@@ -100,6 +100,11 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
             return $this->storage_operation( 'get_objects_to_migrate_admitted', array( $force ) );
         }
 
+		/** Table-only read seam; injected option doubles retain the old behavior. */
+		protected function table_collection_repository() {
+			return method_exists( $this->migrator_engine, 'table_collection_repository' ) ? $this->migrator_engine->table_collection_repository() : null;
+		}
+
         private function get_objects_to_migrate_admitted( $force ) {
             $objects = $this->get_setting( $this->type );
 
@@ -220,6 +225,11 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
          * @return int|string
          */
         function get_current_object_being_migrated() {
+			$repository = $this->table_collection_repository();
+			if ( null !== $repository ) {
+				$started = $repository->first_started( $this->type );
+				return $started['found'] ? $started['value']->unique_identifier() : 0;
+			}
             $objects = $this->get_objects_to_migrate();
 
             foreach ( $objects as $object ) {

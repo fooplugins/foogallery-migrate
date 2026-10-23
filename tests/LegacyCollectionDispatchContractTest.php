@@ -39,6 +39,18 @@ class LegacyCollectionDispatchContractTest extends TestCase {
 		$this->assertSame( 'image', $backend->record['object_type'] );
 		$this->assertSame( array(), $GLOBALS['foogallery_migrate_test_option_writes'] );
 	}
+	public function test_table_view_page_hydrates_only_selected_roots_and_preserves_typed_keys(): void {
+		$backend = new CollectionDispatchBackend();
+		$repo = new MigratableCollectionRepository( $backend, new MigratorSettings() );
+		$first = new \FooPlugins\FooGalleryMigrate\Objects\Image(); $first->source_url = 'string-key';
+		$second = new \FooPlugins\FooGalleryMigrate\Objects\Image(); $second->source_url = 'integer-key';
+		$this->assertTrue( $repo->replace_snapshot( 'galleries', array( '09' => $first, 9 => $second ) ) );
+		$page = $repo->view_page( 'galleries', 1, 1 );
+		$this->assertSame( array( array( 1, 1 ) ), $backend->view_pages );
+		$this->assertSame( 9, $page['rows'][0]['key'] );
+		$this->assertSame( 'integer-key', $page['rows'][0]['value']->source_url );
+		$this->assertSame( array( '09', 9 ), array_keys( $repo->read_snapshot( 'galleries' ) ) );
+	}
 	public function test_injected_engine_uses_bounded_collection_dispatch(): void {
 		$backend = new CollectionDispatchBackend();
 		$settings = new MigratorSettings();
@@ -52,10 +64,15 @@ class LegacyCollectionDispatchContractTest extends TestCase {
 }
 
 class CollectionDispatchBackend extends LegacyTableBackend {
-	public $value; public $companions; public $locator; public $record;
+	public $value; public $companions; public $locator; public $record; public $view_pages = array();
 	public function __construct() {}
 	public function collection_snapshot( $key ) { return $this->value; }
 	public function read_collection( $key ) { return array( 'found' => null !== $this->value, 'value' => $this->value ); }
 	public function replace_collection( $key, $value, $companions = array() ) { $this->value = $value; $this->companions = $companions; return true; }
 	public function update_collection_record( $key, $locator, $value ) { $this->locator = $locator; $this->record = $value; return true; }
+	public function collection_view_page( $key, $offset, $limit ) {
+		$this->view_pages[] = array( $offset, $limit ); $rows = array();
+		foreach ( array_slice( $this->value['items'], $offset, $limit, true ) as $item_key => $value ) { $rows[] = array( 'key' => $item_key, 'value' => $value ); }
+		return array( 'rows' => $rows, 'head' => array( 'revision' => 1 ) );
+	}
 }

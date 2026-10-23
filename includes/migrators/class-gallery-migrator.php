@@ -30,10 +30,29 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
          * @return void
          */
         function render_gallery_form() {
-            $galleries = $this->get_objects_to_migrate();
+            $repository = $this->table_collection_repository();
+            if ( null === $repository ) { $this->render_gallery_form_body( null ); return; }
+            ob_start();
+            try {
+                $context = $this->render_gallery_form_body( $repository );
+                if ( $repository->view_context( $this->type ) !== $context ) { throw new \RuntimeException( 'Galleries changed during form rendering.' ); }
+                $html = ob_get_clean(); echo $html;
+            } catch ( \Exception $error ) { ob_end_clean(); throw $error; }
+            catch ( \Throwable $error ) { ob_end_clean(); throw $error; }
+        }
+
+        private function render_gallery_form_body( $repository ) {
+            $context = null;
+            if ( null === $repository ) { $galleries = $this->get_objects_to_migrate(); $gallery_count = count( $galleries ); }
+            else {
+                $context = $repository->view_context( $this->type );
+                if ( ! $context['found'] ) { $this->get_objects_to_migrate(); $context = $repository->view_context( $this->type ); }
+                if ( ! $context['found'] ) { throw new \RuntimeException( 'Gallery discovery did not publish a collection.' ); }
+                $galleries = array(); $gallery_count = $context['total'];
+            }
             wp_nonce_field( 'foogallery_migrate', 'foogallery_migrate', false );
 
-            if ( count( $galleries ) === 0 ) {
+            if ( $gallery_count === 0 ) {
                 echo '<p>' . esc_html__( 'No galleries found!', 'foogallery-migrate' ) . '</p>';
                 $show_refresh = true;
                 $migrating = false;
@@ -99,7 +118,6 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                         $page = absint( wp_unslash( $_GET['gallery_paged'] ) );
                     }
                     $url = add_query_arg( 'gallery_paged', $page, $url );
-                    $gallery_count = count( $galleries );
                     $preflight_gallery_count = 0;
                     $preflight_image_count = 0;
                     $page_size = $this->migrator_engine->get_page_size();
@@ -120,11 +138,20 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                         $end = $gallery_count - 1;
                     }
 
+                    $table_rows = array(); $table_end = $start;
                     for ($counter = $start; $counter <= $end; $counter++ ) {
                         if ( $counter >= $gallery_count ) {
                             break;
                         }
-                        $gallery = $galleries[$counter];
+                        if ( null !== $repository ) {
+                            if ( $counter >= $table_end ) {
+                                $take = min( 100, $end - $counter + 1, $gallery_count - $counter );
+                                $chunk = $repository->view_page( $this->type, $counter, $take );
+                                if ( $chunk['head'] !== $context['head'] || count( $chunk['rows'] ) !== $take ) { throw new \RuntimeException( 'Gallery page changed during form rendering.' ); }
+                                $table_rows = $chunk['rows']; $table_end = $counter + $take;
+                            }
+                            $gallery = $table_rows[$counter - ( $table_end - count( $table_rows ) )]['value'];
+                        } else { $gallery = $galleries[$counter]; }
                         $progress    = $gallery->progress;
                         $done        = $gallery->migrated;
                         $edit_link   = '';
@@ -318,6 +345,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                     <span class="spinner shown"></span>
                 </div>
             <?php }
+            return $context;
         }
 	}
 }

@@ -47,7 +47,10 @@ class LegacyTableRepositoryTest extends TestCase {
 	public function test_invalid_page_and_typed_root_keys_precede_sql(): void {
 		$db = new RepositoryTestConnection(); $repo = new LegacyTableRepository( $db, 7 );
 		foreach ( array( function () use ( $repo ) { $repo->page( 'history', 101 ); },
-			function () use ( $repo ) { $repo->root( 'history', true ); } ) as $call ) {
+			function () use ( $repo ) { $repo->root( 'history', true ); },
+			function () use ( $repo ) { $repo->collection_view_page( 'galleries', -1, 1 ); },
+			function () use ( $repo ) { $repo->collection_view_page( 'albums', 0, 101 ); },
+			function () use ( $repo ) { $repo->collection_view_page( 'albums', 0, 0 ); } ) as $call ) {
 			try { $call(); $this->fail(); }
 			catch ( \RuntimeException $error ) { $this->assertSame( array(), $db->queries ); }
 		}

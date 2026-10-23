@@ -17,6 +17,36 @@ class MigratableCollectionRepository extends ScalarStateRepository {
 			throw new \RuntimeException( 'Unsupported collection. No fallback.' );
 		}
 	}
+	/** Table form metadata only; option callers keep their original snapshot path. */
+	public function view_context( $bucket ) {
+		$bucket = $this->bucket( $bucket );
+		if ( ! $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table collection view required.' ); }
+		return $this->backend->collection_view_context( $bucket );
+	}
+	private function hydrate_view_record( $bucket, $row ) {
+		if ( ! is_array( $row ) || array_keys( $row ) !== array( 'key', 'value' ) ) { throw new \RuntimeException( 'Invalid collection view row.' ); }
+		$payload = array( MigratorSettings::COMPACT_MARKER => MigratorSettings::COMPACT_VERSION,
+			'type' => 'migratable', 'items' => array( $row['key'] => $row['value'] ) );
+		$objects = $this->decode( $bucket, $payload );
+		if ( ! is_array( $objects ) || count( $objects ) !== 1 || ! array_key_exists( $row['key'], $objects ) ) { throw new \RuntimeException( 'Collection view hydration changed key.' ); }
+		return array( 'key' => $row['key'], 'value' => $objects[$row['key']] );
+	}
+	public function view_page( $bucket, $offset, $limit ) {
+		$bucket = $this->bucket( $bucket );
+		if ( ! $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table collection view required.' ); }
+		$page = $this->backend->collection_view_page( $bucket, $offset, $limit ); $rows = array();
+		foreach ( $page['rows'] as $row ) { $rows[] = $this->hydrate_view_record( $bucket, $row ); }
+		return array( 'rows' => $rows, 'head' => $page['head'] );
+	}
+	public function first_started( $bucket ) {
+		$bucket = $this->bucket( $bucket );
+		if ( ! $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table collection view required.' ); }
+		$page = $this->backend->filtered_page( $bucket, 1, array( 'migration_status' => 'started' ) );
+		if ( ! count( $page['rows'] ) ) { return array( 'found' => false, 'head' => null ); }
+		$row = $this->hydrate_view_record( $bucket, $page['rows'][0] );
+		if ( ! is_object( $row['value'] ) || $row['value']->migration_status !== 'started' ) { throw new \RuntimeException( 'Started collection projection changed.' ); }
+		return array( 'found' => true, 'head' => $page['revision'], 'value' => $row['value'] );
+	}
 	public function read_snapshot( $bucket ) {
 		$bucket = $this->bucket( $bucket );
 		if ( $this->backend instanceof LegacyTableBackend ) {

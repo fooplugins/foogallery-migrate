@@ -1358,6 +1358,47 @@ class LegacyTableRepository {
 		$this->unchanged( $state_key, $head ); return $root['root_count'];
 	}
 
+	/** Gallery/album form context; absence retains the old lazy-discovery decision. */
+	public function collection_view_context( $state_key ) {
+		$this->collection_key( $state_key ); $this->start_budget(); $this->typed_key( $state_key );
+		$head = $this->reader->head( $state_key );
+		if ( false === $head ) {
+			if ( false !== $this->reader->head( $state_key ) ) { $this->fail( 'Missing collection scope changed.' ); }
+			return array( 'found' => false, 'total' => 0, 'head' => false );
+		}
+		$root = $this->collection( $head );
+		if ( ! in_array( $head['state_kind'], array( 'map', 'list' ), true ) || ! isset( $root['wrapper'] ) ) { $this->fail( 'Indexed form collection required.' ); }
+		$rows = $this->read( $this->db->prepare( 'SELECT COUNT(*) AS total FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL',
+			array( $this->blog, $head['id'], $head['active_generation'] ) ) );
+		if ( count( $rows ) !== 1 || $this->number( $rows[0]['total'] ) !== $root['root_count'] ) { $this->fail( 'Form root count mismatch.' ); }
+		$this->unchanged( $state_key, $head );
+		return array( 'found' => true, 'total' => $root['root_count'], 'head' => $head );
+	}
+
+	/** Fixed-size selector offset for a visible form page; skipped roots never decode. */
+	public function collection_view_page( $state_key, $offset, $limit ) {
+		$this->collection_key( $state_key );
+		if ( ! is_int( $offset ) || $offset < 0 || ! is_int( $limit ) || $limit < 1 || $limit > LegacyTableReader::MAX_ROWS ) { $this->fail( 'Invalid form page.' ); }
+		$this->start_budget(); $this->typed_key( $state_key ); $this->byte_limit = min( $this->max_bytes, 4194304 );
+		$head = $this->head( $state_key ); $root = $this->collection( $head );
+		if ( ! in_array( $head['state_kind'], array( 'map', 'list' ), true ) || ! isset( $root['wrapper'] ) ) { $this->fail( 'Indexed form collection required.' ); }
+		if ( $offset > $root['root_count'] ) { $this->fail( 'Form page starts beyond collection.' ); }
+		$selected = $this->read( $this->db->prepare( 'SELECT id, item_order, HEX(node_hash) AS node_hash FROM `' . $this->table . '` '
+			. 'WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL ORDER BY item_order ASC, id ASC LIMIT %d OFFSET %d',
+			array( $this->blog, $head['id'], $head['active_generation'], $limit, $offset ) ) );
+		if ( count( $selected ) !== min( $limit, $root['root_count'] - $offset ) ) { $this->fail( 'Form selector page count changed.' ); }
+		$rows = array(); $previous = -1;
+		foreach ( $selected as $row ) {
+			$id = $this->number( $row['id'] ); $order = $this->number( $row['item_order'] );
+			if ( $id < 1 || $order <= $previous ) { $this->fail( 'Duplicate or invalid form root order.' ); }
+			$tree = $this->tree_hash( $state_key, $head, $this->hex( $row['node_hash'] ) );
+			if ( false === $tree || $this->number( $tree['rows'][0]['id'] ) !== $id || $tree['order'] !== $order ) { $this->fail( 'Form root changed during page.' ); }
+			$rows[] = array( 'key' => $tree['key'], 'value' => $tree['value'] ); $previous = $order;
+		}
+		$this->unchanged( $state_key, $head );
+		return array( 'rows' => $rows, 'head' => $head );
+	}
+
 	/**
 	 * Existing heads only. Changes are {key, expected_revision, patches} for
 	 * maps, with each patch {key, value} OR {key, delete:true}; scalar changes
