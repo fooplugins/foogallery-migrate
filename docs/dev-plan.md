@@ -1,6 +1,61 @@
 # Legacy storage upgrade — first-release plan
 
-**Updated:** 2026-10-23
+**Updated:** 2026-10-24
+
+## Current amendment — pre-migration source-count advice and matching settings rows
+
+Brad requested a pre-migration table recommendation using detected gallery/image
+counts without hydrating source data, plus a storage row matching the existing
+Migration Settings label/control layout. This is a read-only advice/presentation
+change, not an engine, schema, admission-policy or automatic-backend change.
+
+- Preserve the 1 MiB saved-option advice. Where it does not trigger, recommend
+  tables at 100 source gallery records or 1,000 source image records, inclusive;
+  positive-integer filters can adjust either advisory threshold.
+- Use only fixed scalar SQL counts/existence probes over supported source tables
+  and published gallery post types. No adapter discovery, source objects, image
+  arrays or post-content scan is added. Serialized-format image counts and
+  unscanned WordPress gallery occurrences stay unknown. Counts are partial
+  source-record estimates, not the selected migration queue or a memory forecast;
+  WPPA file validity is not checked merely for advice.
+- Keep advice on healthy stable single-site options, suppress it for table mode,
+  recovery/cleanup and unsupported runtimes, and retain all conversion gates.
+  No count cache, option, table or cron task is introduced. SQL work may grow with
+  source size; only PHP result memory and query count are bounded (at most 14
+  source queries with every provider present).
+- Use one Migration Settings heading, with Migration Storage as the first native
+  `form-table` label/control row. Keep its receiver forms separate from the normal
+  preferences form; details/cleanup stay collapsed and recovery remains reachable.
+
+Validation for this amendment:
+
+- Complete maintained suite at explicit 256 MiB: **1,593 tests / 311,604
+  assertions**, zero skips, failures or errors (2m55.367s, 133.61 MiB reported peak).
+- Focused presentation/source-advice/single-site checks: **30 tests / 309
+  assertions**. Includes inclusive boundaries, invalid/valid filters, unknown and
+  failed counts, duplicate metadata, authority/cleanup/capability guards and no
+  duplicate Settings notice. Existing rendered-JavaScript workflow: **62 checks**.
+- Native SQL on the owned disposable WordPress 7.1.3 / PHP 8.4.6 fixture: eight
+  source gallery records and 1,003 → 20,003 image records, **14 scalar queries** at
+  both sizes. Covers source joins, excluded/orphan images, published records,
+  duplicate AIGPL metadata and WPPA status/type hints. Incremental count-path
+  peaks were 70,232B and 17,640B on this run (not universal host guarantees).
+  Rendered advice appears at **zero saved option bytes**. All eight test-only
+  tables were removed; `wp_options`, `wp_posts` and `wp_postmeta` checksums match.
+  Private runner: retained fixture's `source-counts-native.php`; it uses an isolated
+  test prefix and never provisions migration-storage tables or switches backend.
+- Native browser: **11 read-only checks**, matching desktop column coordinates,
+  responsive label stacking without horizontal overflow, default disclosures,
+  unchanged picker behavior, zero storage-operation POSTs and no JS errors.
+- Changed product PHP passes PHP 5.4 syntax checks. The rebuilt 90-file ZIP passes
+  CRC/path/symlink/development-payload/source-parity checks; SHA-256
+  `0ab9a681b6a3bbd6143d8df2ab81c316c70602266bcd822ad40fd548340f466b`.
+  Agent CI was attempted but no `.github/workflows` exist; no CI pass is claimed.
+  Brad authorized committing this amendment, pushing it to PR #15 and deploying
+  the identical validated package to the prepared test site on 2026-10-24.
+  Deployment must retain the current backend and migration data, verify package
+  identity and compare protected-data hashes. Merge/public release and v2 engine
+  implementation remain unauthorized.
 
 ## Current amendment — compact storage settings
 

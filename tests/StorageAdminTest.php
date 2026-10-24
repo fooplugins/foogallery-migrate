@@ -182,6 +182,19 @@ class StorageAdminTest extends TestCase {
 		$this->assertStringContainsString( 'Migration records: 1234', strip_tags( $html ) );
 		$this->assertStringNotContainsString( 'Migration data: 0 B', strip_tags( $html ) );
 	}
+	public function test_storage_controls_use_native_settings_label_and_control_columns(): void {
+		$s = array( 'backend' => 'option', 'phase' => 'stable', 'target' => 'option', 'retained' => false, 'option_bytes' => '264453', 'records' => null, 'schema' => 'not ready', 'problem' => '', 'calibrated' => true );
+		ob_start(); StorageAdmin::render( $s ); $html = ob_get_clean();
+		$dom = new \DOMDocument(); @$dom->loadHTML( $html ); $xpath = new \DOMXPath( $dom );
+		$row = '//section[@id="migration-storage"]/table[@class="form-table"][@role="presentation"]/tbody/tr';
+		$this->assertSame( 1, $xpath->query( $row )->length );
+		$this->assertSame( 'Migration Storage', $xpath->query( $row . '/th[@scope="row"][@id="migration-storage-heading"]' )->item( 0 )->textContent );
+		$this->assertSame( 2, $xpath->query( $row . '/td//input[@type="radio"]' )->length );
+		$this->assertSame( 1, $xpath->query( $row . '/td//button[@id="foogm-storage-change"]' )->length );
+		$this->assertSame( 2, $xpath->query( $row . '/td/details' )->length );
+		$this->assertSame( 0, $xpath->query( '//form//form' )->length );
+		$this->assertSame( 0, $xpath->query( '//section[@id="migration-storage"]//h2' )->length );
+	}
 }
 
 class StorageAdminAdviceWpdb {

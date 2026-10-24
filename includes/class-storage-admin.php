@@ -5,6 +5,8 @@ if ( ! defined( 'ABSPATH' ) ) { exit; }
 
 class StorageAdmin {
 	const ADVICE_THRESHOLD_BYTES = 1048576;
+	const ADVICE_THRESHOLD_GALLERIES = 100;
+	const ADVICE_THRESHOLD_IMAGES = 1000;
 
 	public static function register() {
 		// Core checks page access while building menus, before admin_init.
@@ -47,9 +49,38 @@ class StorageAdmin {
 			return;
 		}
 		$status = self::status( false );
-		if ( ! self::recommendation_eligible( $status ) ) { return; }
+		$message = self::recommendation_message( $status );
+		if ( '' === $message ) { return; }
 		$url = self::settings_url();
-		echo '<div class="notice notice-info"><p>' . esc_html__( 'For this migration size, we recommend database tables.', 'foogallery-migrate' ) . ' (' . esc_html( self::format_bytes( $status['option_bytes'] ) ) . ') <a href="' . esc_url( $url ) . '">' . esc_html__( 'Change storage', 'foogallery-migrate' ) . '</a></p></div>';
+		echo '<div class="notice notice-info"><p>' . esc_html( $message ) . ' <a href="' . esc_url( $url ) . '">' . esc_html__( 'Change storage', 'foogallery-migrate' ) . '</a></p></div>';
+	}
+
+	/** Advice only: never read migration state, run source discovery or alter admission. */
+	private static function recommendation_message( $status ) {
+		if ( is_multisite() || empty( $status['calibrated'] ) || 'option' !== $status['backend'] || 'stable' !== $status['phase'] || ! empty( $status['problem'] ) || null !== StorageCleanup::pending_scope() ) { return ''; }
+		if ( self::recommendation_eligible( $status ) ) {
+			return __( 'For this migration size, we recommend database tables.', 'foogallery-migrate' ) . ' (' . self::format_bytes( $status['option_bytes'] ) . ')';
+		}
+		$counts = StorageSourceCounts::measure();
+		$gallery_limit = apply_filters( 'foogallery_migrate_storage_advice_threshold_galleries', self::ADVICE_THRESHOLD_GALLERIES );
+		$image_limit = apply_filters( 'foogallery_migrate_storage_advice_threshold_images', self::ADVICE_THRESHOLD_IMAGES );
+		$gallery_limit = is_int( $gallery_limit ) && $gallery_limit > 0 ? $gallery_limit : self::ADVICE_THRESHOLD_GALLERIES;
+		$image_limit = is_int( $image_limit ) && $image_limit > 0 ? $image_limit : self::ADVICE_THRESHOLD_IMAGES;
+		if ( $counts['galleries'] < $gallery_limit && $counts['images'] < $image_limit ) { return ''; }
+		$summary = '';
+		if ( $counts['galleries'] > 0 ) {
+			/* translators: %s: source gallery record count, formatted for the locale. */
+			$summary .= sprintf( __( 'Detected gallery records: %s.', 'foogallery-migrate' ), self::format_count( $counts['galleries'] ) ) . ' ';
+		}
+		if ( $counts['images'] > 0 ) {
+			/* translators: %s: source image record count, formatted for the locale. */
+			$summary .= sprintf( __( 'Detected image records: %s.', 'foogallery-migrate' ), self::format_count( $counts['images'] ) ) . ' ';
+		}
+		return $summary . __( 'We recommend database tables before migrating.', 'foogallery-migrate' );
+	}
+
+	private static function format_count( $count ) {
+		return function_exists( 'number_format_i18n' ) ? number_format_i18n( $count ) : number_format( $count );
 	}
 
 	private static function recommendation_eligible( $status ) {
@@ -181,8 +212,8 @@ class StorageAdmin {
 		foreach ( $actions as $a ) {
 			if ( '' === $s['problem'] && in_array( $a['operation'], array( 'switch', 'replace' ), true ) ) { $change = $a; }
 		}
-		echo '<section id="migration-storage" aria-labelledby="migration-storage-heading"><h2 id="migration-storage-heading">' . esc_html__( 'Migration Storage', 'foogallery-migrate' ) . '</h2>';
-		echo '<p>' . esc_html__( 'Choose where migration progress and history are stored.', 'foogallery-migrate' ) . '</p>';
+		echo '<section id="migration-storage" aria-labelledby="migration-storage-heading"><table class="form-table" role="presentation"><tbody><tr><th scope="row" id="migration-storage-heading">' . esc_html__( 'Migration Storage', 'foogallery-migrate' ) . '</th><td>';
+		echo '<p class="description">' . esc_html__( 'Choose where migration progress and history are stored.', 'foogallery-migrate' ) . '</p>';
 		if ( null !== $change ) {
 			echo '<fieldset><legend class="screen-reader-text">' . esc_html__( 'Storage mode', 'foogallery-migrate' ) . '</legend>';
 			foreach ( array(
@@ -204,9 +235,8 @@ class StorageAdmin {
 			echo '<p class="description">' . esc_html__( 'Migration data:', 'foogallery-migrate' ) . ' ' . esc_html( self::format_bytes( $s['option_bytes'] ) ) . '</p>';
 		}
 		echo '<p class="description">' . esc_html__( 'Changing storage does not change your galleries or media.', 'foogallery-migrate' ) . '</p>';
-		if ( ! is_multisite() && self::recommendation_eligible( $s ) ) {
-			echo '<p>' . esc_html__( 'For this migration size, we recommend database tables.', 'foogallery-migrate' ) . '</p>';
-		}
+		$recommendation = self::recommendation_message( $s );
+		if ( '' !== $recommendation ) { echo '<p>' . esc_html( $recommendation ) . '</p>'; }
 		if ( is_multisite() ) {
 			echo '<p>' . esc_html__( 'Table storage is not available on multisite. Continue using WordPress options.', 'foogallery-migrate' ) . '</p>';
 		} elseif ( ! empty( $pending ) ) {
@@ -228,6 +258,7 @@ class StorageAdmin {
 		if ( '' !== $s['problem'] ) { echo '<p>' . esc_html( $s['problem'] ) . '</p>'; }
 		if ( ! empty( $s['retained'] ) ) { echo '<p>' . esc_html__( 'An inactive table copy is retained. Switching to tables replaces it with current migration data.', 'foogallery-migrate' ) . '</p>'; }
 		echo '<p>' . esc_html__( 'Switching checks available memory, data size and table ownership automatically. Very large individual galleries and full source discovery can still use significant memory. Before downgrading the plugin, switch back to options; contact support if this cannot complete.', 'foogallery-migrate' ) . '</p>';
+		echo '<p>' . esc_html__( 'Source counts are advisory estimates, not the selected migration queue. Image counts are unavailable for serialized image lists and unscanned WordPress galleries; no source data is loaded just to calculate a recommendation.', 'foogallery-migrate' ) . '</p>';
 		echo '<p id="foogm-storage-error-detail"></p></details>';
 		$cleanup = array();
 		foreach ( $actions as $a ) { if ( in_array( $a['operation'], array( 'clear', 'remove_all', 'discard' ), true ) ) { $cleanup[] = $a; } }
@@ -237,7 +268,7 @@ class StorageAdmin {
 			foreach ( $cleanup as $a ) { self::render_action( $a, $s, $blog ); }
 			echo '</details>';
 		}
-		echo '</section>';
+		echo '</td></tr></tbody></table></section>';
 		?>
 		<script>
 		(function () {
