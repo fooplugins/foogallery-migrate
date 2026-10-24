@@ -1915,7 +1915,7 @@ class LegacyTableRepository {
 		$head = $this->head( $state_key ); $root = $this->collection( $head );
 		if ( ! isset( $root['wrapper'] ) || ! in_array( $head['state_kind'], array( 'map', 'list' ), true ) ) { $this->fail( 'Indexed migratable collection required.' ); }
 		$rows = $this->read( $this->db->prepare( 'SELECT COUNT(*) AS total, COALESCE(SUM(is_selected),0) AS queued, '
-			. 'COALESCE(SUM(CASE WHEN is_selected = 1 THEN is_migrated ELSE 0 END),0) AS completed, '
+			. "COALESCE(SUM(CASE WHEN is_selected = 1 AND (is_migrated = 1 OR migration_status = 'nothing') THEN 1 ELSE 0 END),0) AS completed, "
 			. "COALESCE(SUM(CASE WHEN is_selected = 1 AND migration_status = 'error' THEN 1 ELSE 0 END),0) AS errors "
 			. 'FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL',
 			array( $this->blog, $head['id'], $head['active_generation'] ) ) );

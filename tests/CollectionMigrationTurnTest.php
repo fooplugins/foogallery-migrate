@@ -24,6 +24,17 @@ class CollectionMigrationTurnTest extends TestCase {
 		$this->assertSame( array( 'select', 'begin', 'flush', 'checkpoint' ), $events );
 		$this->assertSame( array( 'queued' => 0, 'completed' => 0, 'progress' => 0 ), $repository->summary );
 	}
+	public function test_empty_table_root_finishes_without_becoming_a_migrated_mapping(): void {
+		$events = array(); $object = new EmptyTurnObject( $events ); $object->part_of_migration = true;
+		$repository = new TurnCollection( $events, $object, array( 'queued' => 1, 'completed' => 0, 'errors' => 0 ) );
+		$this->assertTrue( ( new TurnMigrator( new TurnEngine( $events, $repository ), 'galleries' ) )->migrate() );
+		$this->assertSame( array( 'queued' => 1, 'completed' => 1, 'progress' => 100 ), $repository->summary );
+		$this->assertFalse( $object->migrated );
+		$this->assertSame( 'nothing', $object->migration_status );
+		$repository = new TurnCollection( $events, null, array( 'queued' => 1, 'completed' => 1, 'errors' => 0 ) );
+		$this->assertTrue( ( new TurnMigrator( new TurnEngine( $events, $repository ), 'galleries' ) )->migrate() );
+		$this->assertSame( 100, $repository->summary['progress'] );
+	}
 	public function test_failed_history_flush_never_publishes_collection_checkpoint(): void {
 		$events = array(); $object = new TurnObject( $events ); $object->part_of_migration = true;
 		$repository = new TurnCollection( $events, $object, array( 'queued' => 1, 'completed' => 0, 'errors' => 0 ) );
@@ -99,6 +110,9 @@ class TurnEngine {
 	public function table_collection_repository() { return $this->repository; }
 	public function begin_migrated_object_batch() { $this->events[] = 'begin'; }
 	public function flush_migrated_object_batch() { $this->events[] = 'flush'; return $this->flush_result; }
+}
+class EmptyTurnObject extends TurnObject {
+	public function migrate() { $this->migration_status = 'nothing'; }
 }
 class TurnCollection {
 	public $summary = null;

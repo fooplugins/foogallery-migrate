@@ -27,6 +27,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
 		 */
 		public function __construct() {
             add_action( 'admin_notices', array($this, 'foogallery_check') );
+            add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_progress_dialog' ) );
             add_action( 'admin_menu', array( 'FooPlugins\\FooGalleryMigrate\\StorageAdmin', 'register' ) );
 
             add_action( 'foogallery_admin_menu_after', array( $this, 'add_menu' ) );
@@ -111,6 +112,31 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
         function render_view() {
             $content_migration_result = $this->consume_content_migration_result();
             require_once 'views/view-migrate.php';
+        }
+
+        /** Load WordPress's shared dialog only on the migration screen. */
+        public function enqueue_progress_dialog() {
+            if ( ! isset( $_GET['page'] ) || ! is_string( $_GET['page'] ) || 'foogallery-migrate' !== $_GET['page'] ) { return; }
+            wp_enqueue_style( 'wp-components' );
+            wp_enqueue_style( 'foogallery-migrate-progress', FOOGM_URL . 'includes/ui/migration-progress.css', array( 'wp-components' ), FOOGM_VERSION );
+            wp_enqueue_script( 'foogallery-migrate-progress', FOOGM_URL . 'includes/ui/migration-progress.js', array( 'jquery', 'wp-components', 'wp-element', 'wp-i18n' ), FOOGM_VERSION, true );
+            // Keep shared UI strings in the plugin's existing PHP/POT pipeline.
+            wp_localize_script( 'foogallery-migrate-progress', 'foogalleryMigrateProgressLabels', array(
+                'Preparing migration…' => __( 'Preparing migration…', 'foogallery-migrate' ),
+                'Stopping after the current batch…' => __( 'Stopping after the current batch…', 'foogallery-migrate' ),
+                'Migration progress' => __( 'Migration progress', 'foogallery-migrate' ),
+                'Keep this tab open while the migration runs.' => __( 'Keep this tab open while the migration runs.', 'foogallery-migrate' ),
+                'Review the results in the table.' => __( 'Review the results in the table.', 'foogallery-migrate' ),
+                'Stopping…' => __( 'Stopping…', 'foogallery-migrate' ),
+                'Stop migration' => __( 'Stop migration', 'foogallery-migrate' ),
+                'Done' => __( 'Done', 'foogallery-migrate' ),
+                'Migration finished.' => __( 'Migration finished.', 'foogallery-migrate' ),
+                'Migration paused. Review the error and try again.' => __( 'Migration paused. Review the error and try again.', 'foogallery-migrate' ),
+                'Migration stopped. Completed work is kept.' => __( 'Migration stopped. Completed work is kept.', 'foogallery-migrate' ),
+                'Processing selected items…' => __( 'Processing selected items…', 'foogallery-migrate' ),
+                // translators: 1: finished item count, 2: selected item count.
+                '%1$s of %2$s finished' => __( '%1$s of %2$s finished', 'foogallery-migrate' ),
+            ) );
         }
 
         /**

@@ -40,6 +40,12 @@ class CollectionMigrationSelectorTest extends TestCase {
 		$this->assertNull( $context['root'] );
 		$this->assertSame( 0, $db->payload_reads );
 	}
+	public function test_finished_aggregate_includes_empty_selected_roots_without_loading_their_payloads(): void {
+		$db = new TurnSelectorConnection( 'galleries', '09', 'nothing', 18 ); $db->none = true;
+		$this->repository( $db )->migration_turn_context( 'galleries' );
+		$this->assertStringContainsString( "is_selected = 1 AND (is_migrated = 1 OR migration_status = 'nothing') THEN 1", $db->aggregate_sql );
+		$this->assertSame( 0, $db->payload_reads );
+	}
 	public function test_changed_head_or_corrupt_projection_refuses_without_writes(): void {
 		foreach ( array( 'stale', 'projection' ) as $mode ) {
 			$db = new TurnSelectorConnection( 'galleries', '09', 'queued', 18 ); $db->mode = $mode;
@@ -253,6 +259,7 @@ class TurnSelectorConnection extends LegacyTransactionConnection {
 	public $payload_reads = 0;
 	public $writes = 0;
 	public $selector_sql = '';
+	public $aggregate_sql = '';
 	public $identity_sql = array();
 	public $identity_rows = 0;
 	public $identity_pages = array();
@@ -289,6 +296,7 @@ class TurnSelectorConnection extends LegacyTransactionConnection {
 	public function get_results( $sql, $format ) {
 		if ( false !== strpos( $sql, 'SELECT root_payload FROM' ) ) { return array( array( 'root_payload' => $this->root_payload ) ); }
 		if ( false !== strpos( $sql, 'SELECT COUNT(*) AS total, COALESCE(SUM(is_selected)' ) ) {
+			$this->aggregate_sql = $sql;
 			return array( array( 'total' => '121', 'queued' => '3', 'completed' => '1', 'errors' => '1' ) );
 		}
 		if ( false !== strpos( $sql, 'SELECT COUNT(*) AS total FROM' ) ) { return array( array( 'total' => '121' ) ); }

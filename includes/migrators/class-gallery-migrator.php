@@ -305,6 +305,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                 echo '<input type="hidden" name="foogallery_migrate_paged" value="' . esc_attr( $page ) . '" />';
                 echo '<input type="hidden" name="foogallery_migrate_url" value="' . esc_url( $url ) . '" />';
                 echo '<input type="hidden" class="migrate_progress" value="' . esc_attr( $overall_progress ) . '" />';
+                echo '<input type="hidden" class="foogm-migration-summary" data-queued="' . esc_attr( false === $migration_state ? 0 : $migration_state['queued'] ) . '" data-completed="' . esc_attr( false === $migration_state ? 0 : $migration_state['completed'] ) . '" />';
                 echo '<input type="hidden" name="foogallery_migrate_retry_gallery_id" value="" />';
                 echo '<input type="hidden" name="foogallery_migrate_check_gallery_id" value="" />';
 
@@ -332,18 +333,6 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
             if ( $show_refresh ) { ?>
                 <button name="foogallery_migrate_action" value="foogallery_refresh_gallery"
                         class="button refresh_gallery"><?php esc_html_e( 'Refresh Galleries', 'foogallery-migrate' ); ?></button>
-            <?php }
-            ?><div id="foogallery_migrate_gallery_spinner" style="width:20px">
-                <span class="spinner"></span>
-            </div>
-            <?php if ( $migrating ) { ?>
-                <div class="foogallery-migrate-progressbar">
-                    <span style="width:<?php echo esc_attr( $overall_progress ); ?>%"></span>
-                </div>
-                <?php echo esc_html( intval( $overall_progress ) ); ?>%
-                <div style="width:20px; display: inline-block;">
-                    <span class="spinner shown"></span>
-                </div>
             <?php }
             return $context;
         }

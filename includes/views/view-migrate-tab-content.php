@@ -37,13 +37,14 @@ if ( ! defined( 'ABSPATH' ) ) {
         var $form = $('#foogallery_migrate_content_form');
         var scanInProgress = false;
         var statusRefreshInProgress = false;
+        var dialog = window.foogalleryMigrateProgress;
+        var dialogTitle = <?php echo wp_json_encode( __( 'Blocks / Shortcodes migration', 'foogallery-migrate' ) ); ?>;
+        var stoppedMessage = <?php echo wp_json_encode( __( 'Migration stopped. Completed work is kept.', 'foogallery-migrate' ) ); ?>;
 
         function setBusy(isBusy) {
             if (isBusy) {
                 $form.find('.button').hide();
-                $('#foogallery_migrate_content_spinner .spinner').addClass('is-active');
             } else {
-                $('#foogallery_migrate_content_spinner .spinner').removeClass('is-active');
                 $form.find('.button').show();
             }
         }
@@ -58,11 +59,14 @@ if ( ! defined( 'ABSPATH' ) ) {
                 data: data + "&action=" + action,
                 success: function(data) {
                     if (window.foogalleryMigrateHandleAjaxResponse(data, contentErrorMessage, action)) {
+                        dialog.fail();
                         return;
                     }
                     success_callback(data);
+                    dialog.finish();
                 },
                 error: function(xhr, ajaxOptions, thrownError) {
+                    dialog.fail();
                     window.foogalleryMigrateHandleAjaxError(xhr, ajaxOptions, thrownError, contentErrorMessage, action);
                 },
                 complete: function() {
@@ -75,10 +79,14 @@ if ( ! defined( 'ABSPATH' ) ) {
             scanInProgress = false;
             setBusy(false);
             $form.find('.refresh_content').attr('data-reset', reset ? '1' : '0').text(reset ? retryScanMessage : resumeScanMessage);
+            dialog.fail(message || contentErrorMessage);
             window.alert(message || contentErrorMessage);
         }
 
         function scanContentBatch(reset) {
+            if (dialog.stopRequested()) {
+                scanInProgress = false; setBusy(false); dialog.finish(stoppedMessage, true); return;
+            }
             var data = $form.serialize();
             scanInProgress = true;
             setBusy(true);
@@ -97,6 +105,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
                     var progress = response.data.progress;
                     $('#foogallery_migrate_content_progress').text(contentProgressMessage.replace('%d', progress.scanned));
+                    dialog.update(progress.complete ? 100 : null, contentProgressMessage.replace('%d', progress.scanned));
                     $form.find('.refresh_content').attr('data-reset', '0').text(resumeScanMessage);
 
                     if (progress.complete) {
@@ -105,6 +114,7 @@ if ( ! defined( 'ABSPATH' ) ) {
                             $form.html(response.data.html);
                         }
                         setBusy(false);
+                        dialog.finish();
                         return;
                     }
 
@@ -128,10 +138,14 @@ if ( ! defined( 'ABSPATH' ) ) {
             statusRefreshInProgress = false;
             setBusy(false);
             $form.find('.refresh_content_status').attr('data-reset', reset ? '1' : '0').text(reset ? refreshStatusMessage : resumeStatusMessage);
+            dialog.fail(message || statusErrorMessage);
             window.alert(message || statusErrorMessage);
         }
 
         function refreshStatusBatch(reset) {
+            if (dialog.stopRequested()) {
+                statusRefreshInProgress = false; setBusy(false); dialog.finish(stoppedMessage, true); return;
+            }
             var data = $form.serialize();
             statusRefreshInProgress = true;
             setBusy(true);
@@ -149,6 +163,8 @@ if ( ! defined( 'ABSPATH' ) ) {
                     }
 
                     var progress = response.data.progress;
+                    dialog.update(progress.total ? progress.cursor / progress.total * 100 : null,
+                        statusProgressMessage.replace('%1$d', progress.cursor).replace('%2$d', progress.total));
                     $('#foogallery_migrate_content_progress').text(
                         statusProgressMessage.replace('%1$d', progress.cursor).replace('%2$d', progress.total)
                     );
@@ -160,6 +176,7 @@ if ( ! defined( 'ABSPATH' ) ) {
                             $form.html(response.data.html);
                         }
                         setBusy(false);
+                        dialog.finish();
                         return;
                     }
 
@@ -192,6 +209,7 @@ if ( ! defined( 'ABSPATH' ) ) {
                 return false;
             }
 
+            dialog.begin(dialogTitle, null);
             foogallery_content_migration_ajax( 'foogallery_content_replace', function (data) {
                 $form.html(data);
             });
@@ -199,11 +217,15 @@ if ( ! defined( 'ABSPATH' ) ) {
 
         $form.on('click', '.refresh_content', function (e) {
             e.preventDefault();
+            if (scanInProgress || statusRefreshInProgress) { return; }
+            dialog.begin(dialogTitle, function () {});
             scanContentBatch($(this).attr('data-reset') === '1');
         });
 
         $form.on('click', '.refresh_content_status', function (e) {
             e.preventDefault();
+            if (scanInProgress || statusRefreshInProgress) { return; }
+            dialog.begin(dialogTitle, function () {});
             refreshStatusBatch($(this).attr('data-reset') === '1');
         });
 

@@ -147,14 +147,17 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Plugin' ) ) {
                 $gallery->title = $data['title'];
                 $gallery->foogallery_title = $data['title'];
                 $gallery->data = $data['data'];
-                $gallery->children = $data['children'];
-                if ( array_key_exists( 'children_count', $data ) ) {
-                    $gallery->children_count = absint( $data['children_count'] );
-                } else {
-                    $gallery->children_count = is_array( $data['children'] ) ? count( $data['children'] ) : 0;
-                }
                 $gallery->settings = $data['settings'];
-            }   
+            }
+
+            // History deliberately omits gallery child caches. Keep its progress
+            // and destination mapping, but reload children from the source data.
+            $gallery->children = $data['children'];
+            if ( array_key_exists( 'children_count', $data ) ) {
+                $gallery->children_count = absint( $data['children_count'] );
+            } else {
+                $gallery->children_count = is_array( $data['children'] ) ? count( $data['children'] ) : 0;
+            }
 
             return $gallery;         
         }

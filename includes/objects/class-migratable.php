@@ -128,6 +128,11 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
             return 1;
         }
 
+        /** An empty source finishes this run without a migrated destination. */
+        function is_migration_finished() {
+            return $this->migrated || ( isset( $this->migration_status ) && self::PROGRESS_NOTHING === $this->migration_status );
+        }
+
         /**
          * Migrates the next child. Returns true if successful.
          *
@@ -142,10 +147,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
                 $children_per_turn = max( 1, absint( $this->get_children_per_turn() ) );
 
                 foreach ( $this->get_children() as $child ) {
-                    if ( !$child->migrated ) {
+                    if ( !$child->is_migration_finished() ) {
                         $child->migrate();
                         foogallery_migrate_migrator_instance()->assert_storage_writer();
-                        if ( $child->migrated ) {
+                        if ( $child->is_migration_finished() ) {
                             $this->migrated_child_count++;
                         }
                         $children_attempted++;
@@ -194,7 +199,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
                 return;
             }
 
-            if ( isset( $this->children_count ) && absint( $this->children_count ) < 1 ) {
+            // A previous empty result may have come from missing child caches.
+            // Recheck the source when retrying it, without rediscovering on views.
+            if ( isset( $this->children_count ) && absint( $this->children_count ) < 1 && self::PROGRESS_NOTHING !== $this->migration_status ) {
                 return;
             }
 
@@ -239,6 +246,15 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
 				if ( $this->has_children() ) {
 					$this->migrated_child_count = $migrated_object->migrated_child_count;
 				}
+                // A reused image may belong to a different gallery's history.
+                // Persist its current parent so the next turn can restore it.
+                if ( ! $this->has_children() && ! empty( $this->migration_parent_key ) ) {
+                    if ( $migrated_object->has_error() ) {
+                        $this->error = $migrated_object->get_error();
+                        $this->migration_status = self::PROGRESS_ERROR;
+                    }
+                    foogallery_migrate_migrator_instance()->add_migrated_object( $this );
+                }
             }
 
             if ( !$this->migrated ) {
@@ -248,6 +264,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
 
                 if ( $this->has_children() && $this->get_children_count() === 0 ) {
                     $this->migration_status = self::PROGRESS_NOTHING;
+                    $this->progress = 100;
                 } else {
                     $this->migration_status = self::PROGRESS_STARTED;
 
@@ -290,7 +307,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
          * @return int
          */
         function calculate_progress() {
-            if ( $this->migrated || $this->get_children_count() === 0 ) {
+            if ( $this->is_migration_finished() || $this->get_children_count() === 0 ) {
                 // Nothing to migrate.
                 $this->progress = 100;
             } else {
@@ -298,7 +315,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
                 if ( $this->has_children() && $this->get_children_count() > 0 ) {
                     $this->migrated_child_count = 0;
                     foreach ( $this->get_children() as $child ) {
-                        if ( $child->migrated ) {
+                        if ( $child->is_migration_finished() ) {
                             $this->migrated_child_count++;
                         }
                     }

@@ -13,6 +13,9 @@ $show_image_tag_sync = $has_migratable_image_tags || $image_tag_sync_status['tot
         var imageTagSyncCompleteMessage = <?php echo wp_json_encode( __( 'Image tag sync complete.', 'foogallery-migrate' ) ); ?>;
         var imageTagSyncRunningMessage = <?php echo wp_json_encode( __( 'Syncing image tags...', 'foogallery-migrate' ) ); ?>;
         var $imageTagSync = $('#foogallery_migrate_image_tags');
+        var dialog = window.foogalleryMigrateProgress;
+        var tagSyncReset = <?php echo $image_tag_sync_status['complete'] ? 'true' : 'false'; ?>;
+        var syncInProgress = false;
 
         function updateImageTagSyncStatus(status) {
             if (!$imageTagSync.length || !status) {
@@ -27,6 +30,8 @@ $show_image_tag_sync = $has_migratable_image_tags || $image_tag_sync_status['tot
             var errors = parseInt(status.error_count, 10) || 0;
             var progress = parseInt(status.progress, 10);
             progress = isNaN(progress) ? 0 : Math.max(0, Math.min(100, progress));
+            dialog.update(progress, status.complete ? imageTagSyncCompleteMessage : imageTagSyncRunningMessage,
+                <?php echo wp_json_encode( __( '%1$s of %2$s images processed', 'foogallery-migrate' ) ); ?>.replace('%1$s', processed).replace('%2$s', total));
 
             $imageTagSync.find('[data-role="tag-sync-message"]').text(status.complete ? imageTagSyncCompleteMessage : imageTagSyncRunningMessage);
             $imageTagSync.find('[data-role="tag-sync-total"]').text(total);
@@ -35,9 +40,11 @@ $show_image_tag_sync = $has_migratable_image_tags || $image_tag_sync_status['tot
             $imageTagSync.find('[data-role="tag-sync-skipped"]').text(skipped);
             $imageTagSync.find('[data-role="tag-sync-unmatched"]').text(unmatched);
             $imageTagSync.find('[data-role="tag-sync-errors"]').text(errors);
-            $imageTagSync.find('[data-role="tag-sync-progress"]').css('width', progress + '%');
 
             if (status.complete) {
+                syncInProgress = false;
+                tagSyncReset = true;
+                dialog.finish(imageTagSyncCompleteMessage);
                 $imageTagSync.find('.spinner').removeClass('is-active');
                 $imageTagSync.find('.foogallery-migrate-image-tags-start').prop('disabled', false);
             }
@@ -61,16 +68,32 @@ $show_image_tag_sync = $has_migratable_image_tags || $image_tag_sync_status['tot
                 },
                 success: function(response) {
                     if (window.foogalleryMigrateHandleAjaxResponse(response, imageTagSyncErrorMessage, 'foogallery_migrate_image_tags')) {
+                        syncInProgress = false;
+                        dialog.fail();
+                        $imageTagSync.find('.foogallery-migrate-image-tags-start').prop('disabled', false);
                         return;
                     }
 
+                    if (!response || response.success !== true || !response.data || typeof response.data.complete !== 'boolean') {
+                        syncInProgress = false; dialog.fail();
+                        $imageTagSync.find('.foogallery-migrate-image-tags-start').prop('disabled', false);
+                        return;
+                    }
                     updateImageTagSyncStatus(response.data);
 
                     if (response.data && !response.data.complete) {
-                        syncImageTags(false);
+                        tagSyncReset = false;
+                        if (dialog.stopRequested()) {
+                            syncInProgress = false;
+                            dialog.finish(<?php echo wp_json_encode( __( 'Migration stopped. Completed work is kept.', 'foogallery-migrate' ) ); ?>, true);
+                            $imageTagSync.find('.spinner').removeClass('is-active');
+                            $imageTagSync.find('.foogallery-migrate-image-tags-start').prop('disabled', false).text(<?php echo wp_json_encode( __( 'Resume Image Tags', 'foogallery-migrate' ) ); ?>);
+                        } else { syncImageTags(false); }
                     }
                 },
                 error: function(xhr, ajaxOptions, thrownError) {
+                    syncInProgress = false; dialog.fail();
+                    $imageTagSync.find('.foogallery-migrate-image-tags-start').prop('disabled', false);
                     window.foogalleryMigrateHandleAjaxError(xhr, ajaxOptions, thrownError, imageTagSyncErrorMessage, 'foogallery_migrate_image_tags');
                 }
             });
@@ -78,7 +101,10 @@ $show_image_tag_sync = $has_migratable_image_tags || $image_tag_sync_status['tot
 
         $imageTagSync.on('click', '.foogallery-migrate-image-tags-start', function (e) {
             e.preventDefault();
-            syncImageTags(true);
+            if (syncInProgress) { return; }
+            syncInProgress = true;
+            dialog.begin(<?php echo wp_json_encode( __( 'Image Tags migration', 'foogallery-migrate' ) ); ?>, function () {});
+            syncImageTags(tagSyncReset);
         });
     });
 </script>
@@ -103,9 +129,8 @@ $show_image_tag_sync = $has_migratable_image_tags || $image_tag_sync_status['tot
         <?php } else { ?>
             <p>
                 <button type="button" class="button button-primary foogallery-migrate-image-tags-start">
-                    <?php esc_html_e( 'Sync Image Tags', 'foogallery-migrate' ); ?>
+                    <?php echo $image_tag_sync_status['complete'] ? esc_html__( 'Sync Image Tags', 'foogallery-migrate' ) : esc_html__( 'Resume Image Tags', 'foogallery-migrate' ); ?>
                 </button>
-                <span class="spinner"></span>
             </p>
             <p data-role="tag-sync-message">
                 <?php echo $image_tag_sync_status['complete'] ? esc_html__( 'Ready to sync image tags.', 'foogallery-migrate' ) : esc_html__( 'Image tag sync in progress.', 'foogallery-migrate' ); ?>
@@ -123,9 +148,6 @@ $show_image_tag_sync = $has_migratable_image_tags || $image_tag_sync_status['tot
                 );
                 ?>
             </p>
-            <div class="foogallery-migrate-progressbar" aria-hidden="true">
-                <span data-role="tag-sync-progress" style="width: <?php echo esc_attr( min( 100, absint( $image_tag_sync_status['progress'] ) ) ); ?>%;"></span>
-            </div>
         <?php } ?>
     <?php } ?>
 </div>

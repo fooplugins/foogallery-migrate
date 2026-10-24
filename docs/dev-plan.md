@@ -2,7 +2,57 @@
 
 **Updated:** 2026-10-24
 
-## Current amendment — matching Troubleshooting counts
+## Current amendment — gallery retries and shared progress dialog
+
+Brad approved fixing the two individual-gallery failures, adding regressions,
+committing/pushing to PR #15 and deploying only to the prepared test site. He also
+requested one modern progress dialog shared by every migration tab.
+
+- Reload gallery children/counts from current source discovery even when history
+  supplies the destination/progress. Retry also rechecks previously saved false
+  empty results, without requiring a reset or changing ordinary read-only views.
+- Treat an empty source as finished for progress (including nested albums and
+  table aggregates), but do not create output or claim a successful migrated
+  mapping. A later source refresh can still discover newly added images.
+- Rebind reused image history to the current parent so galleries sharing images
+  can resume across batches without repeating the first image or importing media
+  twice. Preserve saved image errors during that hand-off.
+- Use one WordPress-components Modal for Galleries, Albums, Blocks / Shortcodes
+  (scan, status refresh and replacement) and Image Tags. Keep focus contained,
+  restore it after table replacement, support narrow screens/reduced motion,
+  and expose progress/status accessibly. No separate UI framework or v2 engine.
+- Stop waits for the in-flight batch: gallery/album cancellation is sent only
+  after it returns; scans/status/tag sync stop polling and retain saved work.
+  Tag sync resumes its existing queue. The existing synchronous content-replace
+  request cannot be cancelled midway, so it has no misleading Stop action.
+- Regression commands: `php -d memory_limit=256M vendor/bin/phpunit`,
+  `node tests/migration-progress-regression.js`, `node tests/ajax-js-regression.js`
+  and `node tests/storage-admin-workflow.js`. The new JavaScript checks execute
+  the production controller and all tab scripts with DOM/HTTP doubles; these are
+  not native browser or SQL proof.
+- Focused PHP checks: **83 tests / 633 assertions**. Separate owned WordPress
+  7.1.3 native acceptance passes Envira/Modula retry/resume, reused attachment
+  order and empty-gallery completion in options and table mode, including a
+  fresh-request table aggregate at effective 256 MiB (peak at most 68,485,120 B).
+  Native browser checks cover the shared dialog on all four tabs, real gallery
+  retry and content-scan completion, focus containment/return, stopped state and
+  mobile width. Tag/album dialog rendering is checked without claiming a new
+  real tag or album migration acceptance. Agent CI has no Actions workflows here.
+- Final complete suite: **1,620 tests / 311,813 assertions**, no failures/errors/
+  skips, explicit 256 MiB (2m49.172s; 133.61 MiB peak). All 11 changed production
+  PHP files pass host lint and the PHP 5.4 parser. Content scan/AJAX, 148 cleanup
+  double checks, 64 rendered storage-workflow checks and whitespace pass.
+- Final ZIP: **94 product files**, no development files; CRC/path/symlink/source
+  parity passes. SHA-256:
+  `2e1cd03576ffb9a28fef3f99b14bd3bbb87e6f66f81921e33a2aaac24b3b3412`.
+
+Test-site hand-off: use **Migrate** on a previously false-empty row; optionally
+Refresh Galleries first to refresh displayed source counts. No history reset is
+needed. Preserve the site's storage mode, saved counts, source data and migration
+records during code deployment. Do not run migrations on Brad's test site as QA.
+No merge or public release; v2 remains blocked until Brad tests/merges PR #15.
+
+## Previous amendment — matching Troubleshooting counts
 
 Brad requested Technical details to use the same valid saved gallery/image counts
 as the admin notice, and to remove the saved-date prefix from that notice.

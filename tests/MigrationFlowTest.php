@@ -150,6 +150,168 @@ class MigrationFlowTest extends TestCase {
 		$this->assertNull( StorageDiscoverySummary::read(), 'Re-detection retires the old source snapshot.' );
 	}
 
+	public function test_source_images_are_reloaded_when_unfinished_history_has_no_child_cache(): void {
+		$plugin = new FactorySourcePlugin();
+		$plugin->source_images = array( $this->create_image( 'https://example.test/reloaded.jpg' ) );
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->run_detection();
+		$migrator = $engine->get_gallery_migrator();
+		$gallery = $migrator->get_objects_to_migrate( true )[0];
+		$uid = $gallery->unique_identifier();
+		// Retry saves unfinished history without child lists before running a turn.
+		$this->assertTrue( $engine->add_migrated_object( $gallery ) );
+		$history = $engine->get_migrated_object( $uid );
+		$this->assertFalse( $history->migrated );
+		$this->assertSame( array(), $history->get_children() );
+		$this->assertCount( 1, $plugin->load_object_children( $gallery ) );
+		$this->assertTrue( $migrator->queue_objects_for_migration( array( $uid => array( 'title' => 'Reloaded' ) ) ) );
+		$this->assertTrue( $migrator->migrate() );
+		$result = $migrator->get_objects_to_migrate()[0];
+		$this->assertSame( Migratable::PROGRESS_COMPLETED, $result->migration_status );
+		$this->assertSame( 1, $result->migrated_child_count );
+		$this->assertGreaterThan( 0, $result->migrated_id );
+		$this->assertSame( array( 'queued' => 1, 'completed' => 1, 'progress' => 100 ), $migrator->get_state() );
+	}
+
+	public function test_empty_gallery_finishes_progress_without_creating_output_or_success_history(): void {
+		$plugin = new FactorySourcePlugin();
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->run_detection();
+		$migrator = $engine->get_gallery_migrator();
+		$uid = $migrator->get_objects_to_migrate( true )[0]->unique_identifier();
+		$migrator->queue_objects_for_migration( array( $uid => array( 'title' => 'Empty' ) ) );
+		$this->assertTrue( $migrator->migrate() );
+		$empty = $migrator->get_objects_to_migrate()[0];
+		$this->assertSame( Migratable::PROGRESS_NOTHING, $empty->migration_status );
+		$this->assertSame( 'No images to migrate!', $empty->friendly_migration_message() );
+		$this->assertSame( 100, $empty->progress );
+		$this->assertFalse( $empty->migrated );
+		$this->assertSame( 0, $empty->migrated_id );
+		$this->assertSame( array( 'queued' => 1, 'completed' => 1, 'progress' => 100 ), $migrator->get_state() );
+		$this->assertFalse( $engine->get_migrated_object( $uid ) );
+		$this->assertSame( array(), $GLOBALS['foogallery_migrate_test_posts'] );
+		$this->assertTrue( $migrator->migrate() );
+		$this->assertSame( 100, $migrator->get_state()['progress'] );
+		// Empty is terminal for this run, not a permanent migrated mapping.
+		$plugin->source_images = array( $this->create_image( 'https://example.test/added-later.jpg' ) );
+		$migrator->get_objects_to_migrate( true );
+		$migrator->queue_objects_for_migration( array( $uid => array( 'title' => 'Now populated' ) ) );
+		$this->assertTrue( $migrator->migrate() );
+		$this->assertSame( Migratable::PROGRESS_COMPLETED, $migrator->get_objects_to_migrate()[0]->migration_status );
+	}
+
+	public function test_public_retry_reloads_images_instead_of_reusing_its_just_saved_empty_history(): void {
+		$plugin = new FactorySourcePlugin();
+		$plugin->source_images = array( $this->create_image( 'https://example.test/retry-source.jpg' ) );
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->run_detection();
+		$uid = $engine->get_gallery_migrator()->get_objects_to_migrate( true )[0]->unique_identifier();
+		$this->assertTrue( $engine->retry_gallery_migration( $uid ) );
+		$this->assertSame( Migratable::PROGRESS_COMPLETED, $engine->get_gallery_migrator()->get_objects_to_migrate()[0]->migration_status );
+		$this->assertSame( 100, $engine->get_gallery_migrator()->get_state()['progress'] );
+	}
+
+	public function test_retry_recovers_a_previously_saved_false_empty_result_without_a_reset(): void {
+		$plugin = new FactorySourcePlugin();
+		$plugin->source_images = array( $this->create_image( 'https://example.test/false-empty.jpg' ) );
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$engine = $GLOBALS['foogallery_migrate_engine_instance']; $engine->run_detection();
+		$migrator = $engine->get_gallery_migrator();
+		$gallery = $migrator->get_objects_to_migrate( true )[0];
+		$gallery->migration_status = Migratable::PROGRESS_NOTHING;
+		$gallery->children_count = 0; $gallery->children = array();
+		$engine->set_migrator_setting( 'galleries', array( $gallery ) );
+		$engine->add_migrated_object( $gallery );
+		$this->assertTrue( $engine->retry_gallery_migration( $gallery->unique_identifier() ) );
+		$this->assertSame( Migratable::PROGRESS_COMPLETED, $migrator->get_objects_to_migrate()[0]->migration_status );
+		$this->assertSame( 1, $migrator->get_objects_to_migrate()[0]->migrated_child_count );
+	}
+
+	public function test_two_galleries_sharing_images_resume_without_repeating_the_first_image(): void {
+		$plugin = new FactorySourcePlugin();
+		$plugin->source_images = array( $this->create_image( 'https://example.test/shared-one.jpg' ),
+			$this->create_image( 'https://example.test/shared-two.jpg' ) );
+		foreach ( $plugin->source_images as $index => $image ) {
+			$this->create_test_post( 9001 + $index, 'attachment', 'Shared attachment' );
+			$GLOBALS['foogallery_migrate_test_attachment_url_to_postid'][$image->source_url] = 9001 + $index;
+		}
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->save_settings( array( 'images_per_turn' => 1 ) ); $engine->run_detection();
+		$migrator = $engine->get_gallery_migrator();
+		foreach ( array( 704, 707 ) as $id ) {
+			$plugin->source_id = $id;
+			$uid = $migrator->get_objects_to_migrate( true )[0]->unique_identifier();
+			$this->assertTrue( $engine->retry_gallery_migration( $uid ) );
+			$this->assertTrue( $migrator->migrate() );
+			$result = $migrator->get_objects_to_migrate()[0];
+			$this->assertSame( Migratable::PROGRESS_COMPLETED, $result->migration_status );
+			$this->assertSame( 2, $result->migrated_child_count );
+			$this->assertSame( 100, $migrator->get_state()['progress'] );
+		}
+		$this->assertCount( 2, array_filter( $GLOBALS['foogallery_migrate_test_posts'], function ( $post ) {
+			return 'attachment' === $post->post_type;
+		} ), 'Shared media are reused, not imported again.' );
+	}
+
+	public function test_reloaded_source_children_keep_completed_mapping_and_deferred_counts(): void {
+		$plugin = new FactorySourcePlugin();
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$gallery = $this->create_gallery( $plugin, 704, 'Saved', array() );
+		$gallery->migrated = true; $gallery->migrated_id = 87;
+		$gallery->migration_status = Migratable::PROGRESS_COMPLETED;
+		$gallery->migrated_child_count = 12; $gallery->progress = 100;
+		$engine->add_migrated_object( $gallery );
+		$plugin->source_images = array( $this->create_image( 'https://example.test/current-source.jpg' ) );
+		$reloaded = $plugin->find_galleries()[0];
+		$this->assertCount( 1, $reloaded->get_children() );
+		$this->assertSame( 87, $reloaded->migrated_id );
+		$this->assertTrue( $reloaded->migrated );
+		$this->assertSame( 12, $reloaded->migrated_child_count );
+		$lazy = $plugin->get_gallery( array( 'ID' => 704, 'title' => 'Saved', 'children' => array(),
+			'children_count' => 10000, 'settings' => array(), 'data' => null ) );
+		$this->assertSame( array(), $lazy->get_children() );
+		$this->assertSame( 10000, $lazy->get_children_count() );
+		$this->assertSame( 87, $lazy->migrated_id );
+	}
+
+	public function test_reusing_failed_image_history_keeps_the_error_when_rebinding_its_parent(): void {
+		$store = new MigratedStore( false, new MigratorSettings() );
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'] = new MigratorEngine( $store );
+		$image = $this->create_image( 'https://example.test/shared-failed.jpg' );
+		$image->migrated = true; $image->migration_status = Migratable::PROGRESS_ERROR;
+		$image->error = new \WP_Error( 'missing', 'Missing source file.' );
+		$image->migration_parent_key = 'gallery_FakeSource_704';
+		$engine->add_migrated_object( $image );
+		$reused = $this->create_image( $image->source_url );
+		$reused->migration_parent_key = 'gallery_FakeSource_707';
+		$reused->migrate();
+		$saved = $engine->get_migrated_object( $image->unique_identifier() );
+		$this->assertSame( Migratable::PROGRESS_ERROR, $saved->migration_status );
+		$this->assertSame( 'Missing source file.', $saved->get_error_message() );
+		$this->assertCount( 1, $store->get_by_parent( 'gallery_FakeSource_707' ) );
+		$this->assertSame( array(), $store->get_by_parent( 'gallery_FakeSource_704' ) );
+	}
+
+	public function test_album_can_finish_with_an_empty_child_gallery(): void {
+		$plugin = new FakeSourcePlugin();
+		$gallery = $this->create_gallery( $plugin, 705, 'Empty child', array() );
+		$album = $this->create_album( $plugin, 706, 'Album with empty child', array( $gallery ) );
+		$plugin->galleries = array( $gallery ); $plugin->albums = array( $album );
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$engine = $GLOBALS['foogallery_migrate_engine_instance']; $engine->run_detection();
+		$migrator = $engine->get_album_migrator();
+		$uid = $migrator->get_objects_to_migrate( true )[0]->unique_identifier();
+		$migrator->queue_objects_for_migration( array( $uid => array( 'title' => 'Empty child album' ) ) );
+		$this->assertTrue( $migrator->migrate() );
+		$this->assertSame( Migratable::PROGRESS_COMPLETED, $migrator->get_objects_to_migrate()[0]->migration_status );
+		$this->assertSame( 100, $migrator->get_state()['progress'] );
+	}
+
 	public function test_failed_gallery_publication_does_not_save_successful_counts(): void {
 		$plugin = new FakeSourcePlugin();
 		$plugin->galleries = array( $this->create_gallery( $plugin, 702, 'Not published', array() ) );
@@ -1524,6 +1686,16 @@ class FakeSourcePlugin extends Plugin {
 
 class ThrowingDiscoverySourcePlugin extends FakeSourcePlugin {
 	public function find_galleries() { throw new \RuntimeException( 'Source discovery failed.' ); }
+}
+
+/** Like Envira/Modula, discovery rebuilds galleries through the shared factory. */
+class FactorySourcePlugin extends FakeSourcePlugin {
+	public $source_images = array();
+	public $source_id = 704;
+	public function find_galleries() {
+		return array( $this->get_gallery( array( 'ID' => $this->source_id, 'title' => 'Factory source', 'data' => null,
+			'children' => array_map( function ( $image ) { return clone $image; }, $this->source_images ), 'settings' => array() ) ) );
+	}
 }
 
 class FakeWpdb {
