@@ -121,7 +121,7 @@ class StorageAdminTest extends TestCase {
 		$this->assertStringNotContainsString( 'OCTET_LENGTH(option_value)', implode( ' ', $GLOBALS['wpdb']->queries ) );
 		$this->assertStringNotContainsString( 'COUNT(*)', implode( ' ', $GLOBALS['wpdb']->queries ) );
 		ob_start(); StorageAdmin::render_troubleshooting( $s ); $troubleshooting = ob_get_clean();
-		$this->assertStringContainsString( 'very large individual galleries and full source discovery', $troubleshooting );
+		$this->assertStringContainsString( 'very large galleries may still need more memory', $troubleshooting );
 		$s['calibrated'] = false;
 		ob_start(); StorageAdmin::render( $s ); $html = ob_get_clean();
 		$this->assertStringNotContainsString( 'we recommend database tables', $html );

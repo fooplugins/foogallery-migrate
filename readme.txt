@@ -100,6 +100,10 @@ Uninstall removes plugin-owned internal storage, including retained history and 
 
 = 1.16 =
 * Added WP Photo Album Plus migration for galleries, nested albums, locally stored images and metadata, plus supported numeric-album shortcodes and blocks; the source plugin can remain inactive, and migration form actions are now handled reliably.
+* Added optional database-table storage for larger single-site migrations, with verified storage switching, progress reset and removal of plugin-owned data and tables without deleting galleries or media.
+* Added simple Migration Storage controls alongside the other migration settings, with recommendations based on saved data size and detected gallery or image counts without loading source image lists.
+* Added a Troubleshooting tab with plain-language help, visible Reset & cleanup actions, technical details and a collapsible support summary. Interrupted storage changes remain recoverable, and destructive actions still require confirmation.
+* Renamed user-facing FooGallery Template settings to Layout settings.
 
 = 1.15 =
 * Added stale-status detection for Blocks / Shortcodes when the migrated gallery map changes after a content scan.

@@ -47,24 +47,38 @@ class StorageTroubleshootingTest extends TestCase {
 	public function test_cleanup_controls_keep_exact_nonce_fields_one_confirmation_and_native_rows(): void {
 		ob_start(); StorageAdmin::render_troubleshooting( $this->status() ); $html = ob_get_clean();
 		$dom = new \DOMDocument(); @$dom->loadHTML( $html ); $xpath = new \DOMXPath( $dom );
-		$this->assertSame( 2, $xpath->query( '//details[@id="foogm-storage-cleanup"]//tr' )->length );
+		$this->assertSame( 2, $xpath->query( '//section[@id="foogm-storage-cleanup"]//tr' )->length );
 		$this->assertSame( 2, $xpath->query( '//form[@data-confirm]' )->length );
 		foreach ( $xpath->query( '//form' ) as $form ) { $this->assertSame( 7, $xpath->query( './/input[@name]', $form )->length ); }
 		$this->assertSame( 0, $xpath->query( '//input[@type="checkbox"]' )->length );
 		$this->assertSame( 0, $xpath->query( '//input[@type="radio"]' )->length );
-		$this->assertSame( 0, $xpath->query( '//details[@id="foogm-storage-cleanup"][@open]' )->length );
+		$this->assertSame( 0, $xpath->query( '//details[@id="foogm-storage-cleanup"]' )->length );
 	}
-	public function test_recovery_is_visible_and_pending_cleanup_opens_only_the_matching_action(): void {
+	public function test_recovery_is_visible_and_pending_cleanup_keeps_only_the_matching_action(): void {
 		ob_start(); StorageAdmin::render_troubleshooting( $this->status( array( 'phase' => 'copying', 'target' => 'table', 'discardable' => true ) ) ); $html = ob_get_clean();
 		$this->assertStringContainsString( 'Continue storage change', $html );
 		$this->assertStringContainsString( 'name="confirmation" value="recover-storage"', $html );
 		$this->assertStringContainsString( 'name="confirmation" value="discard-copy"', $html );
 		$GLOBALS['wpdb']->pending = true;
 		ob_start(); StorageAdmin::render_troubleshooting( $this->status() ); $html = ob_get_clean();
-		$this->assertStringContainsString( 'id="foogm-storage-cleanup" open', $html );
+		$this->assertStringContainsString( '<section id="foogm-storage-cleanup"', $html );
 		$this->assertStringContainsString( 'Continue cleanup', $html );
 		$this->assertStringNotContainsString( 'name="operation" value="remove_all"', $html );
 		$this->assertSame( array(), $GLOBALS['wpdb']->writes );
+	}
+	public function test_simplified_troubleshooting_layout_and_copy_follow_the_requested_order(): void {
+		ob_start(); StorageAdmin::render_troubleshooting( $this->status() ); $html = ob_get_clean();
+		$dom = new \DOMDocument(); @$dom->loadHTML( $html ); $xpath = new \DOMXPath( $dom );
+		$this->assertSame( 'ul', $xpath->query( '/html/body/*[1]' )->item( 0 )->nodeName );
+		$this->assertSame( 3, $xpath->query( '/html/body/ul/li' )->length );
+		$this->assertSame( array( 'Reset & cleanup', 'Technical details' ), array_map( function ( $node ) { return $node->textContent; }, iterator_to_array( $xpath->query( '//h2|//h3' ) ) ) );
+		$this->assertStringNotContainsString( 'Storage is stable. No storage change is in progress.', $html );
+		$this->assertStringNotContainsString( 'Check storage, continue an interrupted change, or reset migration data.', $html );
+		$this->assertStringNotContainsString( 'Open migration settings', $html );
+		$this->assertStringContainsString( 'Galleries and media are kept. Migrating again after a reset or removal may create duplicates.', $html );
+		$this->assertLessThan( strpos( $html, 'id="foogm-storage-details"' ), strpos( $html, 'id="foogm-storage-cleanup"' ) );
+		$this->assertLessThan( strpos( $html, 'Information for support' ), strpos( $html, 'id="foogm-storage-details"' ) );
+		$this->assertSame( 1, $xpath->query( '//details[summary="Information for support"][not(@open)]' )->length );
 	}
 	public function test_permission_denial_precedes_diagnostics_sql(): void {
 		$GLOBALS['foogallery_migrate_test_capabilities']['manage_options'] = false;

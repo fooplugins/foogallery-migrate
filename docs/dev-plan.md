@@ -2,7 +2,38 @@
 
 **Updated:** 2026-10-24
 
-## Current amendment — dedicated Troubleshooting tab
+## Current amendment — simplified Troubleshooting layout
+
+Brad requested a lighter Troubleshooting page and authorized committing, pushing
+to PR #15 and deploying the validated package to the prepared test site.
+
+- Begin with three plain-language help bullets, without a heading. Remove the
+  repeated Troubleshooting introduction, healthy Storage status section and Open
+  migration settings link.
+- Show **Reset & cleanup** immediately below the bullets, always expanded, retaining
+  the galleries/media preservation and duplicate-migration description. Follow it
+  with **Technical details**, then collapsed **Information for support**.
+- Preserve conditional recovery/error messages, exact receiver fields, permissions,
+  confirmations and all backend checks. No engine, schema or storage-policy change.
+- Full maintained suite at 256 MiB: **1,601 tests / 311,667 assertions**, zero skips,
+  errors or failures (3m06.203s, 133.61 MiB reported peak). Focused UI/advice/single-site
+  checks: **38 tests / 369 assertions**; rendered JavaScript: **64 workflow checks**.
+- Owned WordPress 7.1.3 / PHP 8.4.6 browser fixture: **21 checks**, inspected desktop
+  and narrow-screen screenshots, keyboard access, requested section order, expanded
+  cleanup and collapsed support. Two cancelled confirmations issue **zero storage
+  operation POSTs**; migration option hashes are unchanged and JS errors are zero.
+  Private receipt: `ui-browser-troubleshooting-simple-report.json` in the retained
+  owned fixture. Product PHP passes PHP 5.4 syntax checks.
+- The changelog now covers the storage upgrade, recommendations, Troubleshooting
+  layout and Layout terminology. The rebuilt 91-file ZIP passes
+  CRC/path/symlink/development-file/source-parity checks; SHA-256
+  `f7963e59bb878c5a519e97d73b57fb5a221d406f131a247b4fc5f18ed12b3a24`.
+  Agent CI was attempted, but no Actions workflows exist; no CI pass is claimed.
+  Deployment must verify identical installed files and protected-data hashes, without
+  switching storage or running migrations. No merge or public release is authorized;
+  v2 implementation remains blocked until Brad tests and merges PR #15.
+
+## Previous amendment — dedicated Troubleshooting tab
 
 Brad requested moving Technical details and Reset & cleanup off Settings and into
 a new Troubleshooting tab, with a clearer layout and useful diagnostic information.

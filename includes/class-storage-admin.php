@@ -266,21 +266,41 @@ class StorageAdmin {
 		$pending = is_multisite() ? null : StorageCleanup::pending_scope();
 		$s['cleanup_pending'] = $pending;
 		$actions = self::actions( $s, $pending );
-		echo '<h2>' . esc_html__( 'Troubleshooting', 'foogallery-migrate' ) . '</h2><p>' . esc_html__( 'Check storage, continue an interrupted change, or reset migration data.', 'foogallery-migrate' ) . '</p>';
-		echo '<h3>' . esc_html__( 'Storage status', 'foogallery-migrate' ) . '</h3>';
+		echo '<ul class="ul-disc">';
+		foreach ( array(
+			__( 'If a migration stops, pause any other migrations and refresh the page before continuing.', 'foogallery-migrate' ),
+			__( 'If you see a timeout or memory error, reduce Images Per Turn in Settings and keep Page Size above zero. Database tables can help with larger migrations, but very large galleries may still need more memory.', 'foogallery-migrate' ),
+			__( 'Before installing an older version of this plugin, switch back to WordPress options in Settings. If a storage change will not finish, contact support before deleting any data.', 'foogallery-migrate' ),
+		) as $tip ) { echo '<li>' . esc_html( $tip ) . '</li>'; }
+		echo '</ul>';
+		$cleanup = array(
+			'clear' => array( __( 'Reset migration progress', 'foogallery-migrate' ), __( 'Clear progress and history while keeping the selected storage mode.', 'foogallery-migrate' ) ),
+			'remove_all' => array( __( 'Remove all migration data', 'foogallery-migrate' ), __( 'Remove plugin settings, progress, history and owned storage tables.', 'foogallery-migrate' ) ),
+			'discard' => array( __( 'Cancel storage change', 'foogallery-migrate' ), __( 'Discard the unfinished table copy and keep current option data.', 'foogallery-migrate' ) ),
+		);
+		echo '<section id="foogm-storage-cleanup" aria-labelledby="foogm-storage-cleanup-heading"><h3 id="foogm-storage-cleanup-heading">' . esc_html__( 'Reset & cleanup', 'foogallery-migrate' ) . '</h3><p>' . esc_html__( 'Galleries and media are kept. Migrating again after a reset or removal may create duplicates.', 'foogallery-migrate' ) . '</p>';
 		if ( null !== $pending ) {
 			echo '<p>' . esc_html__( 'Cleanup is unfinished. Continue the recorded cleanup below.', 'foogallery-migrate' ) . '</p>';
 		} elseif ( '' !== $s['problem'] || ! in_array( $s['backend'], array( 'option', 'table' ), true ) ) {
 			echo '<p role="alert">' . esc_html__( 'Storage needs attention. Review the details below before continuing a migration.', 'foogallery-migrate' ) . '</p>';
 		} elseif ( 'stable' !== $s['phase'] ) {
 			echo '<p>' . esc_html__( 'A storage change is unfinished. Pause migration tabs, then continue the recorded change.', 'foogallery-migrate' ) . '</p>';
-		} else {
-			echo '<p>' . esc_html__( 'Storage is stable. No storage change is in progress.', 'foogallery-migrate' ) . '</p>';
 		}
 		foreach ( $actions as $a ) { if ( 'recover' === $a['operation'] ) { self::render_action( $a, $s, $blog ); } }
 		echo '<p id="foogm-storage-result" role="status" aria-live="polite"></p>';
 		if ( '' !== $s['problem'] ) { echo '<p>' . esc_html( $s['problem'] ) . '</p>'; }
 		echo '<details id="foogm-storage-last-error" hidden><summary>' . esc_html__( 'Last storage request (this browser)', 'foogallery-migrate' ) . '</summary><p id="foogm-storage-error-detail"></p></details>';
+		echo '<table class="form-table" role="presentation"><tbody>';
+		$offered = false;
+		foreach ( $actions as $a ) {
+			if ( ! isset( $cleanup[$a['operation']] ) ) { continue; }
+			$copy = $cleanup[$a['operation']]; $offered = true;
+			echo '<tr><th scope="row">' . esc_html( $copy[0] ) . '</th><td><p>' . esc_html( $copy[1] ) . '</p>';
+			self::render_action( $a, $s, $blog ); echo '</td></tr>';
+		}
+		echo '</tbody></table>';
+		if ( ! $offered ) { echo '<p>' . esc_html__( 'These storage cleanup controls are not available on this site.', 'foogallery-migrate' ) . '</p>'; }
+		echo '</section>';
 		global $wp_version;
 		$unknown = __( 'Unavailable', 'foogallery-migrate' );
 		$counts = StorageSourceCounts::measure();
@@ -310,29 +330,6 @@ class StorageAdmin {
 		if ( ! empty( $s['retained'] ) ) { echo '<p>' . esc_html__( 'An inactive table copy is retained. Switching to tables replaces it with current migration data.', 'foogallery-migrate' ) . '</p>'; }
 		echo '<p class="description">' . esc_html__( 'Source counts are advisory estimates, not the selected migration queue. Serialized image lists and unscanned WordPress galleries are not loaded to calculate counts.', 'foogallery-migrate' ) . '</p></section>';
 		echo '<details><summary>' . esc_html__( 'Information for support', 'foogallery-migrate' ) . '</summary><p><label for="foogm-support-report">' . esc_html__( 'Copy this summary when contacting support. It contains no gallery content, credentials or server paths.', 'foogallery-migrate' ) . '</label></p><textarea id="foogm-support-report" class="large-text code" rows="10" readonly>' . esc_textarea( implode( "\n", $report ) ) . '</textarea></details>';
-		echo '<h3>' . esc_html__( 'Common checks', 'foogallery-migrate' ) . '</h3><ul class="ul-disc">';
-		foreach ( array(
-			__( 'If a request stops, pause other migration tabs and reload before resuming. An uncertain storage change must be recovered, not automatically retried.', 'foogallery-migrate' ),
-			__( 'For memory or timeout errors, reduce Images Per Turn in Settings and keep pagination enabled. Table storage reduces saved-state memory use, but very large individual galleries and full source discovery can still use significant memory.', 'foogallery-migrate' ),
-			__( 'Before downgrading the plugin, switch back to options in Settings. If a switch or recovery cannot complete, contact support rather than manually deleting storage tables or ownership markers.', 'foogallery-migrate' ),
-		) as $tip ) { echo '<li>' . esc_html( $tip ) . '</li>'; }
-		echo '</ul><p><a href="' . esc_url( self::settings_url() ) . '">' . esc_html__( 'Open migration settings', 'foogallery-migrate' ) . '</a></p>';
-		$cleanup = array(
-			'clear' => array( __( 'Reset migration progress', 'foogallery-migrate' ), __( 'Clear progress and history while keeping the selected storage mode.', 'foogallery-migrate' ) ),
-			'remove_all' => array( __( 'Remove all migration data', 'foogallery-migrate' ), __( 'Remove plugin settings, progress, history and owned storage tables.', 'foogallery-migrate' ) ),
-			'discard' => array( __( 'Cancel storage change', 'foogallery-migrate' ), __( 'Discard the unfinished table copy and keep current option data.', 'foogallery-migrate' ) ),
-		);
-		echo '<details id="foogm-storage-cleanup"' . ( null !== $pending ? ' open' : '' ) . '><summary>' . esc_html__( 'Reset & cleanup', 'foogallery-migrate' ) . '</summary><p>' . esc_html__( 'Galleries and media are kept. Migrating again after a reset or removal may create duplicates.', 'foogallery-migrate' ) . '</p><table class="form-table" role="presentation"><tbody>';
-		$offered = false;
-		foreach ( $actions as $a ) {
-			if ( ! isset( $cleanup[$a['operation']] ) ) { continue; }
-			$copy = $cleanup[$a['operation']]; $offered = true;
-			echo '<tr><th scope="row">' . esc_html( $copy[0] ) . '</th><td><p>' . esc_html( $copy[1] ) . '</p>';
-			self::render_action( $a, $s, $blog ); echo '</td></tr>';
-		}
-		echo '</tbody></table>';
-		if ( ! $offered ) { echo '<p>' . esc_html__( 'These storage cleanup controls are not available on this site.', 'foogallery-migrate' ) . '</p>'; }
-		echo '</details>';
 		self::render_script( $s, $blog );
 	}
 
