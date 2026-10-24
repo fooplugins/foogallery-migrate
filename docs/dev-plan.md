@@ -2,7 +2,59 @@
 
 **Updated:** 2026-10-24
 
-## Current amendment — revised Settings and Troubleshooting copy
+## Current amendment — saved discovery count summary
+
+Brad approved the saved count summary discussed in this chat, validation, committing
+and pushing all pending UI changes to PR #15, and deployment to the prepared test
+site. No merge, public release or v2 implementation is authorized.
+
+Scope and acceptance:
+
+- S1: After successful gallery discovery/publication (initial or Refresh Galleries),
+  save one small non-autoloaded option with discovered gallery count, summed known
+  gallery image-entry count, completeness and refresh time. Reuse already-discovered
+  objects/counts; do not load children or run extra discovery for advice. Totals are
+  a last-discovery snapshot, not unique media or remaining migration work.
+- S2: The notice/Settings advice prefers the valid saved summary, without loading
+  migration state. Before discovery, retain cheap scalar SQL fallback, explicitly
+  marking incomplete image totals. Keep existing thresholds, single-site/runtime/
+  authority gates and manual switching/admission unchanged. Missing/invalid summary
+  must not block migration; failed discovery must not publish a successful summary.
+- S3: Invalidate when discovery state is cleared/re-detected; reset, remove-all and
+  standalone uninstall must delete and audit the new owned option. No new table,
+  background worker, automatic refresh or automatic storage switch.
+- S4: Include pending requested notice heading/copy and removal of the redundant
+  Settings-to-Troubleshooting link; preserve navigation and recovery instructions.
+- S5: Independent QA, full maintained suite, PHP 5.4 syntax, rendered JS and source/
+  ZIP parity must pass before implementation commit/push. Test-site deployment must
+  verify identical installed files and protected-data hashes; do not switch backend,
+  reset, migrate or force source rediscovery on Brad's site merely for validation.
+  Existing discoveries gain the summary on the next successful Refresh Galleries.
+
+Base: `d0f1c19ce98774bd011876b36d733b3604e73e34`, branch
+`feature/migrated-store-scalability`. Existing six pending files belong to the
+authorized notice/link changes; preserve them. Supervisor model setting cannot be
+verified from this session and is left configured as-is.
+
+| Task | Dependencies / owner | Status | Routing / QA / repairs |
+|---|---|---|---|
+| S1–S4 implementation | This planning commit; one developer owns runtime/tests/readme, supervisor owns this plan and ops | developing | GPT-6 Sol High: discovery, advice and cleanup cross component boundaries; independent GPT-6 Sol Medium QA required; repairs 0 |
+| S5 integration and deployment | Accepted S1–S4 plus QA | pending | Supervisor runs full suite/package validation, serializes commits/push/deploy, updates PR/checklist without changing Brad's checkmarks |
+
+Validation: focused count/discovery/cleanup tests, `node tests/storage-admin-workflow.js`,
+`php -d memory_limit=256M vendor/bin/phpunit`, PHP 5.4 parser, `npx gulp translate`,
+`npx gulp zip`, `python3 tests/production-package-regression.py dist/foogallery-migrate.v1.16.zip`.
+Agent CI is attempted but this repository currently has no Actions workflows.
+Native validation uses the retained owned fixture, not Brad's test data for
+destructive/discovery tests. Record actual results below before acceptance.
+
+Usage: Brad previously said "dont worry about budget - just go"; no finite usage
+cap is imposed. Account-wide snapshots are monitored, not a task-only cost or hard
+cap. This amendment's first observed weekly reading is 29% used, limit `codex`,
+10,080-minute window, reset `1793382057`; previous work's consumption is not rebased
+or claimed as measured. No reset credits or billing changes are authorized.
+
+## Previous amendment — revised Settings and Troubleshooting copy
 
 - Remove the Migration Settings heading without changing any settings controls.
 - Start Troubleshooting with "If you are having trouble with a migration, try the
