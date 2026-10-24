@@ -23,7 +23,7 @@ class StorageAdminTest extends TestCase {
 		$base['backend'] = 'unavailable'; $this->assertSame( array( 'remove_all' ), array_column( StorageAdmin::actions( $base ), 'operation' ) );
 	}
 	public function test_read_only_view_escapes_status_and_emits_exact_site_scoped_post_controls(): void {
-		ob_start(); StorageAdmin::render( array( 'backend' => 'option', 'phase' => 'stable', 'target' => 'option', 'retained' => false, 'option_bytes' => '123', 'records' => null, 'schema' => 'not provisioned', 'problem' => '<script>bad</script>', 'calibrated' => false ) ); $html = ob_get_clean();
+		ob_start(); StorageAdmin::render_troubleshooting( array( 'backend' => 'option', 'phase' => 'stable', 'target' => 'option', 'retained' => false, 'option_bytes' => '123', 'records' => null, 'schema' => 'not provisioned', 'problem' => '<script>bad</script>', 'calibrated' => false ) ); $html = ob_get_clean();
 		$this->assertStringNotContainsString( '<script>bad</script>', $html ); $this->assertStringContainsString( '&lt;script&gt;bad&lt;/script&gt;', $html );
 		foreach ( array( 'name="action" value="foogallery_migrate_storage"', 'name="operation" value="clear"', 'name="blog_id" value="7"', 'name="scope" value="site"', 'name="confirmation" value="clear-current-state"', 'name="nonce"', 'data-confirm=', 'admin-post.php', "form.getAttribute('action')", 'Storage needs attention', 'Galleries and media are kept' ) as $text ) { $this->assertStringContainsString( $text, $html ); }
 		$this->assertStringNotContainsString( 'type="checkbox"', $html );
@@ -117,9 +117,11 @@ class StorageAdminTest extends TestCase {
 		ob_start(); StorageAdmin::render( $s ); $html = ob_get_clean();
 		$this->assertStringContainsString( 'we recommend database tables', $html );
 		$this->assertStringContainsString( '2 KB', $html );
-		$this->assertStringContainsString( 'Very large individual galleries and full source discovery', $html );
+		$this->assertStringContainsString( 'tab=troubleshooting', $html );
 		$this->assertStringNotContainsString( 'OCTET_LENGTH(option_value)', implode( ' ', $GLOBALS['wpdb']->queries ) );
 		$this->assertStringNotContainsString( 'COUNT(*)', implode( ' ', $GLOBALS['wpdb']->queries ) );
+		ob_start(); StorageAdmin::render_troubleshooting( $s ); $troubleshooting = ob_get_clean();
+		$this->assertStringContainsString( 'very large individual galleries and full source discovery', $troubleshooting );
 		$s['calibrated'] = false;
 		ob_start(); StorageAdmin::render( $s ); $html = ob_get_clean();
 		$this->assertStringNotContainsString( 'we recommend database tables', $html );
@@ -130,13 +132,13 @@ class StorageAdminTest extends TestCase {
 		$GLOBALS['wpdb'] = new StorageAdminAdviceWpdb( '0' );
 		$GLOBALS['wpdb']->pending_scope = 'clear';
 		$s = array( 'backend' => 'option', 'phase' => 'stable', 'target' => 'option', 'retained' => false, 'option_bytes' => '0', 'records' => null, 'schema' => 'not ready', 'problem' => '', 'calibrated' => true );
-		ob_start(); StorageAdmin::render( $s ); $html = ob_get_clean();
+		ob_start(); StorageAdmin::render_troubleshooting( $s ); $html = ob_get_clean();
 		$this->assertStringContainsString( 'name="operation" value="clear"', $html );
 		$this->assertStringNotContainsString( 'name="operation" value="remove_all"', $html );
 		$this->assertStringNotContainsString( 'name="operation" value="provision"', $html );
 		$this->assertStringNotContainsString( 'data-provision-nonce=', $html );
 		$GLOBALS['wpdb']->pending_scope = 'remove_all';
-		ob_start(); StorageAdmin::render( $s ); $html = ob_get_clean();
+		ob_start(); StorageAdmin::render_troubleshooting( $s ); $html = ob_get_clean();
 		$this->assertStringContainsString( 'name="operation" value="remove_all"', $html );
 		$this->assertStringNotContainsString( 'name="operation" value="clear"', $html );
 		$this->assertStringNotContainsString( 'name="operation" value="provision"', $html );
@@ -155,7 +157,10 @@ class StorageAdminTest extends TestCase {
 			$this->assertStringContainsString( 'id="migration-storage"', $html );
 			$this->assertStringContainsString( 'preferences are unavailable', $html );
 			$this->assertStringNotContainsString( 'foogallery_migrate_save_settings', $html );
-			$this->assertStringContainsString( 'copying' === $status['phase'] ? 'Continue storage change' : 'Remove all migration data', $html );
+			$this->assertStringContainsString( 'tab=troubleshooting', $html );
+			$this->assertStringNotContainsString( 'foogm-storage-cleanup', $html );
+			ob_start(); include dirname( __DIR__ ) . '/includes/views/view-migrate-tab-troubleshooting.php'; $troubleshooting = ob_get_clean();
+			$this->assertStringContainsString( 'copying' === $status['phase'] ? 'Continue storage change' : 'Remove all migration data', $troubleshooting );
 		}
 		$healthy = array( 'backend' => 'option', 'phase' => 'stable', 'problem' => '' );
 		$this->assertTrue( StorageAdmin::settings_available( $healthy ) );
@@ -172,7 +177,7 @@ class StorageAdminTest extends TestCase {
 		$this->assertSame( 1, $xpath->query( '//button[@id="foogm-storage-change"][@disabled]' )->length );
 		$this->assertSame( 7, $xpath->query( '//form[@id="foogm-storage-switch"]//input[@name]' )->length );
 		$this->assertSame( 0, $xpath->query( '//form[@id="foogm-storage-switch"][@data-confirm]' )->length );
-		$this->assertSame( 2, $xpath->query( '//form[@data-confirm]' )->length );
+		$this->assertSame( 0, $xpath->query( '//form[@data-confirm]' )->length );
 		$this->assertSame( 0, $xpath->query( '//details[@open]' )->length );
 		$this->assertStringContainsString( '258 KB', $html );
 		$this->assertStringNotContainsString( 'I have a backup', $html );
@@ -191,7 +196,7 @@ class StorageAdminTest extends TestCase {
 		$this->assertSame( 'Migration Storage', $xpath->query( $row . '/th[@scope="row"][@id="migration-storage-heading"]' )->item( 0 )->textContent );
 		$this->assertSame( 2, $xpath->query( $row . '/td//input[@type="radio"]' )->length );
 		$this->assertSame( 1, $xpath->query( $row . '/td//button[@id="foogm-storage-change"]' )->length );
-		$this->assertSame( 2, $xpath->query( $row . '/td/details' )->length );
+		$this->assertSame( 0, $xpath->query( $row . '/td/details' )->length );
 		$this->assertSame( 0, $xpath->query( '//form//form' )->length );
 		$this->assertSame( 0, $xpath->query( '//section[@id="migration-storage"]//h2' )->length );
 	}

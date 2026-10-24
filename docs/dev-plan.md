@@ -2,6 +2,60 @@
 
 **Updated:** 2026-10-24
 
+## Current amendment — dedicated Troubleshooting tab
+
+Brad requested moving Technical details and Reset & cleanup off Settings and into
+a new Troubleshooting tab, with a clearer layout and useful diagnostic information.
+
+- Settings retains its native storage mode row, recommendations and guarded switch
+  action, plus a Troubleshooting link. Recovery and destructive forms move to the
+  new tab; no receiver operation, schema, capacity rule or migration-engine change.
+- Troubleshooting shows storage health, visible recorded-change recovery, a native
+  technical-details table (versions, actual request memory limit, storage metadata
+  and bounded source-count hints), common checks and an allow-listed copyable
+  support summary. No raw history, content, credentials or server paths enter the
+  summary, and no source objects are discovered/hydrated merely for diagnostics.
+- Reset/cancel/remove actions use labelled settings rows and their existing exact
+  nonce/intent fields. Cleanup is collapsed normally, expanded while pending, and
+  each destructive action still asks once; cancellation issues no request.
+- The new route bypasses engine construction even with healthy storage. It remains
+  available during broken authority and unfinished cleanup instead of falling into
+  the old early-return screen. Conditional engine-derived Log/Debug tabs are not
+  probed on this route. Settings also links to it while preferences are blocked.
+- Storage request errors are available in the same browser tab's session storage,
+  keyed by site ID and displayed as plain text on Troubleshooting. This adds no
+  database options/cache/telemetry; a successful operation clears the last error.
+- Brad subsequently authorized committing this amendment, pushing it to PR #15 and
+  installing the identical validated package on the prepared test site. Deployment
+  must preserve the current backend and migration data and verify package identity
+  and protected-data hashes. Merge/public release and v2 implementation remain
+  unauthorized.
+
+Validation for Troubleshooting:
+
+- Complete maintained suite at explicit 256 MiB: **1,600 tests / 311,659
+  assertions**, zero skips, errors or failures (2m53.205s, 133.61 MiB reported peak).
+- Focused UI/advice/single-site checks: **37 tests / 359 assertions**. New coverage
+  includes engine-free full-route rendering during pending cleanup and malformed
+  authority (including normalized mixed-case tab URLs), read-only diagnostics,
+  support-summary allow-list/escaping, separated Settings controls and exact
+  seven-field confirmed cleanup forms.
+- Rendered JavaScript: **64 workflow checks**, including recovery/cleanup on the
+  new tab, confirmation cancellation, error details surviving browser navigation
+  and removal of the last browser-local error after success.
+- Native browser on the owned WordPress 7.1.3 / PHP 8.4.6 fixture: **16 checks**,
+  keyboard disclosure access, native label/control rows, read-only support summary,
+  default hidden/collapsed panels and literal rendering of synthetic error markup.
+  Two cancelled destructive confirmations produce **zero storage-operation POSTs**;
+  migration option hashes are unchanged and JS errors are zero. Desktop/mobile
+  screenshots were inspected; no narrow-screen horizontal overflow. Private receipt:
+  `ui-browser-troubleshooting-report.json` in the retained owned fixture.
+- All four changed product PHP files pass PHP 5.4 syntax checking. The 91-file ZIP
+  passes CRC/path/symlink/development-file/source-parity checks; SHA-256
+  `95d7cdf8a0a9847648c2873b774eec924e9f5b47010dca892352ec521752e1ae`.
+  Agent CI was attempted but this repository has no Actions workflows; no CI pass
+  or repeat of historical engine/floor migration journeys is claimed.
+
 ## Current amendment — pre-migration source-count advice and matching settings rows
 
 Brad requested a pre-migration table recommendation using detected gallery/image

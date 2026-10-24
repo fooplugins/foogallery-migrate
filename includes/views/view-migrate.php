@@ -349,7 +349,10 @@ if ( ! defined( 'ABSPATH' ) ) {
 <?php
 $foogallery_migrate_clear_handled = false;
 $foogallery_migrate_clear_receipt = null;
-$foogallery_migrate_settings_tab = isset( $_GET['tab'] ) && is_string( $_GET['tab'] ) && 'settings' === wp_unslash( $_GET['tab'] );
+$foogallery_migrate_requested_tab = isset( $_GET['tab'] ) && is_string( $_GET['tab'] ) ? sanitize_key( wp_unslash( $_GET['tab'] ) ) : 'sources';
+$foogallery_migrate_settings_tab = 'settings' === $foogallery_migrate_requested_tab;
+$foogallery_migrate_troubleshooting_tab = 'troubleshooting' === $foogallery_migrate_requested_tab;
+$foogallery_migrate_maintenance_tab = $foogallery_migrate_settings_tab || $foogallery_migrate_troubleshooting_tab;
 if ( ! is_multisite() && isset( $_POST['clear_migration_history'] ) ) {
 	if ( ! current_user_can( 'manage_options' ) ) { wp_die( esc_html__( 'Unauthorized.', 'foogallery-migrate' ) ); }
 	check_admin_referer( 'foogallery_migrate_storage_clear_' . get_current_blog_id(), 'foogallery_migrate_clear_nonce' );
@@ -359,10 +362,11 @@ if ( ! is_multisite() && isset( $_POST['clear_migration_history'] ) ) {
 	if ( is_wp_error( $foogallery_migrate_clear_receipt ) ) { wp_die( esc_html( $foogallery_migrate_clear_receipt->get_error_message() ) ); }
 	$foogallery_migrate_clear_handled = true;
 }
-if ( ! $foogallery_migrate_settings_tab && ( ( is_array( $foogallery_migrate_clear_receipt ) && empty( $foogallery_migrate_clear_receipt['complete'] ) ) ||
+if ( ! $foogallery_migrate_maintenance_tab && ( ( is_array( $foogallery_migrate_clear_receipt ) && empty( $foogallery_migrate_clear_receipt['complete'] ) ) ||
 	'clear' === \FooPlugins\FooGalleryMigrate\StorageCleanup::pending_scope() ) ) {
 	echo '<div class="wrap"><h2>' . esc_html__( 'FooGallery Migrate!', 'foogallery-migrate' ) . '</h2>';
 	echo '<div class="notice notice-warning"><p>' . esc_html__( 'Migration-state cleanup is incomplete. Migrations remain blocked; rerun this confirmed cleanup or inspect the reported resources.', 'foogallery-migrate' ) . '</p>';
+	echo '<p><a href="' . esc_url( \FooPlugins\FooGalleryMigrate\StorageAdmin::troubleshooting_url() ) . '">' . esc_html__( 'Open Troubleshooting', 'foogallery-migrate' ) . '</a></p>';
 	if ( is_array( $foogallery_migrate_clear_receipt ) ) {
 		foreach ( array( 'failed', 'residual' ) as $field ) {
 			foreach ( $foogallery_migrate_clear_receipt[$field] as $item ) { echo '<p>' . esc_html( $field . ': ' . $item ) . '</p>'; }
@@ -374,11 +378,11 @@ if ( ! $foogallery_migrate_settings_tab && ( ( is_array( $foogallery_migrate_cle
 	echo '<p><button type="submit" class="button button-secondary" name="clear_migration_history" value="1">' . esc_html__( 'Continue Clear Migration History', 'foogallery-migrate' ) . '</button></p></form></div>';
 	return;
 }
-$foogallery_migrate_storage_status = $foogallery_migrate_settings_tab ? \FooPlugins\FooGalleryMigrate\StorageAdmin::status() : null;
-$foogallery_migrate_settings_available = ! $foogallery_migrate_settings_tab || \FooPlugins\FooGalleryMigrate\StorageAdmin::settings_available( $foogallery_migrate_storage_status );
+$foogallery_migrate_storage_status = $foogallery_migrate_maintenance_tab ? \FooPlugins\FooGalleryMigrate\StorageAdmin::status() : null;
+$foogallery_migrate_settings_available = ! $foogallery_migrate_maintenance_tab || \FooPlugins\FooGalleryMigrate\StorageAdmin::settings_available( $foogallery_migrate_storage_status );
 $has_log_tab = false;
 $show_debug_tab = false;
-if ( $foogallery_migrate_settings_available ) {
+if ( ! $foogallery_migrate_troubleshooting_tab && $foogallery_migrate_settings_available ) {
 	$migrator = foogallery_migrate_migrator_instance();
 	$has_log_tab = $migrator->has_migrated_objects();
 	$show_debug_tab = $has_log_tab && $migrator->is_debug_enabled();
@@ -418,10 +422,14 @@ $tabs = array(
 		'label' => __( 'Settings', 'foogallery-migrate' ),
 		'view'  => 'view-migrate-tab-settings.php',
 	),
+	'troubleshooting' => array(
+		'label' => __( 'Troubleshooting', 'foogallery-migrate' ),
+		'view'  => 'view-migrate-tab-troubleshooting.php',
+	),
 );
 $active_tab = 'sources';
-if ( array_key_exists( 'tab', $_GET ) ) {
-	$requested_tab = sanitize_key( wp_unslash( $_GET['tab'] ) );
+if ( isset( $_GET['tab'] ) && is_string( $_GET['tab'] ) ) {
+	$requested_tab = $foogallery_migrate_requested_tab;
 	if ( isset( $tabs[ $requested_tab ] ) && ( ! isset( $tabs[ $requested_tab ]['enabled'] ) || $tabs[ $requested_tab ]['enabled'] ) ) {
 		$active_tab = $requested_tab;
 	}

@@ -111,7 +111,7 @@ class StorageSourceCountsTest extends TestCase {
 		$status = array( 'backend' => 'option', 'phase' => 'stable', 'target' => 'option', 'retained' => false, 'option_bytes' => '0', 'records' => null, 'schema' => 'not ready', 'problem' => '', 'calibrated' => true );
 		ob_start(); StorageAdmin::render( $status ); $html = ob_get_clean();
 		$this->assertStringContainsString( 'Detected gallery records: 100.', $html );
-		$this->assertStringContainsString( 'Source counts are advisory estimates', $html );
+		$this->assertStringContainsString( 'tab=troubleshooting', $html );
 		$_GET['page'] = 'foogallery-migrate'; ob_start(); StorageAdmin::recommendation_notice(); $html = ob_get_clean();
 		$this->assertStringContainsString( 'before migrating', $html );
 		$this->assertStringContainsString( 'tab=settings#migration-storage', $html );

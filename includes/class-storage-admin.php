@@ -18,6 +18,10 @@ class StorageAdmin {
 		return admin_url( 'edit.php?post_type=foogallery&page=foogallery-migrate&tab=settings#migration-storage' );
 	}
 
+	public static function troubleshooting_url() {
+		return admin_url( 'edit.php?post_type=foogallery&page=foogallery-migrate&tab=troubleshooting' );
+	}
+
 	/** Old bookmarks remain useful; redirects never perform a storage operation. */
 	public static function redirect_legacy() {
 		if ( current_user_can( 'manage_options' ) && isset( $_SERVER['REQUEST_METHOD'], $_GET['page'] ) &&
@@ -43,7 +47,7 @@ class StorageAdmin {
 	public static function recommendation_notice() {
 		if ( ! current_user_can( 'manage_options' ) || ! isset( $_GET['page'] ) || ! is_string( $_GET['page'] ) ||
 			'foogallery-migrate' !== sanitize_key( wp_unslash( $_GET['page'] ) ) ) { return; }
-		if ( isset( $_GET['tab'] ) && is_string( $_GET['tab'] ) && 'settings' === wp_unslash( $_GET['tab'] ) ) { return; }
+		if ( isset( $_GET['tab'] ) && is_string( $_GET['tab'] ) && in_array( sanitize_key( wp_unslash( $_GET['tab'] ) ), array( 'settings', 'troubleshooting' ), true ) ) { return; }
 		if ( is_multisite() ) {
 			echo '<div class="notice notice-info"><p>' . esc_html__( 'Table storage recommendations and operations are unavailable on multisite. Existing option-mode flows remain supported, and this screen does not change storage authority.', 'foogallery-migrate' ) . '</p></div>';
 			return;
@@ -240,42 +244,113 @@ class StorageAdmin {
 		if ( is_multisite() ) {
 			echo '<p>' . esc_html__( 'Table storage is not available on multisite. Continue using WordPress options.', 'foogallery-migrate' ) . '</p>';
 		} elseif ( ! empty( $pending ) ) {
-			echo '<p>' . esc_html__( 'Migration data cleanup is unfinished. Continue cleanup below.', 'foogallery-migrate' ) . '</p>';
+			echo '<p>' . esc_html__( 'Migration data cleanup is unfinished. Continue it in Troubleshooting.', 'foogallery-migrate' ) . '</p>';
 		} elseif ( ! in_array( $s['backend'], array( 'option', 'table' ), true ) || '' !== $s['problem'] ) {
-			echo '<p role="alert">' . esc_html__( 'Storage needs attention. See Technical details below.', 'foogallery-migrate' ) . '</p>';
+			echo '<p role="alert">' . esc_html__( 'Storage needs attention. See Troubleshooting for details.', 'foogallery-migrate' ) . '</p>';
 		} elseif ( empty( $s['calibrated'] ) ) {
-			echo '<p>' . esc_html__( 'Storage switching is not available on this site. See Technical details below.', 'foogallery-migrate' ) . '</p>';
+			echo '<p>' . esc_html__( 'Storage switching is not available on this site. See Troubleshooting for details.', 'foogallery-migrate' ) . '</p>';
 		} elseif ( 'stable' !== $s['phase'] ) {
-			echo '<p>' . esc_html__( 'A storage change is unfinished. Continue where it stopped.', 'foogallery-migrate' ) . '</p>';
+			echo '<p>' . esc_html__( 'A storage change is unfinished. Continue it in Troubleshooting.', 'foogallery-migrate' ) . '</p>';
+		}
+		echo '<p id="foogm-storage-result" role="status" aria-live="polite"></p>';
+		echo '<p><a href="' . esc_url( self::troubleshooting_url() ) . '">' . esc_html__( 'Troubleshooting, technical details and cleanup', 'foogallery-migrate' ) . '</a></p>';
+		echo '</td></tr></tbody></table></section>';
+		self::render_script( $s, $blog );
+	}
+
+	/** This screen deliberately needs no engine, history or source-object hydration. */
+	public static function render_troubleshooting( $status = null ) {
+		if ( ! current_user_can( 'manage_options' ) ) { wp_die( __( 'Storage access denied.', 'foogallery-migrate' ) ); }
+		$s = is_array( $status ) ? $status : self::status();
+		$blog = get_current_blog_id();
+		$pending = is_multisite() ? null : StorageCleanup::pending_scope();
+		$s['cleanup_pending'] = $pending;
+		$actions = self::actions( $s, $pending );
+		echo '<h2>' . esc_html__( 'Troubleshooting', 'foogallery-migrate' ) . '</h2><p>' . esc_html__( 'Check storage, continue an interrupted change, or reset migration data.', 'foogallery-migrate' ) . '</p>';
+		echo '<h3>' . esc_html__( 'Storage status', 'foogallery-migrate' ) . '</h3>';
+		if ( null !== $pending ) {
+			echo '<p>' . esc_html__( 'Cleanup is unfinished. Continue the recorded cleanup below.', 'foogallery-migrate' ) . '</p>';
+		} elseif ( '' !== $s['problem'] || ! in_array( $s['backend'], array( 'option', 'table' ), true ) ) {
+			echo '<p role="alert">' . esc_html__( 'Storage needs attention. Review the details below before continuing a migration.', 'foogallery-migrate' ) . '</p>';
+		} elseif ( 'stable' !== $s['phase'] ) {
+			echo '<p>' . esc_html__( 'A storage change is unfinished. Pause migration tabs, then continue the recorded change.', 'foogallery-migrate' ) . '</p>';
+		} else {
+			echo '<p>' . esc_html__( 'Storage is stable. No storage change is in progress.', 'foogallery-migrate' ) . '</p>';
 		}
 		foreach ( $actions as $a ) { if ( 'recover' === $a['operation'] ) { self::render_action( $a, $s, $blog ); } }
 		echo '<p id="foogm-storage-result" role="status" aria-live="polite"></p>';
-		echo '<details id="foogm-storage-details"><summary>' . esc_html__( 'Technical details', 'foogallery-migrate' ) . '</summary><dl>';
-		foreach ( array( __( 'Site ID', 'foogallery-migrate' ) => $blog, __( 'Backend', 'foogallery-migrate' ) => $s['backend'], __( 'Switch phase', 'foogallery-migrate' ) => $s['phase'], __( 'Shared schema', 'foogallery-migrate' ) => $s['schema'], __( 'Option bytes', 'foogallery-migrate' ) => $s['option_bytes'], __( 'Site table records (including retained copies)', 'foogallery-migrate' ) => $s['records'] ) as $label => $value ) {
-			echo '<dt><strong>' . esc_html( $label ) . '</strong></dt><dd>' . esc_html( null === $value ? __( 'Unavailable', 'foogallery-migrate' ) : $value ) . '</dd>';
-		}
-		echo '</dl>';
 		if ( '' !== $s['problem'] ) { echo '<p>' . esc_html( $s['problem'] ) . '</p>'; }
-		if ( ! empty( $s['retained'] ) ) { echo '<p>' . esc_html__( 'An inactive table copy is retained. Switching to tables replaces it with current migration data.', 'foogallery-migrate' ) . '</p>'; }
-		echo '<p>' . esc_html__( 'Switching checks available memory, data size and table ownership automatically. Very large individual galleries and full source discovery can still use significant memory. Before downgrading the plugin, switch back to options; contact support if this cannot complete.', 'foogallery-migrate' ) . '</p>';
-		echo '<p>' . esc_html__( 'Source counts are advisory estimates, not the selected migration queue. Image counts are unavailable for serialized image lists and unscanned WordPress galleries; no source data is loaded just to calculate a recommendation.', 'foogallery-migrate' ) . '</p>';
-		echo '<p id="foogm-storage-error-detail"></p></details>';
-		$cleanup = array();
-		foreach ( $actions as $a ) { if ( in_array( $a['operation'], array( 'clear', 'remove_all', 'discard' ), true ) ) { $cleanup[] = $a; } }
-		if ( count( $cleanup ) ) {
-			echo '<details id="foogm-storage-cleanup"' . ( null !== $pending ? ' open' : '' ) . '><summary>' . esc_html__( 'Reset & cleanup', 'foogallery-migrate' ) . '</summary>';
-			echo '<p>' . esc_html__( 'Reset progress and history, or remove all migration data, settings and storage tables. Galleries and media are kept.', 'foogallery-migrate' ) . '</p>';
-			foreach ( $cleanup as $a ) { self::render_action( $a, $s, $blog ); }
-			echo '</details>';
+		echo '<details id="foogm-storage-last-error" hidden><summary>' . esc_html__( 'Last storage request (this browser)', 'foogallery-migrate' ) . '</summary><p id="foogm-storage-error-detail"></p></details>';
+		global $wp_version;
+		$unknown = __( 'Unavailable', 'foogallery-migrate' );
+		$counts = StorageSourceCounts::measure();
+		$rows = array(
+			__( 'Plugin version', 'foogallery-migrate' ) => defined( 'FOOGM_VERSION' ) ? FOOGM_VERSION : $unknown,
+			__( 'WordPress version', 'foogallery-migrate' ) => isset( $wp_version ) ? $wp_version : $unknown,
+			__( 'PHP version', 'foogallery-migrate' ) => PHP_VERSION,
+			__( 'PHP memory limit', 'foogallery-migrate' ) => ini_get( 'memory_limit' ),
+			__( 'Site type', 'foogallery-migrate' ) => is_multisite() ? __( 'Multisite (options only)', 'foogallery-migrate' ) : __( 'Single site', 'foogallery-migrate' ),
+			__( 'Site ID', 'foogallery-migrate' ) => $blog,
+			__( 'Backend', 'foogallery-migrate' ) => $s['backend'],
+			__( 'Switch phase', 'foogallery-migrate' ) => $s['phase'],
+			__( 'Shared schema', 'foogallery-migrate' ) => $s['schema'],
+			__( 'Option bytes', 'foogallery-migrate' ) => $s['option_bytes'],
+			__( 'Site table records (including retained copies)', 'foogallery-migrate' ) => $s['records'],
+			__( 'Detected gallery records', 'foogallery-migrate' ) => $counts['galleries'],
+			__( 'Detected image records', 'foogallery-migrate' ) => $counts['images'],
+		);
+		echo '<section id="foogm-storage-details"><h3>' . esc_html__( 'Technical details', 'foogallery-migrate' ) . '</h3><table class="widefat striped"><tbody>';
+		$report = array();
+		foreach ( $rows as $label => $value ) {
+			$value = null === $value || false === $value || '' === $value ? $unknown : $value;
+			echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>' . esc_html( $value ) . '</td></tr>';
+			$report[] = $label . ': ' . $value;
 		}
-		echo '</td></tr></tbody></table></section>';
+		echo '</tbody></table>';
+		if ( ! empty( $s['retained'] ) ) { echo '<p>' . esc_html__( 'An inactive table copy is retained. Switching to tables replaces it with current migration data.', 'foogallery-migrate' ) . '</p>'; }
+		echo '<p class="description">' . esc_html__( 'Source counts are advisory estimates, not the selected migration queue. Serialized image lists and unscanned WordPress galleries are not loaded to calculate counts.', 'foogallery-migrate' ) . '</p></section>';
+		echo '<details><summary>' . esc_html__( 'Information for support', 'foogallery-migrate' ) . '</summary><p><label for="foogm-support-report">' . esc_html__( 'Copy this summary when contacting support. It contains no gallery content, credentials or server paths.', 'foogallery-migrate' ) . '</label></p><textarea id="foogm-support-report" class="large-text code" rows="10" readonly>' . esc_textarea( implode( "\n", $report ) ) . '</textarea></details>';
+		echo '<h3>' . esc_html__( 'Common checks', 'foogallery-migrate' ) . '</h3><ul class="ul-disc">';
+		foreach ( array(
+			__( 'If a request stops, pause other migration tabs and reload before resuming. An uncertain storage change must be recovered, not automatically retried.', 'foogallery-migrate' ),
+			__( 'For memory or timeout errors, reduce Images Per Turn in Settings and keep pagination enabled. Table storage reduces saved-state memory use, but very large individual galleries and full source discovery can still use significant memory.', 'foogallery-migrate' ),
+			__( 'Before downgrading the plugin, switch back to options in Settings. If a switch or recovery cannot complete, contact support rather than manually deleting storage tables or ownership markers.', 'foogallery-migrate' ),
+		) as $tip ) { echo '<li>' . esc_html( $tip ) . '</li>'; }
+		echo '</ul><p><a href="' . esc_url( self::settings_url() ) . '">' . esc_html__( 'Open migration settings', 'foogallery-migrate' ) . '</a></p>';
+		$cleanup = array(
+			'clear' => array( __( 'Reset migration progress', 'foogallery-migrate' ), __( 'Clear progress and history while keeping the selected storage mode.', 'foogallery-migrate' ) ),
+			'remove_all' => array( __( 'Remove all migration data', 'foogallery-migrate' ), __( 'Remove plugin settings, progress, history and owned storage tables.', 'foogallery-migrate' ) ),
+			'discard' => array( __( 'Cancel storage change', 'foogallery-migrate' ), __( 'Discard the unfinished table copy and keep current option data.', 'foogallery-migrate' ) ),
+		);
+		echo '<details id="foogm-storage-cleanup"' . ( null !== $pending ? ' open' : '' ) . '><summary>' . esc_html__( 'Reset & cleanup', 'foogallery-migrate' ) . '</summary><p>' . esc_html__( 'Galleries and media are kept. Migrating again after a reset or removal may create duplicates.', 'foogallery-migrate' ) . '</p><table class="form-table" role="presentation"><tbody>';
+		$offered = false;
+		foreach ( $actions as $a ) {
+			if ( ! isset( $cleanup[$a['operation']] ) ) { continue; }
+			$copy = $cleanup[$a['operation']]; $offered = true;
+			echo '<tr><th scope="row">' . esc_html( $copy[0] ) . '</th><td><p>' . esc_html( $copy[1] ) . '</p>';
+			self::render_action( $a, $s, $blog ); echo '</td></tr>';
+		}
+		echo '</tbody></table>';
+		if ( ! $offered ) { echo '<p>' . esc_html__( 'These storage cleanup controls are not available on this site.', 'foogallery-migrate' ) . '</p>'; }
+		echo '</details>';
+		self::render_script( $s, $blog );
+	}
+
+	private static function render_script( $s, $blog ) {
 		?>
 		<script>
 		(function () {
 			var forms = document.querySelectorAll('.foogm-storage-form'), result = document.getElementById('foogm-storage-result'), busy = false;
 			var radios = document.querySelectorAll('input[name="foogm-storage-mode"]'), change = document.getElementById('foogm-storage-change'), spinner = document.getElementById('foogm-storage-spinner'), errorDetail = document.getElementById('foogm-storage-error-detail');
-			var current = <?php echo wp_json_encode( $s['backend'] ); ?>, noticeKey = <?php echo wp_json_encode( 'foogm-storage-notice-' . $blog ); ?>;
+			var current = <?php echo wp_json_encode( $s['backend'] ); ?>, noticeKey = <?php echo wp_json_encode( 'foogm-storage-notice-' . $blog ); ?>, errorKey = <?php echo wp_json_encode( 'foogm-storage-error-' . $blog ); ?>;
+			var lastError = document.getElementById('foogm-storage-last-error');
 			try { var notice = window.sessionStorage.getItem(noticeKey); window.sessionStorage.removeItem(noticeKey); if (notice) { result.textContent = notice; } } catch (ignored) {}
+			function rememberError(message) {
+				try { window.sessionStorage.setItem(errorKey, message); } catch (ignored) {}
+				if (errorDetail) { errorDetail.textContent = message; }
+				if (lastError) { lastError.hidden = !message; }
+			}
+			try { var previousError = window.sessionStorage.getItem(errorKey); if (previousError && errorDetail) { errorDetail.textContent = previousError; if (lastError) { lastError.hidden = false; } } } catch (ignored) {}
 			function updateSelection() {
 				if (!change) { return; }
 				var selected = current;
@@ -293,6 +368,7 @@ class StorageAdmin {
 			}
 			function requireReload(message) {
 				result.textContent = message;
+				rememberError(message);
 				if (spinner) { spinner.classList.toggle('is-active', false); }
 				// Keep controls locked when the response cannot prove the current phase.
 			}
@@ -328,13 +404,14 @@ class StorageAdmin {
 								}
 							}
 							if (steps.length) { sendStep(); } else {
+								try { window.sessionStorage.removeItem(errorKey); } catch (ignored) {}
 								try { window.sessionStorage.setItem(noticeKey, recovery ? <?php echo wp_json_encode( __( 'Storage updated.', 'foogallery-migrate' ) ); ?> : <?php echo wp_json_encode( __( 'Migration data updated.', 'foogallery-migrate' ) ); ?>); } catch (ignored) {}
 								window.location.reload();
 							}
 							return;
 						}
-						result.textContent = detail.code === 'foogallery_migrate_storage_busy' ? <?php echo wp_json_encode( __( 'Storage is busy. Pause any running migration, then reload to check progress.', 'foogallery-migrate' ) ); ?> : <?php echo wp_json_encode( __( 'The operation could not finish. Reload to check progress. More information is available in Technical details.', 'foogallery-migrate' ) ); ?>;
-						if (errorDetail) { errorDetail.textContent = (detail.code || '') + ' ' + (detail.message || '') + (Array.isArray(detail.failed) ? ' ' + detail.failed.join(', ') : '') + (Array.isArray(detail.residual) ? ' ' + detail.residual.join(', ') : ''); }
+						result.textContent = detail.code === 'foogallery_migrate_storage_busy' ? <?php echo wp_json_encode( __( 'Storage is busy. Pause any running migration, then reload to check progress.', 'foogallery-migrate' ) ); ?> : <?php echo wp_json_encode( __( 'The operation could not finish. Reload to check progress. More information is available in Troubleshooting.', 'foogallery-migrate' ) ); ?>;
+						rememberError((detail.code || '') + ' ' + (detail.message || '') + (Array.isArray(detail.failed) ? ' ' + detail.failed.join(', ') : '') + (Array.isArray(detail.residual) ? ' ' + detail.residual.join(', ') : ''));
 						setBusy(false);
 					};
 					xhr.onerror = xhr.ontimeout = function () { requireReload(<?php echo wp_json_encode( __( 'The connection ended. Reload to check storage before continuing.', 'foogallery-migrate' ) ); ?>); };

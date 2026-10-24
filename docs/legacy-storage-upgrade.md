@@ -26,9 +26,9 @@ This project does **not** create or redesign a migration engine. It preserves th
 
 Table mode is an administrator-selected storage choice. It is never enabled automatically.
 
-### Storage controls in migration settings (23 October 2026 amendment)
+### Storage settings and Troubleshooting (24 October 2026 amendment)
 
-Use **FooGallery → Migrate → Settings → Migration Storage**, at
+Use **FooGallery → Migrate → Settings → Migration Settings → Migration Storage**, at
 `edit.php?post_type=foogallery&page=foogallery-migrate&tab=settings#migration-storage`.
 The former `options-general.php?page=foogallery-migrate-storage` bookmark redirects here;
 there is no separate WordPress Settings submenu. Recommendations link to this section.
@@ -47,12 +47,28 @@ The normal section shows two labelled choices, a readable migration-data size
 alone performs no request; the button is disabled for the current mode. Routine
 switching has no acknowledgement checkbox, backup acceptance or confirmation
 dialog. A spinner reports progress and an inline success message survives reload.
-Technical details and Reset & cleanup are collapsed by default. Reset/removal
-each use one confirmation dialog describing retained galleries/media and the
-possibility of duplicates when migrating again; cancellation sends no request.
-Pending cleanup expands its section, and **Continue storage change** remains
-visible for interrupted switches. Underlying permissions, purpose-specific nonce
-and intent fields, strict request shapes and receiver checks are unchanged.
+Technical details and Reset & cleanup now live in the separate **Troubleshooting**
+tab at `edit.php?post_type=foogallery&page=foogallery-migrate&tab=troubleshooting`.
+Settings links there rather than rendering recovery/destructive forms inline.
+The new tab shows storage health, a labelled technical-details table with runtime
+versions/memory, source-count estimates, and a copyable support summary containing
+only allow-listed metadata (no migration contents, credentials or server paths).
+Common checks explain request recovery, memory limits and downgrade precautions.
+Raw debug-history output is not loaded by this tab.
+
+Reset & cleanup stays collapsed unless cleanup is pending. Its actions use labelled
+native settings rows; reset/removal/cancel each retain one confirmation describing
+kept data and duplicate-migration implications. Cancelling sends no request.
+**Continue storage change** is visible outside the cleanup disclosure for interrupted
+switches. Underlying permissions, purpose-specific nonce/intent fields, exact request
+shapes and receiver checks are unchanged. The tab is rendered without constructing
+the engine, including during unhealthy authority or incomplete cleanup; conditional
+engine-derived Log/Debug navigation is not probed on this diagnostic route.
+
+Failure details from a storage request can be inspected in Troubleshooting in the
+same browser tab. These use site-scoped browser session storage, not a database
+option, server log, telemetry upload or migration payload dump. A successful storage
+operation clears the last browser-local error. All error text is escaped/text-only.
 
 Normal successful continuation is not error retry or ambiguous-owner takeover.
 An error, malformed reply, unexpected receipt, timeout or connection loss stops the
@@ -61,8 +77,9 @@ session sends at most 256 continuation turns. If preparation succeeded but conve
 did not, options remain authoritative unless the recorded conversion phase says
 otherwise; prepared tables may remain for an explicit retry or owned-data cleanup.
 Switching back to options uses current table data and the same safety/size limits.
-The Settings tab keeps recovery and cleanup controls reachable even when normal
-preferences and the migration engine cannot safely load. Cleanup still preserves
+The Settings tab links to Troubleshooting even when normal preferences and the
+migration engine cannot safely load. Troubleshooting keeps recovery/cleanup controls
+reachable in those states. Cleanup still preserves
 source/destination galleries, attachments and content.
 
 Redis is not a third storage mode or a dependency. A site may use Redis through WordPress's optional persistent object cache; the option or MySQL tables remain authoritative. Caching a large serialized option does not avoid its PHP decode-memory cost. Validation includes persistent caching so authority switches and cleanup cannot leave stale owned cache entries.
@@ -609,7 +626,7 @@ The first release includes a basic saved-size or source-count suggestion, not an
 - Count source records directly with scalar SQL aggregates, never by constructing the engine, invoking adapter detection/discovery, selecting source rows, decoding image lists or scanning post content. Published Envira, Modula and Robo galleries are counted; AIGPL requires its existing nonempty image metadata and uses `EXISTS` to avoid duplicate-meta overcounting. NextGEN counts galleries and non-excluded images joined to existing galleries. 10Web counts published galleries and their image rows. WPPA uses its active table constants (or current-site defaults), public albums and supported-looking photo statuses/extensions, without validating files. These are advisory source-record estimates, not the exact selected/unmigrated queue, attachment uniqueness or a guarantee that every row can migrate.
 - Serialized image lists (including Envira, Modula, Robo and AIGPL) and unscanned WordPress core gallery occurrences remain **unknown**, not zero. Their gallery counts can still trigger advice. Do not hydrate those formats solely to obtain image counts. Source query failures are ignored for advice; successful known counts can still justify a recommendation. With all current providers present there are at most 14 source-count/existence queries and only scalar results retained; SQL may still scan source indexes/tables, so this is a PHP-memory bound, not a constant-time SQL promise.
 - Recommend only on a supported, healthy, stable, single-site option backend, without pending cleanup. If the byte threshold already triggers, skip source-count queries. Otherwise recalculate on the migration screens and in Settings so source changes are reflected; do not persist a count cache, new options or scheduled tasks. The Settings screen suppresses the duplicate global notice.
-- Link to **Migrate → Settings → Migration Settings → Migration Storage**. The native label/control row shares the settings layout, with technical details and cleanup normally collapsed. Switching remains an explicit **Change storage** action, without routine confirmation dialogs or acknowledgement checkboxes. If switching is unsupported, explain the limit and safe next action rather than offering a broken enable button.
+- Link to **Migrate → Settings → Migration Settings → Migration Storage**. The native label/control row shares the settings layout; technical details and cleanup live in **Troubleshooting**, with cleanup normally collapsed. Switching remains an explicit **Change storage** action, without routine confirmation dialogs or acknowledgement checkboxes. If switching is unsupported, explain the limit and safe next action rather than offering a broken enable button.
 - Do not auto-create tables, select a backend, or treat a recommendation threshold as permission to bypass admission. Reverse conversion is governed by measured safety limits, not this advisory threshold.
 
 The original 512 KiB/1,000-saved-record warning tier, 2,000-record and hydrated-memory tiers, dismissal growth tracking and repeated notifications remain deferred. The separate source-image count heuristic above is now included; it does not revive the multi-tier notification system.

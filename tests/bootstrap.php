@@ -314,6 +314,10 @@ function esc_html( $text ) {
 	return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
 }
 
+function esc_textarea( $text ) {
+	return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
+}
+
 function esc_html__( $text, $domain = 'default' ) {
 	return esc_html( $text );
 }

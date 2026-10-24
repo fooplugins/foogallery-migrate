@@ -4,9 +4,9 @@ const assert = require('node:assert/strict');
 const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
 let checks = 0;
-function fixture(overrides = {}, confirmAnswer = true) {
+function fixture(overrides = {}, confirmAnswer = true, troubleshooting = false, notices = new Map()) {
   const status = { backend: 'option', phase: 'stable', target: 'option', retained: false, option_bytes: '0', records: null, schema: 'not ready', problem: '', calibrated: true, ...overrides };
-  const php = 'require "tests/bootstrap.php"; $GLOBALS["foogallery_migrate_test_capabilities"]=array("manage_options"=>true); $GLOBALS["foogallery_migrate_test_blog_id"]=7; FooPlugins\\FooGalleryMigrate\\StorageAdmin::render(json_decode($argv[1],true));';
+  const php = 'require "tests/bootstrap.php"; $GLOBALS["foogallery_migrate_test_capabilities"]=array("manage_options"=>true); $GLOBALS["foogallery_migrate_test_blog_id"]=7; FooPlugins\\FooGalleryMigrate\\StorageAdmin::' + (troubleshooting ? 'render_troubleshooting' : 'render') + '(json_decode($argv[1],true));';
   const rendered = spawnSync('php', ['-r', php, JSON.stringify(status)], { encoding: 'utf8' });
   assert.equal(rendered.status, 0, rendered.stderr);
   const html = rendered.stdout;
@@ -15,7 +15,8 @@ function fixture(overrides = {}, confirmAnswer = true) {
     const fields = Object.fromEntries([...match[2].matchAll(/<input type="hidden" name="([^"]+)" value="([^"]*)">/g)].map(m => [m[1], m[2]]));
     return { attrs, fields, button: { disabled: false }, getAttribute(name) { return this.attrs[name] || null; }, querySelector(name) { assert.equal(name, 'button'); return this.button; }, addEventListener(name, listener) { assert.equal(name, 'submit'); this.submit = () => listener.call(this, { preventDefault() {} }); } };
   });
-  const requests = [], result = { textContent: '' }, errorDetail = { textContent: '' }, confirmations = [], notices = new Map();
+  const requests = [], result = { textContent: '' }, errorDetail = troubleshooting ? { textContent: '' } : null, confirmations = [];
+  const lastError = troubleshooting ? { hidden: true } : null;
   const change = html.includes('id="foogm-storage-change"') ? { disabled: true } : null;
   const radios = [...html.matchAll(/<input type="radio"[^>]*value="([^"]+)"([^>]*)>/g)].map(m => ({ value: m[1], checked: m[2].includes('checked'), disabled: false, addEventListener(name, fn) { assert.equal(name, 'change'); this.change = fn; } }));
   const spinner = { active: false, classList: { toggle(name, value) { assert.equal(name, 'is-active'); spinner.active = value; } } };
@@ -32,10 +33,10 @@ function fixture(overrides = {}, confirmAnswer = true) {
   }
   const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
   vm.runInNewContext(script, {
-    document: { querySelectorAll(selector) { return selector === '.foogm-storage-form' ? forms : radios; }, getElementById(id) { return { 'foogm-storage-result': result, 'foogm-storage-error-detail': errorDetail, 'foogm-storage-change': change, 'foogm-storage-spinner': spinner }[id] || null; } },
+    document: { querySelectorAll(selector) { return selector === '.foogm-storage-form' ? forms : radios; }, getElementById(id) { return { 'foogm-storage-result': result, 'foogm-storage-error-detail': errorDetail, 'foogm-storage-last-error': lastError, 'foogm-storage-change': change, 'foogm-storage-spinner': spinner }[id] || null; } },
     window: { location: { reload() { reloads++; } }, confirm(text) { confirmations.push(text); return confirmAnswer; }, sessionStorage: { getItem(key) { return notices.get(key); }, setItem(key, value) { notices.set(key, value); }, removeItem(key) { notices.delete(key); } } }, FormData, XMLHttpRequest
   });
-  return { forms, requests, result, errorDetail, confirmations, notices, change, radios, spinner, get reloads() { return reloads; }, select(value) { radios.forEach(r => { r.checked = r.value === value; }); radios[0].change(); }, start(operation = 'switch') { const form = forms.find(f => f.fields.operation === operation); assert.ok(form); form.submit(); return form; } };
+  return { forms, requests, result, errorDetail, lastError, confirmations, notices, change, radios, spinner, get reloads() { return reloads; }, select(value) { radios.forEach(r => { r.checked = r.value === value; }); radios[0].change(); }, start(operation = 'switch') { const form = forms.find(f => f.fields.operation === operation); assert.ok(form); form.submit(); return form; } };
 }
 const okay = data => ({ success: true, data });
 const receipt = (phase, backend = 'option') => okay({ blog_id: 7, backend, epoch: 1, phase });
@@ -53,7 +54,8 @@ function checkRequest(request, operation, purpose, scope = 'site') {
   f.start(); checkRequest(f.requests[0], 'preflight', 'option_import');
   assert.equal(f.confirmations.length, 0, 'Routine switching has no confirmation'); assert.ok(f.change.disabled && f.spinner.active && f.radios.every(r => r.disabled));
   assert.ok(f.forms.every(form => form.button.disabled));
-  f.forms.find(form => form.fields.operation === 'clear').submit(); assert.equal(f.requests.length, 1, 'Concurrent cleanup is blocked');
+  assert.ok(!f.forms.some(form => form.fields.operation === 'clear'), 'Settings has no cleanup forms');
+  f.forms[0].submit(); assert.equal(f.requests.length, 1, 'Concurrent submissions are blocked');
   f.requests[0].respond(okay({ decode_admitted: true })); checkRequest(f.requests[1], 'provision', 'provision_schema', 'installation');
   f.requests[1].respond(okay({ schema: 'verified', backend: 'option' })); checkRequest(f.requests[2], 'switch');
   for (const [index, phase, backend] of [[2, 'copying', 'option'], [3, 'verified', 'option'], [4, 'flipped', 'table'], [5, 'stable', 'table']]) {
@@ -64,7 +66,7 @@ function checkRequest(request, operation, purpose, scope = 'site') {
   assert.equal(f.notices.get('foogm-storage-notice-7'), 'Storage updated.'); checks++;
 }
 for (const [overrides, operation, target] of [[{ schema: 'verified' }, 'switch', 'table'], [{ schema: 'verified', retained: true }, 'replace', 'table'], [{ schema: 'verified', backend: 'table', target: 'table' }, 'switch', 'option'], [{ schema: 'verified', phase: 'copying', target: 'table', discardable: true }, 'recover', 'table']]) {
-  const f = fixture(overrides); f.start(operation);
+  const f = fixture(overrides, true, operation === 'recover'); f.start(operation);
   let i = 0;
   if (target === 'table' && operation !== 'recover') {
     checkRequest(f.requests[i], 'preflight', 'option_import'); f.requests[i++].respond(okay({ decode_admitted: true }));
@@ -100,16 +102,21 @@ for (const failAt of [0, 1, 2, 3]) {
   assert.equal(f.requests.length, 258); assert.equal(f.reloads, 0); assert.match(f.result.textContent, /saved its progress/); checks++;
 }
 for (const operation of ['clear', 'remove_all']) {
-  const cancelled = fixture({}, false); cancelled.start(operation);
+  const cancelled = fixture({}, false, true); cancelled.start(operation);
   assert.equal(cancelled.confirmations.length, 1); assert.equal(cancelled.requests.length, 0); assert.equal(cancelled.reloads, 0); checks++;
-  const accepted = fixture(); accepted.start(operation);
+  const accepted = fixture({}, true, true); accepted.start(operation);
   assert.equal(accepted.confirmations.length, 1); checkRequest(accepted.requests[0], operation);
   accepted.requests[0].respond(okay({ complete: true })); assert.equal(accepted.reloads, 1); checks++;
 }
 {
   const f = fixture(); f.select('table'); f.start();
   f.requests[0].respond({ success: false, data: { code: 'foogallery_migrate_storage_busy', message: 'Internal ownership detail.' } }, 409);
-  assert.match(f.result.textContent, /Storage is busy/); assert.match(f.errorDetail.textContent, /Internal ownership detail/);
+  assert.match(f.result.textContent, /Storage is busy/); assert.match(f.notices.get('foogm-storage-error-7'), /Internal ownership detail/);
+  const help = fixture({}, true, true, f.notices);
+  assert.match(help.errorDetail.textContent, /Internal ownership detail/); assert.equal(help.lastError.hidden, false); assert.equal(help.requests.length, 0);
+  help.start('clear'); checkRequest(help.requests[0], 'clear');
+  help.requests[0].respond(okay({ complete: true }));
+  assert.equal(help.notices.get('foogm-storage-error-7'), undefined, 'Successful operations clear the last browser-local error'); checks++;
   assert.ok(!f.change.disabled && !f.spinner.active && f.radios.every(r => !r.disabled));
   f.select('option'); assert.ok(f.change.disabled); checks++;
 }
