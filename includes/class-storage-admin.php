@@ -74,10 +74,7 @@ class StorageAdmin {
 		$gallery_limit = is_int( $gallery_limit ) && $gallery_limit > 0 ? $gallery_limit : self::ADVICE_THRESHOLD_GALLERIES;
 		$image_limit = is_int( $image_limit ) && $image_limit > 0 ? $image_limit : self::ADVICE_THRESHOLD_IMAGES;
 		if ( $counts['galleries'] < $gallery_limit && $counts['images'] < $image_limit ) { return ''; }
-		$summary = null === $saved ? '' : sprintf(
-			/* translators: %s: UTC date and time when gallery discovery counts were saved. */
-			__( 'Saved discovery counts from %s UTC: ', 'foogallery-migrate' ), gmdate( 'Y-m-d H:i', $saved['refreshed_at'] )
-		);
+		$summary = '';
 		if ( $counts['galleries'] > 0 ) {
 			/* translators: %s: source gallery record count, formatted for the locale. */
 			$summary .= sprintf( null === $saved ? __( 'Detected gallery records: %s.', 'foogallery-migrate' ) : __( 'Discovered galleries: %s.', 'foogallery-migrate' ), self::format_count( $counts['galleries'] ) ) . ' ';
@@ -310,7 +307,8 @@ class StorageAdmin {
 		echo '</section>';
 		global $wp_version;
 		$unknown = __( 'Unavailable', 'foogallery-migrate' );
-		$counts = StorageSourceCounts::measure();
+		$saved = StorageDiscoverySummary::read();
+		$counts = null === $saved ? StorageSourceCounts::measure() : array( 'galleries' => $saved['galleries'], 'images' => $saved['images'] );
 		$rows = array(
 			__( 'Plugin version', 'foogallery-migrate' ) => defined( 'FOOGM_VERSION' ) ? FOOGM_VERSION : $unknown,
 			__( 'WordPress version', 'foogallery-migrate' ) => isset( $wp_version ) ? $wp_version : $unknown,
@@ -323,8 +321,8 @@ class StorageAdmin {
 			__( 'Shared schema', 'foogallery-migrate' ) => $s['schema'],
 			__( 'Option bytes', 'foogallery-migrate' ) => $s['option_bytes'],
 			__( 'Site table records (including retained copies)', 'foogallery-migrate' ) => $s['records'],
-			__( 'Detected gallery records', 'foogallery-migrate' ) => $counts['galleries'],
-			__( 'Detected image records', 'foogallery-migrate' ) => $counts['images'],
+			( null === $saved ? __( 'Detected gallery records', 'foogallery-migrate' ) : __( 'Discovered galleries', 'foogallery-migrate' ) ) => null === $counts['galleries'] ? null : self::format_count( $counts['galleries'] ),
+			( null === $saved ? __( 'Detected image records (partial estimate)', 'foogallery-migrate' ) : ( $saved['images_complete'] ? __( 'Image entries', 'foogallery-migrate' ) : __( 'Known image entries (partial)', 'foogallery-migrate' ) ) ) => null === $counts['images'] ? null : self::format_count( $counts['images'] ),
 		);
 		echo '<section id="foogm-storage-details"><h3>' . esc_html__( 'Technical details', 'foogallery-migrate' ) . '</h3><table class="widefat striped"><tbody>';
 		$report = array();
@@ -335,7 +333,15 @@ class StorageAdmin {
 		}
 		echo '</tbody></table>';
 		if ( ! empty( $s['retained'] ) ) { echo '<p>' . esc_html__( 'An inactive table copy is retained. Switching to tables replaces it with current migration data.', 'foogallery-migrate' ) . '</p>'; }
-		echo '<p class="description">' . esc_html__( 'Source counts are advisory estimates, not the selected migration queue. Serialized image lists and unscanned WordPress galleries are not loaded to calculate counts.', 'foogallery-migrate' ) . '</p></section>';
+		if ( null !== $saved ) {
+			/* translators: %s: UTC date and time when gallery discovery counts were saved. */
+			$refreshed = sprintf( __( 'Discovery counts saved: %s UTC.', 'foogallery-migrate' ), gmdate( 'Y-m-d H:i', $saved['refreshed_at'] ) );
+			echo '<p class="description">' . esc_html( $refreshed ) . '</p><p class="description">' . esc_html__( 'Counts come from saved gallery discovery, not unique media or remaining migration work. Use Refresh Galleries to update them.', 'foogallery-migrate' ) . '</p>';
+			$report[] = $refreshed;
+		} else {
+			echo '<p class="description">' . esc_html__( 'Source counts are advisory estimates, not the selected migration queue. Serialized image lists and unscanned WordPress galleries are not loaded to calculate counts.', 'foogallery-migrate' ) . '</p>';
+		}
+		echo '</section>';
 		echo '<details><summary>' . esc_html__( 'Information for support', 'foogallery-migrate' ) . '</summary><p><label for="foogm-support-report">' . esc_html__( 'Copy this summary when contacting support. It contains no gallery content, credentials or server paths.', 'foogallery-migrate' ) . '</label></p><textarea id="foogm-support-report" class="large-text code" rows="10" readonly>' . esc_textarea( implode( "\n", $report ) ) . '</textarea></details>';
 		self::render_script( $s, $blog );
 	}

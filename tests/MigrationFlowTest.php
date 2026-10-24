@@ -189,7 +189,8 @@ class MigrationFlowTest extends TestCase {
 		$method->setAccessible( true );
 		$message = $method->invoke( null, array( 'backend' => 'option', 'phase' => 'stable',
 			'option_bytes' => '0', 'calibrated' => true, 'problem' => '' ) );
-		$this->assertStringContainsString( 'Saved discovery counts from ' . gmdate( 'Y-m-d H:i', $old['refreshed_at'] ) . ' UTC:', $message );
+		$this->assertStringStartsWith( 'Discovered galleries: 100.', $message );
+		$this->assertStringNotContainsString( 'Saved discovery counts from ', $message );
 	}
 
 	public function test_gallery_migration_imports_configured_images_per_turn(): void {

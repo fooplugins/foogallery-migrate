@@ -50,8 +50,9 @@ class StorageSourceCountsTest extends TestCase {
 		$db->queries = array();
 		$summary['galleries'] = 100;
 		$this->assertTrue( StorageDiscoverySummary::publish( $summary ) );
-		$this->assertStringContainsString( 'Saved discovery counts from ' . gmdate( 'Y-m-d H:i', $summary['refreshed_at'] ) . ' UTC: Discovered galleries: 100.', $this->message() );
-		$this->assertCount( 1, $db->queries );
+		$this->assertStringStartsWith( 'Discovered galleries: 100.', $this->message() );
+		$this->assertStringNotContainsString( 'Saved discovery counts from ', $this->message() );
+		$this->assertCount( 2, $db->queries );
 		$this->assertStringContainsString( StorageCleanup::MARKER, $db->queries[0] );
 		$db->queries = array();
 		$summary['galleries'] = 0; $summary['images'] = 1000; $summary['images_complete'] = false;

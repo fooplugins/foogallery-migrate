@@ -6,10 +6,13 @@ namespace {
 }
 namespace FooPlugins\FooGalleryMigrate\Tests {
 use FooPlugins\FooGalleryMigrate\StorageAdmin;
+use FooPlugins\FooGalleryMigrate\StorageDiscoverySummary;
 use PHPUnit\Framework\TestCase;
 
 class StorageTroubleshootingTest extends TestCase {
 	protected function setUp(): void {
+		$GLOBALS['foogallery_migrate_test_options'] = array();
+		unset( $GLOBALS['foogallery_migrate_test_failed_options'], $GLOBALS['foogallery_migrate_test_failed_deletes'] );
 		$GLOBALS['wpdb'] = new TroubleshootingMetadataWpdb();
 		$GLOBALS['foogallery_migrate_test_capabilities'] = array( 'manage_options' => true );
 		$GLOBALS['foogallery_migrate_test_blog_id'] = 7;
@@ -44,6 +47,41 @@ class StorageTroubleshootingTest extends TestCase {
 		$this->assertStringNotContainsString( '/private/', $report );
 		$this->assertStringNotContainsString( 'nonce', $report );
 		$this->assertSame( array(), $GLOBALS['wpdb']->writes );
+	}
+	public function test_technical_details_and_support_use_saved_counts_without_source_queries(): void {
+		$summary = array( 'version' => 1, 'galleries' => 114, 'images' => 12345, 'images_complete' => true, 'refreshed_at' => time() - 3600 );
+		$formatted = function_exists( 'number_format_i18n' ) ? number_format_i18n( 12345 ) : number_format( 12345 );
+		StorageDiscoverySummary::publish( $summary );
+		ob_start(); StorageAdmin::render_troubleshooting( $this->status() ); $html = ob_get_clean();
+		$dom = new \DOMDocument(); @$dom->loadHTML( $html ); $xpath = new \DOMXPath( $dom );
+		$this->assertSame( '114', $xpath->query( '//section[@id="foogm-storage-details"]//tr[th="Discovered galleries"]/td' )->item( 0 )->textContent );
+		$this->assertSame( $formatted, $xpath->query( '//section[@id="foogm-storage-details"]//tr[th="Image entries"]/td' )->item( 0 )->textContent );
+		$this->assertStringNotContainsString( 'SELECT COUNT(', implode( ' ', $GLOBALS['wpdb']->queries ) );
+		$this->assertStringNotContainsString( 'SHOW TABLES LIKE', implode( ' ', $GLOBALS['wpdb']->queries ) );
+		$report = $xpath->query( '//textarea[@id="foogm-support-report"]' )->item( 0 )->textContent;
+		$this->assertStringContainsString( 'Image entries: ' . $formatted, $report );
+		$method = new \ReflectionMethod( StorageAdmin::class, 'recommendation_message' ); $method->setAccessible( true );
+		$notice = $method->invoke( null, $this->status() );
+		$this->assertStringContainsString( 'Discovered galleries: 114.', $notice );
+		$this->assertStringContainsString( 'Image entries: ' . $formatted . '.', $notice );
+		$this->assertStringNotContainsString( ' UTC:', $notice );
+		$this->assertStringContainsString( 'Discovery counts saved: ' . gmdate( 'Y-m-d H:i', $summary['refreshed_at'] ) . ' UTC.', $report );
+		$this->assertStringContainsString( 'Use Refresh Galleries to update them.', $html );
+		$this->assertSame( array(), $GLOBALS['wpdb']->writes );
+		$summary['images_complete'] = false; StorageDiscoverySummary::publish( $summary );
+		ob_start(); StorageAdmin::render_troubleshooting( $this->status() ); $html = ob_get_clean();
+		$this->assertStringContainsString( 'Known image entries (partial)', $html );
+	}
+	public function test_missing_or_invalid_summary_keeps_partial_scalar_count_fallback(): void {
+		foreach ( array( false, array( 'version' => 99 ) ) as $invalid ) {
+			$GLOBALS['foogallery_migrate_test_options'][StorageDiscoverySummary::OPTION] = $invalid;
+			$GLOBALS['wpdb']->queries = array();
+			ob_start(); StorageAdmin::render_troubleshooting( $this->status() ); $html = ob_get_clean();
+			$this->assertStringContainsString( 'Detected image records (partial estimate)', $html );
+			$this->assertStringContainsString( 'SELECT COUNT(', implode( ' ', $GLOBALS['wpdb']->queries ) );
+			$this->assertStringNotContainsString( 'Discovery counts saved:', $html );
+			$this->assertSame( array(), $GLOBALS['wpdb']->writes );
+		}
 	}
 	public function test_cleanup_controls_keep_exact_nonce_fields_one_confirmation_and_native_rows(): void {
 		ob_start(); StorageAdmin::render_troubleshooting( $this->status() ); $html = ob_get_clean();

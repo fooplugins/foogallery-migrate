@@ -2,7 +2,33 @@
 
 **Updated:** 2026-10-24
 
-## Current amendment — saved discovery count summary
+## Current amendment — matching Troubleshooting counts
+
+Brad requested Technical details to use the same valid saved gallery/image counts
+as the admin notice, and to remove the saved-date prefix from that notice.
+
+- Technical details and Information for support now prefer the saved summary;
+  missing/invalid summaries retain bounded scalar SQL with partial image labels.
+- The saved UTC time remains in Technical details/support only. The notice starts
+  directly with its count information; no discovery, cache-write or safety behavior
+  changes. Counts remain saved source entries, not unique media or remaining work.
+- Local checks pass: **77 focused tests / 714 assertions**, **64 rendered workflow
+  checks**, PHP 5.4 syntax and whitespace. Translation strings and operator guidance
+  updated. Agent CI is unavailable because this repo has no Actions workflows.
+- Complete maintained suite at explicit 256 MiB: **1,610 tests / 311,750 assertions**,
+  zero skips/errors/failures (3m52.501s, 133.61 MiB reported peak).
+- Production ZIP: **92 product files**, zero development payloads; CRC/path/symlink/
+  source-parity checks pass. SHA-256
+  `ceeffbefbc24df748b417551cf6aeb7a39e4dcd1ee20002516dfbf3ca8b756c2`.
+- Brad authorized committing, pushing to PR #15 and deployment to the test site.
+  Deployment must preserve its current mode, saved summary and all migration/source
+  data; verify installed-file identity, protected-data hashes and matching saved
+  notice/technical/support counts without source queries or forced rediscovery.
+  Earlier independent/native-browser/lifecycle receipts below remain scoped to
+  their original revisions; this amendment does not repeat them. No merge or public
+  release is authorized; v2 remains blocked until Brad tests and merges PR #15.
+
+## Previous amendment — saved discovery count summary
 
 Brad approved the saved count summary discussed in this chat, validation, committing
 and pushing all pending UI changes to PR #15, and deployment to the prepared test

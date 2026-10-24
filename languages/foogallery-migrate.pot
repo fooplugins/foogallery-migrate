@@ -8,7 +8,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Language-Team: FooPlugins <info@fooplugins.com>\n"
 "Last-Translator: Brad Vincent <brad@fooplugins.com>\n"
-"POT-Creation-Date: 2026-10-24 11:29+0000\n"
+"POT-Creation-Date: 2026-10-24 13:54+0000\n"
 "Report-Msgid-Bugs-To: https://fooplugins.com\n"
 "X-Poedit-Basepath: ..\n"
 "X-Poedit-KeywordsList: __;_e;_ex:1,2c;_n:1,2;_n_noop:1,2;_nx:1,2,4c;_nx_noop:1,2,3c;_x:1,2c;esc_attr__;esc_attr_e;esc_attr_x:1,2c;esc_html__;esc_html_e;esc_html_x:1,2c\n"
@@ -160,7 +160,7 @@ msgstr ""
 msgid "Large Migrations Detected!"
 msgstr ""
 
-#: includes/class-storage-admin.php:59, includes/class-storage-admin.php:213, includes/class-storage-admin.php:239
+#: includes/class-storage-admin.php:59, includes/class-storage-admin.php:210, includes/class-storage-admin.php:236
 msgid "Change storage"
 msgstr ""
 
@@ -173,341 +173,356 @@ msgstr ""
 msgid "Saved migration data: %s."
 msgstr ""
 
-#. translators: %s: UTC date and time when gallery discovery counts were saved.
-#: includes/class-storage-admin.php:79
-msgid "Saved discovery counts from %s UTC: "
-msgstr ""
-
 #. translators: %s: source gallery record count, formatted for the locale.
-#: includes/class-storage-admin.php:83
+#: includes/class-storage-admin.php:80
 msgid "Detected gallery records: %s."
 msgstr ""
 
-#: includes/class-storage-admin.php:83
+#: includes/class-storage-admin.php:80
 msgid "Discovered galleries: %s."
 msgstr ""
 
-#: includes/class-storage-admin.php:89
+#: includes/class-storage-admin.php:86
 msgid "Image entry total is unknown or incomplete."
 msgstr ""
 
-#: includes/class-storage-admin.php:87
+#: includes/class-storage-admin.php:84
 msgid "Detected image records: %s (partial estimate)."
 msgstr ""
 
-#: includes/class-storage-admin.php:87
+#: includes/class-storage-admin.php:84
 msgid "Image entries: %s."
 msgstr ""
 
-#: includes/class-storage-admin.php:87
+#: includes/class-storage-admin.php:84
 msgid "Known image entries: %s (partial)."
 msgstr ""
 
-#: includes/class-storage-admin.php:114, includes/class-storage-admin.php:115, includes/class-storage-admin.php:241, includes/class-storage-admin.php:312
+#: includes/class-storage-admin.php:111, includes/class-storage-admin.php:112, includes/class-storage-admin.php:238, includes/class-storage-admin.php:309
 msgid "Unavailable"
 msgstr ""
 
-#: includes/class-storage-admin.php:125, includes/class-storage-admin.php:218, includes/class-storage-admin.php:270
+#: includes/class-storage-admin.php:122, includes/class-storage-admin.php:215, includes/class-storage-admin.php:267
 msgid "Storage access denied."
 msgstr ""
 
-#: includes/class-storage-admin.php:140
+#: includes/class-storage-admin.php:137
 msgid "Storage size is unavailable."
 msgstr ""
 
-#: includes/class-storage-admin.php:154
+#: includes/class-storage-admin.php:151
 msgid "Record count is unavailable."
 msgstr ""
 
-#: includes/class-storage-admin.php:157
+#: includes/class-storage-admin.php:154
 msgid "Shared tables need attention. No automatic repair or cleanup has been attempted."
 msgstr ""
 
-#: includes/class-storage-admin.php:162
+#: includes/class-storage-admin.php:159
 msgid "Storage health could not be read. Current authority has not been changed."
 msgstr ""
 
-#: includes/class-storage-admin.php:169
+#: includes/class-storage-admin.php:166
 msgid "Remove all FooGallery Migrate internal data (keep galleries and media)"
 msgstr ""
 
-#: includes/class-storage-admin.php:171
+#: includes/class-storage-admin.php:168
 msgid "Clear migration state (this may allow duplicate galleries and media)"
 msgstr ""
 
-#: includes/class-storage-admin.php:175
+#: includes/class-storage-admin.php:172
 msgid "Continue clearing migration state"
 msgstr ""
 
-#: includes/class-storage-admin.php:179
+#: includes/class-storage-admin.php:176
 msgid "Recover recorded switch"
 msgstr ""
 
-#: includes/class-storage-admin.php:180
+#: includes/class-storage-admin.php:177
 msgid "Discard this incomplete table copy (keep current options)"
 msgstr ""
 
-#: includes/class-storage-admin.php:184
+#: includes/class-storage-admin.php:181
 msgid "Switch this site to options"
 msgstr ""
 
-#: includes/class-storage-admin.php:185
+#: includes/class-storage-admin.php:182
 msgid "Replace retained table copy and switch this site to tables"
 msgstr ""
 
-#: includes/class-storage-admin.php:186
+#: includes/class-storage-admin.php:183
 msgid "Switch this site to tables"
 msgstr ""
 
-#: includes/class-storage-admin.php:190, includes/class-storage-admin.php:284
+#: includes/class-storage-admin.php:187, includes/class-storage-admin.php:281
 msgid "Reset migration progress"
 msgstr ""
 
-#: includes/class-storage-admin.php:191, includes/class-storage-admin.php:285
+#: includes/class-storage-admin.php:188, includes/class-storage-admin.php:282
 msgid "Remove all migration data"
 msgstr ""
 
-#: includes/class-storage-admin.php:192
+#: includes/class-storage-admin.php:189
 msgid "Continue storage change"
 msgstr ""
 
-#: includes/class-storage-admin.php:193, includes/class-storage-admin.php:286
+#: includes/class-storage-admin.php:190, includes/class-storage-admin.php:283
 msgid "Cancel storage change"
 msgstr ""
 
-#: includes/class-storage-admin.php:195
+#: includes/class-storage-admin.php:192
 msgid "Reset migration progress and history? Galleries and media will be kept. Migrating again may create duplicates."
 msgstr ""
 
-#: includes/class-storage-admin.php:196
+#: includes/class-storage-admin.php:193
 msgid "Remove all migration data, plugin settings and storage tables? Galleries and media will be kept. Migrating again may create duplicates."
 msgstr ""
 
-#: includes/class-storage-admin.php:197
+#: includes/class-storage-admin.php:194
 msgid "Cancel this unfinished storage change? Current storage and migration data will be kept."
 msgstr ""
 
-#: includes/class-storage-admin.php:199
+#: includes/class-storage-admin.php:196
 msgid "Continue cleanup"
 msgstr ""
 
-#: includes/class-storage-admin.php:227
+#: includes/class-storage-admin.php:224
 msgid "Migration Storage"
 msgstr ""
 
-#: includes/class-storage-admin.php:228
+#: includes/class-storage-admin.php:225
 msgid "Choose where migration progress and history are stored."
 msgstr ""
 
-#: includes/class-storage-admin.php:241
+#: includes/class-storage-admin.php:238
 msgid "Database tables"
 msgstr ""
 
-#: includes/class-storage-admin.php:241
+#: includes/class-storage-admin.php:238
 msgid "WordPress options"
 msgstr ""
 
-#: includes/class-storage-admin.php:242
+#: includes/class-storage-admin.php:239
 msgid "Current storage:"
 msgstr ""
 
-#: includes/class-storage-admin.php:230
+#: includes/class-storage-admin.php:227
 msgid "Storage mode"
 msgstr ""
 
-#: includes/class-storage-admin.php:247
+#: includes/class-storage-admin.php:244
 msgid "Migration data:"
 msgstr ""
 
-#: includes/class-storage-admin.php:245
+#: includes/class-storage-admin.php:242
 msgid "Migration records:"
 msgstr ""
 
-#: includes/class-storage-admin.php:249
+#: includes/class-storage-admin.php:246
 msgid "Changing storage does not change your galleries or media."
 msgstr ""
 
-#: includes/class-storage-admin.php:261
+#: includes/class-storage-admin.php:258
 msgid "A storage change is unfinished. Continue it in Troubleshooting."
 msgstr ""
 
-#: includes/class-storage-admin.php:259
+#: includes/class-storage-admin.php:256
 msgid "Storage switching is not available on this site. See Troubleshooting for details."
 msgstr ""
 
-#: includes/class-storage-admin.php:257
+#: includes/class-storage-admin.php:254
 msgid "Storage needs attention. See Troubleshooting for details."
 msgstr ""
 
-#: includes/class-storage-admin.php:255
+#: includes/class-storage-admin.php:252
 msgid "Migration data cleanup is unfinished. Continue it in Troubleshooting."
 msgstr ""
 
-#: includes/class-storage-admin.php:253
+#: includes/class-storage-admin.php:250
 msgid "Table storage is not available on multisite. Continue using WordPress options."
 msgstr ""
 
-#: includes/class-storage-admin.php:276
+#: includes/class-storage-admin.php:273
 msgid "If you are having trouble with a migration, try the following:"
 msgstr ""
 
-#: includes/class-storage-admin.php:284
+#: includes/class-storage-admin.php:281
 msgid "Clear progress and history while keeping the selected storage mode."
 msgstr ""
 
-#: includes/class-storage-admin.php:285
+#: includes/class-storage-admin.php:282
 msgid "Remove plugin settings, progress, history and owned storage tables."
 msgstr ""
 
-#: includes/class-storage-admin.php:286
+#: includes/class-storage-admin.php:283
 msgid "Discard the unfinished table copy and keep current option data."
 msgstr ""
 
-#: includes/class-storage-admin.php:288
+#: includes/class-storage-admin.php:285
 msgid "Reset & cleanup"
 msgstr ""
 
-#: includes/class-storage-admin.php:288
+#: includes/class-storage-admin.php:285
 msgid "Galleries and media are kept. Migrating again after a reset or removal may create duplicates."
 msgstr ""
 
-#: includes/class-storage-admin.php:294
+#: includes/class-storage-admin.php:291
 msgid "A storage change is unfinished. Pause migration tabs, then continue the recorded change."
 msgstr ""
 
-#: includes/class-storage-admin.php:292
+#: includes/class-storage-admin.php:289
 msgid "Storage needs attention. Review the details below before continuing a migration."
 msgstr ""
 
-#: includes/class-storage-admin.php:290
+#: includes/class-storage-admin.php:287
 msgid "Cleanup is unfinished. Continue the recorded cleanup below."
 msgstr ""
 
-#: includes/class-storage-admin.php:299
+#: includes/class-storage-admin.php:296
 msgid "Last storage request (this browser)"
 msgstr ""
 
-#: includes/class-storage-admin.php:309
+#: includes/class-storage-admin.php:306
 msgid "These storage cleanup controls are not available on this site."
 msgstr ""
 
-#: includes/class-storage-admin.php:315
+#: includes/class-storage-admin.php:313
 msgid "Plugin version"
 msgstr ""
 
-#: includes/class-storage-admin.php:316
+#: includes/class-storage-admin.php:314
 msgid "WordPress version"
 msgstr ""
 
-#: includes/class-storage-admin.php:317
+#: includes/class-storage-admin.php:315
 msgid "PHP version"
 msgstr ""
 
-#: includes/class-storage-admin.php:318
+#: includes/class-storage-admin.php:316
 msgid "PHP memory limit"
 msgstr ""
 
-#: includes/class-storage-admin.php:319
+#: includes/class-storage-admin.php:317
 msgid "Site type"
 msgstr ""
 
-#: includes/class-storage-admin.php:319
+#: includes/class-storage-admin.php:317
 msgid "Multisite (options only)"
 msgstr ""
 
-#: includes/class-storage-admin.php:319
+#: includes/class-storage-admin.php:317
 msgid "Single site"
 msgstr ""
 
-#: includes/class-storage-admin.php:320
+#: includes/class-storage-admin.php:318
 msgid "Site ID"
 msgstr ""
 
-#: includes/class-storage-admin.php:321
+#: includes/class-storage-admin.php:319
 msgid "Backend"
 msgstr ""
 
-#: includes/class-storage-admin.php:322
+#: includes/class-storage-admin.php:320
 msgid "Switch phase"
 msgstr ""
 
-#: includes/class-storage-admin.php:323
+#: includes/class-storage-admin.php:321
 msgid "Shared schema"
 msgstr ""
 
-#: includes/class-storage-admin.php:324
+#: includes/class-storage-admin.php:322
 msgid "Option bytes"
 msgstr ""
 
-#: includes/class-storage-admin.php:325
+#: includes/class-storage-admin.php:323
 msgid "Site table records (including retained copies)"
 msgstr ""
 
-#: includes/class-storage-admin.php:326
+#: includes/class-storage-admin.php:324
 msgid "Detected gallery records"
 msgstr ""
 
-#: includes/class-storage-admin.php:327
-msgid "Detected image records"
+#: includes/class-storage-admin.php:324
+msgid "Discovered galleries"
 msgstr ""
 
-#: includes/class-storage-admin.php:329
+#: includes/class-storage-admin.php:325
+msgid "Detected image records (partial estimate)"
+msgstr ""
+
+#: includes/class-storage-admin.php:325
+msgid "Image entries"
+msgstr ""
+
+#: includes/class-storage-admin.php:325
+msgid "Known image entries (partial)"
+msgstr ""
+
+#: includes/class-storage-admin.php:327
 msgid "Technical details"
 msgstr ""
 
-#: includes/class-storage-admin.php:337
+#: includes/class-storage-admin.php:335
 msgid "An inactive table copy is retained. Switching to tables replaces it with current migration data."
 msgstr ""
 
-#: includes/class-storage-admin.php:338
+#: includes/class-storage-admin.php:342
 msgid "Source counts are advisory estimates, not the selected migration queue. Serialized image lists and unscanned WordPress galleries are not loaded to calculate counts."
 msgstr ""
 
+#: includes/class-storage-admin.php:338
+msgid "Discovery counts saved: %s UTC."
+msgstr ""
+
 #: includes/class-storage-admin.php:339
+msgid "Counts come from saved gallery discovery, not unique media or remaining migration work. Use Refresh Galleries to update them."
+msgstr ""
+
+#: includes/class-storage-admin.php:345
 msgid "Information for support"
 msgstr ""
 
-#: includes/class-storage-admin.php:339
+#: includes/class-storage-admin.php:345
 msgid "Copy this summary when contacting support. It contains no gallery content, credentials or server paths."
 msgstr ""
 
-#: includes/class-storage-admin.php:394
+#: includes/class-storage-admin.php:400
 msgid "Changing storage…"
 msgstr ""
 
-#: includes/class-storage-admin.php:394
+#: includes/class-storage-admin.php:400
 msgid "Updating migration data…"
 msgstr ""
 
-#: includes/class-storage-admin.php:399
+#: includes/class-storage-admin.php:405
 msgid "The response could not be read. Reload to check storage before continuing."
 msgstr ""
 
-#: includes/class-storage-admin.php:403
+#: includes/class-storage-admin.php:409
 msgid "Storage returned an unexpected status. Reload to check progress before continuing."
 msgstr ""
 
-#: includes/class-storage-admin.php:406
+#: includes/class-storage-admin.php:412
 msgid "Storage has saved its progress. Reload and choose Continue storage change."
 msgstr ""
 
-#: includes/class-storage-admin.php:412
+#: includes/class-storage-admin.php:418
 msgid "Storage updated."
 msgstr ""
 
-#: includes/class-storage-admin.php:412
+#: includes/class-storage-admin.php:418
 msgid "Migration data updated."
 msgstr ""
 
-#: includes/class-storage-admin.php:417
+#: includes/class-storage-admin.php:423
 msgid "Storage is busy. Pause any running migration, then reload to check progress."
 msgstr ""
 
-#: includes/class-storage-admin.php:417
+#: includes/class-storage-admin.php:423
 msgid "The operation could not finish. Reload to check progress. More information is available in Troubleshooting."
 msgstr ""
 
-#: includes/class-storage-admin.php:421
+#: includes/class-storage-admin.php:427
 msgid "The connection ended. Reload to check storage before continuing."
 msgstr ""
 
