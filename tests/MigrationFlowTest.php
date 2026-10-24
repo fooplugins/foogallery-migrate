@@ -5,6 +5,7 @@ namespace FooPlugins\FooGalleryMigrate\Tests;
 use FooPlugins\FooGalleryMigrate\MigratedStore;
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
+use FooPlugins\FooGalleryMigrate\StorageDiscoverySummary;
 use FooPlugins\FooGalleryMigrate\Objects\Album;
 use FooPlugins\FooGalleryMigrate\Objects\Gallery;
 use FooPlugins\FooGalleryMigrate\Objects\Image;
@@ -36,8 +37,15 @@ class MigrationFlowTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_gallery_templates'] = array();
 		$GLOBALS['foogallery_migrate_test_taxonomies']        = array();
 		$GLOBALS['foogallery_migrate_test_foogallery_fs']     = null;
+		unset( $GLOBALS['foogallery_migrate_test_failed_options'] );
+		unset( $GLOBALS['foogallery_migrate_test_failed_deletes'] );
 		$GLOBALS['foogallery_migrate_engine_instance'] = new MigratorEngine( new MigratedStore( false, new MigratorSettings() ) );
 		unset( $GLOBALS['wpdb'] );
+	}
+
+	protected function tearDown(): void {
+		unset( $GLOBALS['foogallery_migrate_test_failed_options'], $GLOBALS['foogallery_migrate_test_failed_deletes'] );
+		parent::tearDown();
 	}
 
 	public function test_gallery_migration_can_resume_and_tracks_migrated_objects(): void {
@@ -111,10 +119,77 @@ class MigrationFlowTest extends TestCase {
 		$this->assertSame( '.gallery-source{}', $this->get_meta_update_value( $completed[0]->migrated_id, FOOGALLERY_META_CUSTOM_CSS ) );
 		$this->assertSame( array( 'queued' => 1, 'completed' => 1, 'progress' => 100 ), $migrator->get_state() );
 		$this->assertTrue( $engine->has_object_been_migrated( $uid ) );
+		$this->assertSame( 2, StorageDiscoverySummary::read()['images'], 'The saved total remains source entries after no migration work remains.' );
 
 		$summary = $engine->get_migrated_objects_summary();
 		$this->assertSame( 1, $summary['gallery']['count'] );
 		$this->assertSame( 2, $summary['image']['count'] );
+	}
+
+	public function test_gallery_discovery_saves_total_source_entries_and_reuses_the_snapshot_until_refresh(): void {
+		$plugin = new FakeSourcePlugin();
+		$gallery = $this->create_gallery( $plugin, 701, 'Counted', array() );
+		$gallery->children_count = 1001; // Known without loading child objects.
+		$plugin->galleries = array( $gallery );
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->run_detection();
+		$this->assertNull( StorageDiscoverySummary::read() );
+		$engine->get_gallery_migrator()->get_objects_to_migrate();
+		$summary = StorageDiscoverySummary::read();
+		$this->assertSame( 1, $summary['galleries'] );
+		$this->assertSame( 1001, $summary['images'] );
+		$this->assertTrue( $summary['images_complete'] );
+		$this->assertGreaterThan( 0, $summary['refreshed_at'] );
+		$plugin->galleries = array();
+		$this->assertCount( 1, $engine->get_gallery_migrator()->get_objects_to_migrate() );
+		$this->assertSame( $summary, StorageDiscoverySummary::read() );
+		$engine->get_gallery_migrator()->get_objects_to_migrate( true );
+		$this->assertSame( 0, StorageDiscoverySummary::read()['galleries'] );
+		$engine->run_detection();
+		$this->assertNull( StorageDiscoverySummary::read(), 'Re-detection retires the old source snapshot.' );
+	}
+
+	public function test_failed_gallery_publication_does_not_save_successful_counts(): void {
+		$plugin = new FakeSourcePlugin();
+		$plugin->galleries = array( $this->create_gallery( $plugin, 702, 'Not published', array() ) );
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->run_detection();
+		$GLOBALS['foogallery_migrate_test_failed_options'][FOOGALLERY_MIGRATE_OPTION_DATA] = true;
+		$engine->get_gallery_migrator()->get_objects_to_migrate( true );
+		$this->assertNull( StorageDiscoverySummary::read() );
+		unset( $GLOBALS['foogallery_migrate_test_failed_options'] );
+	}
+
+	public function test_failed_gallery_discovery_does_not_save_successful_counts(): void {
+		$plugin = new ThrowingDiscoverySourcePlugin();
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->run_detection();
+		try { $engine->get_gallery_migrator()->get_objects_to_migrate( true ); $this->fail( 'Discovery should fail.' ); }
+		catch ( \RuntimeException $error ) { $this->assertSame( 'Source discovery failed.', $error->getMessage() ); }
+		$this->assertNull( StorageDiscoverySummary::read() );
+	}
+
+	public function test_failed_summary_delete_and_update_leave_an_older_dated_snapshot_without_blocking_discovery(): void {
+		$plugin = new FakeSourcePlugin();
+		$plugin->galleries = array( $this->create_gallery( $plugin, 703, 'New source', array() ) );
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$engine = $GLOBALS['foogallery_migrate_engine_instance'];
+		$engine->run_detection();
+		$old = array( 'version' => 1, 'galleries' => 100, 'images' => 0,
+			'images_complete' => true, 'refreshed_at' => time() - 3600 );
+		$GLOBALS['foogallery_migrate_test_options'][StorageDiscoverySummary::OPTION] = $old;
+		$GLOBALS['foogallery_migrate_test_failed_deletes'][StorageDiscoverySummary::OPTION] = true;
+		$GLOBALS['foogallery_migrate_test_failed_options'][StorageDiscoverySummary::OPTION] = true;
+		$this->assertCount( 1, $engine->get_gallery_migrator()->get_objects_to_migrate( true ) );
+		$this->assertSame( $old, StorageDiscoverySummary::read() );
+		$method = new \ReflectionMethod( \FooPlugins\FooGalleryMigrate\StorageAdmin::class, 'recommendation_message' );
+		$method->setAccessible( true );
+		$message = $method->invoke( null, array( 'backend' => 'option', 'phase' => 'stable',
+			'option_bytes' => '0', 'calibrated' => true, 'problem' => '' ) );
+		$this->assertStringContainsString( 'Saved discovery counts from ' . gmdate( 'Y-m-d H:i', $old['refreshed_at'] ) . ' UTC:', $message );
 	}
 
 	public function test_gallery_migration_imports_configured_images_per_turn(): void {
@@ -1444,6 +1519,10 @@ class FakeSourcePlugin extends Plugin {
 	public function has_migratable_image_tags() {
 		return $this->has_image_tags;
 	}
+}
+
+class ThrowingDiscoverySourcePlugin extends FakeSourcePlugin {
+	public function find_galleries() { throw new \RuntimeException( 'Source discovery failed.' ); }
 }
 
 class FakeWpdb {

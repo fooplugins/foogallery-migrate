@@ -22,6 +22,7 @@ require_once FOOGM_PATH . 'includes/class-storage-scalar-observer.php';
 require_once FOOGM_PATH . 'includes/class-legacy-transaction-connection.php';
 require_once FOOGM_PATH . 'includes/class-legacy-option-backend.php';
 require_once FOOGM_PATH . 'includes/class-migrator-settings.php';
+require_once FOOGM_PATH . 'includes/class-storage-discovery-summary.php';
 require_once FOOGM_PATH . 'includes/class-migrated-store.php';
 require_once FOOGM_PATH . 'includes/class-storage-authority.php';
 require_once FOOGM_PATH . 'includes/class-storage-maintenance-gate.php';

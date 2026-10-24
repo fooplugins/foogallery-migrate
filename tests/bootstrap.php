@@ -182,6 +182,9 @@ function update_option( $name, $value, $autoload = null ) {
 }
 
 function delete_option( $name ) {
+	if ( ! empty( $GLOBALS['foogallery_migrate_test_failed_deletes'][ $name ] ) ) {
+		return false;
+	}
 	unset( $GLOBALS['foogallery_migrate_test_options'][ $name ] );
 	return true;
 }

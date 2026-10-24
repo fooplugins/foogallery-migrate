@@ -38,8 +38,8 @@ verified from this session and is left configured as-is.
 
 | Task | Dependencies / owner | Status | Routing / QA / repairs |
 |---|---|---|---|
-| S1–S4 implementation | This planning commit; one developer owns runtime/tests/readme, supervisor owns this plan and ops | developing | GPT-6 Sol High: discovery, advice and cleanup cross component boundaries; independent GPT-6 Sol Medium QA required; repairs 0 |
-| S5 integration and deployment | Accepted S1–S4 plus QA | pending | Supervisor runs full suite/package validation, serializes commits/push/deploy, updates PR/checklist without changing Brad's checkmarks |
+| S1–S4 implementation | Planning `4bcc681`; one developer owns runtime/tests/readme, supervisor owns this plan and ops | validating | GPT-6 Sol High `/root/saved_counts_dev`; independent GPT-6 Sol Medium `/root/saved_counts_qa` PASS; two bounded repairs (fallback/date copy, then test-isolation cleanup) |
+| S5 integration and deployment | Accepted S1–S4 plus QA | validating | Supervisor source/native/browser/full-suite/package acceptance passes below; commit/push/deployment next; preserve Brad's checklist checkmarks |
 
 Validation: focused count/discovery/cleanup tests, `node tests/storage-admin-workflow.js`,
 `php -d memory_limit=256M vendor/bin/phpunit`, PHP 5.4 parser, `npx gulp translate`,
@@ -48,11 +48,52 @@ Agent CI is attempted but this repository currently has no Actions workflows.
 Native validation uses the retained owned fixture, not Brad's test data for
 destructive/discovery tests. Record actual results below before acceptance.
 
+Acceptance evidence for the frozen candidate:
+
+- Complete maintained suite at explicit 256 MiB: **1,608 tests / 311,726 assertions**,
+  zero skips/errors/failures (2m54.882s, 133.61 MiB reported peak). Developer focused
+  checks: **102 tests / 778 assertions**. Independent final ordered QA filter:
+  **44 tests / 400 assertions**; both reviewed findings are resolved and test failure
+  flags no longer leak between cases. Rendered JS: **64 workflow checks**.
+- Seven product files pass PHP 5.4 parser checks; independent QA also ran literal
+  PHP 5.4.45 lint. Translation and whitespace checks pass. Agent CI was attempted;
+  no Actions workflows exist, so no CI pass is claimed.
+- Native owned WordPress 7.1.3 / PHP 8.4.6: actual AIGPL discovery publishes 100
+  galleries / 100 image entries, refresh changes that to 101 entries from two shared
+  media attachments. Summary is **125 bytes**, non-autoloaded; notice reads issue
+  **zero source-count queries** and cannot hydrate the legacy option. Ordinary
+  cached collection reads do not rewrite it.
+- Native public reset/remove-all and separate inactive-plugin uninstall delete/audit
+  the summary and preserve all source fixtures/media. Afterwards only the owned
+  100-gallery/two-attachment QA fixtures were removed; original post/metadata hashes
+  match. Private receipt: retained fixture's `saved-counts-native-owned.json`.
+- Real Chrome: **26 checks**, two cancelled confirmations and zero storage POSTs,
+  zero JS errors, unchanged migration-option hashes, desktop/narrow-screen layout,
+  saved notice counts and requested heading/copy/link removal. Screenshots inspected;
+  receipt `ui-browser-saved-counts-report.json` in the retained owned fixture.
+- An extra retained-copy conversion probe was safely refused: read-only census
+  confirmed that this reused fixture's old retained manifest no longer matches its
+  recorded digest. Option authority stayed stable. No marker/digest override or
+  history deletion was used to make that probe pass; no new conversion-journey pass
+  is claimed for this advisory amendment. This does not affect the native summary,
+  browser or cleanup receipts above; prior storage-core qualification stays scoped.
+- Production ZIP: **92 product files**, zero development payloads; CRC/path/symlink/
+  source-parity pass. SHA-256
+  `b4fbd52fdfae3789d4132787adb1af8857fb022ca1e770781729ef3b3f5fc506`.
+
+Cache writes remain best effort: if deleting and rewriting the option both fail,
+an older saved snapshot can remain. Advice displays its persisted UTC timestamp,
+not a claim that it reflects the latest refresh. Counts never authorize conversion.
+
 Usage: Brad previously said "dont worry about budget - just go"; no finite usage
 cap is imposed. Account-wide snapshots are monitored, not a task-only cost or hard
 cap. This amendment's first observed weekly reading is 29% used, limit `codex`,
 10,080-minute window, reset `1793382057`; previous work's consumption is not rebased
 or claimed as measured. No reset credits or billing changes are authorized.
+Latest development/QA/integration readings remain 29% used in that same window:
+observed account-wide increase since this amendment's first reading is 0 points
+at the tool's coarse precision, not a claim of zero task usage. One temporary
+telemetry failure was retried without stopping authorized work.
 
 ## Previous amendment — revised Settings and Troubleshooting copy
 

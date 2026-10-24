@@ -3,6 +3,7 @@ namespace FooPlugins\FooGalleryMigrate\Tests;
 
 use FooPlugins\FooGalleryMigrate\StorageAuthority;
 use FooPlugins\FooGalleryMigrate\StorageCleanup;
+use FooPlugins\FooGalleryMigrate\StorageDiscoverySummary;
 use FooPlugins\FooGalleryMigrate\StorageMaintenanceGate;
 use PHPUnit\Framework\TestCase;
 
@@ -42,6 +43,7 @@ class StorageCleanupTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_options'][FOOGALLERY_MIGRATE_OPTION_DATA] = serialize( array( 'queue' => array( 8 ) ) );
 		$GLOBALS['foogallery_migrate_test_options'][FOOGALLERY_MIGRATE_OPTION_SETTINGS] = serialize( array( 'images_per_turn' => 100 ) );
 		$GLOBALS['foogallery_migrate_test_options'][StorageAuthority::STORAGE_BACKUP_OPTION] = 'stale';
+		$GLOBALS['foogallery_migrate_test_options'][StorageDiscoverySummary::OPTION] = array( 'old' );
 		$GLOBALS['foogallery_migrate_test_transients'][StorageCleanup::TRANSIENT_PREFIX . '17'] = array( 'old' );
 		$this->db->users = array( 17 );
 		$this->db->output = array( 41 => 'unchanged FooGallery', 42 => 'unchanged attachment' );
@@ -51,6 +53,8 @@ class StorageCleanupTest extends TestCase {
 		$this->assertSame( serialize( array( 'images_per_turn' => 100 ) ), $GLOBALS['foogallery_migrate_test_options'][FOOGALLERY_MIGRATE_OPTION_SETTINGS] );
 		$this->assertSame( json_encode( $control ), $GLOBALS['foogallery_migrate_test_options'][StorageAuthority::CONTROL_OPTION] );
 		$this->assertArrayNotHasKey( StorageAuthority::STORAGE_BACKUP_OPTION, $GLOBALS['foogallery_migrate_test_options'] );
+		$this->assertArrayNotHasKey( StorageDiscoverySummary::OPTION, $GLOBALS['foogallery_migrate_test_options'] );
+		$this->assertContains( StorageDiscoverySummary::OPTION, $receipt['removed'] );
 		$this->assertArrayNotHasKey( StorageCleanup::TRANSIENT_PREFIX . '17', $GLOBALS['foogallery_migrate_test_transients'] );
 		$this->assertContains( StorageCleanup::TRANSIENT_PREFIX . '17', $GLOBALS['foogallery_migrate_test_deleted_transients'] );
 		$this->assertArrayNotHasKey( StorageCleanup::MARKER, $GLOBALS['foogallery_migrate_test_options'] );
@@ -63,12 +67,14 @@ class StorageCleanupTest extends TestCase {
 		$this->db->fail_drop_once = 'wp_foogallery_migrate_legacy_records';
 		$GLOBALS['foogallery_migrate_test_options'][FOOGALLERY_MIGRATE_OPTION_DATA] = 'old history';
 		$GLOBALS['foogallery_migrate_test_options'][FOOGALLERY_MIGRATE_OPTION_SETTINGS] = 'preferences';
+		$GLOBALS['foogallery_migrate_test_options'][StorageDiscoverySummary::OPTION] = array( 'old' );
 		$GLOBALS['foogallery_migrate_test_options'][StorageAuthority::AUTHORITY_OPTION] = 'partial sentinel';
 		$first = StorageCleanup::dispatch( 'remove_all', $this->request( 'remove_all' ) );
 		$this->assertFalse( $first['complete'] );
 		$this->assertArrayHasKey( StorageCleanup::MARKER, $GLOBALS['foogallery_migrate_test_options'] );
 		$this->assertArrayHasKey( StorageAuthority::AUTHORITY_OPTION, $GLOBALS['foogallery_migrate_test_options'], 'Sentinel is last, not removed before tables.' );
 		$this->assertArrayNotHasKey( FOOGALLERY_MIGRATE_OPTION_DATA, $GLOBALS['foogallery_migrate_test_options'] );
+		$this->assertArrayNotHasKey( StorageDiscoverySummary::OPTION, $GLOBALS['foogallery_migrate_test_options'] );
 		$this->assertArrayHasKey( 'wp_foogallery_migrate_legacy_records', $this->db->tables );
 		$this->assertContains( StorageCleanup::MARKER, $first['residual'] );
 		$this->assertContains( StorageAuthority::AUTHORITY_OPTION, $first['residual'] );

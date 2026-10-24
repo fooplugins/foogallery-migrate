@@ -12,6 +12,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
+use FooPlugins\FooGalleryMigrate\StorageDiscoverySummary;
 use FooPlugins\FooGalleryMigrate\Objects\Gallery;
 use FooPlugins\FooGalleryMigrate\Objects\Migratable;
 use stdClass;
@@ -131,11 +132,17 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
                         }
                     }
                 }
+				$summary = 'galleries' === $this->type ? StorageDiscoverySummary::capture( $objects ) : null;
 				if ( null !== $table ) {
 					// Replacement of a discovered table collection has no need to
 					// decode the discarded roots merely to calculate a diff.
-					$table->replace_discovered( $this->type, $objects, $discovery_context );
-				} else { $this->set_setting( $this->type, $objects ); }
+					$published = $table->replace_discovered( $this->type, $objects, $discovery_context );
+				} else { $published = $this->set_setting( $this->type, $objects ); }
+				if ( 'galleries' === $this->type ) {
+					// A failed collection publication must never make these counts current.
+					StorageDiscoverySummary::invalidate();
+					if ( $published ) { StorageDiscoverySummary::publish( $summary ); }
+				}
             }
 
             return $objects;

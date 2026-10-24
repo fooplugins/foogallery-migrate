@@ -56,31 +56,39 @@ class StorageAdmin {
 		$message = self::recommendation_message( $status );
 		if ( '' === $message ) { return; }
 		$url = self::settings_url();
-		echo '<div class="notice notice-info"><p>' . esc_html( $message ) . ' <a href="' . esc_url( $url ) . '">' . esc_html__( 'Change storage', 'foogallery-migrate' ) . '</a></p></div>';
+		echo '<div class="notice notice-info"><h3>' . esc_html__( 'Large Migrations Detected!', 'foogallery-migrate' ) . '</h3><p>' . esc_html( $message ) . ' <a href="' . esc_url( $url ) . '">' . esc_html__( 'Change storage', 'foogallery-migrate' ) . '</a></p></div>';
 	}
 
 	/** Advice only: never read migration state, run source discovery or alter admission. */
 	private static function recommendation_message( $status ) {
 		if ( is_multisite() || empty( $status['calibrated'] ) || 'option' !== $status['backend'] || 'stable' !== $status['phase'] || ! empty( $status['problem'] ) || null !== StorageCleanup::pending_scope() ) { return ''; }
+		$recommendation = __( 'We recommend changing your migration storage to use database tables before migrating.', 'foogallery-migrate' );
 		if ( self::recommendation_eligible( $status ) ) {
-			return __( 'For this migration size, we recommend database tables.', 'foogallery-migrate' ) . ' (' . self::format_bytes( $status['option_bytes'] ) . ')';
+			/* translators: %s: formatted size of saved migration data. */
+			return sprintf( __( 'Saved migration data: %s.', 'foogallery-migrate' ), self::format_bytes( $status['option_bytes'] ) ) . ' ' . $recommendation;
 		}
-		$counts = StorageSourceCounts::measure();
+		$saved = StorageDiscoverySummary::read();
+		$counts = null === $saved ? StorageSourceCounts::measure() : array( 'galleries' => $saved['galleries'], 'images' => $saved['images'] );
 		$gallery_limit = apply_filters( 'foogallery_migrate_storage_advice_threshold_galleries', self::ADVICE_THRESHOLD_GALLERIES );
 		$image_limit = apply_filters( 'foogallery_migrate_storage_advice_threshold_images', self::ADVICE_THRESHOLD_IMAGES );
 		$gallery_limit = is_int( $gallery_limit ) && $gallery_limit > 0 ? $gallery_limit : self::ADVICE_THRESHOLD_GALLERIES;
 		$image_limit = is_int( $image_limit ) && $image_limit > 0 ? $image_limit : self::ADVICE_THRESHOLD_IMAGES;
 		if ( $counts['galleries'] < $gallery_limit && $counts['images'] < $image_limit ) { return ''; }
-		$summary = '';
+		$summary = null === $saved ? '' : sprintf(
+			/* translators: %s: UTC date and time when gallery discovery counts were saved. */
+			__( 'Saved discovery counts from %s UTC: ', 'foogallery-migrate' ), gmdate( 'Y-m-d H:i', $saved['refreshed_at'] )
+		);
 		if ( $counts['galleries'] > 0 ) {
 			/* translators: %s: source gallery record count, formatted for the locale. */
-			$summary .= sprintf( __( 'Detected gallery records: %s.', 'foogallery-migrate' ), self::format_count( $counts['galleries'] ) ) . ' ';
+			$summary .= sprintf( null === $saved ? __( 'Detected gallery records: %s.', 'foogallery-migrate' ) : __( 'Discovered galleries: %s.', 'foogallery-migrate' ), self::format_count( $counts['galleries'] ) ) . ' ';
 		}
-		if ( $counts['images'] > 0 ) {
-			/* translators: %s: source image record count, formatted for the locale. */
-			$summary .= sprintf( __( 'Detected image records: %s.', 'foogallery-migrate' ), self::format_count( $counts['images'] ) ) . ' ';
+		if ( $counts['images'] > 0 || null !== $saved && ! $saved['images_complete'] ) {
+			/* translators: %s: source image entry count, formatted for the locale. */
+			$summary .= sprintf( null === $saved ? __( 'Detected image records: %s (partial estimate).', 'foogallery-migrate' ) : ( $saved['images_complete'] ? __( 'Image entries: %s.', 'foogallery-migrate' ) : __( 'Known image entries: %s (partial).', 'foogallery-migrate' ) ), self::format_count( $counts['images'] ) ) . ' ';
+		} elseif ( null === $saved ) {
+			$summary .= __( 'Image entry total is unknown or incomplete.', 'foogallery-migrate' ) . ' ';
 		}
-		return $summary . __( 'We recommend database tables before migrating.', 'foogallery-migrate' );
+		return $summary . $recommendation;
 	}
 
 	private static function format_count( $count ) {
@@ -253,7 +261,6 @@ class StorageAdmin {
 			echo '<p>' . esc_html__( 'A storage change is unfinished. Continue it in Troubleshooting.', 'foogallery-migrate' ) . '</p>';
 		}
 		echo '<p id="foogm-storage-result" role="status" aria-live="polite"></p>';
-		echo '<p><a href="' . esc_url( self::troubleshooting_url() ) . '">' . esc_html__( 'Troubleshooting, technical details and cleanup', 'foogallery-migrate' ) . '</a></p>';
 		echo '</td></tr></tbody></table></section>';
 		self::render_script( $s, $blog );
 	}

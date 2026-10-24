@@ -2,6 +2,8 @@
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
 use FooPlugins\FooGalleryMigrate\StorageAdmin;
+use FooPlugins\FooGalleryMigrate\StorageCleanup;
+use FooPlugins\FooGalleryMigrate\StorageDiscoverySummary;
 use FooPlugins\FooGalleryMigrate\StorageSourceCounts;
 use PHPUnit\Framework\TestCase;
 
@@ -11,6 +13,8 @@ class StorageSourceCountsTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_capabilities'] = array( 'manage_options' => true );
 		$GLOBALS['foogallery_migrate_test_is_multisite'] = false;
 		$GLOBALS['foogallery_migrate_test_filters'] = array();
+		$GLOBALS['foogallery_migrate_test_options'] = array();
+		unset( $GLOBALS['foogallery_migrate_test_failed_options'], $GLOBALS['foogallery_migrate_test_failed_deletes'] );
 		$GLOBALS['wpdb'] = new SourceCountsWpdb();
 	}
 	protected function tearDown(): void {
@@ -32,7 +36,49 @@ class StorageSourceCountsTest extends TestCase {
 			$this->assertStringNotContainsString( 'SELECT meta_value', $sql );
 		}
 		$this->assertStringContainsString( 'Detected gallery records: 100.', $this->message() );
+		$this->assertStringContainsString( 'Image entry total is unknown or incomplete.', $this->message() );
 		$this->assertStringNotContainsString( 'image records:', $this->message() );
+	}
+	public function test_saved_summary_is_preferred_even_below_threshold_and_invalid_summary_uses_partial_sql(): void {
+		$db = $GLOBALS['wpdb']; $db->post_galleries = '100';
+		$summary = array( 'version' => 1, 'galleries' => 2, 'images' => 3,
+			'images_complete' => true, 'refreshed_at' => time() );
+		$this->assertTrue( StorageDiscoverySummary::publish( $summary ) );
+		$this->assertSame( '', $this->message() );
+		$this->assertCount( 1, $db->queries, 'A valid saved count skips scalar source SQL even when below threshold.' );
+		$this->assertStringContainsString( StorageCleanup::MARKER, $db->queries[0] );
+		$db->queries = array();
+		$summary['galleries'] = 100;
+		$this->assertTrue( StorageDiscoverySummary::publish( $summary ) );
+		$this->assertStringContainsString( 'Saved discovery counts from ' . gmdate( 'Y-m-d H:i', $summary['refreshed_at'] ) . ' UTC: Discovered galleries: 100.', $this->message() );
+		$this->assertCount( 1, $db->queries );
+		$this->assertStringContainsString( StorageCleanup::MARKER, $db->queries[0] );
+		$db->queries = array();
+		$summary['galleries'] = 0; $summary['images'] = 1000; $summary['images_complete'] = false;
+		$this->assertTrue( StorageDiscoverySummary::publish( $summary ) );
+		$formatted = function_exists( 'number_format_i18n' ) ? number_format_i18n( 1000 ) : number_format( 1000 );
+		$this->assertStringContainsString( 'Known image entries: ' . $formatted . ' (partial).', $this->message() );
+		$this->assertCount( 1, $db->queries );
+		$this->assertStringContainsString( StorageCleanup::MARKER, $db->queries[0] );
+		$summary['galleries'] = 100; $summary['images'] = 0;
+		$this->assertTrue( StorageDiscoverySummary::publish( $summary ) );
+		$this->assertStringContainsString( 'Known image entries: 0 (partial).', $this->message() );
+		$summary['version'] = 2;
+		$GLOBALS['foogallery_migrate_test_options'][StorageDiscoverySummary::OPTION] = $summary;
+		$this->assertStringContainsString( 'Detected gallery records: 100.', $this->message() );
+		$this->assertNotEmpty( $db->queries );
+	}
+	public function test_capture_never_loads_children_and_marks_unknown_image_counts_partial(): void {
+		$known = new CountOnlyGallery();
+		$summary = StorageDiscoverySummary::capture( array( $known, (object) array( 'id' => 2 ) ) );
+		$this->assertSame( 2, $summary['galleries'] );
+		$this->assertSame( 1000, $summary['images'] );
+		$this->assertFalse( $summary['images_complete'] );
+		$this->assertTrue( StorageDiscoverySummary::publish( $summary ) );
+		$formatted = function_exists( 'number_format_i18n' ) ? number_format_i18n( 1000 ) : number_format( 1000 );
+		$this->assertStringContainsString( 'Known image entries: ' . $formatted . ' (partial).', $this->message() );
+		$this->assertCount( 1, $GLOBALS['wpdb']->queries );
+		$this->assertStringContainsString( StorageCleanup::MARKER, $GLOBALS['wpdb']->queries[0] );
 	}
 	public function test_counts_sum_only_scalar_source_totals_with_a_fixed_query_budget(): void {
 		$db = $GLOBALS['wpdb']; $db->tables = array( 'wp_ngg_gallery', 'wp_ngg_pictures', 'wp_bwg_gallery', 'wp_bwg_image', 'wp_wppa_albums', 'wp_wppa_photos' );
@@ -56,9 +102,9 @@ class StorageSourceCountsTest extends TestCase {
 		$this->assertSame( '', $this->message() );
 		$db->source_counts['ngg_pictures'] = '1000';
 		$formatted = function_exists( 'number_format_i18n' ) ? number_format_i18n( 1000 ) : number_format( 1000 );
-		$this->assertStringContainsString( 'Detected image records: ' . $formatted . '.', $this->message() );
+		$this->assertStringContainsString( 'Detected image records: ' . $formatted . ' (partial estimate).', $this->message() );
 		$db->queries = array();
-		$this->assertStringContainsString( 'For this migration size', $this->message( array( 'option_bytes' => '1048576' ) ) );
+		$this->assertStringContainsString( 'Saved migration data: 1 MB.', $this->message( array( 'option_bytes' => '1048576' ) ) );
 		$this->assertCount( 1, $db->queries, 'Existing byte advice reads only the cleanup hint, with no source-count queries.' );
 		$this->assertStringContainsString( 'foogallery_migrate_storage_cleanup', $db->queries[0] );
 	}
@@ -74,7 +120,7 @@ class StorageSourceCountsTest extends TestCase {
 		$this->assertStringContainsString( 'before migrating', $this->message() );
 		$db->post_galleries = '0'; $db->tables = array( 'wp_ngg_gallery', 'wp_ngg_pictures' ); $db->source_counts['ngg_pictures'] = '4';
 		$GLOBALS['foogallery_migrate_test_filters']['foogallery_migrate_storage_advice_threshold_images'] = function () { return 4; };
-		$this->assertStringContainsString( 'Detected image records: 4.', $this->message() );
+		$this->assertStringContainsString( 'Detected image records: 4 (partial estimate).', $this->message() );
 	}
 	public function test_unknown_failed_and_malformed_counts_never_become_invented_workload(): void {
 		$db = $GLOBALS['wpdb'];
@@ -111,13 +157,30 @@ class StorageSourceCountsTest extends TestCase {
 		$status = array( 'backend' => 'option', 'phase' => 'stable', 'target' => 'option', 'retained' => false, 'option_bytes' => '0', 'records' => null, 'schema' => 'not ready', 'problem' => '', 'calibrated' => true );
 		ob_start(); StorageAdmin::render( $status ); $html = ob_get_clean();
 		$this->assertStringContainsString( 'Detected gallery records: 100.', $html );
-		$this->assertStringContainsString( 'tab=troubleshooting', $html );
+		$this->assertStringNotContainsString( 'tab=troubleshooting', $html );
 		$_GET['page'] = 'foogallery-migrate'; ob_start(); StorageAdmin::recommendation_notice(); $html = ob_get_clean();
 		$this->assertStringContainsString( 'before migrating', $html );
 		$this->assertStringContainsString( 'tab=settings#migration-storage', $html );
 		$db->queries = array(); $_GET['tab'] = 'settings';
 		ob_start(); StorageAdmin::recommendation_notice(); $this->assertSame( '', ob_get_clean() );
 		$this->assertSame( array(), $db->queries, 'No duplicate global recommendation query on Settings.' );
+	}
+	public function test_notice_orders_heading_detected_counts_recommendation_and_link(): void {
+		$db = $GLOBALS['wpdb']; $_GET['page'] = 'foogallery-migrate';
+		$db->tables = array( 'wp_ngg_gallery', 'wp_ngg_pictures' );
+		foreach ( array( array( '100', '0' ), array( '0', '1000' ), array( '100', '1000' ) ) as $counts ) {
+			$db->post_galleries = $counts[0]; $db->source_counts['ngg_pictures'] = $counts[1];
+			ob_start(); StorageAdmin::recommendation_notice(); $html = ob_get_clean();
+			$dom = new \DOMDocument(); @$dom->loadHTML( $html ); $xpath = new \DOMXPath( $dom );
+			$this->assertSame( 'Large Migrations Detected!', $xpath->query( '//div[@class="notice notice-info"]/*[1][self::h3]' )->item( 0 )->textContent );
+			$summary = '';
+			if ( (int) $counts[0] > 0 ) { $summary .= 'Detected gallery records: 100. '; }
+			if ( (int) $counts[1] > 0 ) { $summary .= 'Detected image records: ' . ( function_exists( 'number_format_i18n' ) ? number_format_i18n( 1000 ) : number_format( 1000 ) ) . ' (partial estimate). '; }
+			else { $summary .= 'Image entry total is unknown or incomplete. '; }
+			$this->assertSame( $summary . 'We recommend changing your migration storage to use database tables before migrating. Change storage', $xpath->query( '//div/p' )->item( 0 )->textContent );
+			$this->assertSame( StorageAdmin::settings_url(), $xpath->query( '//div/p/a' )->item( 0 )->getAttribute( 'href' ) );
+			$this->assertSame( 'a', $xpath->query( '//div/p/*[last()]' )->item( 0 )->nodeName );
+		}
 	}
 	public function test_pending_cleanup_suppresses_both_source_and_saved_byte_advice_before_source_queries(): void {
 		$db = $GLOBALS['wpdb']; $db->post_galleries = '1000'; $db->pending = true;
@@ -160,4 +223,9 @@ class SourceCountsWpdb {
 		}
 		throw new \LogicException( 'Unexpected SQL: ' . $sql );
 	}
+}
+
+class CountOnlyGallery {
+	public function get_children_count() { return 1000; }
+	public function ensure_children_loaded() { throw new \LogicException( 'Children must not be hydrated for advice.' ); }
 }

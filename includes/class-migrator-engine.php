@@ -335,7 +335,9 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
 				return false;
 			}
 
-			return $this->settings()->clear_migrator_setting();
+			$cleared = $this->settings()->clear_migrator_setting();
+			if ( $cleared ) { StorageDiscoverySummary::invalidate(); }
+			return $cleared;
         }
 
         /**
@@ -357,6 +359,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         }
 
         private function run_detection_admitted() {
+            StorageDiscoverySummary::invalidate();
             $plugins = foogallery_migrate_get_available_plugins();
 
             foreach ( $plugins as $plugin ) {

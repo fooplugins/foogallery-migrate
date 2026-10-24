@@ -75,7 +75,8 @@ class StorageAdminTest extends TestCase {
 		$this->assertSame( '', $html ); $this->assertSame( array(), $GLOBALS['wpdb']->queries );
 		$_GET['page'] = 'foogallery-migrate'; ob_start(); StorageAdmin::recommendation_notice(); $html = ob_get_clean();
 		$this->assertStringContainsString( '1 MB', $html );
-		$this->assertStringContainsString( 'we recommend database tables', $html );
+		$this->assertStringContainsString( '<h3>Large Migrations Detected!</h3>', $html );
+		$this->assertStringContainsString( 'Saved migration data: 1 MB. We recommend changing your migration storage to use database tables before migrating. <a ', $html );
 		$this->assertStringContainsString( 'edit.php?post_type=foogallery&amp;page=foogallery-migrate&amp;tab=settings#migration-storage', $html );
 		$this->assertStringContainsString( 'OCTET_LENGTH(option_value)', implode( ' ', $GLOBALS['wpdb']->queries ) );
 		$this->assertStringNotContainsString( 'SHOW TABLE STATUS', implode( ' ', $GLOBALS['wpdb']->queries ) );
@@ -115,16 +116,16 @@ class StorageAdminTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_filters']['foogallery_migrate_storage_advice_threshold_bytes'] = function () { return 2048; };
 		$s = array( 'backend' => 'option', 'phase' => 'stable', 'target' => 'option', 'retained' => false, 'option_bytes' => '2048', 'records' => null, 'schema' => 'verified', 'problem' => '', 'calibrated' => true );
 		ob_start(); StorageAdmin::render( $s ); $html = ob_get_clean();
-		$this->assertStringContainsString( 'we recommend database tables', $html );
+		$this->assertStringContainsString( 'We recommend changing your migration storage to use database tables before migrating.', $html );
 		$this->assertStringContainsString( '2 KB', $html );
-		$this->assertStringContainsString( 'tab=troubleshooting', $html );
+		$this->assertStringNotContainsString( 'tab=troubleshooting', $html );
 		$this->assertStringNotContainsString( 'OCTET_LENGTH(option_value)', implode( ' ', $GLOBALS['wpdb']->queries ) );
 		$this->assertStringNotContainsString( 'COUNT(*)', implode( ' ', $GLOBALS['wpdb']->queries ) );
 		ob_start(); StorageAdmin::render_troubleshooting( $s ); $troubleshooting = ob_get_clean();
 		$this->assertStringContainsString( 'If you are migrating a lot of galleries or images, try changing your migration storage to use tables', $troubleshooting );
 		$s['calibrated'] = false;
 		ob_start(); StorageAdmin::render( $s ); $html = ob_get_clean();
-		$this->assertStringNotContainsString( 'we recommend database tables', $html );
+		$this->assertStringNotContainsString( 'We recommend changing your migration storage to use database tables before migrating.', $html );
 		$this->assertStringContainsString( 'Storage switching is not available on this site', $html );
 		$this->assertStringNotContainsString( 'id="foogm-storage-change"', $html );
 	}
@@ -158,7 +159,7 @@ class StorageAdminTest extends TestCase {
 			$this->assertStringNotContainsString( 'Migration Settings', $html );
 			$this->assertStringContainsString( 'preferences are unavailable', $html );
 			$this->assertStringNotContainsString( 'foogallery_migrate_save_settings', $html );
-			$this->assertStringContainsString( 'tab=troubleshooting', $html );
+			$this->assertStringNotContainsString( 'tab=troubleshooting', $html );
 			$this->assertStringNotContainsString( 'foogm-storage-cleanup', $html );
 			ob_start(); include dirname( __DIR__ ) . '/includes/views/view-migrate-tab-troubleshooting.php'; $troubleshooting = ob_get_clean();
 			$this->assertStringContainsString( 'copying' === $status['phase'] ? 'Continue storage change' : 'Remove all migration data', $troubleshooting );

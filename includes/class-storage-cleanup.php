@@ -90,6 +90,7 @@ class StorageCleanup {
 			$this->delete_option( MigratedStore::LEGACY_BACKUP_OPTION );
 			$this->delete_option( StorageAuthority::STORAGE_BACKUP_OPTION );
 			$this->delete_option( 'foogallery_migrate_storage' );
+			$this->delete_option( StorageDiscoverySummary::OPTION );
 			if ( 'clear' === $action ) {
 				$this->clear_option();
 				$this->delete_rows();
@@ -130,7 +131,7 @@ class StorageCleanup {
 			$db = $this->gate->connection();
 			$names = array( self::MARKER, StorageAuthority::MAINTENANCE_OPTION,
 				MigratedStore::LEGACY_BACKUP_OPTION, StorageAuthority::STORAGE_BACKUP_OPTION, 'foogallery_migrate_storage',
-				MigratedStore::SCHEMA_OPTION, MigratedStore::MIGRATION_OPTION );
+				MigratedStore::SCHEMA_OPTION, MigratedStore::MIGRATION_OPTION, StorageDiscoverySummary::OPTION );
 			if ( 'remove_all' === $action ) { $names = array_merge( $names, array( FOOGALLERY_MIGRATE_OPTION_DATA,
 				FOOGALLERY_MIGRATE_OPTION_SETTINGS, StorageAuthority::AUTHORITY_OPTION, StorageAuthority::CONTROL_OPTION,
 				LegacyStorageSchema::VERSION_OPTION, LegacyStorageSchema::LOCK_OPTION ) ); }
@@ -324,7 +325,7 @@ class StorageCleanup {
 		$this->receipt[$had ? 'removed' : 'absent'][] = $table;
 	}
 	private function audit( $action ) {
-		foreach ( array( MigratedStore::LEGACY_BACKUP_OPTION, StorageAuthority::STORAGE_BACKUP_OPTION, 'foogallery_migrate_storage' ) as $name ) {
+		foreach ( array( MigratedStore::LEGACY_BACKUP_OPTION, StorageAuthority::STORAGE_BACKUP_OPTION, 'foogallery_migrate_storage', StorageDiscoverySummary::OPTION ) as $name ) {
 			if ( $this->present( $name ) ) { $this->receipt['residual'][] = $name; }
 		}
 		if ( 'clear' === $action ) {

@@ -25,7 +25,8 @@ class StorageTroubleshootingTest extends TestCase {
 	public function test_settings_has_no_technical_or_destructive_controls(): void {
 		ob_start(); StorageAdmin::render( $this->status() ); $html = ob_get_clean();
 		$this->assertStringContainsString( 'id="foogm-storage-change"', $html );
-		$this->assertStringContainsString( 'tab=troubleshooting', $html );
+		$this->assertStringNotContainsString( 'tab=troubleshooting', $html );
+		$this->assertStringNotContainsString( 'Troubleshooting, technical details and cleanup', $html );
 		foreach ( array( 'id="foogm-storage-details"', 'id="foogm-storage-cleanup"', 'value="clear"', 'value="remove_all"', 'value="discard"', 'id="foogm-support-report"' ) as $control ) {
 			$this->assertStringNotContainsString( $control, $html );
 		}
