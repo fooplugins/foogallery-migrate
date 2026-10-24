@@ -38,8 +38,8 @@ verified from this session and is left configured as-is.
 
 | Task | Dependencies / owner | Status | Routing / QA / repairs |
 |---|---|---|---|
-| S1–S4 implementation | Planning `4bcc681`; one developer owns runtime/tests/readme, supervisor owns this plan and ops | validating | GPT-6 Sol High `/root/saved_counts_dev`; independent GPT-6 Sol Medium `/root/saved_counts_qa` PASS; two bounded repairs (fallback/date copy, then test-isolation cleanup) |
-| S5 integration and deployment | Accepted S1–S4 plus QA | validating | Supervisor source/native/browser/full-suite/package acceptance passes below; commit/push/deployment next; preserve Brad's checklist checkmarks |
+| S1–S4 implementation | Planning `4bcc681`; one developer owns runtime/tests/readme, supervisor owns this plan and ops | done | Implementation `4cd5bdc`; GPT-6 Sol High `/root/saved_counts_dev`; independent GPT-6 Sol Medium `/root/saved_counts_qa` PASS; two bounded repairs (fallback/date copy, then test-isolation cleanup) |
+| S5 integration and deployment | Accepted S1–S4 plus QA | done | `4cd5bdc` pushed to PR #15 and identical validated package deployed; supervisor source/native/browser/full-suite/package and protected-data checks pass; manual merge/public-release gates retained |
 
 Validation: focused count/discovery/cleanup tests, `node tests/storage-admin-workflow.js`,
 `php -d memory_limit=256M vendor/bin/phpunit`, PHP 5.4 parser, `npx gulp translate`,
@@ -84,6 +84,18 @@ Acceptance evidence for the frozen candidate:
 Cache writes remain best effort: if deleting and rewriting the option both fail,
 an older saved snapshot can remain. Advice displays its persisted UTC timestamp,
 not a claim that it reflects the latest refresh. Counts never authorize conversion.
+
+Test-site deployment completed on 2026-10-24: all **92 installed files** match the
+ZIP SHA above. Fresh before/after protected-data hashes match for migration options,
+owned tables, posts and post metadata. The existing **option / stable** mode, six
+retained state rows and 153 retained migration records are preserved. Read-only
+Settings/Troubleshooting route and advice-preview checks pass, including removed
+redundant link, exact action fields and no diagnostic engine access. No switch,
+migration, reset or forced source discovery was run there. The new summary is absent
+until Brad's next successful **Refresh Galleries**; fallback currently reports 114
+gallery records and 14 image records explicitly labelled a partial estimate.
+Only the exact owned local PHP server/container were stopped after QA; retained
+receipts remain available. No merge or public release was performed.
 
 Usage: Brad previously said "dont worry about budget - just go"; no finite usage
 cap is imposed. Account-wide snapshots are monitored, not a task-only cost or hard
