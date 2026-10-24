@@ -2,7 +2,31 @@
 
 **Updated:** 2026-10-24
 
-## Current amendment — simplified Troubleshooting layout
+## Current amendment — revised Settings and Troubleshooting copy
+
+- Remove the Migration Settings heading without changing any settings controls.
+- Start Troubleshooting with "If you are having trouble with a migration, try the
+  following:". Keep the interrupted-migration tip, shorten the memory-error tip,
+  replace the older-version tip with the requested table-storage suggestion.
+- Leave cleanup, recovery, technical details and support behavior unchanged.
+- Local validation: **38 focused tests / 375 assertions**, **64 rendered JavaScript
+  workflow checks**, PHP 5.4 syntax and whitespace checks pass. Translation
+  strings and current operator guidance are updated. Agent CI cannot run because
+  this repository has no Actions workflows.
+- Complete maintained suite at 256 MiB: **1,601 tests / 311,672 assertions**, zero
+  skips, errors or failures (2m48.750s, 133.61 MiB reported peak). Historical native
+  browser receipts below precede this copy-only amendment; no new browser run is
+  claimed. Deployment checks verify the installed intro/bullets, heading removal,
+  section order and engine-free Troubleshooting rendering without invoking actions.
+- Brad authorized committing, pushing to PR #15 and deploying the same validated
+  package to the prepared test site. Verify package identity and protected-data
+  hashes without changing storage mode or running migrations/cleanup. No merge or
+  public release is authorized; v2 remains blocked until Brad tests and merges #15.
+- Production package: **91 files**, zero development payloads; CRC/path/symlink/
+  source-parity checks pass. SHA-256
+  `a3c0c3b623e0ae07b840b3419ad0f1b54a2c868decb1cea53830173984e31f1a`.
+
+## Previous amendment — simplified Troubleshooting layout
 
 Brad requested a lighter Troubleshooting page and authorized committing, pushing
 to PR #15 and deploying the validated package to the prepared test site.

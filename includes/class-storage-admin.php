@@ -266,11 +266,11 @@ class StorageAdmin {
 		$pending = is_multisite() ? null : StorageCleanup::pending_scope();
 		$s['cleanup_pending'] = $pending;
 		$actions = self::actions( $s, $pending );
-		echo '<ul class="ul-disc">';
+		echo '<p>' . esc_html__( 'If you are having trouble with a migration, try the following:', 'foogallery-migrate' ) . '</p><ul class="ul-disc">';
 		foreach ( array(
 			__( 'If a migration stops, pause any other migrations and refresh the page before continuing.', 'foogallery-migrate' ),
-			__( 'If you see a timeout or memory error, reduce Images Per Turn in Settings and keep Page Size above zero. Database tables can help with larger migrations, but very large galleries may still need more memory.', 'foogallery-migrate' ),
-			__( 'Before installing an older version of this plugin, switch back to WordPress options in Settings. If a storage change will not finish, contact support before deleting any data.', 'foogallery-migrate' ),
+			__( 'If you see a timeout or memory error, reduce Images Per Turn in Settings and keep Page Size above zero.', 'foogallery-migrate' ),
+			__( 'If you are migrating a lot of galleries or images, try changing your migration storage to use tables', 'foogallery-migrate' ),
 		) as $tip ) { echo '<li>' . esc_html( $tip ) . '</li>'; }
 		echo '</ul>';
 		$cleanup = array(

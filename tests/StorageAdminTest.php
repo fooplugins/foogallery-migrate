@@ -110,7 +110,7 @@ class StorageAdminTest extends TestCase {
 		$this->assertStringNotContainsString( 'read-only decode-budget preflight', $html );
 		$this->assertStringNotContainsString( 'name="operation" value="switch"', $html );
 	}
-	public function test_storage_screen_recommendation_uses_provided_status_and_explains_scaling_limits(): void {
+	public function test_storage_screen_recommendation_uses_provided_status_and_troubleshooting_suggests_tables(): void {
 		$GLOBALS['wpdb'] = new StorageAdminAdviceWpdb( '2048' );
 		$GLOBALS['foogallery_migrate_test_filters']['foogallery_migrate_storage_advice_threshold_bytes'] = function () { return 2048; };
 		$s = array( 'backend' => 'option', 'phase' => 'stable', 'target' => 'option', 'retained' => false, 'option_bytes' => '2048', 'records' => null, 'schema' => 'verified', 'problem' => '', 'calibrated' => true );
@@ -121,7 +121,7 @@ class StorageAdminTest extends TestCase {
 		$this->assertStringNotContainsString( 'OCTET_LENGTH(option_value)', implode( ' ', $GLOBALS['wpdb']->queries ) );
 		$this->assertStringNotContainsString( 'COUNT(*)', implode( ' ', $GLOBALS['wpdb']->queries ) );
 		ob_start(); StorageAdmin::render_troubleshooting( $s ); $troubleshooting = ob_get_clean();
-		$this->assertStringContainsString( 'very large galleries may still need more memory', $troubleshooting );
+		$this->assertStringContainsString( 'If you are migrating a lot of galleries or images, try changing your migration storage to use tables', $troubleshooting );
 		$s['calibrated'] = false;
 		ob_start(); StorageAdmin::render( $s ); $html = ob_get_clean();
 		$this->assertStringNotContainsString( 'we recommend database tables', $html );
@@ -155,6 +155,7 @@ class StorageAdminTest extends TestCase {
 			$foogallery_migrate_storage_status = array_merge( array( 'target' => 'table', 'retained' => false, 'discardable' => true, 'option_bytes' => '0', 'records' => null, 'schema' => 'not ready', 'calibrated' => true ), $status );
 			ob_start(); include dirname( __DIR__ ) . '/includes/views/view-migrate-tab-settings.php'; $html = ob_get_clean();
 			$this->assertStringContainsString( 'id="migration-storage"', $html );
+			$this->assertStringNotContainsString( 'Migration Settings', $html );
 			$this->assertStringContainsString( 'preferences are unavailable', $html );
 			$this->assertStringNotContainsString( 'foogallery_migrate_save_settings', $html );
 			$this->assertStringContainsString( 'tab=troubleshooting', $html );

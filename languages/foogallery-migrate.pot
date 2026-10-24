@@ -8,7 +8,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Language-Team: FooPlugins <info@fooplugins.com>\n"
 "Last-Translator: Brad Vincent <brad@fooplugins.com>\n"
-"POT-Creation-Date: 2026-10-24 10:25+0000\n"
+"POT-Creation-Date: 2026-10-24 10:54+0000\n"
 "Report-Msgid-Bugs-To: https://fooplugins.com\n"
 "X-Poedit-Basepath: ..\n"
 "X-Poedit-KeywordsList: __;_e;_ex:1,2c;_n:1,2;_n_noop:1,2;_nx:1,2,4c;_nx_noop:1,2,3c;_x:1,2c;esc_attr__;esc_attr_e;esc_attr_x:1,2c;esc_html__;esc_html_e;esc_html_x:1,2c\n"
@@ -324,6 +324,10 @@ msgstr ""
 
 #: includes/class-storage-admin.php:256
 msgid "Troubleshooting, technical details and cleanup"
+msgstr ""
+
+#: includes/class-storage-admin.php:269
+msgid "If you are having trouble with a migration, try the following:"
 msgstr ""
 
 #: includes/class-storage-admin.php:277
@@ -1118,63 +1122,59 @@ msgstr ""
 msgid "Are you sure you want to delete this migrated object from the log?"
 msgstr ""
 
-#: includes/views/view-migrate-tab-settings.php:7
-msgid "Migration Settings"
-msgstr ""
-
-#: includes/views/view-migrate-tab-settings.php:10
+#: includes/views/view-migrate-tab-settings.php:9
 msgid "Migration preferences are unavailable until storage recovery or cleanup is complete. Open Troubleshooting to continue; existing preferences have not been changed."
 msgstr ""
 
-#: includes/views/view-migrate-tab-settings.php:21
+#: includes/views/view-migrate-tab-settings.php:20
 msgid "Settings saved."
 msgstr ""
 
-#: includes/views/view-migrate-tab-settings.php:31
+#: includes/views/view-migrate-tab-settings.php:30
 msgid "Override Gallery Layout"
 msgstr ""
 
-#: includes/views/view-migrate-tab-settings.php:35
+#: includes/views/view-migrate-tab-settings.php:34
 msgid "Do not override"
 msgstr ""
 
-#: includes/views/view-migrate-tab-settings.php:46
+#: includes/views/view-migrate-tab-settings.php:45
 msgid "Override Gallery Settings"
 msgstr ""
 
-#: includes/views/view-migrate-tab-settings.php:50, includes/views/view-migrate-tab-settings.php:65
+#: includes/views/view-migrate-tab-settings.php:49, includes/views/view-migrate-tab-settings.php:64
 msgid "Default"
 msgstr ""
 
-#: includes/views/view-migrate-tab-settings.php:61
+#: includes/views/view-migrate-tab-settings.php:60
 msgid "Override Album Settings"
 msgstr ""
 
-#: includes/views/view-migrate-tab-settings.php:76
+#: includes/views/view-migrate-tab-settings.php:75
 msgid "Page Size"
 msgstr ""
 
-#: includes/views/view-migrate-tab-settings.php:80
+#: includes/views/view-migrate-tab-settings.php:79
 msgid "The number of items per page in the migration. Set to zero to disable pagination."
 msgstr ""
 
-#: includes/views/view-migrate-tab-settings.php:85
+#: includes/views/view-migrate-tab-settings.php:84
 msgid "Images Per Turn"
 msgstr ""
 
-#: includes/views/view-migrate-tab-settings.php:89
+#: includes/views/view-migrate-tab-settings.php:88
 msgid "The number of images to import during each migration AJAX request."
 msgstr ""
 
-#: includes/views/view-migrate-tab-settings.php:93
+#: includes/views/view-migrate-tab-settings.php:92
 msgid "Debug Enabled"
 msgstr ""
 
-#: includes/views/view-migrate-tab-settings.php:97
+#: includes/views/view-migrate-tab-settings.php:96
 msgid "Enable debug output for migration views."
 msgstr ""
 
-#: includes/views/view-migrate-tab-settings.php:103
+#: includes/views/view-migrate-tab-settings.php:102
 msgid "Save Settings"
 msgstr ""
 

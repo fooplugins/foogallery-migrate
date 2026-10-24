@@ -69,8 +69,15 @@ class StorageTroubleshootingTest extends TestCase {
 	public function test_simplified_troubleshooting_layout_and_copy_follow_the_requested_order(): void {
 		ob_start(); StorageAdmin::render_troubleshooting( $this->status() ); $html = ob_get_clean();
 		$dom = new \DOMDocument(); @$dom->loadHTML( $html ); $xpath = new \DOMXPath( $dom );
-		$this->assertSame( 'ul', $xpath->query( '/html/body/*[1]' )->item( 0 )->nodeName );
-		$this->assertSame( 3, $xpath->query( '/html/body/ul/li' )->length );
+		$this->assertSame( 'If you are having trouble with a migration, try the following:', $xpath->query( '/html/body/*[1][self::p]' )->item( 0 )->textContent );
+		$this->assertSame( 'ul', $xpath->query( '/html/body/*[2]' )->item( 0 )->nodeName );
+		$this->assertSame( array(
+			'If a migration stops, pause any other migrations and refresh the page before continuing.',
+			'If you see a timeout or memory error, reduce Images Per Turn in Settings and keep Page Size above zero.',
+			'If you are migrating a lot of galleries or images, try changing your migration storage to use tables',
+		), array_map( function ( $node ) { return $node->textContent; }, iterator_to_array( $xpath->query( '/html/body/ul/li' ) ) ) );
+		$this->assertStringNotContainsString( 'Database tables can help with larger migrations, but very large galleries may still need more memory.', $html );
+		$this->assertStringNotContainsString( 'Before installing an older version of this plugin', $html );
 		$this->assertSame( array( 'Reset & cleanup', 'Technical details' ), array_map( function ( $node ) { return $node->textContent; }, iterator_to_array( $xpath->query( '//h2|//h3' ) ) ) );
 		$this->assertStringNotContainsString( 'Storage is stable. No storage change is in progress.', $html );
 		$this->assertStringNotContainsString( 'Check storage, continue an interrupted change, or reset migration data.', $html );

@@ -4,7 +4,6 @@ if ( ! defined( 'ABSPATH' ) ) {
 }
 $storage_status = isset( $foogallery_migrate_storage_status ) && is_array( $foogallery_migrate_storage_status ) ?
 	$foogallery_migrate_storage_status : \FooPlugins\FooGalleryMigrate\StorageAdmin::status();
-echo '<h2>' . esc_html__( 'Migration Settings', 'foogallery-migrate' ) . '</h2>';
 \FooPlugins\FooGalleryMigrate\StorageAdmin::render( $storage_status );
 if ( ! \FooPlugins\FooGalleryMigrate\StorageAdmin::settings_available( $storage_status ) ) {
 	echo '<p>' . esc_html__( 'Migration preferences are unavailable until storage recovery or cleanup is complete. Open Troubleshooting to continue; existing preferences have not been changed.', 'foogallery-migrate' ) . '</p>';
