@@ -136,6 +136,12 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 'Processing selected items…' => __( 'Processing selected items…', 'foogallery-migrate' ),
                 // translators: 1: finished item count, 2: selected item count.
                 '%1$s of %2$s finished' => __( '%1$s of %2$s finished', 'foogallery-migrate' ),
+                // translators: 1: finished gallery count, 2: selected gallery count.
+                '%1$s of %2$s galleries finished' => __( '%1$s of %2$s galleries finished', 'foogallery-migrate' ),
+                // translators: 1: processed image count, 2: current gallery image count.
+                '%1$s of %2$s images processed' => __( '%1$s of %2$s images processed', 'foogallery-migrate' ),
+                'Preparing next gallery…' => __( 'Preparing next gallery…', 'foogallery-migrate' ),
+                'Current gallery' => __( 'Current gallery', 'foogallery-migrate' ),
             ) );
         }
 

@@ -70,7 +70,22 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                     }
                 }
                 $migrating = $has_migrations && defined( 'DOING_AJAX' ) && DOING_AJAX;
-                $current_gallery_id = $this->get_current_object_being_migrated();
+                // Reuse the bounded current-root lookup; do not load its image
+                // list or rely on the active gallery being on the visible page.
+                $current_gallery = null;
+                if ( null !== $repository ) {
+                    $started = $repository->first_started( $this->type );
+                    if ( $started['found'] ) { $current_gallery = $started['value']; }
+                } else {
+                    foreach ( $galleries as $candidate ) {
+                        if ( Migratable::PROGRESS_STARTED === $candidate->migration_status ) {
+                            $current_gallery = $candidate; break;
+                        }
+                    }
+                }
+                $current_gallery_id = null === $current_gallery ? 0 : $current_gallery->unique_identifier();
+                $current_image_total = null === $current_gallery ? 0 : $current_gallery->get_children_count();
+                $current_image_processed = null === $current_gallery ? 0 : min( $current_image_total, absint( $current_gallery->migrated_child_count ) );
                 $show_refresh = !$has_migrations;
                 ?>
                 <table class="wp-list-table widefat fixed striped table-view-list pages">
@@ -305,7 +320,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                 echo '<input type="hidden" name="foogallery_migrate_paged" value="' . esc_attr( $page ) . '" />';
                 echo '<input type="hidden" name="foogallery_migrate_url" value="' . esc_url( $url ) . '" />';
                 echo '<input type="hidden" class="migrate_progress" value="' . esc_attr( $overall_progress ) . '" />';
-                echo '<input type="hidden" class="foogm-migration-summary" data-queued="' . esc_attr( false === $migration_state ? 0 : $migration_state['queued'] ) . '" data-completed="' . esc_attr( false === $migration_state ? 0 : $migration_state['completed'] ) . '" />';
+                echo '<input type="hidden" class="foogm-migration-summary" data-queued="' . esc_attr( false === $migration_state ? 0 : $migration_state['queued'] ) . '" data-completed="' . esc_attr( false === $migration_state ? 0 : $migration_state['completed'] ) . '" data-image-title="' . esc_attr( null === $current_gallery ? '' : $current_gallery->title ) . '" data-image-processed="' . esc_attr( $current_image_processed ) . '" data-image-total="' . esc_attr( $current_image_total ) . '" />';
                 echo '<input type="hidden" name="foogallery_migrate_retry_gallery_id" value="" />';
                 echo '<input type="hidden" name="foogallery_migrate_check_gallery_id" value="" />';
 

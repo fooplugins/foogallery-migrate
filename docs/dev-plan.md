@@ -1,8 +1,37 @@
 # Legacy storage upgrade — first-release plan
 
-**Updated:** 2026-10-24
+**Updated:** 2026-10-25
 
-## Current amendment — gallery retries and shared progress dialog
+## Current amendment — image progress within the current gallery
+
+The Galleries dialog now displays processed images / total images and the
+percentage within the active gallery, alongside the overall finished-gallery
+count. Between galleries it shows preparation rather than mixing overall and
+per-gallery percentages. Only the overall queue percentage controls continuation;
+one gallery reaching 100% must not stop the remaining queued galleries.
+
+Use the current-root read already needed by the table renderer and existing saved
+counts. This works when the active gallery is outside the visible page and does
+not load its image list, rediscover sources or hydrate the whole table collection.
+The option renderer reuses its already-loaded collection. Polling, stopping,
+engine/storage state and the other tabs' progress semantics remain unchanged.
+
+Regression coverage exercises option/table markup parity, off-page current roots,
+escaped gallery names, bounded reads without child hydration, batch advancement,
+next-gallery preparation/reset, continuation at 100% current-gallery progress,
+stopping and final overall completion. Brad authorized committing/pushing this
+amendment to PR #15 and deploying it to the stopped test site on 2026-10-25.
+Preserve site data and storage mode; no merge/public release or v2 work.
+
+Validation: **1,622 tests / 311,823 assertions** at explicit 256 MiB, no failures/
+errors/skips (2m47.264s; 133.61 MiB peak). Focused checks: **75 tests / 520
+assertions**; all shared-dialog/AJAX regressions, 64 storage workflow checks,
+content-scan regression, three changed production PHP host/5.4 syntax checks and
+whitespace pass. Agent CI has no Actions workflows to run. The local 94-file ZIP
+passes source/CRC/path/symlink/development-exclusion checks; SHA-256
+`6494db74f778b543294923afdf589173c9ab0f0f633409294bb12979d54795b7`.
+
+## Previous amendment — gallery retries and shared progress dialog
 
 Brad approved fixing the two individual-gallery failures, adding regressions,
 committing/pushing to PR #15 and deploying only to the prepared test site. He also

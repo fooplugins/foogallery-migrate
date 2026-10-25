@@ -129,8 +129,26 @@
             var title = current.find('td strong').first().text();
             var message = title ? title + ' — ' + current.find('.foogallery-migrate-progress-started').text().trim()
                 : __('Processing selected items…', 'foogallery-migrate');
-            progress.update(percent, message, wp.i18n.sprintf(__('%1$s of %2$s finished', 'foogallery-migrate'),
-                summary.attr('data-completed') || '0', summary.attr('data-queued') || '0'));
+            var detail = wp.i18n.sprintf(__(config.imageProgress ? '%1$s of %2$s galleries finished' : '%1$s of %2$s finished', 'foogallery-migrate'),
+                summary.attr('data-completed') || '0', summary.attr('data-queued') || '0');
+            var displayPercent = percent;
+            if (config.imageProgress && percent < 100) {
+                var imageTotal = Number(summary.attr('data-image-total'));
+                var imageProcessed = Number(summary.attr('data-image-processed'));
+                // Between galleries, show preparation rather than briefly
+                // switching this image-progress bar back to overall progress.
+                displayPercent = null;
+                message = __('Preparing next gallery…', 'foogallery-migrate');
+                if (isFinite(imageTotal) && imageTotal > 0 && isFinite(imageProcessed) && imageProcessed >= 0) {
+                    imageProcessed = Math.min(imageProcessed, imageTotal);
+                    displayPercent = imageProcessed / imageTotal * 100;
+                    message = summary.attr('data-image-title') || __('Current gallery', 'foogallery-migrate');
+                    detail = wp.i18n.sprintf(__('%1$s of %2$s images processed', 'foogallery-migrate'), imageProcessed, imageTotal) + ' · ' + detail;
+                }
+            }
+            progress.update(displayPercent, message, detail);
+            // Only overall completion controls polling. A gallery reaching
+            // 100% must not stop the remaining queued galleries.
             if (!isFinite(percent)) { progress.fail(); return; }
             if (stopping) { cancel(); return; }
             if (percent >= 100) { progress.finish(); return; }

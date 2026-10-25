@@ -8,11 +8,11 @@ let tree, stopCalls = 0, focusCalls = 0;
 const button = { focus() { focusCalls++; } };
 const requests = [], handlers = {};
 const form = {
-    percent: '0', html() { return this; }, serialize() { return 'nonce=valid&gallery=7'; },
+    percent: '0', summary: {}, html() { return this; }, serialize() { return 'nonce=valid&gallery=7'; },
     on(event, selector, fn) { handlers[selector] = fn; },
     find(selector) {
         return { length: selector.includes(':checked') ? 1 : 0, prop() { return this; },
-            val: () => form.percent, attr: name => name === 'data-queued' ? '1' : '0',
+            val: () => form.percent, attr: name => Object.hasOwn(form.summary, name) ? form.summary[name] : name === 'data-queued' ? '1' : '0',
             first() { return this; }, closest() { return this; }, find() { return this; }, text: () => '' };
     }
 };
@@ -75,6 +75,41 @@ assert.equal(tree.props.shouldCloseOnEsc, true);
 click('resume'); assert.equal(requests.length, 5, 'transport failure releases the request lock');
 form.percent = undefined; requests[4].success('<form>');
 assert.equal(requests.length, 5, 'missing progress stops instead of polling forever');
+// Image progress is display-only; overall queue progress still controls polling.
+requests.length = 0;
+bind(form, { title: 'Gallery migration', startButton: 'start', continueButton: 'resume', cancelButton: 'cancel', refreshButton: 'refresh',
+    selection: 'selected', progress: 'progress', imageProgress: true,
+    start: 'start-action', continue: 'continue-action', cancel: 'cancel-action', preflight() {} });
+form.percent = '0';
+form.summary = { 'data-queued': '2', 'data-completed': '0', 'data-image-title': 'Large gallery',
+    'data-image-total': '1000', 'data-image-processed': '250' };
+click('start'); requests[0].success('<form>');
+const meterValue = () => nodes(tree, 'div').find(n => n.props.role === 'progressbar').props['aria-valuenow'];
+assert.equal(meterValue(), 25, 'the first gallery must not stay at zero until it completes');
+assert.ok(JSON.stringify(tree).includes('250 of 1000 images processed · 0 of 2 galleries finished'));
+assert.ok(JSON.stringify(tree).includes('Large gallery'));
+form.summary['data-image-processed'] = '500'; requests[1].success('<form>');
+assert.equal(meterValue(), 50, 'each completed batch advances image progress');
+form.summary['data-image-processed'] = '1000'; requests[2].success('<form>');
+assert.equal(meterValue(), 100);
+assert.equal(tree.props.isDismissible, false, 'a completed gallery is not a completed queue');
+assert.equal(requests.length, 4, 'remaining galleries still get a continuation at 100% current-gallery progress');
+form.percent = '50'; form.summary['data-completed'] = '1'; form.summary['data-image-total'] = '0';
+requests[3].success('<form>');
+assert.equal(meterValue(), undefined, 'between galleries do not show misleading overall progress as image progress');
+assert.ok(JSON.stringify(tree).includes('Preparing next gallery'));
+form.summary['data-image-title'] = 'Next gallery'; form.summary['data-image-total'] = '100'; form.summary['data-image-processed'] = '10';
+requests[4].success('<form>');
+assert.equal(meterValue(), 10, 'progress resets for the next gallery with its own image total');
+assert.ok(JSON.stringify(tree).includes('10 of 100 images processed · 1 of 2 galleries finished'));
+nodes(tree, 'Button')[0].props.onClick();
+assert.equal(requests.length, 6, 'stop still waits for the in-flight image batch');
+form.summary['data-image-processed'] = '20'; requests[5].success('<form>');
+assert.ok(requests[6].data.endsWith('action=cancel-action')); requests[6].success('<form>');
+assert.equal(meterValue(), 20, 'stopped progress retains the last completed image batch');
+click('resume'); form.percent = '100'; requests[7].success('<form>');
+assert.equal(meterValue(), 100); assert.equal(requests.length, 8, 'overall completion ends polling');
+assert.equal(tree.props.isDismissible, true);
 for (const tab of ['galleries', 'albums', 'content', 'image-tags']) {
     const php = fs.readFileSync('includes/views/view-migrate-tab-' + tab + '.php', 'utf8');
     const script = php.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/<\?php[\s\S]*?\?>/g, '"test message"');

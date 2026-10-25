@@ -113,6 +113,31 @@ class CollectionFormReadTest extends TestCase {
 			$this->assertSame( array(), $repository->pages );
 		}
 	}
+	public function test_gallery_image_progress_uses_saved_counts_even_outside_the_visible_page(): void {
+		$objects = array_values( $this->objects( 'galleries' ) );
+		$objects[120]->migration_status = 'started';
+		$objects[120]->children_count = 10000;
+		$objects[120]->migrated_child_count = 250;
+		$objects[120]->title = 'Large "gallery" <script>not markup</script>';
+		$repository = new CollectionFormRepository( $objects );
+		$repository->started = $objects[120];
+		$table = $this->render( 'galleries', $repository, $objects, 20, 1 );
+		$option = $this->render( 'galleries', null, $objects, 20, 1 );
+		$this->assertSame( preg_replace( '/\s+/', '', $option ), preg_replace( '/\s+/', '', $table ) );
+		$this->assertStringContainsString( 'data-image-processed="250"', $table );
+		$this->assertStringContainsString( 'data-image-total="10000"', $table );
+		$this->assertStringContainsString( 'data-image-title="Large &quot;gallery&quot; &lt;script&gt;not markup&lt;/script&gt;"', $table );
+		$this->assertStringNotContainsString( '<script>not markup</script>', $table );
+		$this->assertSame( array( array( 0, 20 ) ), $repository->pages );
+		$this->assertSame( 1, $repository->started_reads, 'Reuse the indexed current-root read, not another collection or image-list read.' );
+		$this->assertSame( array(), $objects[120]->get_children(), 'Reporting progress must not load source images.' );
+	}
+	public function test_gallery_progress_does_not_report_an_active_image_total_when_no_gallery_is_started(): void {
+		$objects = $this->objects( 'galleries' );
+		$html = $this->render( 'galleries', new CollectionFormRepository( $objects ), $objects, 20 );
+		$this->assertStringContainsString( 'data-image-total="0"', $html );
+		$this->assertStringContainsString( 'data-image-processed="0"', $html );
+	}
 	public function test_table_queue_and_cancel_dispatch_without_full_collection_read(): void {
 		$objects = $this->objects( 'galleries' ); $repository = new CollectionFormRepository( $objects );
 		$engine = new CollectionFormEngine( $repository, $objects, 'galleries', 20 );
