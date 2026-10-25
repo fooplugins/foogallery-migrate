@@ -2,7 +2,30 @@
 
 **Updated:** 2026-10-25
 
-## Current amendment — image progress within the current gallery
+## Current amendment — defensive Robo Gallery defaults
+
+The read-only audit of Brad's 20 migrated test galleries found correct image
+counts/order, valid files and completed records. Recomputing settings for Robo
+Gallery 1 exposed legacy assumptions about missing `robogrid` fields. Normalize
+missing/non-array source settings locally, default absent size, border, alignment,
+spacing and slider fields, and retain supported layout mappings and explicit
+valid values. Do not rewrite source settings or existing migrated galleries.
+
+Brad approved this fix, regression tests, commit/push to PR #15 and test-site
+deployment, and confirmed migrations are stopped. No merge/public release or
+v2 implementation. Deployment must preserve site data and storage mode.
+
+Validation: **36 Robo cases / 82 assertions**, including warning-to-exception
+checks, the observed source shape, partial/malformed fields, valid mappings,
+overrides, discovery and gallery creation. The full maintained suite passes
+**1,658 tests / 311,903 assertions** at explicit 256 MiB, no failures/errors/skips
+(2m50.826s; 133.61 MiB peak). Content-scan, shared-dialog/AJAX and 148 fault-injection
+cleanup checks pass. Host PHP lint, PHP 5.4.45 production lint and whitespace pass.
+Agent CI was attempted; there are no Actions workflows to run. The 94-file ZIP
+passes source/CRC/path/symlink/development-exclusion checks; SHA-256
+`25fb938d88d9eb19f2a118a1f29b85d52fb84e5d4d5e0b2d07396848b75eeff9`.
+
+## Previous amendment — image progress within the current gallery
 
 The Galleries dialog now displays processed images / total images and the
 percentage within the active gallery, alongside the overall finished-gallery

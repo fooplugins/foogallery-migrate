@@ -99,6 +99,7 @@ Uninstall removes plugin-owned internal storage, including retained history and 
 == Changelog ==
 
 = 1.16 =
+* Fixed Robo Gallery migration warnings when older galleries have missing or incomplete settings, using safe defaults while preserving existing layout mappings.
 * Fixed gallery image loading after retry or saved history, and migrations staying at 0% when a gallery has no images.
 * Added one shared, accessible progress dialog across Galleries, Albums, Blocks / Shortcodes and Image Tags, with current-gallery image progress and safe stopping between batches.
 * Added WP Photo Album Plus migration for galleries, nested albums, locally stored images and metadata, plus supported numeric-album shortcodes and blocks; the source plugin can remain inactive, and migration form actions are now handled reliably.
