@@ -98,6 +98,10 @@ Uninstall removes plugin-owned internal storage, including retained history and 
 
 == Changelog ==
 
+= 1.16.1 =
+* Fixed third-party gallery blocks incorrectly failing with "changed after detection" by recording exact block positions and original markup, including repeated and nested blocks. Use Rescan Content once after updating to refresh older block findings.
+* Fixed the content migration dialog showing 100% completion after a failed replacement. Errors and partial results now appear inside the dialog without a success percentage.
+
 = 1.16 =
 * Fixed Robo Gallery migration warnings when older galleries have missing or incomplete settings, using safe defaults while preserving existing layout mappings.
 * Fixed gallery image loading after retry or saved history, and migrations staying at 0% when a gallery has no images.

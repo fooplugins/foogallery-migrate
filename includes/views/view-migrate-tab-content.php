@@ -40,6 +40,9 @@ if ( ! defined( 'ABSPATH' ) ) {
         var dialog = window.foogalleryMigrateProgress;
         var dialogTitle = <?php echo wp_json_encode( __( 'Blocks / Shortcodes migration', 'foogallery-migrate' ) ); ?>;
         var stoppedMessage = <?php echo wp_json_encode( __( 'Migration stopped. Completed work is kept.', 'foogallery-migrate' ) ); ?>;
+        var replacementErrorMessage = <?php echo wp_json_encode( __( 'The replacement result could not be confirmed. Review the page before trying again.', 'foogallery-migrate' ) ); ?>;
+        var replacementFailedMessage = <?php echo wp_json_encode( __( 'No selected items were replaced.', 'foogallery-migrate' ) ); ?>;
+        var replacementPartialMessage = <?php echo wp_json_encode( __( 'Some selected items could not be replaced.', 'foogallery-migrate' ) ); ?>;
 
         function setBusy(isBusy) {
             if (isBusy) {
@@ -63,7 +66,23 @@ if ( ! defined( 'ABSPATH' ) ) {
                         return;
                     }
                     success_callback(data);
-                    dialog.finish();
+                    var result = $form.find('.foogm-content-result');
+                    var success = result.attr('data-success');
+                    var failures = result.attr('data-errors');
+                    if (result.length !== 1 || !/^\d+$/.test(success || '') || !/^\d+$/.test(failures || '')) {
+                        dialog.fail(replacementErrorMessage);
+                        return;
+                    }
+                    var errors = result.find('.notice-error li').map(function () { return $(this).text(); }).get();
+                    var successMessage = result.find('.notice-success p').text();
+                    if (Number(failures) > 0) {
+                        if (Number(success) > 0 && successMessage) { errors.unshift(successMessage); }
+                        dialog.fail(Number(success) > 0 ? replacementPartialMessage : replacementFailedMessage, errors);
+                    } else if (Number(success) > 0) {
+                        dialog.finish(successMessage);
+                    } else {
+                        dialog.fail(replacementFailedMessage);
+                    }
                 },
                 error: function(xhr, ajaxOptions, thrownError) {
                     dialog.fail();

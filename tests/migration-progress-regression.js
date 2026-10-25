@@ -20,7 +20,7 @@ const context = {
     window: { setTimeout: fn => fn() }, document: { activeElement: button, contains: () => true, createElement: () => ({}), body: { appendChild() {} } },
     wp: { element: { createElement: (type, props, ...children) => ({ type, props: props || {}, children }),
         createRoot: () => ({ render(value) { tree = value; } }) },
-        components: { Modal: 'Modal', Spinner: 'Spinner', Button: 'Button' },
+        components: { Modal: 'Modal', Spinner: 'Spinner', Button: 'Button', Notice: 'Notice' },
         i18n: { __: s => s, sprintf: (s, a, b) => s.replace('%1$s', a).replace('%2$s', b) } },
     jQuery: { ajax: options => requests.push(options) }, ajaxurl: '/wp-admin/admin-ajax.php'
 };
@@ -29,6 +29,7 @@ context.window.foogalleryMigrateHandleAjaxError = () => {};
 vm.runInNewContext(source, context);
 const progress = context.window.foogalleryMigrateProgress;
 function nodes(node, type) {
+    if (Array.isArray(node)) return node.flatMap(child => nodes(child, type));
     if (!node || typeof node !== 'object') return [];
     return (node.type === type ? [node] : []).concat(...(node.children || []).map(child => nodes(child, type)));
 }
@@ -57,6 +58,14 @@ for (const title of ['Gallery migration', 'Album migration', 'Blocks / Shortcode
 progress.begin('Single request', null); assert.equal(nodes(tree, 'Button').length, 0);
 progress.fail('Request failed'); assert.equal(tree.props.shouldCloseOnEsc, true);
 assert.ok(JSON.stringify(tree).includes('Request failed'));
+assert.equal(nodes(tree, 'Notice')[0].props.status, 'error');
+assert.equal(nodes(tree, 'div').filter(n => n.props.role === 'progressbar').length, 0, 'errors must not show successful or indeterminate progress');
+progress.begin('Replacement', null); progress.update(100, 'Response received');
+progress.fail('Some items failed', ['Changed occurrence', '<script>literal error text</script>']);
+assert.equal(nodes(tree, 'li').length, 2, 'all errors are visible inside the dialog');
+assert.equal(nodes(tree, 'li')[1].children[0], '<script>literal error text</script>', 'errors are text, never injected HTML');
+assert.equal(nodes(tree, 'div').filter(n => n.props.role === 'progressbar').length, 0);
+assert.equal(nodes(tree, 'Spinner').length, 0); assert.equal(tree.props.isDismissible, true);
 const bind = context.window.foogalleryMigrateBindCollection;
 bind(form, { title: 'Gallery migration', startButton: 'start', continueButton: 'resume', cancelButton: 'cancel', refreshButton: 'refresh',
     selection: 'selected', progress: 'progress', start: 'start-action', continue: 'continue-action', cancel: 'cancel-action', preflight() {} });
@@ -119,13 +128,22 @@ for (const tab of ['galleries', 'albums', 'content', 'image-tags']) {
 // Run the actual content/tag tab scripts, not copies of their polling logic.
 function tabFixture(tab) {
     const events = {}, calls = [], timers = [], messages = [];
+    let responseHtml = '';
+    const result = {
+        get length() { return (responseHtml.match(/class="foogm-content-result"/g) || []).length; },
+        attr(name) { return (responseHtml.match(new RegExp(name + '="([^"]*)"')) || [])[1]; },
+        find(selector) {
+            return { text: () => (responseHtml.match(/class="notice notice-success"><p>(.*?)<\/p>/s) || [,''])[1],
+                map(callback) { return { get: () => [...responseHtml.matchAll(/<li>(.*?)<\/li>/gs)].map(m => callback.call({ nodeText: m[1] })) }; } };
+        }
+    };
     let stopped = false;
     const chain = { length: 1, serialize: () => 'nonce=valid',
-        find() { return this; }, prop() { return this; }, attr(name, value) { return arguments.length > 1 ? this : '1'; }, text() { return this; },
+        find(selector) { return selector === '.foogm-content-result' ? result : this; }, prop() { return this; }, attr(name, value) { return arguments.length > 1 ? this : '1'; }, text() { return this; },
         hide() { return this; }, show() { return this; }, css() { return this; },
-        addClass() { return this; }, removeClass() { return this; }, html() { return this; }, val: () => 'nonce',
+        addClass() { return this; }, removeClass() { return this; }, html(value) { responseHtml = value; return this; }, val: () => 'nonce',
         on(event, selector, fn) { events[selector] = fn; } };
-    const $ = arg => { if (typeof arg === 'function') arg($); return chain; };
+    const $ = arg => { if (typeof arg === 'function') arg($); return arg && Object.hasOwn(arg, 'nodeText') ? { text: () => arg.nodeText } : chain; };
     $.ajax = request => calls.push(request);
     const dialog = { begin(title, stop) { stopped = false; messages.push(['begin', title, stop]); },
         update(...args) { messages.push(['update', ...args]); }, finish(...args) { messages.push(['finish', ...args]); },
@@ -150,7 +168,26 @@ for (const selector of ['.refresh_content', '.refresh_content_status']) {
 }
 const replace = tabFixture('content'); replace.click('.replace_content');
 assert.equal(replace.messages[0][2], null, 'single replacement request cannot pretend to stop mid-write');
-replace.calls[0].success('<table></table>'); assert.equal(replace.messages.at(-1)[0], 'finish');
+const contentResult = (success, errors) => '<div class="foogm-content-result" data-success="' + success + '" data-errors="' + errors.length + '">' +
+    (Number(success) ? '<div class="notice notice-success"><p>Replaced ' + success + ' occurrences.</p></div>' : '') +
+    '<div class="notice notice-error"><ul>' + errors.map(e => '<li>' + e + '</li>').join('') + '</ul></div></div><table></table>';
+replace.calls[0].success(contentResult(2, [])); assert.equal(replace.messages.at(-1)[0], 'finish');
+assert.equal(replace.messages.at(-1)[1], 'Replaced 2 occurrences.');
+for (const [count, errors] of [[0, ['Changed block', 'Another changed block']], [2, ['One failed block']], [0, []]]) {
+    const tab = tabFixture('content'); tab.click('.replace_content'); tab.calls[0].success(contentResult(count, errors));
+    assert.equal(tab.messages.at(-1)[0], 'fail', 'HTTP success with application errors or zero replacements cannot finish successfully');
+    assert.equal(tab.messages.filter(m => m[0] === 'finish').length, 0);
+    if (errors.length) {
+        assert.ok(tab.messages.at(-1)[2].includes(errors[0]));
+        assert.equal(tab.messages.at(-1)[2].length, errors.length + (count > 0 ? 1 : 0));
+    }
+}
+for (const html of ['<table></table>', contentResult('bad', []), contentResult(1, []) + contentResult(1, [])]) {
+    const tab = tabFixture('content'); tab.click('.replace_content'); tab.calls[0].success(html);
+    assert.equal(tab.messages.at(-1)[0], 'fail', 'missing, malformed or duplicate receipts cannot claim success');
+}
+const transport = tabFixture('content'); transport.click('.replace_content'); transport.calls[0].error({}, 'timeout', 'timeout');
+assert.equal(transport.messages.at(-1)[0], 'fail');
 const tags = tabFixture('image-tags'); tags.click('.foogallery-migrate-image-tags-start'); tags.click('.foogallery-migrate-image-tags-start');
 assert.equal(tags.calls.length, 1); assert.equal(tags.calls[0].data.reset, 1);
 tags.stop(); tags.calls[0].success({ success: true, data: { complete: false, total: 100, processed: 50, progress: 50 } });

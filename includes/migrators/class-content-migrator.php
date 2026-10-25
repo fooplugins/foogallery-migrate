@@ -684,10 +684,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 
 			$all_blocks = array();
 			if ( function_exists( 'parse_blocks' ) ) {
-				$blocks = parse_blocks( $post->post_content );
-				if ( ! empty( $blocks ) && is_array( $blocks ) ) {
-					$all_blocks = $this->get_all_blocks_recursive( $blocks );
-				}
+				$all_blocks = $this->get_block_source_ranges( $post->post_content );
 			}
 
 			$is_inside_block = function( $position ) use ( $post ) {
@@ -764,12 +761,16 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 								continue;
 							}
 
-							foreach ( $all_blocks as $block ) {
-								if ( isset( $block['blockName'] ) && $block['blockName'] === $block_name ) {
+							foreach ( $all_blocks as $range ) {
+								if ( $range['blockName'] === $block_name ) {
+									$original = substr( $post->post_content, $range['start'], $range['end'] - $range['start'] );
+									$parsed = parse_blocks( $original );
+									if ( empty( $parsed[0]['blockName'] ) || $parsed[0]['blockName'] !== $block_name ) { continue; }
+									$block = $parsed[0];
 									$gallery_id = $this->extract_gallery_id_from_block( $block, $plugin );
 
 									if ( $gallery_id ) {
-										$found_items[] = $this->create_content_item( $post, $plugin, $gallery_id, 'block', serialize_block( $block ), 0, $block_name );
+										$found_items[] = $this->create_content_item( $post, $plugin, $gallery_id, 'block', $original, $range['start'], $block_name );
 									}
 								}
 							}
@@ -860,7 +861,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				$item['block_name'] = $block_name;
 			}
 
-			if ( $type === 'shortcode' ) {
+			if ( $type === 'shortcode' || $type === 'block' ) {
 				$item['match_offset'] = $match_offset;
 			}
 
@@ -1184,25 +1185,31 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 		}
 
 		/**
-		 * Recursively get all blocks including nested ones.
+		 * Locate paired and self-closing block comments without reserializing them.
 		 *
-		 * @param array $blocks Array of blocks
-		 * @return array Flat array of all blocks
+		 * @param string $content Stored post content.
+		 * @return array Exact source ranges, including nested and repeated blocks.
 		 */
-		private function get_all_blocks_recursive( $blocks ) {
-			$all_blocks = array();
-
-			foreach ( $blocks as $block ) {
-				if ( ! empty( $block['blockName'] ) ) {
-					$all_blocks[] = $block;
-				}
-
-				if ( ! empty( $block['innerBlocks'] ) && is_array( $block['innerBlocks'] ) ) {
-					$all_blocks = array_merge( $all_blocks, $this->get_all_blocks_recursive( $block['innerBlocks'] ) );
+		private function get_block_source_ranges( $content ) {
+			$ranges = array(); $stack = array(); $matches = array();
+			preg_match_all( '/<!--\s*(\/?)wp:([^\s>]+)(.*?)-->/s', $content, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE );
+			foreach ( $matches as $match ) {
+				$name = $match[2][0];
+				$name = false === strpos( $name, '/' ) ? 'core/' . $name : $name;
+				$start = (int) $match[0][1]; $end = $start + strlen( $match[0][0] );
+				if ( '/' === $match[1][0] ) {
+					$last = count( $stack ) - 1;
+					// Do not turn malformed/unbalanced comments into a replaceable range.
+					if ( $last < 0 || $stack[$last]['blockName'] !== $name ) { $stack = array(); continue; }
+					$opened = array_pop( $stack ); $opened['end'] = $end; $ranges[] = $opened;
+				} elseif ( preg_match( '/\/\s*$/', $match[3][0] ) ) {
+					$ranges[] = array( 'blockName' => $name, 'start' => $start, 'end' => $end );
+				} else {
+					$stack[] = array( 'blockName' => $name, 'start' => $start );
 				}
 			}
-
-			return $all_blocks;
+			usort( $ranges, function ( $left, $right ) { return $left['start'] === $right['start'] ? 0 : ( $left['start'] < $right['start'] ? -1 : 1 ); } );
+			return $ranges;
 		}
 
 		/**

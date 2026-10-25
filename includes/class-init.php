@@ -127,6 +127,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 'Migration progress' => __( 'Migration progress', 'foogallery-migrate' ),
                 'Keep this tab open while the migration runs.' => __( 'Keep this tab open while the migration runs.', 'foogallery-migrate' ),
                 'Review the results in the table.' => __( 'Review the results in the table.', 'foogallery-migrate' ),
+                'Review the errors before trying again.' => __( 'Review the errors before trying again.', 'foogallery-migrate' ),
                 'Stopping…' => __( 'Stopping…', 'foogallery-migrate' ),
                 'Stop migration' => __( 'Stop migration', 'foogallery-migrate' ),
                 'Done' => __( 'Done', 'foogallery-migrate' ),
@@ -712,6 +713,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 $result = $content_migrator->migrate_and_replace_content( $selected_items );
 
                 // Show success/error messages
+                echo '<div class="foogm-content-result" data-success="' . absint( $result['success'] ) . '" data-errors="' . count( $result['errors'] ) . '">';
                 if ( $result['success'] > 0 ) {
                     echo '<div class="notice notice-success"><p>';
                     printf(
@@ -730,6 +732,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                     echo '</ul></div>';
                 }
 
+                echo '</div>';
                 $content_migrator->render_content_form();
 
                 die();

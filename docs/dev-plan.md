@@ -2,7 +2,49 @@
 
 **Updated:** 2026-10-25
 
-## Current amendment — defensive Robo Gallery defaults
+## Current amendment — exact block replacement and honest error results (1.16.1)
+
+Brad approved fixing the false "changed after detection" errors for third-party
+gallery blocks and the dialog incorrectly showing 100% after replacement errors.
+Include regression tests, commit/push to PR #15 and deploy to the stopped test site.
+The requested patch bump is **1.16.1** in the plugin and package metadata. Keep the
+WordPress.org Stable tag at **1.16**; no merge, public release or v2 implementation.
+
+- Discovery records exact stored block markup and byte offsets, including nested
+  and repeated blocks, rather than serializing blocks and omitting their offsets.
+  Keep strict stale-content checks and whole-selection preflight unchanged.
+- The shared dialog reads explicit replacement success/error counts. Failed and
+  partial results show the returned errors inside the dialog, without a success
+  percentage. Missing, malformed or zero-success receipts cannot report success.
+- **After updating, use Rescan Content once before retrying replacements.** Older
+  saved third-party block findings lack offsets; do not guess positions, replace
+  first matches, reset migration history or rescan/migrate on Brad's behalf.
+- Regression coverage: **20 cases / 78 assertions**, in options and a table scan
+  repository double; exact surrounding text/UTF-8 byte offsets, supported source
+  block names, repeated/nested/noncanonical markup, mixed shortcodes, changed
+  content, old scans and malformed comments. The same 20 cases also pass with
+  WordPress's actual block parser/serializer. The table double is not native SQL
+  acceptance. Dialog tests cover all-failed/partial/successful, malformed/missing/
+  duplicate receipts and transport errors, with escaped error text and no meter
+  or spinner on failure.
+- Full maintained suite: **1,678 tests / 311,981 assertions**, explicit 256 MiB,
+  no failures/errors/skips (final rerun: 3m03.397s; 133.61 MiB peak). After the
+  parser fixture was made compatible with native WordPress, focused checks pass
+  **87 / 523**, followed by that complete rerun.
+  Shared-dialog/AJAX, content-scan, 64 storage workflow and 148 cleanup fault checks
+  pass, as do host PHP lint, PHP 5.4.45 production lint and whitespace checks.
+  Agent CI was attempted; this repository has no Actions workflows to run.
+- Read-only candidate scanning on the test site locates all **10** previously
+  failing third-party blocks with exact original bytes and correct positions.
+  The existing 60-gallery/attachment audit still reports no issues or warnings;
+  protected data fingerprints are unchanged. No replacements were executed.
+- Built ZIP: **94 product files**, zero development payloads; CRC/path/symlink/
+  source parity passes. SHA-256:
+  `c375f73c83e82dc80ce932df390f34cfa90ae3fd1fc94c6e1a37593842fe4b47`.
+  Deployment must verify installed-file identity and unchanged protected site data;
+  preserve storage mode, saved counts, source content and all migration history.
+
+## Previous amendment — defensive Robo Gallery defaults
 
 The read-only audit of Brad's 20 migrated test galleries found correct image
 counts/order, valid files and completed records. Recomputing settings for Robo

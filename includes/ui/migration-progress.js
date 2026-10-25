@@ -41,19 +41,22 @@
             shouldCloseOnEsc: !state.running
         },
         el('div', { className: 'foogm-progress-content' },
-            el('div', { className: 'foogm-progress-heading' },
+            state.failed ? el(wp.components.Notice, { status: 'error', isDismissible: false },
+                el('p', { role: 'alert' }, state.message),
+                state.errors.length ? el('ul', null, state.errors.map(function (error, index) { return el('li', { key: index }, error); })) : null)
+                : el('div', { className: 'foogm-progress-heading' },
                 state.running ? el(wp.components.Spinner) : null,
                 el('p', { role: 'status', 'aria-live': 'polite', 'aria-atomic': true }, state.message)),
-            el('div', { className: 'foogm-progress-meter', role: 'progressbar',
+            state.failed ? null : el('div', { className: 'foogm-progress-meter', role: 'progressbar',
                 'aria-label': __('Migration progress', 'foogallery-migrate'), 'aria-valuemin': 0, 'aria-valuemax': 100,
                 'aria-valuenow': state.percent === null ? undefined : state.percent },
                 el('span', { style: { width: state.percent === null ? '100%' : state.percent + '%' },
                     className: state.percent === null ? 'is-indeterminate' : '' })),
-            el('div', { className: 'foogm-progress-meta' }, el('span', null, state.detail),
+            state.failed ? null : el('div', { className: 'foogm-progress-meta' }, el('span', null, state.detail),
                 el('strong', null, state.percent === null ? '' : Math.floor(state.percent) + '%')),
             el('p', { className: 'description' }, state.running
                 ? __('Keep this tab open while the migration runs.', 'foogallery-migrate')
-                : __('Review the results in the table.', 'foogallery-migrate')),
+                : state.failed ? __('Review the errors before trying again.', 'foogallery-migrate') : __('Review the results in the table.', 'foogallery-migrate')),
             el('div', { className: 'foogm-progress-actions' }, state.running && !state.onStop ? null : state.running
                 ? el(wp.components.Button, { variant: 'secondary', isSecondary: true,
                     disabled: state.stopping || !state.onStop, onClick: requestStop },
@@ -65,7 +68,7 @@
     var progress = window.foogalleryMigrateProgress = {
         begin: function (title, onStop) {
             state = { title: title, onStop: onStop, running: true, stopping: false, percent: null,
-                message: __('Preparing migration…', 'foogallery-migrate'), detail: '', returnFocus: document.activeElement };
+                message: __('Preparing migration…', 'foogallery-migrate'), detail: '', failed: false, errors: [], returnFocus: document.activeElement };
             render();
         },
         update: function (percent, message, detail) {
@@ -82,9 +85,12 @@
             state.message = message || __('Migration finished.', 'foogallery-migrate');
             render();
         },
-        fail: function (message) {
+        fail: function (message, errors) {
             if (!state) { return; }
             state.running = false;
+            state.failed = true;
+            state.percent = null;
+            state.errors = Array.isArray(errors) ? errors : [];
             state.message = message || __('Migration paused. Review the error and try again.', 'foogallery-migrate');
             render();
         },
