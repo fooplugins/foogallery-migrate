@@ -355,9 +355,13 @@ $foogallery_migrate_troubleshooting_tab = 'troubleshooting' === $foogallery_migr
 $foogallery_migrate_maintenance_tab = $foogallery_migrate_settings_tab || $foogallery_migrate_troubleshooting_tab;
 if ( ! is_multisite() && isset( $_POST['clear_migration_history'] ) ) {
 	if ( ! current_user_can( 'manage_options' ) ) { wp_die( esc_html__( 'Unauthorized.', 'foogallery-migrate' ) ); }
+	if ( ! isset( $_POST['foogallery_migrate_clear_nonce'] ) || ! is_string( $_POST['foogallery_migrate_clear_nonce'] ) ) {
+		wp_die( esc_html__( 'Invalid migration storage request.', 'foogallery-migrate' ), '', array( 'response' => 400 ) );
+	}
 	check_admin_referer( 'foogallery_migrate_storage_clear_' . get_current_blog_id(), 'foogallery_migrate_clear_nonce' );
 	$foogallery_migrate_clear_receipt = ( new \FooPlugins\FooGalleryMigrate\StorageOperations() )->dispatch( 'clear', array(
 		'blog_id' => get_current_blog_id(), 'scope' => 'site', 'target' => 'state',
+		// phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Require a posted string above; preserve the opaque nonce for check_admin_referer and the dispatcher's own nonce verification rather than altering it.
 		'confirmation' => 'clear-current-state', 'nonce' => wp_unslash( $_POST['foogallery_migrate_clear_nonce'] ) ) );
 	if ( is_wp_error( $foogallery_migrate_clear_receipt ) ) { wp_die( esc_html( $foogallery_migrate_clear_receipt->get_error_message() ) ); }
 	$foogallery_migrate_clear_handled = true;

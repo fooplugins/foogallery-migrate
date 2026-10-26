@@ -13,10 +13,14 @@ if ( ! defined( 'ABSPATH' ) ) {
                 $storage_error = \FooPlugins\FooGalleryMigrate\StorageAuthority::admit_option_writer();
                 if ( is_wp_error( $storage_error ) ) { wp_die( esc_html( $storage_error->get_error_message() ) ); }
             } else {
+                if ( ! isset( $_POST['foogallery_migrate_clear_nonce'] ) || ! is_string( $_POST['foogallery_migrate_clear_nonce'] ) ) {
+                    wp_die( esc_html__( 'Invalid migration storage request.', 'foogallery-migrate' ), '', array( 'response' => 400 ) );
+                }
                 check_admin_referer( 'foogallery_migrate_storage_clear_' . get_current_blog_id(), 'foogallery_migrate_clear_nonce' );
                 $clear_result = ( new \FooPlugins\FooGalleryMigrate\StorageOperations() )->dispatch( 'clear', array(
                     'blog_id' => get_current_blog_id(), 'scope' => 'site', 'target' => 'state',
                     'confirmation' => 'clear-current-state',
+                    // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Require a posted string above; the opaque nonce is verified here and again by cleanup dispatch, not sanitized into a different token.
                     'nonce' => wp_unslash( $_POST['foogallery_migrate_clear_nonce'] ) ) );
                 if ( is_wp_error( $clear_result ) ) { wp_die( esc_html( $clear_result->get_error_message() ) ); }
             }

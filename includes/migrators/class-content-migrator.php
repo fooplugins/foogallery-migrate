@@ -1994,10 +1994,14 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			$url = foogallery_migrate_admin_url( 'content' );
 			$page = 1;
 			if ( defined( 'DOING_AJAX' ) ) {
+				// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Display pagination only; content AJAX controllers check capability and nonce before calling this renderer.
 				if ( isset( $_POST['foogallery_content_migrate_paged'] ) && is_scalar( $_POST['foogallery_content_migrate_paged'] ) ) {
+					// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Accept only a string pagination URL and sanitize it below; it cannot authorize a content replacement.
 					if ( isset( $_POST['foogallery_content_migrate_url'] ) && is_string( $_POST['foogallery_content_migrate_url'] ) ) {
+						// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Read-only URL after the authenticated controller; sanitize before rendering it.
 						$url = esc_url_raw( wp_unslash( $_POST['foogallery_content_migrate_url'] ) );
 					}
+					// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Read-only page number normalized with absint and bounded below; replacement actions have separate nonce verification.
 					$page = absint( wp_unslash( $_POST['foogallery_content_migrate_paged'] ) );
 				} else {
 					$referer = wp_get_referer();
@@ -2012,7 +2016,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 						}
 					}
 				}
-			} elseif ( array_key_exists( 'content_paged', $_GET ) ) {
+			} elseif ( array_key_exists( 'content_paged', $_GET ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only page navigation, not a content replacement request.
+				// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Normalize the display page before choosing occurrences; this value is not a migration instruction.
 				$page = absint( wp_unslash( $_GET['content_paged'] ) );
 			}
 			if ( $page < 1 ) {

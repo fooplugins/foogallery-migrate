@@ -55,7 +55,9 @@ if ( $scoped_history ? 0 === $log_summary['total'] : ( empty( $migrated_objects 
 }
 
 $log_type = 'gallery';
+// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only log filter; the sanitized value is checked against the available types below.
 if ( array_key_exists( 'log_type', $_GET ) ) {
+	// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only filter, not a mutation request; sanitize before using this value in the log view.
 	$log_type = sanitize_text_field( wp_unslash( $_GET['log_type'] ) );
 }
 if ( ! empty( $available_types ) && ! array_key_exists( $log_type, $available_types ) ) {
@@ -76,7 +78,9 @@ if ( ! $scoped_history ) {
 
 $url = foogallery_migrate_admin_url( 'log' );
 $page = 1;
+// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only log pagination; no migration or history data is changed.
 if ( array_key_exists( 'log_paged', $_GET ) ) {
+	// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Unslash and normalize the display page to a positive integer below; no write is authorized here.
 	$page = absint( wp_unslash( $_GET['log_paged'] ) );
 }
 if ( $page < 1 ) {

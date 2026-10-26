@@ -15,7 +15,8 @@ $gallery_templates = $migrator->get_available_gallery_templates();
 $gallery_settings_sources = $migrator->get_available_gallery_settings_sources();
 $album_settings_sources = $migrator->get_available_album_settings_sources();
 ?>
-<?php if ( array_key_exists( 'settings-updated', $_GET ) ) { ?>
+<?php // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Display-only redirect flag; settings are saved by Init::save_settings after capability and nonce verification.
+if ( array_key_exists( 'settings-updated', $_GET ) ) { ?>
 	<div class="notice notice-success inline">
 		<p><?php esc_html_e( 'Settings saved.', 'foogallery-migrate' ); ?></p>
 	</div>

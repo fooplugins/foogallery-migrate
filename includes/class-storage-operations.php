@@ -85,11 +85,15 @@ class StorageOperations {
 		if ( ! current_user_can( 'manage_options' ) ) {
 			$result = new \WP_Error( 'foogallery_migrate_storage_forbidden', __( 'You are not authorized to manage migration storage.', 'foogallery-migrate' ) );
 		} else if ( ! isset( $_SERVER['REQUEST_METHOD'] ) || 'POST' !== $_SERVER['REQUEST_METHOD'] ||
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Validate the envelope first; dispatch() verifies capability, scope and the operation-specific nonce before any SQL operation.
 			! is_array( $_POST ) || 7 !== count( $_POST ) || ! isset( $_POST['action'], $_POST['operation'] ) ||
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Only this fixed action and a string operation reach dispatch's strict allowlist and nonce checks.
 			'foogallery_migrate_storage' !== $_POST['action'] || ! is_string( $_POST['operation'] ) ) {
 			$result = self::invalid();
 		} else {
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Private scalar observation only; it neither authorizes a write nor persists data before dispatch verifies the nonce.
 			$receiver->incoming_memory->observe_receiver( $_POST );
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Unslash the bounded envelope once; every operation is authorized by dispatch before database access or mutation.
 			$request = wp_unslash( $_POST ); $operation = $request['operation'];
 			unset( $request['action'], $request['operation'] );
 			$receiver->incoming_memory->sample();

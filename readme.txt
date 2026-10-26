@@ -99,6 +99,7 @@ Uninstall removes plugin-owned internal storage, including retained history and 
 == Changelog ==
 
 = 1.16.1 =
+* Reject missing or non-string posted cleanup nonces before processing them; document existing request guards and cover nonce/capability rejection and title/settings sanitization with regression tests.
 * Reviewed buffered migration forms, storage diagnostics and SQL preparation boundaries, documented clear scanner false positives, and added regression coverage for hostile source values and diagnostic messages.
 * Bound table identifiers with WordPress 6.2 identifier placeholders in storage administration, authority checks, snapshots and WP Photo Album Plus queries, preserving the existing filters and transaction safeguards.
 * Raised the minimum WordPress version to 6.2 and aligned the plugin header, readme and runtime requirement.

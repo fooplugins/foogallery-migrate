@@ -5,7 +5,7 @@ $site = realpath( $argv[1] );
 if ( ! $site || ! preg_match( '#^/(private/)?tmp/foogallery-migrate-r0\.[A-Za-z0-9]+$#D', $site ) ) { throw new RuntimeException( 'Not an owned R0 site path.' ); }
 $owner = json_decode( file_get_contents( $site . '/.fgm-r0-owner.json' ), true );
 if ( ! is_array( $owner ) || 'foogallery-migrate-r0-v1' !== $owner['kind'] || realpath( $owner['site'] ) !== $site ||
-	! in_array( $argv[2], array( 'output-boundaries', 'identifier-sql', 'identifier-conversion', 'legacy-storage-snapshots', 'legacy-history-mutations', 'history-retirement' ), true ) ) {
+	! in_array( $argv[2], array( 'request-boundaries', 'output-boundaries', 'identifier-sql', 'identifier-conversion', 'legacy-storage-snapshots', 'legacy-history-mutations', 'history-retirement' ), true ) ) {
 	throw new RuntimeException( 'Fixture identity or harness differs.' );
 }
 require $site . '/wp-load.php';

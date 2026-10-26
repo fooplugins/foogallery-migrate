@@ -24,7 +24,9 @@ class StorageAdmin {
 
 	/** Old bookmarks remain useful; redirects never perform a storage operation. */
 	public static function redirect_legacy() {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- GET-only compatibility redirect to a fixed settings URL; it performs no storage operation.
 		if ( current_user_can( 'manage_options' ) && isset( $_SERVER['REQUEST_METHOD'], $_GET['page'] ) &&
+			// phpcs:ignore WordPress.Security.NonceVerification.Recommended,WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Require a string and compare the unslashed value exactly to one fixed page slug; never use it as a redirect destination or stored value.
 			'GET' === $_SERVER['REQUEST_METHOD'] && is_string( $_GET['page'] ) && 'foogallery-migrate-storage' === wp_unslash( $_GET['page'] ) ) {
 			wp_safe_redirect( self::settings_url() );
 			exit;
@@ -45,8 +47,11 @@ class StorageAdmin {
 
 	/** Keep the size query and its output on the migration/storage screens only. */
 	public static function recommendation_notice() {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only notice routing; this check also rejects non-string page values before unslashing/sanitization.
 		if ( ! current_user_can( 'manage_options' ) || ! isset( $_GET['page'] ) || ! is_string( $_GET['page'] ) ||
+			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Sanitized page slug controls only whether advice is displayed, never a storage change.
 			'foogallery-migrate' !== sanitize_key( wp_unslash( $_GET['page'] ) ) ) { return; }
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Sanitized/allowlisted tab names suppress duplicate advice; no setting, queue or storage authority is changed.
 		if ( isset( $_GET['tab'] ) && is_string( $_GET['tab'] ) && in_array( sanitize_key( wp_unslash( $_GET['tab'] ) ), array( 'settings', 'troubleshooting' ), true ) ) { return; }
 		if ( is_multisite() ) {
 			echo '<div class="notice notice-info"><p>' . esc_html__( 'Table storage recommendations and operations are unavailable on multisite. Existing option-mode flows remain supported, and this screen does not change storage authority.', 'foogallery-migrate' ) . '</p></div>';

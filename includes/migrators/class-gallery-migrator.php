@@ -122,10 +122,14 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                     $url = foogallery_migrate_admin_url( 'galleries' );
                     $page = 1;
                     if ( defined( 'DOING_AJAX' ) ) {
+                        // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Display pagination only; migration AJAX controllers verify capability and nonce before calling this renderer.
                         if ( isset( $_POST['foogallery_migrate_paged'] ) && is_scalar( $_POST['foogallery_migrate_paged'] ) ) {
+                            // phpcs:ignore WordPress.Security.NonceVerification.Missing -- A string pagination URL is sanitized below and escaped when rendered; this value cannot start a migration.
                             if ( isset( $_POST['foogallery_migrate_url'] ) && is_string( $_POST['foogallery_migrate_url'] ) ) {
+                                // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Read-only pagination URL after the authenticated controller; sanitize it for URL use here.
                                 $url = esc_url_raw( wp_unslash( $_POST['foogallery_migrate_url'] ) );
                             }
+                            // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Read-only page number, normalized with absint and bounded below; mutations retain their controller nonce checks.
                             $page = absint( wp_unslash( $_POST['foogallery_migrate_paged'] ) );
                         } else {
                             $referer = wp_get_referer();
@@ -135,7 +139,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                             if ( isset( $parts['query'] ) ) { parse_str( $parts['query'], $query ); }
                             $page = isset( $query['gallery_paged'] ) ? absint( $query['gallery_paged'] ) : 1;
                         }
-                    } else if ( array_key_exists( 'gallery_paged', $_GET ) ) {
+                    } else if ( array_key_exists( 'gallery_paged', $_GET ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only page navigation, not a migration command.
+                        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Normalize the read-only page number before choosing the visible rows.
                         $page = absint( wp_unslash( $_GET['gallery_paged'] ) );
                     }
                     $page = max( 1, $page );

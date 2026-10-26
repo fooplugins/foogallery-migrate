@@ -116,6 +116,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
 
         /** Load WordPress's shared dialog only on the migration screen. */
         public function enqueue_progress_dialog() {
+            // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only screen detection for enqueuing assets; exact page-name comparison performs no migration or settings write.
             if ( ! isset( $_GET['page'] ) || ! is_string( $_GET['page'] ) || 'foogallery-migrate' !== $_GET['page'] ) { return; }
             wp_enqueue_style( 'wp-components' );
             wp_enqueue_style( 'foogallery-migrate-progress', FOOGM_URL . 'includes/ui/migration-progress.css', array( 'wp-components' ), FOOGM_VERSION );
@@ -310,6 +311,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             );
 
             if ( array_key_exists( 'override_gallery_layout', $_POST ) ) {
+                // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Unslash into a temporary value, then require a scalar and sanitize_key below before saving.
                 $override_gallery_layout = wp_unslash( $_POST['override_gallery_layout'] );
                 if ( is_scalar( $override_gallery_layout ) ) {
                     $settings['override_gallery_layout'] = sanitize_key( $override_gallery_layout );
@@ -317,6 +319,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             }
 
             if ( array_key_exists( 'override_gallery_settings', $_POST ) ) {
+                // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Unslash first; scalar validation and absint below normalize the saved ID.
                 $override_gallery_settings = wp_unslash( $_POST['override_gallery_settings'] );
                 if ( is_scalar( $override_gallery_settings ) ) {
                     $settings['override_gallery_settings'] = absint( $override_gallery_settings );
@@ -324,6 +327,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             }
 
             if ( array_key_exists( 'override_album_settings', $_POST ) ) {
+                // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Unslash first; scalar validation and absint below normalize the saved ID.
                 $override_album_settings = wp_unslash( $_POST['override_album_settings'] );
                 if ( is_scalar( $override_album_settings ) ) {
                     $settings['override_album_settings'] = absint( $override_album_settings );
@@ -331,6 +335,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             }
 
             if ( array_key_exists( 'page_size', $_POST ) ) {
+                // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Unslash first; only scalar values normalized by absint reach the saved setting.
                 $page_size = wp_unslash( $_POST['page_size'] );
                 if ( is_scalar( $page_size ) ) {
                     $settings['page_size'] = absint( $page_size );
@@ -338,6 +343,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
             }
 
             if ( array_key_exists( 'images_per_turn', $_POST ) ) {
+                // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Unslash first; only scalar values normalized by absint reach the saved setting.
                 $images_per_turn = wp_unslash( $_POST['images_per_turn'] );
                 if ( is_scalar( $images_per_turn ) ) {
                     $settings['images_per_turn'] = absint( $images_per_turn );
@@ -394,13 +400,16 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
         private function get_migration_title_from_request( $object_id, $prefix = 'foogallery-title-' ) {
             $field_name = $prefix . $object_id;
             $request_key = $field_name;
+            // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Private helper called only after the gallery/album start controller verifies its nonce and manage_options capability.
             if ( ! array_key_exists( $request_key, $_POST ) ) {
                 $request_key = str_replace( array( ' ', '.' ), '_', $field_name );
             }
+            // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Same authenticated callers; try the PHP-normalized field name without performing a write.
             if ( ! array_key_exists( $request_key, $_POST ) ) {
                 return false;
             }
 
+            // phpcs:ignore WordPress.Security.NonceVerification.Missing,WordPress.Security.ValidatedSanitizedInput.MissingUnslash,WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Both authenticated callers immediately apply wp_unslash and sanitize_text_field to this raw title; keep one unslash at that boundary.
             return $_POST[ $request_key ];
         }
 

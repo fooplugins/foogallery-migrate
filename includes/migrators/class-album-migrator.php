@@ -109,10 +109,14 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                     $url = foogallery_migrate_admin_url( 'albums' );
                     $page = 1;
                     if ( defined( 'DOING_AJAX' ) ) {
+                        // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Display pagination only; album AJAX controllers verify capability and nonce before calling this renderer.
                         if ( isset( $_POST['foogallery_album_migrate_paged'] ) && is_scalar( $_POST['foogallery_album_migrate_paged'] ) ) {
+                            // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Only a string pagination URL is accepted and sanitized below; this renderer does not authorize an album migration.
                             if ( isset( $_POST['foogallery_album_migrate_url'] ) && is_string( $_POST['foogallery_album_migrate_url'] ) ) {
+                                // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Read-only URL after the authenticated controller; sanitize it for URL use here.
                                 $url = esc_url_raw( wp_unslash( $_POST['foogallery_album_migrate_url'] ) );
                             }
+                            // phpcs:ignore WordPress.Security.NonceVerification.Missing -- Read-only page number, normalized with absint and bounded below; mutation controllers retain their nonce checks.
                             $page = absint( wp_unslash( $_POST['foogallery_album_migrate_paged'] ) );
                         } else {
                             $referer = wp_get_referer();
@@ -122,7 +126,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                             if ( isset( $parts['query'] ) ) { parse_str( $parts['query'], $query ); }
                             $page = isset( $query['album_paged'] ) ? absint( $query['album_paged'] ) : 1;
                         }
-                    } else if ( array_key_exists( 'album_paged', $_GET ) ) {
+                    } else if ( array_key_exists( 'album_paged', $_GET ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Read-only page navigation, not an album migration command.
+                        // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Normalize the display page before choosing visible albums; no state change is authorized here.
                         $page = absint( wp_unslash( $_GET['album_paged'] ) );
                     }
                     $page = max( 1, $page );

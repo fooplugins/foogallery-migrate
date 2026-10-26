@@ -401,3 +401,84 @@ Validation:
 Evidence: `/private/tmp/fgm-sql-comments-20261026.5rdc05zn`; scanner output:
 `/private/tmp/fgm-low-risk-20261026.YVQNZE/sql-comments-*`.
 Changes remain local/uncommitted. No push, deployment or public release.
+
+## Request validation and nonce warnings (buckets 1 and 2)
+
+The two single-site cleanup form handlers now require
+`foogallery_migrate_clear_nonce` to exist in **POST** and be a string before
+calling `check_admin_referer` or dispatching cleanup. Previously WordPress could
+accept a valid nonce in the query string while the handler subsequently accessed
+a missing POST field. Malformed array/object fields also needed a clean refusal
+before WordPress tried to interpret them. These requests now receive the existing
+invalid-request message with HTTP 400. Capability checks and both the form and
+operation-specific nonce verification remain intact. Nonce values stay opaque;
+sanitizing a token into a different value is not authorization.
+
+The remaining findings in these buckets are documented with **43 line-specific
+PHPCS comments**: settings values are unslashed into temporaries and then
+scalar-checked/sanitized; both migration-title callers unslash/sanitize the raw
+helper return exactly once; mutation controllers and storage dispatchers verify
+capabilities and purpose-scoped nonces before writes. GET navigation, filtering,
+notice selection and settings-saved display flags remain read-only. No blanket
+nonce suppression or duplicate authorization layer was added.
+
+Content Migrator's mixed line endings made PHPCS attribute comments and findings
+to incorrect lines. That touched file was normalized to LF so comments remain
+line-specific; Robo and 10Web formatting were left for their separate bucket.
+Token comparison confirms **84 packaged PHP files have identical executable
+tokens**, the two cleanup views contain only the intentional new guards, and
+Content Migrator has identical tokens after CRLF normalization (HTML/interpolated
+text line endings are normalized too). No migration-engine behavior was upgraded.
+
+Regression coverage:
+
+- **12 isolated PHP tests / 36 assertions** include the actual two cleanup views
+  and reject absent, null, array, integer, boolean and object POST nonce fields
+  without PHP warnings, SQL access or option writes. The query-string nonce does
+  not substitute for a required POST field.
+- **313 native checks each for source and production ZIP**, on fresh owned
+  WordPress **7.1.3 / PHP 8.4.6 / MariaDB 11.4** fixtures. Both real cleanup forms
+  handle valid requests and reject malformed, query-only, wrong-site, invalid
+  nonce and unauthorized requests. Twenty migration/settings/log controllers
+  reject missing/bad nonces and unauthorized users; all eight public storage
+  operations reject missing/bad nonces or permissions before mutation.
+  Fifteen native session mutation/transaction counters supplement WordPress's
+  query filter, which alone cannot observe the pinned mysqli transport.
+- Authorized gallery/album title tests cover literal and PHP-normalized field
+  names, quotes/backslashes, stripped markup and array-shaped titles. Settings
+  tests exercise real WordPress scalar sanitization and preservation of defaults
+  for arrays. These queue/settings destinations use a spy engine; no gallery or
+  media migration was run. The cleanup forms use the real engine and storage.
+
+Plugin Check source reports **5 errors / 256 warnings**; production ZIP reports
+**2 errors / 255 warnings**. A normalized comparison finds no new findings and
+exactly **65 warnings removed**: all **52 nonce**, all **12 input-validation**
+reports, plus Content Migrator's one mixed-line-ending report. Other warning
+buckets remain unchanged. The two errors are still the intentional pinned
+`mysqli_query` restriction and the held Stable tag mismatch.
+
+Both native sites/containers were removed after retaining evidence. An initial
+disposable setup used the Plugin Check-specific CLI wrapper and failed; its
+container/database/path identity was verified before cleanup, and the standard
+CLI was used for the passing fixtures. The native harness's initial fake engine
+also correctly triggered the quiescence guard; cleanup tests now use the real
+engine instead of weakening that guard.
+
+Final validation:
+
+- Full maintained suite after normalization: **1,810 tests / 313,706 assertions**,
+  no failures, errors or skips; explicit **256 MiB**, **2m46.479s**, reported peak
+  **137.61 MiB**.
+- AJAX/shared-dialog regressions, **66** rendered storage-workflow checks,
+  bounded content scanning and **148** repository cleanup fault checks pass.
+- All **87** packaged PHP files pass PHP **8.4.6** and **5.4.45** syntax checks.
+  Build, source/package byte parity, repeated identical ZIPs, translation format
+  and diff checks pass. POT source references were regenerated for the normalized
+  file and new guard locations; existing template header warnings remain.
+  ZIP SHA-256: `de1f7dee47036cb739ac41194ea11f092b5f10e4591a8e441844bb322e672180`.
+- Agent CI was attempted; the repository has no `.github/workflows` directory,
+  so the maintained checks above were run directly.
+
+Evidence: `/private/tmp/fgm-request-review-20261026.xu5wsy5f`; scanner output:
+`/private/tmp/fgm-low-risk-20261026.YVQNZE/request-boundaries-*`.
+No test-site deployment, push, public tag or Stable tag change was performed.
