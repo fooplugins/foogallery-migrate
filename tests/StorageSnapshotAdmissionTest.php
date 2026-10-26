@@ -2,12 +2,12 @@
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\StorageConversion;
 use FooPlugins\FooGalleryMigrate\StorageMemoryBaseline;
 use PHPUnit\Framework\TestCase;
 
-require_once __DIR__ . '/LegacyTableSnapshotTest.php';
+require_once __DIR__ . '/TableSnapshotTest.php';
 require_once __DIR__ . '/support/SnapshotScaleConnection.php';
 
 /** Executed phase/rollback ordering with a query spy, NOT native SQL evidence. */
@@ -25,7 +25,7 @@ class StorageSnapshotAdmissionTest extends TestCase {
 
 	public function test_preflight_floor_refuses_before_encoding_or_sql(): void {
 		$db = new SnapshotTestWpdb(); $seen = array();
-		$repo = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( &$seen ) {
+		$repo = new TableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( &$seen ) {
 			$seen[] = $bytes; $this->refuse();
 		} );
 		$this->assertRefusal( $repo, $db );
@@ -35,7 +35,7 @@ class StorageSnapshotAdmissionTest extends TestCase {
 
 	public function test_complete_encoded_preflight_is_charged_before_digest_and_sql(): void {
 		$db = new SnapshotTestWpdb(); $seen = array();
-		$repo = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( &$seen ) {
+		$repo = new TableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( &$seen ) {
 			$seen[] = $bytes; if ( $bytes > 0 ) { $this->refuse(); } return true;
 		} );
 		$this->assertRefusal( $repo, $db );
@@ -47,7 +47,7 @@ class StorageSnapshotAdmissionTest extends TestCase {
 
 	public function test_stage_refusal_rolls_back_before_any_insert(): void {
 		$db = new SnapshotTestWpdb();
-		$repo = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( $db ) {
+		$repo = new TableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( $db ) {
 			if ( in_array( 'START TRANSACTION', $db->queries, true ) ) { $this->assertGreaterThan( 0, $bytes ); $this->refuse(); } return true;
 		} );
 		$this->assertRefusal( $repo, $db );
@@ -57,7 +57,7 @@ class StorageSnapshotAdmissionTest extends TestCase {
 
 	public function test_verification_refusal_rolls_back_staging_before_payload_fetch(): void {
 		$db = new SnapshotTestWpdb();
-		$repo = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( $db ) {
+		$repo = new TableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( $db ) {
 			if ( false !== strpos( implode( "\n", $db->queries ), 'INSERT INTO' ) ) { $this->assertGreaterThan( 0, $bytes ); $this->refuse(); } return true;
 		} );
 		$this->assertRefusal( $repo, $db );
@@ -67,7 +67,7 @@ class StorageSnapshotAdmissionTest extends TestCase {
 
 	public function test_digest_refusal_sees_retained_readback_and_does_not_publish(): void {
 		$db = new SnapshotTestWpdb();
-		$repo = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( $db ) {
+		$repo = new TableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( $db ) {
 			if ( false !== strpos( implode( "\n", $db->queries ), 'SELECT root_payload FROM' ) ) { $this->assertGreaterThan( 0, $bytes ); $this->refuse(); } return true;
 		} );
 		$this->assertRefusal( $repo, $db );
@@ -77,7 +77,7 @@ class StorageSnapshotAdmissionTest extends TestCase {
 	/** @dataProvider stagedCallbackFailures */
 	public function test_post_staging_callback_failures_rollback_and_clear_busy( $class ): void {
 		$db = new SnapshotTestWpdb(); $fault = new $class( 'callback failure' );
-		$repo = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( $db, $fault ) {
+		$repo = new TableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( $db, $fault ) {
 			if ( false !== strpos( implode( "\n", $db->queries ), 'INSERT INTO' ) ) { throw $fault; } return true;
 		} );
 		try { $repo->replace_many( array( $this->change() ) ); $this->fail( 'Missing callback failure.' ); }
@@ -94,7 +94,7 @@ class StorageSnapshotAdmissionTest extends TestCase {
 
 	public function test_ordinary_scalar_keeps_commit_and_digest_semantics(): void {
 		$db = new SnapshotTestWpdb(); $seen = array();
-		$repo = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( &$seen ) { $seen[] = $bytes; return true; } );
+		$repo = new TableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( &$seen ) { $seen[] = $bytes; return true; } );
 		$result = $repo->replace_many( array( $this->change() ) );
 		$this->assertSame( array( 'key' => 'checkpoint', 'id' => 4, 'generation' => 1, 'revision' => 1 ), $result[0] );
 		$this->assertContains( 'COMMIT', $db->queries );
@@ -132,7 +132,7 @@ class StorageSnapshotAdmissionTest extends TestCase {
 
 	public function test_nonaffirmative_callback_fails_closed(): void {
 		$db = new SnapshotTestWpdb();
-		$repo = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) { return null; } );
+		$repo = new TableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) { return null; } );
 		try { $repo->replace_many( array( $this->change() ) ); $this->fail( 'Nonaffirmative admission accepted.' ); }
 		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'memory admission', $error->getMessage() ); }
 		$this->assertSame( array(), $db->queries );
@@ -140,7 +140,7 @@ class StorageSnapshotAdmissionTest extends TestCase {
 
 	public function test_mutated_later_source_during_first_insert_rolls_back_without_publishing(): void {
 		$db = new SnapshotScaleConnection();
-		$repo = new LegacyTableSnapshot( $db, 7, 100, 1048576 );
+		$repo = new TableSnapshot( $db, 7, 100, 1048576 );
 		$last = array( 'title' => 'original' );
 		$first = array( 'title' => 'before' );
 		$value = array( 'root' => array( 'children' => array( 'first' => $first, 'last' => &$last ) ) );

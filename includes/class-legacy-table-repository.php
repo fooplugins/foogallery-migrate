@@ -1,9 +1,9 @@
 <?php
 /**
- * Inert bounded compact map/list/scalar repository on the approved shared schema.
+ * Bounded compact map/list/scalar repository used by the current table backend.
  * No provisioning, authority selection, option fallback or runtime hydration.
  * Caller must own the manager's writer guard and this idle pinned connection.
- * This is not yet an admitted engine backend (logical wrappers need integration).
+ * Logical wrappers expose these operations to the existing migration engine.
  *
  * @package FooPlugins\FooGalleryMigrate
  */
@@ -46,7 +46,7 @@ class LegacyTableRepository {
 		$this->db = $db; $this->blog = $blog; $this->max_rows = $max_rows; $this->max_bytes = $max_bytes; $this->max_seconds = $max_seconds;
 		$this->codec = new LegacyStateCodec();
 		$this->records = new LegacyRecordCodec( $this->codec, $max_rows, $max_bytes );
-		$this->reader = new LegacyTableReader( $db, $blog, $this->codec );
+		$this->reader = new TableReader( $db, $blog, $this->codec );
 		$this->definitions = ( new LegacyStorageSchema( $db ) )->definitions();
 		$tables = array_keys( $this->definitions ); $this->state = $tables[0]; $this->table = $tables[1];
 	}
@@ -56,7 +56,7 @@ class LegacyTableRepository {
 	 */
 	public function metadata_many( $keys ) {
 		$this->start_budget();
-		if ( ! is_array( $keys ) || ! count( $keys ) || count( $keys ) > min( $this->max_rows, LegacyTableReader::MAX_ROWS ) ) { $this->fail( 'Need 1 to 100 metadata keys within the shared row budget.' ); }
+		if ( ! is_array( $keys ) || ! count( $keys ) || count( $keys ) > min( $this->max_rows, TableReader::MAX_ROWS ) ) { $this->fail( 'Need 1 to 100 metadata keys within the shared row budget.' ); }
 		$this->consume( count( $keys ), 0 );
 		$seen = array();
 		foreach ( $keys as $key ) {
@@ -256,7 +256,7 @@ class LegacyTableRepository {
 				if ( in_array( $key, array( 'migrated', 'migrated-revision', 'plugins', 'galleries', 'albums' ), true ) ) { $this->fail( 'Reserved history companion.' ); }
 				// Reject objects/oversized indivisible values before fetching metadata.
 				$encoded = $this->codec->encode( array( 'version' => 1, 'kind' => 'scalar', 'value' => $value ) );
-				if ( strlen( $encoded ) > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Companion row byte budget exceeded.' ); }
+				if ( strlen( $encoded ) > TableReader::MAX_RECORD_BYTES ) { $this->fail( 'Companion row byte budget exceeded.' ); }
 				$this->consume( 0, strlen( $encoded ) ); $keys[] = $key;
 			}
 			if ( 'upsert' === $operation ) {
@@ -294,7 +294,7 @@ class LegacyTableRepository {
 				}
 				if ( $this->max_rows <= $this->used_rows || $this->byte_limit <= $this->used_bytes ) { $this->fail( 'Clear publication budget exhausted.' ); }
 				$this->tick();
-				( new LegacyTableSnapshot( $this->db, $this->blog, $this->max_rows - $this->used_rows, $this->byte_limit - $this->used_bytes, $this->deadline ) )->replace_many( $changes );
+				( new TableSnapshot( $this->db, $this->blog, $this->max_rows - $this->used_rows, $this->byte_limit - $this->used_bytes, $this->deadline ) )->replace_many( $changes );
 				return $this->finish_history_read( true );
 			}
 			// Retry uses the exact parent key plus the indexed ERROR domain only.
@@ -317,7 +317,7 @@ class LegacyTableRepository {
 				$old = array_values( $selected );
 			} else {
 				$old = array();
-				foreach ( array_chunk( array_values( $identifiers ), LegacyTableReader::MAX_ROWS ) as $batch ) {
+				foreach ( array_chunk( array_values( $identifiers ), TableReader::MAX_ROWS ) as $batch ) {
 					foreach ( $this->identifiers( 'migrated', $batch ) as $row ) { $old[] = $row; }
 				}
 			}
@@ -373,7 +373,7 @@ class LegacyTableRepository {
 				$this->typed_key( $key );
 				if ( in_array( $key, array( 'migrated', 'migrated-revision', 'plugins', 'galleries', 'albums' ), true ) ) { $this->fail( 'Scalar facade cannot replace reserved collections or history revision.' ); }
 				$encoded = $this->codec->encode( array( 'version' => 1, 'kind' => 'scalar', 'value' => $value ) );
-				if ( strlen( $encoded ) > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Scalar row byte budget exceeded.' ); }
+				if ( strlen( $encoded ) > TableReader::MAX_RECORD_BYTES ) { $this->fail( 'Scalar row byte budget exceeded.' ); }
 				$this->consume( 0, strlen( $encoded ) );
 			}
 			$context = array(); $missing = false; $changes = array(); $guards = array();
@@ -413,7 +413,7 @@ class LegacyTableRepository {
 	private function replace_bounded( $changes, $guards ) {
 		$this->tick();
 		if ( $this->max_rows <= $this->used_rows || $this->byte_limit <= $this->used_bytes ) { $this->fail( 'Replacement publication budget exhausted.' ); }
-		( new LegacyTableSnapshot( $this->db, $this->blog, $this->max_rows - $this->used_rows, $this->byte_limit - $this->used_bytes, $this->deadline ) )->replace_many( $changes, $guards );
+		( new TableSnapshot( $this->db, $this->blog, $this->max_rows - $this->used_rows, $this->byte_limit - $this->used_bytes, $this->deadline ) )->replace_many( $changes, $guards );
 	}
 
 	/** Delete only a verified scalar; all retained generations must be empty. */
@@ -565,7 +565,7 @@ class LegacyTableRepository {
 					$id = $this->number( $row['id'] ); $order = $this->number( $row['item_order'] );
 					$bytes = $this->number( $row['plugin_bytes'] );
 					if ( $id < 1 || ( $order < $last_order || ( $order === $last_order && $id <= $last_id ) ) ||
-						$bytes < 1 || $bytes > LegacyTableReader::MAX_RECORD_BYTES || $bytes > 4194304 - $page_bytes ) {
+						$bytes < 1 || $bytes > TableReader::MAX_RECORD_BYTES || $bytes > 4194304 - $page_bytes ) {
 						$this->fail( 'Invalid content plugin projection size or order.' );
 					}
 					$this->consume( 1, $bytes ); $page_bytes += $bytes;
@@ -819,7 +819,7 @@ class LegacyTableRepository {
 			$root = ( new LegacyCollectionEnvelope( $this->codec ) )->split( ImageTagQueueRepository::STATE_KEY, 'map', $empty )['root'];
 			$root['root_count'] = $stats['root_count']; ( new LegacyCollectionEnvelope( $this->codec ) )->validate( $root, ImageTagQueueRepository::STATE_KEY );
 			$encoded = $this->codec->encode_collection_root( $root );
-			if ( strlen( $encoded ) > LegacyTableReader::MAX_RECORD_BYTES || strlen( $encoded ) > $this->max_bytes ) { $this->fail( 'Queue summary exceeds finite byte budget.' ); }
+			if ( strlen( $encoded ) > TableReader::MAX_RECORD_BYTES || strlen( $encoded ) > $this->max_bytes ) { $this->fail( 'Queue summary exceeds finite byte budget.' ); }
 			// Every affected tree was read back in its page transaction. The
 			// established dirty-digest contract defers whole-collection logical
 			// proof to maintenance/reversal instead of rehydrating this queue here.
@@ -1230,7 +1230,7 @@ class LegacyTableRepository {
 	/** One shared head and operation budget, NOT N independently bounded reads. */
 	public function roots( $state_key, $keys ) {
 		$this->start_budget(); $this->typed_key( $state_key );
-		if ( ! is_array( $keys ) || count( $keys ) > LegacyTableReader::MAX_ROWS ) { $this->fail( 'Need at most 100 exact root keys.' ); }
+		if ( ! is_array( $keys ) || count( $keys ) > TableReader::MAX_ROWS ) { $this->fail( 'Need at most 100 exact root keys.' ); }
 		$seen = array();
 		foreach ( $keys as $key ) {
 			$this->typed_key( $key ); $hash = $this->codec->key_hash( $key );
@@ -1291,7 +1291,7 @@ class LegacyTableRepository {
 		$this->start_budget(); $this->typed_key( $state_key );
 		$this->byte_limit = min( $this->max_bytes, 4194304 );
 		$this->consume( 0, strlen( $this->codec->key_value( $state_key ) ) );
-		if ( ! is_int( $limit ) || $limit < 1 || $limit > LegacyTableReader::MAX_ROWS ) { $this->fail( 'Page limit must be 1 to 100.' ); }
+		if ( ! is_int( $limit ) || $limit < 1 || $limit > TableReader::MAX_ROWS ) { $this->fail( 'Page limit must be 1 to 100.' ); }
 		$filter = $this->filters( $filters );
 		$head = $this->head( $state_key ); $this->collection( $head );
 		$identity = array( 'blog' => $this->blog, 'state' => $head['id'], 'generation' => $head['active_generation'], 'revision' => $head['revision'] );
@@ -1446,7 +1446,7 @@ class LegacyTableRepository {
 		foreach ( $meta as $row ) {
 			$node = $this->hex( $row['node_hash'] ); $bytes = $this->number( $row['encoded_bytes'] );
 			if ( ! in_array( $node, $selected, true ) || isset( $by_node[$node] ) || null !== $row['parent_node_hash'] ||
-				$bytes > LegacyTableReader::MAX_RECORD_BYTES || $bytes > $this->max_bytes - $this->used_bytes - $total ) { $this->fail( 'Invalid selected history root metadata.' ); }
+				$bytes > TableReader::MAX_RECORD_BYTES || $bytes > $this->max_bytes - $this->used_bytes - $total ) { $this->fail( 'Invalid selected history root metadata.' ); }
 			foreach ( array( 'blog_id' => $this->blog, 'state_id' => $head['id'], 'generation' => $head['active_generation'] ) as $field => $expected ) {
 				if ( $this->number( $row[$field] ) !== $expected ) { $this->fail( 'Selected history root scope changed.' ); }
 			}
@@ -1756,7 +1756,7 @@ class LegacyTableRepository {
 	/** Fixed-size selector offset for a visible form page; skipped roots never decode. */
 	public function collection_view_page( $state_key, $offset, $limit ) {
 		$this->collection_key( $state_key );
-		if ( ! is_int( $offset ) || $offset < 0 || ! is_int( $limit ) || $limit < 1 || $limit > LegacyTableReader::MAX_ROWS ) { $this->fail( 'Invalid form page.' ); }
+		if ( ! is_int( $offset ) || $offset < 0 || ! is_int( $limit ) || $limit < 1 || $limit > TableReader::MAX_ROWS ) { $this->fail( 'Invalid form page.' ); }
 		$this->start_budget(); $this->typed_key( $state_key ); $this->byte_limit = min( $this->max_bytes, 4194304 );
 		$head = $this->head( $state_key ); $root = $this->collection( $head );
 		if ( ! in_array( $head['state_kind'], array( 'map', 'list' ), true ) || ! isset( $root['wrapper'] ) ) { $this->fail( 'Indexed form collection required.' ); }
@@ -2094,8 +2094,8 @@ class LegacyTableRepository {
 						if ( $id < 1 || $order < $last_order || ( $order === $last_order && $id <= $last_id ) ||
 							$row['object_type'] !== $type || $this->number( $row['is_migrated'] ) !== $flag ||
 							$this->hex( $row['identity_hash'] ) !== $hash ||
-							$plugin_bytes > LegacyTableReader::MAX_RECORD_BYTES || $id_bytes > LegacyTableReader::MAX_RECORD_BYTES ||
-							$mutable_bytes > LegacyTableReader::MAX_RECORD_BYTES ||
+							$plugin_bytes > TableReader::MAX_RECORD_BYTES || $id_bytes > TableReader::MAX_RECORD_BYTES ||
+							$mutable_bytes > TableReader::MAX_RECORD_BYTES ||
 							! in_array( $this->number( $row['is_selected'] ), array( 0, 1 ), true ) || ! is_string( $row['migration_status'] ) ) {
 							$this->fail( 'Invalid indexed collection identity metadata.' );
 						}
@@ -2174,8 +2174,8 @@ class LegacyTableRepository {
 				$plugin_bytes = $this->number( $row['plugin_bytes'] ); $id_bytes = $this->number( $row['id_bytes'] );
 				$mutable_bytes = $this->number( $row['mutable_bytes'] );
 				if ( $id < 1 || $order <= $last_order || $row['object_type'] !== $expected_type ||
-					$plugin_bytes > LegacyTableReader::MAX_RECORD_BYTES || $id_bytes > LegacyTableReader::MAX_RECORD_BYTES ||
-					$mutable_bytes > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Invalid collection identity metadata.' ); }
+					$plugin_bytes > TableReader::MAX_RECORD_BYTES || $id_bytes > TableReader::MAX_RECORD_BYTES ||
+					$mutable_bytes > TableReader::MAX_RECORD_BYTES ) { $this->fail( 'Invalid collection identity metadata.' ); }
 				$this->hex( $row['node_hash'] ); $this->hex( $row['plugin_hash'] ); $this->hex( $row['identity_hash'] );
 				if ( ! in_array( $this->number( $row['is_selected'] ), array( 0, 1 ), true ) || ! is_string( $row['migration_status'] ) ) { $this->fail( 'Invalid queue projection.' ); }
 				$this->consume( 1, $this->add( $this->add( $plugin_bytes, $id_bytes ), $mutable_bytes ) );
@@ -2363,7 +2363,7 @@ class LegacyTableRepository {
 				}
 				if ( $count < 0 || $bytes < 0 || $root['kind'] !== $head['state_kind'] ) { $this->fail( 'Invalid head statistics.' ); }
 				$encoded = $this->codec->encode( $root );
-				if ( strlen( $encoded ) > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Root payload exceeds the row byte budget.' ); }
+				if ( strlen( $encoded ) > TableReader::MAX_RECORD_BYTES ) { $this->fail( 'Root payload exceeds the row byte budget.' ); }
 				$digest_sql = "digest_status = 'dirty', "; $digest_args = array();
 				if ( 'scalar' === $head['state_kind'] ) {
 					// Small scalars have no per-record logical hash. Publish their
@@ -2410,14 +2410,14 @@ class LegacyTableRepository {
 				array_key_exists( 'items', $change['queue_summary'] ) || array_key_exists( 'value', $change ) || array_key_exists( 'content_progress', $change ) ) ) { $this->fail( 'Invalid image-tag queue checkpoint.' ); }
 			if ( array_key_exists( 'queue_summary', $change ) ) {
 				$summary_bytes = strlen( $this->codec->encode( $change['queue_summary'] ) );
-				if ( $summary_bytes > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Queue summary exceeds record byte budget.' ); }
+				if ( $summary_bytes > TableReader::MAX_RECORD_BYTES ) { $this->fail( 'Queue summary exceeds record byte budget.' ); }
 				$this->consume( 0, $summary_bytes );
 			}
 			if ( isset( $result[$hash] ) ) { $this->fail( 'Duplicate state change.' ); }
 			$this->consume( 0, strlen( $this->codec->key_value( $change['key'] ) ) );
 			if ( array_key_exists( 'value', $change ) ) {
 				$encoded = $this->codec->encode( array( 'version' => 1, 'kind' => 'scalar', 'value' => $change['value'] ) );
-				if ( strlen( $encoded ) > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Scalar row byte budget exceeded.' ); }
+				if ( strlen( $encoded ) > TableReader::MAX_RECORD_BYTES ) { $this->fail( 'Scalar row byte budget exceeded.' ); }
 				$this->consume( 0, strlen( $encoded ) );
 			} else {
 				if ( ! isset( $change['patches'] ) || ! is_array( $change['patches'] ) || ( ! count( $change['patches'] ) && ! $extra ) || count( $change['patches'] ) > $this->max_rows ) { $this->fail( 'Invalid affected patches.' ); }
@@ -2458,7 +2458,7 @@ class LegacyTableRepository {
 	private function unchanged( $key, $head ) { if ( $this->head( $key ) !== $head ) { $this->fail( 'State changed; restart bounded read.' ); } }
 
 	private function root_metadata( $head ) {
-		if ( $head['root_payload_bytes'] > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Oversized root metadata.' ); }
+		if ( $head['root_payload_bytes'] > TableReader::MAX_RECORD_BYTES ) { $this->fail( 'Oversized root metadata.' ); }
 		$this->consume( 0, $head['root_payload_bytes'] );
 		$rows = $this->read( $this->db->prepare( 'SELECT root_payload FROM `' . $this->state . '` WHERE blog_id = %d AND id = %d AND revision = %d AND active_generation = %d AND OCTET_LENGTH(root_payload) = %d LIMIT 1',
 			array( $this->blog, $head['id'], $head['revision'], $head['active_generation'], $head['root_payload_bytes'] ) ) );
@@ -2503,7 +2503,7 @@ class LegacyTableRepository {
 		for ( $i = 0; $i < count( $meta ); $i++ ) {
 			if ( count( $meta ) > $this->max_rows ) { $this->fail( 'Affected tree row budget exceeded.' ); }
 			$row = $meta[$i]; $node = $this->hex( $row['node_hash'] ); $bytes = $this->number( $row['encoded_bytes'] );
-			if ( isset( $seen[$node] ) || $bytes > LegacyTableReader::MAX_RECORD_BYTES || $bytes > $this->max_bytes - $total ) { $this->fail( 'Invalid tree identity or encoded byte budget.' ); }
+			if ( isset( $seen[$node] ) || $bytes > TableReader::MAX_RECORD_BYTES || $bytes > $this->max_bytes - $total ) { $this->fail( 'Invalid tree identity or encoded byte budget.' ); }
 			$seen[$node] = true; $total += $bytes; $payload = $this->add( $payload, $this->number( $row['payload_bytes'] ) );
 			foreach ( array( 'blog_id' => $this->blog, 'state_id' => $head['id'], 'generation' => $head['active_generation'] ) as $field => $expected ) {
 				if ( $this->number( $row[$field] ) !== $expected ) { $this->fail( 'Tree scope mismatch.' ); }
@@ -2598,5 +2598,8 @@ class LegacyTableRepository {
 		$this->tick(); $result = $this->db->query( $sql );
 		if ( false === $result || ! empty( $this->db->last_error ) ) { $this->fail( 'Database write failed.' ); } return $result;
 	}
-	private function fail( $message ) { throw new \RuntimeException( 'Legacy table repository: ' . $message ); }
+	private function fail( $message ) {
+		// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Every private caller supplies a fixed diagnostic literal, not a record value. Preserve exception data; HTML consumers must escape at display time.
+		throw new \RuntimeException( 'Legacy table repository: ' . $message );
+	}
 }

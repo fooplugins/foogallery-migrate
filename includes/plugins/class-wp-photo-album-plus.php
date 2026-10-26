@@ -527,19 +527,19 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\WpPhotoAlbumPlus' ) )
                 return;
             }
 
-            $album_rows = $wpdb->get_results(
+            $album_rows = $wpdb->get_results( $wpdb->prepare(
                 "SELECT id, name, description, a_order, a_parent, p_order_by, suba_order_by, timestamp, status, capability
-                FROM {$tables['albums']}
-                ORDER BY a_order ASC, id ASC"
-            );
-            $photo_rows = $wpdb->get_results(
+                FROM %i
+                ORDER BY a_order ASC, id ASC", $tables['albums']
+            ) );
+            $photo_rows = $wpdb->get_results( $wpdb->prepare(
                 "SELECT id, album, ext, name, description, p_order, mean_rating, rating_count,
                     owner, timestamp, status, alt, filename, modified, exifdtm,
                     videox, videoy, duration, misc
-                FROM {$tables['photos']}
+                FROM %i
                 WHERE album > 0
-                ORDER BY id ASC"
-            );
+                ORDER BY id ASC", $tables['photos']
+            ) );
 
             $album_rows = is_array( $album_rows ) ? $album_rows : array();
             $photo_rows = is_array( $photo_rows ) ? $photo_rows : array();

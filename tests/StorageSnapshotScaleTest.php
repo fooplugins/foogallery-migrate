@@ -1,7 +1,7 @@
 <?php
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\StorageScaleAdmission;
 use PHPUnit\Framework\TestCase;
 
@@ -30,7 +30,7 @@ class StorageSnapshotScaleTest extends TestCase {
 	}
 	public function test_original20k_no_scale_default_refuses_with_zero_sql(): void {
 		$db = new SnapshotScaleConnection(); $refused = false;
-		try { ( new LegacyTableSnapshot( $db, 7 ) )->replace_many( $this->changes( StorageA7Fixture::value( 20000 ) ) ); }
+		try { ( new TableSnapshot( $db, 7 ) )->replace_many( $this->changes( StorageA7Fixture::value( 20000 ) ) ); }
 		catch ( \RuntimeException $error ) { $refused = true; $this->assertStringContainsString( 'record budget', $error->getMessage() ); }
 		$this->assertTrue( $refused ); $this->assertSame( array(), $db->events ); $this->assertSame( array(), $db->queries );
 	}
@@ -109,7 +109,7 @@ class StorageSnapshotScaleTest extends TestCase {
 		}
 		$this->assertSame( $heads, $db->heads ); $this->assertSame( $records, $db->records );
 		$refused = false;
-		try { new LegacyTableSnapshot( $db, 8, 20208, 15070958, null, null, $b ); }
+		try { new TableSnapshot( $db, 8, 20208, 15070958, null, null, $b ); }
 		catch ( \RuntimeException $error ) { $refused = true; }
 		$this->assertTrue( $refused ); $this->assertSame( $events, $db->events );
 	}
@@ -118,7 +118,7 @@ class StorageSnapshotScaleTest extends TestCase {
 		$forged = ( new \ReflectionClass( StorageScaleAdmission::class ) )->newInstanceWithoutConstructor();
 		foreach ( array( new \stdClass(), $forged ) as $bad ) {
 			$refused = false;
-			try { new LegacyTableSnapshot( $db, 7, 24576, 16777216, null, null, $bad ); }
+			try { new TableSnapshot( $db, 7, 24576, 16777216, null, null, $bad ); }
 			catch ( \RuntimeException $error ) { $refused = true; }
 			$this->assertTrue( $refused );
 		}
@@ -140,7 +140,7 @@ class StorageSnapshotScaleTest extends TestCase {
 		return array( array( 'key' => 'galleries', 'order' => 0, 'kind' => 'map', 'value' => $value['galleries'], 'expected_revision' => null ) );
 	}
 	private function snapshot( $db, $budget ) {
-		return new LegacyTableSnapshot( $db, 7, $budget->limit( 'max_rows' ), $budget->limit( 'max_bytes' ), null, null, $budget );
+		return new TableSnapshot( $db, 7, $budget->limit( 'max_rows' ), $budget->limit( 'max_bytes' ), null, null, $budget );
 	}
 	/**
 	 * @runInSeparateProcess

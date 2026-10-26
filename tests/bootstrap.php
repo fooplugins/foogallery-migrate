@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/support/IdentifierSqlFixture.php';
+
 if ( ! defined( 'WPINC' ) ) {
 	define( 'WPINC', 'wp-includes' );
 }

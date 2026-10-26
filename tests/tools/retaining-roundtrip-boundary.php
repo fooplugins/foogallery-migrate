@@ -21,7 +21,7 @@ class WP_Error { public function __construct( $code, $message ) {} }
 function is_wp_error( $value ) { return $value instanceof WP_Error; }
 function __( $value, $domain ) { return $value; }
 function absint( $value ) { return abs( (int) $value ); }
-foreach ( array( 'storage-preflight', 'storage-scale-admission', 'legacy-state-codec', 'legacy-record-codec', 'legacy-table-reader', 'generic-retaining-model' ) as $file ) { require $root . '/includes/class-' . $file . '.php'; }
+foreach ( array( 'storage-preflight', 'storage-scale-admission', 'legacy-state-codec', 'legacy-record-codec', 'table-reader', 'generic-retaining-model' ) as $file ) { require $root . '/includes/class-' . $file . '.php'; }
 require $fixture;
 function sample() { return array( 'true' => memory_get_usage( true ), 'live' => memory_get_usage( false ), 'peak_true' => memory_get_peak_usage( true ), 'peak_live' => memory_get_peak_usage( false ) ); }
 $value = FooPlugins\FooGalleryMigrate\Tests\StorageA7Fixture::value( $count );

@@ -7,8 +7,8 @@
 use FooPlugins\FooGalleryMigrate\ContentScanRepository;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
-use FooPlugins\FooGalleryMigrate\LegacyTableReader;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableReader;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\MigratableCollectionRepository;
 use FooPlugins\FooGalleryMigrate\MigratedHistoryRepository;
@@ -83,7 +83,7 @@ $save = function ( $journal ) use ( $journal_key, $raw_option ) {
 };
 $schema = new LegacyStorageSchema( $wpdb ); $tables = array_keys( $schema->definitions() );
 $db = new LegacyTransactionConnection( $wpdb ); $blog = (int) get_current_blog_id();
-$reader = new LegacyTableReader( $db, $blog );
+$reader = new TableReader( $db, $blog );
 $backend = new LegacyTableBackend( $db, $blog );
 $settings = new MigratorSettings(); $plugin = new Aigpl();
 $history = new MigratedHistoryRepository( $backend, $settings );
@@ -109,7 +109,7 @@ if ( 'init' === $phase ) {
 	require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 	foreach ( $schema->statements() as $ddl ) { dbDelta( $ddl ); }
 	scaling_check( $schema->verify(), 'Schema verification failed.' );
-	( new LegacyTableSnapshot( $db, $blog ) )->replace_many( array( array( 'key' => 'galleries', 'order' => 0,
+	( new TableSnapshot( $db, $blog ) )->replace_many( array( array( 'key' => 'galleries', 'order' => 0,
 		'kind' => 'map', 'value' => $settings->compact_state_value( 'galleries', array() ), 'expected_revision' => null ) ) );
 	scaling_check( $actual_counts() === array( 'history' => 0, 'content' => 0, 'gallery' => 0 ), 'Empty head setup differs.' );
 	$journal = array( 'identity' => hash( 'sha256', $site . '|' . $expected_container . '|' . $expected_tree ),

@@ -2,7 +2,7 @@
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\StorageConversion;
 use FooPlugins\FooGalleryMigrate\StorageScaleAdmission;
 use PHPUnit\Framework\TestCase;
@@ -20,7 +20,7 @@ class StorageFiniteMaintenanceTest extends TestCase {
 	public function test_finite_dirty_runtime_read_still_refuses_without_maintenance(): void {
 		// The spy's bounded-read metadata is deliberately made dirty here.
 		$db = new OwningMetadataWpdb(); $db->dirty_digest = true;
-		$snapshot = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, null, $this->scale() );
+		$snapshot = new TableSnapshot( $db, 7, 100, 1048576, null, null, $this->scale() );
 		try { $snapshot->read_bounded( 'bucket' ); $this->fail( 'Dirty read repaired implicitly.' ); }
 		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'dirty or stale', $error->getMessage() ); }
 		$this->assertFalse( $db->published ); $this->assertFalse( $db->records_fetched );
@@ -31,7 +31,7 @@ class StorageFiniteMaintenanceTest extends TestCase {
 		$r = new \ReflectionClass( $manager );
 		foreach ( array( 'connection' => $db, 'gate' => new MaintenanceAdmissionGate(), 'deadline' => microtime( true ) + 10.0 ) as $name => $value ) { $r->getProperty( $name )->setValue( $manager, $value ); }
 		$r->getMethod( 'start_memory' )->invoke( $manager ); $r->getMethod( 'storage' )->invoke( $manager );
-		$this->assertSame( LegacyTableSnapshot::class, get_class( $r->getProperty( 'snapshot' )->getValue( $manager ) ) );
+		$this->assertSame( TableSnapshot::class, get_class( $r->getProperty( 'snapshot' )->getValue( $manager ) ) );
 		$result = $r->getMethod( 'table_snapshot' )->invoke( $manager, true );
 		$this->assertSame( array( 'bucket' => $db->value ), $result['value'] );
 		$this->assertTrue( $db->published ); $this->assertContains( 'COMMIT', $db->queries );
@@ -42,7 +42,7 @@ class StorageFiniteMaintenanceTest extends TestCase {
 		$clock = function () use ( $db, $seam ) { return 'deadline' === $seam && $db->records_fetched ? 111.0 : 100.0; };
 		$memory = function () use ( $db, $seam ) { return array( '-1', 'memory' === $seam && $db->records_fetched ? 2147483647 : 0 ); };
 		$scale = $this->scale( array(), $clock, $memory );
-		$snapshot = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, null, $scale );
+		$snapshot = new TableSnapshot( $db, 7, 100, 1048576, null, null, $scale );
 		try { $snapshot->verify_digest( 'bucket', 1 ); $this->fail( 'No material finite refusal.' ); }
 		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'Finite storage', $error->getMessage() ); }
 		$this->assertTrue( $db->records_fetched ); $this->assertFalse( $db->digest_written );
@@ -56,7 +56,7 @@ class StorageFiniteMaintenanceTest extends TestCase {
 		if ( 'bytes' === $seam ) { $limits['max_bytes'] = $db->head['payload_bytes']; }
 		if ( 'tokens' === $seam ) { $limits['max_tokens'] = 2; }
 		$scale = $this->scale( $limits, function () use ( &$now ) { return $now; }, function () use ( &$used ) { return array( '-1', $used ); } );
-		$snapshot = new LegacyTableSnapshot( $db, 7, 100, $scale->limit( 'max_bytes' ), null, null, $scale );
+		$snapshot = new TableSnapshot( $db, 7, 100, $scale->limit( 'max_bytes' ), null, null, $scale );
 		if ( 'memory' === $seam ) { $used = 2147483647; }
 		if ( 'deadline' === $seam ) { $now = 111.0; }
 		if ( 'stale' === $seam ) { $db->head['revision'] = 2; }

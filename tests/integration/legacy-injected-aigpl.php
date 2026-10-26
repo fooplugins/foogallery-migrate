@@ -6,7 +6,7 @@ require_once $root . '/migrate.php'; require_once ABSPATH . 'wp-admin/includes/u
 use FooPlugins\FooGalleryMigrate\LegacyOptionBackend;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\MigratedHistoryRepository;
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
@@ -33,7 +33,7 @@ try {
 	foreach ( $schema->statements() as $i => $ddl ) { $created[] = $tables[$i]; dbDelta( $ddl ); }
 	$settings = new MigratorSettings(); $db = new LegacyTransactionConnection( $wpdb ); $blog = (int) get_current_blog_id();
 	$empty_history = $settings->compact_state_value( 'migrated', array() );
-	( new LegacyTableSnapshot( $db, $blog ) )->replace_many( array( array( 'key' => 'migrated', 'kind' => 'map', 'order' => 0, 'value' => $empty_history, 'expected_revision' => null ), array( 'key' => 'migrated-revision', 'kind' => 'scalar', 'order' => 1, 'value' => 0, 'expected_revision' => null ) ) );
+	( new TableSnapshot( $db, $blog ) )->replace_many( array( array( 'key' => 'migrated', 'kind' => 'map', 'order' => 0, 'value' => $empty_history, 'expected_revision' => null ), array( 'key' => 'migrated-revision', 'kind' => 'scalar', 'order' => 1, 'value' => 0, 'expected_revision' => null ) ) );
 	( new LegacyOptionBackend() )->replace_all( array( 'sentinel' => 'options must not be used by injected engine' ) );
 	$option_before = serialize( get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) );
 	$ids = array(); $base_url = wp_get_upload_dir()['baseurl'];

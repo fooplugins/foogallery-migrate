@@ -8,7 +8,7 @@ use FooPlugins\FooGalleryMigrate\StorageAuthority;
 use FooPlugins\FooGalleryMigrate\StorageMaintenanceGate;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
 
 if ( PHP_VERSION_ID < 70400 || ! function_exists( 'proc_open' ) ) { throw new RuntimeException( 'This native process fixture requires PHP7.4+ array-form proc_open.' ); }
@@ -63,7 +63,7 @@ $other = $blog + 1000;
 try {
 	foreach ( $schema->statements() as $index => $ddl ) { $created[] = $tables[$index]; dbDelta( $ddl ); }
 	$check( $schema->verify(), 'native fixture schema verified' );
-	( new LegacyTableSnapshot( $db, $other ) )->replace_many( array( array( 'key' => 'checkpoint', 'order' => 0, 'kind' => 'scalar', 'value' => 'other-blog', 'expected_revision' => null ) ) );
+	( new TableSnapshot( $db, $other ) )->replace_many( array( array( 'key' => 'checkpoint', 'order' => 0, 'kind' => 'scalar', 'value' => 'other-blog', 'expected_revision' => null ) ) );
 	$other_raw = array();
 	foreach ( $tables as $table ) { $other_raw[$table] = $db->get_results( $db->prepare( 'SELECT * FROM `' . $table . '` WHERE blog_id = %d ORDER BY id', array( $other ) ), ARRAY_A ); }
 	foreach ( array( 'option-writer', 'table-before-commit', 'table-after-commit', 'copying', 'snapshot-commit', 'flipped', 'source-deleted', 'stable' ) as $point ) {

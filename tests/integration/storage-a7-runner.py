@@ -192,7 +192,7 @@ def validate_positive(p, cell, stage, owner, manifest):
         require((control['backend'], control['epoch'], control['phase'], control['blog_id'], control['logical_digest']) ==
                 ('table', 1, 'stable', p['blog_id'], fixture['logical_sha256']), 'backup-authority')
     require(p['product_pins_before'] == p['product_pins_after'] and bool(p['product_pins_before']), 'product-mutated')
-    required = ['StorageOperations', 'StorageConversion', 'LegacyStateCodec', 'LegacyTableSnapshot', 'StorageControl']
+    required = ['StorageOperations', 'StorageConversion', 'LegacyStateCodec', 'TableSnapshot', 'StorageControl']
     for name in required:
         entry = p['product_classes'][chr(92).join(('FooPlugins', 'FooGalleryMigrate', name))]
         relative = str(Path(entry['file']).relative_to(p['product_root']))

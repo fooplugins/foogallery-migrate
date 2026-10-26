@@ -1,5 +1,9 @@
 # Narrowed table-storage implementation checkpoint
 
+**Historical checkpoint:** Brad raised the current WordPress minimum to 6.2 on
+26 October 2026. The WP 5.0/6.0 evidence below is retained as historical evidence,
+not current-floor acceptance. See [the current requirements and proposed identifier-query follow-up](legacy-storage-upgrade.md#identifier-query-follow-up-sql-review-bucket-3).
+
 This is a partial implementation checkpoint, not PR15 acceptance or release approval.
 The existing table-storage foundation is retained. PHP 5.4 and WordPress 5.0 remain
 supported floors; ordinary option-backed migrations remain the default.

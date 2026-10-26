@@ -3,7 +3,7 @@
 $root = isset($argv[1]) ? $argv[1] : dirname(__DIR__);
 define('ABSPATH', $root . '/');
 define('ARRAY_A', 'ARRAY_A');
-foreach (array('storage-authority', 'legacy-transaction-connection', 'legacy-state-codec', 'legacy-record-codec', 'legacy-table-reader', 'legacy-storage-schema', 'scalar-state-repository', 'content-scan-repository', 'image-tag-queue-repository', 'legacy-table-repository') as $file) {
+foreach (array('storage-authority', 'legacy-transaction-connection', 'legacy-state-codec', 'legacy-record-codec', 'table-reader', 'legacy-storage-schema', 'scalar-state-repository', 'content-scan-repository', 'image-tag-queue-repository', 'legacy-table-repository') as $file) {
     require_once $root . '/includes/class-' . $file . '.php';
 }
 class CleanupContractConnection extends \FooPlugins\FooGalleryMigrate\LegacyTransactionConnection {

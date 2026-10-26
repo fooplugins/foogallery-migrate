@@ -183,7 +183,12 @@ class StorageCleanup {
 		catch ( \Throwable $error ) { $this->receipt['failed'][] = 'Bounded residual readback unavailable; preserve ownership evidence and inspect owned SQL.'; }
 	}
 
-	private function required( $result, $name ) { if ( true !== $result ) { throw new \RuntimeException( $name . ' refused; no owner was taken over.' ); } }
+	private function required( $result, $name ) {
+		if ( true !== $result ) {
+			// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Private callers pass fixed operation labels; diagnostic receipts are escaped in HTML and displayed with textContent in the request UI.
+			throw new \RuntimeException( $name . ' refused; no owner was taken over.' );
+		}
+	}
 	private function connection() { $this->required( $this->gate->renew_maintenance(), 'maintenance renewal' ); return $this->gate->connection(); }
 	private function query( $sql ) {
 		$db = $this->connection(); $result = $db->query( $sql );
@@ -284,7 +289,10 @@ class StorageCleanup {
 		$db = $this->connection(); $had = $this->present( $name );
 		if ( $had ) { $this->query( $db->prepare( 'DELETE FROM `' . $this->options . '` WHERE option_name=%s', array( $name ) ) ); }
 		$this->invalidate( $name );
-		if ( $this->present( $name ) ) { throw new \RuntimeException( 'Owned option remained: ' . $name ); }
+		if ( $this->present( $name ) ) {
+			// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Name is a fixed owned option or a validated transient-prefix/numeric-user name, not its value; receipt HTML is escaped and browser diagnostics use textContent.
+			throw new \RuntimeException( 'Owned option remained: ' . $name );
+		}
 		$this->receipt[$had ? 'removed' : 'absent'][] = $name;
 	}
 	private function clear_option() {
@@ -327,7 +335,10 @@ class StorageCleanup {
 	private function drop_table( $table ) {
 		$had = $this->table_present( $table );
 		if ( $had ) { $this->query( 'DROP TABLE `' . $table . '`' ); }
-		if ( $this->table_present( $table ) ) { throw new \RuntimeException( 'Owned table remained: ' . $table ); }
+		if ( $this->table_present( $table ) ) {
+			// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Private callers build only the two owned table names from a validated prefix. The exception/receipt is plain data; HTML consumers escape it.
+			throw new \RuntimeException( 'Owned table remained: ' . $table );
+		}
 		$this->receipt[$had ? 'removed' : 'absent'][] = $table;
 	}
 	private function audit( $action ) {

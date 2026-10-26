@@ -2,10 +2,10 @@
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
-use FooPlugins\FooGalleryMigrate\LegacyTableReader;
+use FooPlugins\FooGalleryMigrate\TableReader;
 use PHPUnit\Framework\TestCase;
 
-class LegacyTableReaderTest extends TestCase {
+class TableReaderTest extends TestCase {
 	private $db;
 	private $codec;
 	protected function setUp(): void {
@@ -26,7 +26,7 @@ class LegacyTableReaderTest extends TestCase {
 	}
 
 	public function test_reader_is_inert_and_reads_only_bounded_current_blog_generation(): void {
-		$reader = new LegacyTableReader( $this->db, 7, $this->codec );
+		$reader = new TableReader( $this->db, 7, $this->codec );
 		$this->assertSame( array(), $this->db->queries );
 		$page = $reader->record_page( 'migrated', 1 );
 		$this->assertSame( '007', $page['rows'][0]['key'] );
@@ -45,14 +45,14 @@ class LegacyTableReaderTest extends TestCase {
 	public function test_missing_head_is_not_an_empty_collection(): void {
 		$this->db->head = null;
 		$this->expectException( \RuntimeException::class );
-		( new LegacyTableReader( $this->db, 7 ) )->record_page( 'migrated', 1 );
+		( new TableReader( $this->db, 7 ) )->record_page( 'migrated', 1 );
 	}
 
 	/** @dataProvider readerFaults */
 	public function test_corruption_and_concurrent_changes_fail_closed( $fault ): void {
 		$this->db->fault = $fault;
 		$this->expectException( \RuntimeException::class );
-		( new LegacyTableReader( $this->db, 7 ) )->record_page( 'migrated', 1 );
+		( new TableReader( $this->db, 7 ) )->record_page( 'migrated', 1 );
 	}
 
 	public static function readerFaults(): array {
@@ -62,12 +62,12 @@ class LegacyTableReaderTest extends TestCase {
 
 	public function test_oversized_rows_are_refused_before_payload_fetch(): void {
 		$this->db->fault = 'oversized';
-		try { ( new LegacyTableReader( $this->db, 7 ) )->record_page( 'migrated', 1 ); $this->fail(); }
+		try { ( new TableReader( $this->db, 7 ) )->record_page( 'migrated', 1 ); $this->fail(); }
 		catch ( \RuntimeException $error ) { $this->assertCount( 2, $this->db->queries ); }
 	}
 
 	public function test_row_and_page_budgets_and_stale_cursors_are_refused(): void {
-		$reader = new LegacyTableReader( $this->db, 7, $this->codec, 100 );
+		$reader = new TableReader( $this->db, 7, $this->codec, 100 );
 		foreach ( array( 0, 101, '1' ) as $limit ) {
 			try { $reader->record_page( 'migrated', $limit ); $this->fail(); }
 			catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'storage', $error->getMessage() ); }

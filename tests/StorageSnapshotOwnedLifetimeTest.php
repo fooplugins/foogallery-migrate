@@ -1,7 +1,7 @@
 <?php
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\StoragePreflight;
 use PHPUnit\Framework\TestCase;
 
@@ -46,7 +46,7 @@ class StorageSnapshotOwnedLifetimeTest extends TestCase {
 			$samples[$phase]['legacy_forecast_input'] = max( $samples[$phase]['legacy_forecast_input'], $bytes );
 			return true;
 		};
-		$snapshot = new LegacyTableSnapshot( $db, 7, 20208, 15070958, microtime( true ) + 10.0, $memory );
+		$snapshot = new TableSnapshot( $db, 7, 20208, 15070958, microtime( true ) + 10.0, $memory );
 		$started = microtime( true );
 		$result = $snapshot->replace_many( array( array( 'key' => 'galleries', 'order' => 0, 'kind' => 'map', 'value' => $value['galleries'], 'expected_revision' => null ) ) );
 		$replace_seconds = microtime( true ) - $started;

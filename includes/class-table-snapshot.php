@@ -1,8 +1,9 @@
 <?php
 /**
- * Inert, bounded snapshot write primitive for the approved shared schema.
- * No provisioning, backend selection, option reads or destination mutations.
- * NOT the high-cardinality history/queue repository or resumable importer.
+ * Transactional, bounded state snapshots for the current shared schema.
+ * Used by storage conversion and repository replacements, including verification
+ * and bounded reconstruction. Never provisions tables, selects a backend or
+ * mutates destination galleries/media; conversion may inspect source option metadata.
  *
  * @package FooPlugins\FooGalleryMigrate
  */
@@ -12,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-class LegacyTableSnapshot {
+class TableSnapshot {
 	private $wpdb;
 	private $blog_id;
 	private $codec;
@@ -90,10 +91,11 @@ class LegacyTableSnapshot {
 		catch ( \Exception $error ) { $this->busy = false; $this->tainted = true; throw $error; }
 		try {
 			$options = $this->wpdb->prefix . 'options';
-			$this->read( $this->wpdb->prepare( 'SELECT option_name FROM `' . $options . '` WHERE option_name IN (%s,%s,%s) ORDER BY option_name FOR UPDATE', array( StorageAuthority::CONTROL_OPTION, StorageAuthority::MAINTENANCE_OPTION, FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
+			$this->read( $this->wpdb->prepare( 'SELECT option_name FROM %i WHERE option_name IN (%s,%s,%s) ORDER BY option_name FOR UPDATE', array( $options, StorageAuthority::CONTROL_OPTION, StorageAuthority::MAINTENANCE_OPTION, FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
 			$old = json_encode( $r );
 			if ( $controls->read( StorageAuthority::CONTROL_OPTION ) !== $old ) { $this->fail( 'Verification control changed.' ); }
-			$raw_hash = $this->wpdb->get_var( $this->wpdb->prepare( 'SELECT SHA2(option_value,256) FROM `' . $options . '` WHERE option_name=%s LIMIT 1', array( FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The pinned adapter delegates to native wpdb::prepare; %i binds the options table and %s binds the fixed migration option name.
+			$raw_hash = $this->wpdb->get_var( $this->wpdb->prepare( 'SELECT SHA2(option_value,256) FROM %i WHERE option_name=%s LIMIT 1', array( $options, FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
 			if ( ! empty( $this->wpdb->last_error ) || hash( 'sha256', null === $raw_hash ? 'absent' : 'present:' . $raw_hash ) !== $r['source_digest'] ) { $this->fail( 'Verification source changed.' ); }
 			$heads = $this->copy_heads();
 			if ( count( $heads ) !== count( $value ) ) { $this->fail( 'Foreign or missing conversion head.' ); }
@@ -105,7 +107,7 @@ class LegacyTableSnapshot {
 			// pages pin those exact heads and the source's raw+logical digest,
 			// avoiding a second whole-tree logical pass each recovery turn.
 			foreach ( $value as $key => $state ) { $this->copy_prove_head( $heads[$ordinal], $key, $state, $ordinal, true, $c, $totals, PHP_INT_MAX, true, $unbound_proof ); ++$ordinal; }
-			$scope = $this->read( $this->wpdb->prepare( 'SELECT COUNT(*) AS n FROM `' . $this->record_table . '` WHERE blog_id=%d', array( $this->blog_id ) ) );
+			$scope = $this->read( $this->wpdb->prepare( 'SELECT COUNT(*) AS n FROM %i WHERE blog_id=%d', array( $this->record_table, $this->blog_id ) ) );
 			if ( count( $scope ) !== 1 || $this->number( $scope[0]['n'] ) !== $totals['rows'] ||
 				$c['verified_rows'] > $totals['rows'] || $c['verified_bytes'] > $totals['bytes'] ) { $this->fail( 'Verification generation scope changed.' ); }
 			$already_complete = $c['state_order'] === count( $value ) && ! $unbound_proof;
@@ -176,7 +178,7 @@ class LegacyTableSnapshot {
 				hash( 'sha256', $root ) !== $head['root_digest'] ) { $this->fail( 'Proved generation statistics changed.' ); }
 			$rows += $stats['record_count']; $bytes += $stats['encoded_bytes'];
 		}
-		$scope = $this->read( $this->wpdb->prepare( 'SELECT COUNT(*) AS n FROM `' . $this->record_table . '` WHERE blog_id=%d', array( $this->blog_id ) ) );
+		$scope = $this->read( $this->wpdb->prepare( 'SELECT COUNT(*) AS n FROM %i WHERE blog_id=%d', array( $this->record_table, $this->blog_id ) ) );
 		if ( count( $scope ) !== 1 || $this->number( $scope[0]['n'] ) !== $rows || $rows !== $c['verified_rows'] || $bytes !== $c['verified_bytes'] ) { $this->fail( 'Completed proof totals changed.' ); }
 		return true;
 	}
@@ -194,10 +196,11 @@ class LegacyTableSnapshot {
 		catch ( \Exception $error ) { $this->busy = false; $this->tainted = true; throw $error; }
 		try {
 			$options = $this->wpdb->prefix . 'options';
-			$this->read( $this->wpdb->prepare( 'SELECT option_name FROM `' . $options . '` WHERE option_name IN (%s,%s,%s) ORDER BY option_name FOR UPDATE', array( StorageAuthority::CONTROL_OPTION, StorageAuthority::MAINTENANCE_OPTION, FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
+			$this->read( $this->wpdb->prepare( 'SELECT option_name FROM %i WHERE option_name IN (%s,%s,%s) ORDER BY option_name FOR UPDATE', array( $options, StorageAuthority::CONTROL_OPTION, StorageAuthority::MAINTENANCE_OPTION, FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
 			$old = json_encode( $r );
 			if ( $controls->read( StorageAuthority::CONTROL_OPTION ) !== $old ) { $this->fail( 'Copy control changed.' ); }
-			$raw_hash = $this->wpdb->get_var( $this->wpdb->prepare( 'SELECT SHA2(option_value,256) FROM `' . $options . '` WHERE option_name=%s LIMIT 1', array( FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- The pinned adapter delegates to native wpdb::prepare; %i binds the options table and %s binds the fixed migration option name.
+			$raw_hash = $this->wpdb->get_var( $this->wpdb->prepare( 'SELECT SHA2(option_value,256) FROM %i WHERE option_name=%s LIMIT 1', array( $options, FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
 			if ( ! empty( $this->wpdb->last_error ) || hash( 'sha256', null === $raw_hash ? 'absent' : 'present:' . $raw_hash ) !== $r['source_digest'] ) { $this->fail( 'Copy source changed.' ); }
 			$heads = $this->copy_heads(); $expected_heads = $c['state_order'] + ( $c['state_id'] > 0 ? 1 : 0 );
 			if ( count( $heads ) !== $expected_heads ) { $this->fail( 'Foreign or missing conversion head.' ); }
@@ -215,14 +218,14 @@ class LegacyTableSnapshot {
 				}
 				++$ordinal;
 			}
-			$scope = $this->read( $this->wpdb->prepare( 'SELECT COUNT(*) AS n FROM `' . $this->record_table . '` WHERE blog_id=%d', array( $this->blog_id ) ) );
+			$scope = $this->read( $this->wpdb->prepare( 'SELECT COUNT(*) AS n FROM %i WHERE blog_id=%d', array( $this->record_table, $this->blog_id ) ) );
 			if ( $this->number( $scope[0]['n'] ) !== $c['committed_rows'] || $totals['rows'] !== $c['committed_rows'] || $totals['bytes'] !== $c['committed_bytes'] ||
 				( $discard && $totals['tokens'] !== $c['committed_tokens'] ) || $digest !== $c['completed_heads_digest'] ) { $this->fail( 'Committed prefix counters/digest changed; no replay.' ); }
 			if ( $discard ) {
 				if ( null !== $controls->read( StorageAuthority::AUTHORITY_OPTION ) ) { $this->fail( 'Discard cannot remove selected table authority.' ); }
 				foreach ( $heads as $head ) {
-					$this->write( $this->wpdb->prepare( 'DELETE FROM `' . $this->record_table . '` WHERE blog_id=%d AND state_id=%d AND generation=1', array( $this->blog_id, $head['id'] ) ) );
-					if ( 1 !== $this->write( $this->wpdb->prepare( 'DELETE FROM `' . $this->state_table . '` WHERE blog_id=%d AND id=%d AND revision=%d AND active_generation=%d', array( $this->blog_id, $head['id'], $head['revision'], $head['active_generation'] ) ) ) ) { $this->fail( 'Discard head CAS failed.' ); }
+					$this->write( $this->wpdb->prepare( 'DELETE FROM %i WHERE blog_id=%d AND state_id=%d AND generation=1', array( $this->record_table, $this->blog_id, $head['id'] ) ) );
+					if ( 1 !== $this->write( $this->wpdb->prepare( 'DELETE FROM %i WHERE blog_id=%d AND id=%d AND revision=%d AND active_generation=%d', array( $this->state_table, $this->blog_id, $head['id'], $head['revision'], $head['active_generation'] ) ) ) ) { $this->fail( 'Discard head CAS failed.' ); }
 				}
 				$controls->cas( StorageAuthority::CONTROL_OPTION, $old, null, null, $owner, $this->deadline );
 				$commit = $this->wpdb->query( 'COMMIT' ); $this->busy = false;
@@ -273,6 +276,7 @@ class LegacyTableSnapshot {
 			if ( $finished ) {
 				$stats = $this->generation_stats( $c['state_id'], 1 ); $logical = $this->codec->snapshot_digest( $state );
 				$sql = 'UPDATE `' . $this->state_table . '` SET active_generation=1, revision=1, state_kind=%s, record_count=%d, payload_bytes=%d, snapshot_digest=UNHEX(%s), digest_revision=1, digest_status=\'current\', updated_gmt=%s WHERE blog_id=%d AND id=%d AND state_kind=\'staging\' AND revision=0 AND active_generation=0';
+				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Schema-owned table from a validated prefix; all state, count, digest, date and scope values are prepared through the pinned adapter.
 				if ( 1 !== $this->write( $this->wpdb->prepare( $sql, array( $kind, $stats['record_count'], $stats['payload_bytes'] + strlen( $root ), $logical, gmdate( 'Y-m-d H:i:s' ), $this->blog_id, $c['state_id'] ) ) ) ) { $this->fail( 'Copy head CAS failed.' ); }
 				$after = $this->copy_heads(); $head = $after[$c['state_order']];
 				$c['completed_heads_digest'] = hash( 'sha256', $c['completed_heads_digest'] . json_encode( $head ) );
@@ -293,6 +297,7 @@ class LegacyTableSnapshot {
 
 	private function copy_heads() {
 		$sql = 'SELECT id, state_order, state_kind, active_generation, revision, codec_version, record_count, payload_bytes, digest_revision, digest_status, HEX(state_key_hash) AS key_hash, SHA2(state_key_value,256) AS key_digest, SHA2(root_payload,256) AS root_digest, HEX(snapshot_digest) AS logical_digest FROM `' . $this->state_table . '` WHERE blog_id=%d ORDER BY state_order LIMIT ' . ( $this->scale->limit( 'max_heads' ) + 1 ) . ' FOR UPDATE';
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Fixed head projection and schema-owned table; max_heads is a validated integer policy limit, and the site value is prepared below.
 		$heads = $this->read( $this->wpdb->prepare( $sql, array( $this->blog_id ) ) );
 		if ( count( $heads ) > $this->scale->limit( 'max_heads' ) ) { $this->fail( 'Excess conversion heads.' ); }
 		foreach ( $heads as &$head ) {
@@ -397,6 +402,7 @@ class LegacyTableSnapshot {
 		}
 		$max = $this->scale->capacity()->limit( 'max_row_bytes' ); $this->scale->capacity()->checkpoint( $max );
 		$sql = 'SELECT * FROM `' . $this->record_table . '` WHERE blog_id=%d AND state_id=%d AND generation=1 AND node_hash=UNHEX(%s) AND ' . $this->record_bytes() . ' <= %d LIMIT 2';
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- record_bytes() returns literal column expressions and the table is schema-owned; site, state, hash and byte limit are prepared values.
 		$rows = $this->read( $this->wpdb->prepare( $sql, array( $this->blog_id, $id, $row['node_hash'], $max ) ) );
 		if ( count( $rows ) !== 1 ) { $this->fail( 'Missing, oversized or duplicate committed row.' ); }
 		$expected = array_merge( $row, array( 'blog_id' => $this->blog_id, 'state_id' => $id, 'generation' => 1 ) );
@@ -459,9 +465,9 @@ class LegacyTableSnapshot {
 			foreach ( $prepared as $hash => $change ) { if ( ! isset( $locks[$hash] ) ) { $locks[$hash] = array( 'key' => $change['key'] ); } }
 			ksort( $locks, SORT_STRING );
 			foreach ( $locks as $entry ) {
-				$this->read( $this->wpdb->prepare( 'SELECT id FROM `' . $this->state_table . '` WHERE blog_id = %d AND state_key_hash = UNHEX(%s) LIMIT 2 FOR UPDATE', array( $this->blog_id, $this->codec->key_hash( $entry['key'] ) ) ) );
+				$this->read( $this->wpdb->prepare( 'SELECT id FROM %i WHERE blog_id = %d AND state_key_hash = UNHEX(%s) LIMIT 2 FOR UPDATE', array( $this->state_table, $this->blog_id, $this->codec->key_hash( $entry['key'] ) ) ) );
 			}
-			$reader = new LegacyTableReader( $this->wpdb, $this->blog_id, $this->codec );
+			$reader = new TableReader( $this->wpdb, $this->blog_id, $this->codec );
 			foreach ( $dependencies as $entry ) { if ( $reader->head( $entry['key'] ) !== $entry['head'] ) { $this->fail( 'Snapshot read dependency changed.' ); } $this->tick(); }
 			$staged = array();
 			foreach ( $prepared as $hash => $change ) {
@@ -491,6 +497,7 @@ class LegacyTableSnapshot {
 					. 'codec_version = %d, record_count = %d, payload_bytes = %d, snapshot_digest = UNHEX(%s), digest_revision = %d, '
 					. "digest_status = 'current', root_payload = %s, updated_gmt = %s WHERE blog_id = %d AND id = %d "
 					. 'AND active_generation = %d AND revision = %d AND state_key_hash = UNHEX(%s)';
+				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Fixed compare-and-swap template on a schema-owned table; all changed values and revision/site predicates are bound in args.
 				if ( 1 !== $this->write( $this->wpdb->prepare( $sql, $args ) ) ) { $this->fail( 'State-head compare-and-swap failed.' ); }
 				$result[] = array( 'key' => $change['key'], 'id' => $stage['id'], 'generation' => $stage['generation'], 'revision' => $stage['revision'] + 1 );
 			}
@@ -530,11 +537,12 @@ class LegacyTableSnapshot {
 		$this->typed_key( $key );
 		$key_bytes = strlen( $this->codec->key_value( $key ) );
 		if ( $key_bytes > $this->max_bytes ) { $this->fail( 'State key exceeds the encoded byte budget.' ); }
-		$reader = new LegacyTableReader( $this->wpdb, $this->blog_id, $this->codec );
+		$reader = new TableReader( $this->wpdb, $this->blog_id, $this->codec );
 		$head = $reader->head( $key );
 		if ( false === $head ) { $this->fail( 'Missing state head; no option fallback.' ); }
 		if ( $head['record_count'] > $this->max_rows || $head['payload_bytes'] > $this->max_bytes - $key_bytes ) { $this->fail( 'Snapshot exceeds the row/byte budget.' ); }
 		$sql = 'SELECT HEX(snapshot_digest) AS snapshot_digest, digest_revision, digest_status FROM `' . $this->state_table . '` WHERE blog_id = %d AND id = %d AND revision = %d AND active_generation = %d LIMIT 1';
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Fixed digest projection and schema-owned table; site, head, revision and generation are prepared values.
 		$digests = $this->read( $this->wpdb->prepare( $sql, array( $this->blog_id, $head['id'], $head['revision'], $head['active_generation'] ) ) );
 		if ( count( $digests ) !== 1 || 'current' !== $digests[0]['digest_status'] || $this->number( $digests[0]['digest_revision'] ) !== $head['revision'] || ! is_string( $digests[0]['snapshot_digest'] ) || ! preg_match( '/^[0-9a-f]{64}$/Di', $digests[0]['snapshot_digest'] ) ) { $this->fail( 'Snapshot digest is absent, dirty or stale.' ); }
 		$hash = $this->codec->key_hash( $key );
@@ -633,10 +641,11 @@ class LegacyTableSnapshot {
 			$this->fail( 'Transaction start failed; connection state is uncertain. Reconcile using a fresh connection.' );
 		}
 		try {
-			$this->read( $this->wpdb->prepare( 'SELECT id FROM `' . $this->state_table . '` WHERE blog_id = %d AND id = %d FOR UPDATE', array( $this->blog_id, $head['id'] ) ) );
+			$this->read( $this->wpdb->prepare( 'SELECT id FROM %i WHERE blog_id = %d AND id = %d FOR UPDATE', array( $this->state_table, $this->blog_id, $head['id'] ) ) );
 			if ( microtime( true ) > $deadline || $this->maintenance_head( $key ) !== $head ) { $this->fail( 'Maintenance deadline or head changed before publication.' ); }
 			if ( 'dirty' === $head['digest_status'] ) {
 				$sql = 'UPDATE `' . $this->state_table . '` SET snapshot_digest = UNHEX(%s), digest_revision = %d, digest_status = %s WHERE blog_id = %d AND id = %d AND revision = %d AND active_generation = %d AND digest_status = %s';
+				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Fixed digest compare-and-swap on a schema-owned table; digest, statuses, revisions and scope are prepared values.
 				if ( 1 !== $this->write( $this->wpdb->prepare( $sql, array( $digest, $expected_revision, 'current', $this->blog_id, $head['id'], $expected_revision, $head['active_generation'], 'dirty' ) ) ) ) { $this->fail( 'Maintenance digest CAS failed.' ); }
 			}
 			$verified = $this->maintenance_head( $key );
@@ -650,12 +659,13 @@ class LegacyTableSnapshot {
 
 	/** Bounded physical metadata; existing reader head/cursor shapes stay unchanged. */
 	private function maintenance_head( $key ) {
-		$head = ( new LegacyTableReader( $this->wpdb, $this->blog_id ) )->head( $key );
-		if ( false === $head || $head['revision'] < 1 || $head['root_payload_bytes'] > min( $this->max_bytes, LegacyTableReader::MAX_RECORD_BYTES ) ) { $this->fail( 'Missing or oversized maintenance head.' ); }
+		$head = ( new TableReader( $this->wpdb, $this->blog_id ) )->head( $key );
+		if ( false === $head || $head['revision'] < 1 || $head['root_payload_bytes'] > min( $this->max_bytes, TableReader::MAX_RECORD_BYTES ) ) { $this->fail( 'Missing or oversized maintenance head.' ); }
 		$key_bytes = strlen( $this->codec->key_value( $key ) );
 		if ( $head['record_count'] > $this->max_rows || $head['payload_bytes'] < $head['root_payload_bytes'] || $head['payload_bytes'] > $this->max_bytes - $key_bytes ) { $this->fail( 'Maintenance exceeds total row/byte budget.' ); }
 		$this->admit_memory( $head['payload_bytes'] + $key_bytes );
 		$sql = 'SELECT root_payload, digest_status, digest_revision, HEX(snapshot_digest) AS logical_digest FROM `' . $this->state_table . '` WHERE blog_id = %d AND id = %d AND revision = %d AND active_generation = %d AND OCTET_LENGTH(root_payload) = %d LIMIT 1';
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Fixed maintenance projection on a schema-owned table; all identity, revision and payload-length values are prepared.
 		$rows = $this->read( $this->wpdb->prepare( $sql, array( $this->blog_id, $head['id'], $head['revision'], $head['active_generation'], $head['root_payload_bytes'] ) ) );
 		if ( count( $rows ) !== 1 || ! in_array( $rows[0]['digest_status'], array( 'dirty', 'current' ), true ) ) { $this->fail( 'Missing or invalid digest metadata.' ); }
 		$this->admit_memory( $head['payload_bytes'] + $key_bytes );
@@ -712,7 +722,7 @@ class LegacyTableSnapshot {
 				$root = $split['root'];
 			} else { $this->fail( 'Unsupported snapshot kind or value.' ); }
 			$change['root_payload'] = 'scalar' === $change['kind'] ? $this->codec->encode( $root ) : $this->codec->encode_collection_root( $root );
-			if ( strlen( $change['root_payload'] ) > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Root metadata exceeds the row byte budget.' ); }
+			if ( strlen( $change['root_payload'] ) > TableReader::MAX_RECORD_BYTES ) { $this->fail( 'Root metadata exceeds the row byte budget.' ); }
 			$total_rows += $stats['record_count'];
 			$bytes = strlen( $change['root_payload'] ) + strlen( $this->codec->key_value( $change['key'] ) ) + $stats['encoded_bytes'];
 			if ( $bytes > $this->max_bytes - $total_bytes ) { $this->fail( 'Snapshot exceeds the encoded byte budget.' ); }
@@ -754,6 +764,7 @@ class LegacyTableSnapshot {
 		$sql = 'SELECT id, active_generation, revision, codec_version, state_order, state_kind, '
 			. 'CASE WHEN OCTET_LENGTH(state_key_value) <= %d THEN state_key_value ELSE NULL END AS state_key_value '
 			. 'FROM `' . $this->state_table . '` WHERE blog_id = %d AND state_key_hash = UNHEX(%s) LIMIT 2 FOR UPDATE';
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Fixed locking head query on a schema-owned table; key length, site and state-key hash are prepared below.
 		$heads = $this->read( $this->wpdb->prepare( $sql, array( strlen( $key_value ), $this->blog_id, $hash ) ) );
 		if ( count( $heads ) > 1 ) { $this->fail( 'Duplicate state heads.' ); }
 		if ( count( $heads ) ) {
@@ -773,6 +784,7 @@ class LegacyTableSnapshot {
 		$generation = $head['active_generation'] + 1;
 		if ( $head['revision'] > 0 ) {
 			$sql = 'UPDATE `' . $this->state_table . '` SET root_payload = %s WHERE blog_id = %d AND id = %d AND revision = %d AND active_generation = %d';
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Fixed root update on a schema-owned table; payload and every scope/revision value are prepared through the pinned adapter.
 			$affected = $this->write( $this->wpdb->prepare( $sql, array( $change['root_payload'], $this->blog_id, $head['id'], $head['revision'], $head['active_generation'] ) ) );
 			// The locked head may retain byte-identical root metadata. MySQL's
 			// affected-row count is then 0; read-back and final revision CAS still
@@ -937,7 +949,8 @@ class LegacyTableSnapshot {
 
 	private function root_payload( $id ) {
 		$sql = 'SELECT root_payload FROM `' . $this->state_table . '` WHERE blog_id = %d AND id = %d AND OCTET_LENGTH(root_payload) <= %d LIMIT 1';
-		$rows = $this->read( $this->wpdb->prepare( $sql, array( $this->blog_id, $id, min( LegacyTableReader::MAX_RECORD_BYTES, $this->max_bytes ) ) ) );
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Fixed bounded-root query on a schema-owned table; site, head ID and byte limit are prepared values.
+		$rows = $this->read( $this->wpdb->prepare( $sql, array( $this->blog_id, $id, min( TableReader::MAX_RECORD_BYTES, $this->max_bytes ) ) ) );
 		if ( count( $rows ) !== 1 || ! is_string( $rows[0]['root_payload'] ) ) { $this->fail( 'Missing or oversized root payload.' ); }
 		return $rows[0]['root_payload'];
 	}
@@ -977,6 +990,7 @@ class LegacyTableSnapshot {
 	private function generation_stats( $id, $generation ) {
 		$sql = 'SELECT COUNT(*) AS record_count, COALESCE(SUM(payload_bytes),0) AS payload_bytes, COALESCE(SUM('
 			. $this->record_bytes() . '),0) AS encoded_bytes FROM `' . $this->record_table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d';
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- record_bytes() is a literal aggregate expression and the table is schema-owned; site, state and generation are prepared values.
 		$rows = $this->read( $this->wpdb->prepare( $sql, array( $this->blog_id, $id, $generation ) ) );
 		if ( count( $rows ) !== 1 ) { $this->fail( 'Missing generation statistics.' ); }
 		$stats = $rows[0];
@@ -997,6 +1011,7 @@ class LegacyTableSnapshot {
 			$args[] = $value;
 		}
 		$sql = 'INSERT INTO `' . $table . '` (' . implode( ',', $columns ) . ') VALUES (' . implode( ',', $expressions ) . ')';
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Private callers select a schema-owned table; columns/types come only from its fixed definitions, and every non-NULL value uses the generated %s/%d placeholders.
 		if ( 1 !== $this->write( $this->wpdb->prepare( $sql, $args ) ) ) { $this->fail( 'Staged insert did not write exactly one row.' ); }
 		$id = $this->number( $this->wpdb->insert_id );
 		if ( $id < 1 ) { $this->fail( 'Missing staged row ID.' ); }
@@ -1020,6 +1035,7 @@ class LegacyTableSnapshot {
 
 	private function write( $sql ) {
 		$this->tick();
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Private callers pass prepared statements from the fixed schema builders or literal transaction commands; never request-supplied SQL.
 		$result = $this->wpdb->query( $sql );
 		if ( false === $result || ! empty( $this->wpdb->last_error ) ) { $this->fail( 'Database write failed.' ); }
 		if ( 'START TRANSACTION' !== $sql ) { $this->tick(); }
@@ -1028,6 +1044,7 @@ class LegacyTableSnapshot {
 
 	private function read( $sql ) {
 		$this->tick();
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Private callers pass prepared statements with schema-owned identifiers or literal session probes; values are bound before reaching this forwarding method.
 		$rows = $this->wpdb->get_results( $sql, ARRAY_A );
 		$this->tick();
 		if ( ! is_array( $rows ) || ! empty( $this->wpdb->last_error ) ) { $this->fail( 'Database read failed.' ); }
@@ -1051,6 +1068,7 @@ class LegacyTableSnapshot {
 	}
 
 	private function fail( $message ) {
+		// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Private callers supply literals or approved schema column labels, not stored values; preserve plain diagnostics and escape only at the eventual HTML boundary.
 		throw new \RuntimeException( 'Legacy table snapshot: ' . $message );
 	}
 }

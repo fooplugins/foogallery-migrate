@@ -231,9 +231,47 @@ The following are fixed for this project:
 - Existing non-compact state and compact payload version 1 remain readable.
 - Option mode continues using `foogallery-migrate-data` with autoload disabled.
 - User preferences continue using `foogallery-migrate-settings`.
-- The existing declarations are not changed by this project: runtime `FOOGM_MIN_WP` remains 5.0, the WordPress.org `readme.txt` declaration remains 6.0, and the PHP floor remains 5.4 even though the two WordPress declarations are currently inconsistent.
+- **26 October 2026 amendment:** Brad raised the minimum WordPress version to **6.2**. Runtime `FOOGM_MIN_WP`, the main plugin header and `readme.txt` now agree. The plugin's PHP declaration remains 5.4; WordPress 6.2 itself requires PHP 5.6.20 or later, so this does not claim support for a WordPress 6.2/PHP 5.4 pairing. Earlier WP 5.0/6.0 acceptance checkpoints remain historical evidence, not validation of the current minimum.
 
 Backend implementations may have different physical encodings, but decoding either backend must produce the same logical PHP state and the same runtime objects.
+
+### Identifier-query follow-up (SQL review bucket 3)
+
+With the new WordPress 6.2 minimum, use native `wpdb::prepare()` **`%i` identifier
+placeholders** for table names instead of interpolating them into SQL. This is
+supported from WordPress 6.2; see the [WordPress API reference](https://developer.wordpress.org/reference/classes/wpdb/prepare/).
+**Implemented following Brad's approval on 26 October 2026:** all three batches
+below now bind table identifiers through `%i`. The changes cover 16 statement
+sites; the 36 scanner reports were not 36 separate queries. No extra SQL layer,
+pre-6.2 fallback or new suppression was introduced. Existing predicates, limits,
+ordering and transaction boundaries are preserved.
+
+The three implemented batches cover the original 36 bucket-3 flags:
+
+1. `StorageAdmin` and `StorageAuthority`: **4 flags**, the straightforward
+   ownership/count/existence queries.
+2. WP Photo Album Plus: **2 flags**, its album/photo source queries. Retain the
+   validated active-plugin table constants and inactive-plugin prefix fallback.
+3. `TableSnapshot`: **30 flags**, its option metadata, scoped counts, locks and
+   guarded deletion statements. The pinned adapter already delegates preparation
+   to native `wpdb::prepare()`; do not replace its non-replaying execution path.
+
+Keep existing identifier allow-lists, site scope, schema ownership, permissions,
+value placeholders, transaction boundaries and revision/authority predicates.
+Pass identifiers as arguments to unquoted `%i` placeholders: the placeholder
+adds backticks itself. Do not use `%s` for an identifier, double-prepare SQL, add
+a compatibility fallback for pre-6.2 WordPress, or introduce another SQL layer.
+
+For every changed statement, add before/after preparation tests and native SQL
+result/order checks on WordPress 6.2 and a current supported version. Statements
+already using backticks should remain byte-identical after preparation; the
+previously unquoted WPPA queries will gain identifier quotes, so test equivalent
+SQL results instead of claiming byte-identical text. Include non-default/site
+prefixes, rejected unsafe identifiers and exact blog/revision filters, plus
+rollback and cleanup checks for snapshot writes. Rerun Plugin Check after each
+batch. A reduction of all 36 flags is not guaranteed: the custom adapter can
+still confuse scanner analysis. Review any residual finding individually rather
+than weakening safeguards or suppressing a whole file/category.
 
 ## Explicit non-goals
 
@@ -808,7 +846,7 @@ The following retained design applies only to a future separately scheduled mult
 - Cleanup for one selected network deletes only that network's blog rows. Global uninstall/cleanup may drop both exact tables only after proving no network still owns rows.
 - On non-multisite, “remove all” may drop both tables immediately.
 - Maintain a bounded, chunked or table-backed network registry of sites that have plugin storage so cleanup and diagnostics do not normally scan every site; do not assume one ever-growing network option remains small.
-- Multisite table mode requires the plugin to be network-active for the site's network before provisioning or selection; site-only activation remains option-mode only. When loaded for site deletion, remove that site's rows and registry entry. On WordPress 5.1+ use the appropriate modern site-uninitialization hook; retain the older `delete_blog` fallback for the runtime's declared WordPress 5.0 compatibility.
+- Multisite table mode requires the plugin to be network-active for the site's network before provisioning or selection; site-only activation remains option-mode only. When loaded for site deletion, remove that site's rows and registry entry. Future multisite implementation can use the modern site-uninitialization hook throughout the now-supported WordPress 6.2+ range; a WordPress 5.0 `delete_blog` compatibility fallback is no longer required by this plan.
 - Network deactivation or an unusual deletion path can prevent the hook from running. Registry health checks, network cleanup, and WP-CLI therefore audit registered `blog_id` values in bounded pages, identify sites that no longer exist, and remove only those orphan rows/entries after confirmation or during authorized uninstall cleanup.
 - Network activation does not iterate sites or create tables.
 - Within the benchmarked synchronous bound, uninstall removes all registered/current per-site resources and performs a bounded final enumeration for pre-upgrade sites that never entered the registry. Above that bound, every per-site resource—not only pre-registry options—must be removed by the preparatory batched admin/WP-CLI workflow before uninstall. Final uninstall still drops the two exact shared tables and removes the installation-wide schema resources.
@@ -872,7 +910,7 @@ The repository audit on 2026-08-28 recorded these historical baseline commands. 
 - PR #15 adds codec/repository, table, maintenance, conversion, lifecycle, compatibility and native integration coverage. Audit what each test actually exercises: lifecycle retention is not complete uninstall coverage, fault-free transport recovery is not process-death recovery, and fake-table benchmarks are not native database scaling evidence.
 - R0 records/reproduces relevant failures and classifies historical diagnostics before attributing regressions. R4 must complete the maintained release suite and package validation with no unexplained failures/timeouts. Report excluded diagnostic groups and their reviewed rationale; focused passes are not a substitute.
 
-PHPUnit 9.6 cannot execute on PHP 5.4. In addition to modern PHPUnit/WordPress integration tests, the built production package needs a PHP 5.4 syntax/runtime smoke job with the declared WordPress 5.0 runtime floor. New production code cannot use generators, `finally`, `Throwable`, scalar/return type declarations, null coalescing, or unpolyfilled modern randomness. Repository methods named `iteratePages()` describe repeated bounded page calls/callbacks, not a PHP generator.
+PHPUnit 9.6 cannot execute on PHP 5.4. The current WordPress minimum is **6.2**; maintained native minimum-version integration should use a PHP runtime supported by WordPress 6.2 (at least 5.6.20). Standalone PHP 5.4 syntax/loader probes remain useful for the unchanged plugin PHP declaration, but are not a supported WordPress/PHP pair or a substitute for native WP 6.2 acceptance. Old WP 5.0 fixture scripts are historical diagnostics and must not be relabelled as current-floor evidence. Production syntax restrictions remain unchanged in this task. Repository methods named `iteratePages()` describe repeated bounded page calls/callbacks, not a PHP generator.
 
 ### Codec and compatibility
 

@@ -7,7 +7,7 @@ require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 use FooPlugins\FooGalleryMigrate\LegacyOptionBackend;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
 use FooPlugins\FooGalleryMigrate\ScalarStateRepository;
@@ -20,7 +20,7 @@ try {
 	foreach ( $schema->statements() as $i => $ddl ) { $created[] = $tables[$i]; dbDelta( $ddl ); }
 	$db = new LegacyTransactionConnection( $wpdb ); $settings = new MigratorSettings(); $option_backend = new LegacyOptionBackend(); $blog = (int) get_current_blog_id();
 	$option_backend->replace_all( array( 'queue' => false ) );
-	( new LegacyTableSnapshot( $db, $blog ) )->replace_many( array( array( 'key' => 'queue', 'kind' => 'scalar', 'order' => 0, 'value' => false, 'expected_revision' => null ) ) );
+	( new TableSnapshot( $db, $blog ) )->replace_many( array( array( 'key' => 'queue', 'kind' => 'scalar', 'order' => 0, 'value' => false, 'expected_revision' => null ) ) );
 	$option = new ScalarStateRepository( $option_backend, $settings ); $table = new ScalarStateRepository( new LegacyTableBackend( $db, $blog ), $settings );
 	foreach ( array( array( 'set', array( 'queue', null ) ), array( 'set', array( 'queue', false ) ), array( 'set', array( 'queue', false ) ), array( 'set', array( 'future', null ) ), array( 'delete', array( 'missing' ) ), array( 'delete', array( 'queue' ) ), array( 'mutate_many', array( array( 'future' => false, '09' => null, 9 => false ) ) ), array( 'delete', array( '09' ) ) ) as $index => $operation ) {
 		$before = $physical(); $expected = call_user_func_array( array( $option, $operation[0] ), $operation[1] ); $actual = call_user_func_array( array( $table, $operation[0] ), $operation[1] );

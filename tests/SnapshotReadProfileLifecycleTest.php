@@ -1,7 +1,7 @@
 <?php
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\SnapshotReadPhase;
 use FooPlugins\FooGalleryMigrate\SnapshotReadPlan;
 use FooPlugins\FooGalleryMigrate\SnapshotReadProfile;
@@ -11,7 +11,7 @@ require_once __DIR__ . '/support/SnapshotScaleConnection.php';
 /** SYNTHETIC arithmetic/lifecycle inputs, NOT measured qualification or enabling. */
 class SnapshotReadProfileLifecycleTest extends TestCase {
 	public static function fixture( $records = 1 ) {
-		$s = new LegacyTableSnapshot( new SnapshotScaleConnection(), 7, 100, 1048576 );
+		$s = new TableSnapshot( new SnapshotScaleConnection(), 7, 100, 1048576 );
 		$auth = new \ReflectionProperty( $s, 'snapshot_authentication_enabled' ); if ( PHP_VERSION_ID < 80100 ) { $auth->setAccessible( true ); } $auth->setValue( $s, true );
 		$value = array( 'r' => array( 'unknown' => str_repeat( 'x', 12 ) ) );
 		if ( 2 === $records ) { $value['s'] = false; }

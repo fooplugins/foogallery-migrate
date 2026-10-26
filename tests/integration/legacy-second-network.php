@@ -8,7 +8,7 @@ require_once $root . '/migrate.php';
 require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
 global $wpdb;
@@ -40,7 +40,7 @@ try {
 			$check( get_current_blog_id() === $blog && array_keys( ( new LegacyStorageSchema( $wpdb ) )->definitions() ) === $tables && ( new LegacyStorageSchema( $wpdb ) )->verify(), 'all actual blog contexts use the same two installation-wide base-prefix tables' );
 			$backends[$blog] = new LegacyTableBackend( $db, $blog );
 			$value = $settings->compact_state_value( 'galleries', array( '09' => array( 'tenant' => $blog, 'identity' => 'string-09', 'binary' => "\xff\x00" ), 9 => array( 'tenant' => $blog, 'identity' => 'integer-9' ) ) );
-			( new LegacyTableSnapshot( $db, $blog ) )->replace_many( array( array( 'key' => 'galleries', 'kind' => 'map', 'order' => 0, 'value' => $value, 'expected_revision' => null ) ) );
+			( new TableSnapshot( $db, $blog ) )->replace_many( array( array( 'key' => 'galleries', 'kind' => 'map', 'order' => 0, 'value' => $value, 'expected_revision' => null ) ) );
 			$rows = $backends[$blog]->roots( 'galleries', array( '09', 9 ) );
 			$check( $rows[0]['found'] && $rows[1]['found'] && '09' === $rows[0]['key'] && 9 === $rows[1]['key'] && $rows[0]['value']['tenant'] === $blog && $rows[1]['value']['tenant'] === $blog && "\xff\x00" === $rows[0]['value']['binary'], 'typed identities and binary payloads explicitly read back in their own network/blog scope' );
 		} finally { restore_current_blog(); }

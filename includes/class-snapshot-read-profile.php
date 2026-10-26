@@ -168,5 +168,8 @@ final class SnapshotReadProfile {
 		return $this->pid === getmypid() && $this->cell['runtime'] === SnapshotReadPlan::runtime_binding() && $this->cell['plan'] === $plan && $this->cell['identity'] === $identity;
 	}
 	public function margin() { return $this->margin; }
-	private static function fail( $reason ) { throw new \RuntimeException( 'Snapshot finite host cell refused: ' . $reason ); }
+	private static function fail( $reason ) {
+		// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Private callers use diagnostic literals plus fixed key/seam labels, never trace contents; throwing an exception is not an HTML output boundary.
+		throw new \RuntimeException( 'Snapshot finite host cell refused: ' . $reason );
+	}
 }

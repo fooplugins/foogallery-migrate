@@ -10,6 +10,8 @@ command -v docker >/dev/null
 command -v wp >/dev/null
 command -v php >/dev/null
 command -v shasum >/dev/null
+wp_version="${FOOGM_R0_WORDPRESS_VERSION:-7.1.3}"
+[[ "$wp_version" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]
 package_json=''
 if test "$#" -ne 0; then
 	test "$#" -eq 3 && test "$1" = '--package'
@@ -43,7 +45,7 @@ for attempt in $(seq 1 30); do
 done
 docker exec "$container" mariadb --protocol=tcp -h127.0.0.1 -ufgm_r0 "-p$db_password" "$database" -e 'SELECT 1' >/dev/null 2>&1
 
-wp core download --path="$site" --version=7.1.3 --skip-content
+wp core download --path="$site" --version="$wp_version" --skip-content
 wp config create --path="$site" --dbname="$database" --dbuser=fgm_r0 \
 	--dbpass="$db_password" --dbhost="127.0.0.1:$port" --dbprefix=wp_ --skip-check
 wp core install --path="$site" --url="http://fgm-r0-$suffix.invalid" \
@@ -76,7 +78,12 @@ if test -n "$package_json"; then
 	php "$repo/tests/integration/storage-release-package-identity.php" verify-tree \
 		"$site/wp-content/plugins/foogallery-migrate" "$site/.fgm-r0-owner.json"
 fi
-wp plugin activate foogallery foogallery-migrate --path="$site"
+if test "${FOOGM_R0_SKIP_GALLERY:-0}" = 1; then
+	# SQL primitive checks on old WordPress do not need a newer FooGallery build.
+	wp plugin activate foogallery-migrate --path="$site"
+else
+	wp plugin activate foogallery foogallery-migrate --path="$site"
+fi
 
 echo "Container: $container ($container_id)"
 echo "Database: $database at 127.0.0.1:$port"

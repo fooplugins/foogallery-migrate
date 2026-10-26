@@ -2,8 +2,8 @@
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
 use FooPlugins\FooGalleryMigrate\LegacySnapshotRowReader;
-use FooPlugins\FooGalleryMigrate\LegacyTableReader;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableReader;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use PHPUnit\Framework\TestCase;
 
 require_once __DIR__ . '/support/SnapshotScaleConnection.php';
@@ -18,7 +18,7 @@ class StorageSnapshotStreamingBoundaryTest extends TestCase {
 		return array( 'root' => array( 'object_type' => 'gallery', 'children' => $children, 'unknown' => array( true, 1.25 ) ) );
 	}
 	private function change( $value ) { return array( array( 'key' => 'bucket', 'order' => 0, 'kind' => 'map', 'value' => $value, 'expected_revision' => null ) ); }
-	private function snapshot( $db, $deadline = null, $memory = null ) { return new LegacyTableSnapshot( $db, 7, 1000, 8388608, $deadline, $memory ); }
+	private function snapshot( $db, $deadline = null, $memory = null ) { return new TableSnapshot( $db, 7, 1000, 8388608, $deadline, $memory ); }
 
 	public function test_single_root_multiwindow_nonpreorder_and_typed_binary_unknown_empty_parity(): void {
 		$db = new SnapshotScaleConnection(); $value = $this->value();
@@ -34,7 +34,7 @@ class StorageSnapshotStreamingBoundaryTest extends TestCase {
 		$this->assertSame( serialize( $value ), serialize( $snapshot->read_bounded( 'bucket' ) ) );
 		$this->assertSame( 1, $db->events['commit'] ); $this->assertGreaterThan( 3, $db->fetches );
 		$this->assertLessThanOrEqual( 32, $db->max_window_rows );
-		$this->assertLessThanOrEqual( LegacyTableReader::MAX_RECORD_BYTES, $db->max_window_bytes );
+		$this->assertLessThanOrEqual( TableReader::MAX_RECORD_BYTES, $db->max_window_bytes );
 	}
 
 	public function test_byte_window_restricts_rows_before_driver_allocation(): void {
@@ -42,7 +42,7 @@ class StorageSnapshotStreamingBoundaryTest extends TestCase {
 		$snapshot->replace_many( $this->change( $value ) );
 		$this->assertSame( serialize( $value ), serialize( $snapshot->read_bounded( 'bucket' ) ) );
 		$this->assertLessThan( 32, $db->max_window_rows );
-		$this->assertLessThanOrEqual( LegacyTableReader::MAX_RECORD_BYTES, $db->max_window_bytes );
+		$this->assertLessThanOrEqual( TableReader::MAX_RECORD_BYTES, $db->max_window_bytes );
 	}
 
 	public function test_byte_bound_plus_one_refuses_before_payload_fetch(): void {
@@ -140,7 +140,7 @@ class StorageSnapshotStreamingBoundaryTest extends TestCase {
 			return $now;
 		};
 		$scale = StorageScaleAdmissionTest::admission( null, $clock, function () { return array( ini_get( 'memory_limit' ), memory_get_usage( true ) ); } );
-		$snapshot = new LegacyTableSnapshot( $db, 7, 1000, 8388608, null, null, $scale );
+		$snapshot = new TableSnapshot( $db, 7, 1000, 8388608, null, null, $scale );
 		$returned = null; $authority = $GLOBALS['foogallery_migrate_test_options'];
 		try { $returned = $snapshot->replace_many( $this->change( $this->value() ) ); $this->fail( 'Interrupted final digest published.' ); }
 		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'scale admission refused', $error->getMessage() ); }

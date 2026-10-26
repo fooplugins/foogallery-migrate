@@ -23,7 +23,7 @@ def sample(stage, owner='a' * 32):
     exact = dict(bytes=fixture['raw_bytes'], sha256=fixture['sha256'])
     p.update(cell=a7.POSITIVE, fixture=fixture, product_root='/HOST-ONLY', product_classes={},
              product_pins_before={}, product_pins_after={})
-    for name in ('StorageOperations', 'StorageConversion', 'LegacyStateCodec', 'LegacyTableSnapshot', 'StorageControl'):
+    for name in ('StorageOperations', 'StorageConversion', 'LegacyStateCodec', 'TableSnapshot', 'StorageControl'):
         relative = 'includes/' + name + '.php'
         p['product_classes'][chr(92).join(('FooPlugins', 'FooGalleryMigrate', name))] = dict(file='/HOST-ONLY/' + relative, sha256='a' * 64)
         p['product_pins_before'][relative] = 'a' * 64

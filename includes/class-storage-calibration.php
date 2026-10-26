@@ -41,7 +41,7 @@ class StorageCalibration {
 		foreach ( array( 'storage-calibration', 'storage-operations', 'storage-conversion', 'storage-retirement', 'storage-preflight', 'storage-memory-baseline',
 			'storage-scale-admission', 'generic-retaining-model', 'repository-flatten-model', 'snapshot-stats-model',
 			'legacy-option-decoder', 'legacy-option-durable-scan', 'legacy-option-structural-scan', 'storage-scalar-observer',
-			'legacy-collection-envelope', 'legacy-state-codec', 'legacy-record-codec', 'legacy-table-snapshot', 'legacy-table-reader',
+			'legacy-collection-envelope', 'legacy-state-codec', 'legacy-record-codec', 'table-snapshot', 'table-reader',
 			'legacy-transaction-connection', 'storage-control', 'storage-maintenance-gate', 'storage-authority',
 			'legacy-storage-schema', 'storage-provisioning', 'storage-admin', 'storage-cli', 'migrator-settings', 'content-scan-repository', 'image-tag-queue-repository', 'migrator-engine', 'init' ) as $class ) {
 			$path = dirname( __FILE__ ) . '/class-' . $class . '.php';

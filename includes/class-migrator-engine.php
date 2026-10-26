@@ -71,6 +71,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
             $this->storage_gate = StorageMaintenanceGate::current();
             $error = StorageAuthority::runtime_record( $this->storage_gate );
             if ( is_wp_error( $error ) ) {
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- StorageAuthority diagnostic remains exception data, not HTML; the page factory escapes fatal output and AJAX consumers render messages as text.
                 throw new \RuntimeException( $error->get_error_message() );
             }
             $this->storage_guarded = true;
@@ -81,7 +82,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         public function assert_storage_writer() {
             if ( ! $this->storage_guarded ) { return true; }
             $error = StorageAuthority::admit_option_writer( $this->storage_gate );
-            if ( is_wp_error( $error ) ) { throw new \RuntimeException( $error->get_error_message() ); }
+            if ( is_wp_error( $error ) ) {
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Admission errors are plain diagnostic data. Do not pre-escape exceptions: HTML boundaries escape them, and JSON/CLI consumers require the original message.
+                throw new \RuntimeException( $error->get_error_message() );
+            }
             $this->assert_storage_context();
             return true;
         }
@@ -322,7 +326,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                     'confirmation' => 'clear-current-state',
                     'nonce' => wp_create_nonce( 'foogallery_migrate_storage_clear_' . $blog )
                 ) );
-                if ( is_wp_error( $result ) ) { throw new \RuntimeException( $result->get_error_message() ); }
+                if ( is_wp_error( $result ) ) {
+                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Cleanup dispatch returns a fixed diagnostic WP_Error; throwing does not emit HTML. Display boundaries escape messages rather than double-escaping exception data.
+                    throw new \RuntimeException( $result->get_error_message() );
+                }
                 return ! empty( $result['complete'] );
             }
             return $this->storage_operation( 'clear_migrator_setting_admitted' );

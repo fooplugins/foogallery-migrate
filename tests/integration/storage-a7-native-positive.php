@@ -50,7 +50,7 @@ function foogm_a7_product_pins( $root ) {
 }
 function foogm_a7_product_classes( $root ) {
 	$classes = array(); $root = realpath( $root ) . '/';
-	foreach ( array( 'StorageOperations', 'StorageConversion', 'LegacyStateCodec', 'LegacyTableSnapshot', 'StorageControl' ) as $short ) {
+	foreach ( array( 'StorageOperations', 'StorageConversion', 'LegacyStateCodec', 'TableSnapshot', 'StorageControl' ) as $short ) {
 		if ( ! class_exists( 'FooPlugins\\FooGalleryMigrate\\' . $short ) ) { throw new RuntimeException( 'Required product class absent.' ); }
 	}
 	foreach ( get_declared_classes() as $name ) {

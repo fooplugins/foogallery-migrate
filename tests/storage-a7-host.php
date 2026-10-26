@@ -4,7 +4,7 @@ define( 'ABSPATH', dirname( __DIR__ ) . '/' );
 require ABSPATH . 'includes/class-legacy-option-decoder.php';
 require ABSPATH . 'includes/class-legacy-state-codec.php';
 require ABSPATH . 'includes/class-legacy-record-codec.php';
-require ABSPATH . 'includes/class-legacy-table-reader.php';
+require ABSPATH . 'includes/class-table-reader.php';
 require ABSPATH . 'includes/class-legacy-collection-envelope.php';
 require ABSPATH . 'includes/class-migrator-settings.php';
 require ABSPATH . 'includes/class-storage-scalar-observer.php';

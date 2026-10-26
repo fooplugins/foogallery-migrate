@@ -10,7 +10,7 @@ use FooPlugins\FooGalleryMigrate\StorageMaintenanceGate;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
 
 class FgmRuntimeReceiptLoss extends LegacyTransactionConnection {
@@ -77,7 +77,7 @@ $other = $blog + 1000;
 try {
 	foreach ( $schema->statements() as $index => $ddl ) { $created[] = $tables[$index]; dbDelta( $ddl ); }
 	$check( $schema->verify(), 'native fixture schema verified' );
-	( new LegacyTableSnapshot( $observer, $other ) )->replace_many( array( array( 'key' => 'checkpoint', 'order' => 0, 'kind' => 'scalar', 'value' => 'other-scope', 'expected_revision' => null ) ) );
+	( new TableSnapshot( $observer, $other ) )->replace_many( array( array( 'key' => 'checkpoint', 'order' => 0, 'kind' => 'scalar', 'value' => 'other-scope', 'expected_revision' => null ) ) );
 	$other_raw = array();
 	foreach ( $tables as $table ) { $other_raw[$table] = $observer->get_results( $observer->prepare( 'SELECT * FROM `' . $table . '` WHERE blog_id = %d ORDER BY id', array( $other ) ), ARRAY_A ); }
 	foreach ( array( 'commit-ack', 'post-commit-read' ) as $fault ) {

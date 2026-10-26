@@ -13,7 +13,7 @@ function __( $v, $domain ) { return $v; }
 function absint( $v ) { return abs( (int) $v ); }
 // Production autoloads this diagnostic dependency on refusal; this standalone
 // probe has an explicit loader and must preserve the same refusal semantics.
-foreach ( array( 'storage-scalar-observer', 'storage-preflight', 'storage-scale-admission', 'legacy-state-codec', 'legacy-record-codec', 'legacy-table-reader', 'generic-retaining-model', 'legacy-option-decoder' ) as $file ) {
+foreach ( array( 'storage-scalar-observer', 'storage-preflight', 'storage-scale-admission', 'legacy-state-codec', 'legacy-record-codec', 'table-reader', 'generic-retaining-model', 'legacy-option-decoder' ) as $file ) {
  require $root . '/includes/class-' . $file . '.php';
 }
 function sample() {

@@ -211,7 +211,7 @@ class StorageConversion {
 			( new StorageProvisioning( $this->gate, $this->deadline ) )->ensure();
 			$this->require_true( ( new LegacyStorageSchema( $this->connection ) )->verify() );
 		}
-		$this->snapshot = new LegacyTableSnapshot( $this->connection, $this->blog, $this->limit( 'max_rows', 10000 ), $this->limit( 'max_bytes', 16777216 ), $this->deadline,
+		$this->snapshot = new TableSnapshot( $this->connection, $this->blog, $this->limit( 'max_rows', 10000 ), $this->limit( 'max_bytes', 16777216 ), $this->deadline,
 			function ( $bytes ) { $this->table_budget( $bytes ); return true; }, $this->scale );
 	}
 

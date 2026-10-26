@@ -3,34 +3,36 @@ namespace FooPlugins\FooGalleryMigrate\Tests;
 
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use PHPUnit\Framework\TestCase;
 
-class LegacyTableSnapshotTest extends TestCase {
+require_once __DIR__ . '/support/IdentifierSqlFixture.php';
+
+class TableSnapshotTest extends TestCase {
 	private function change( $value = false ) {
 		return array( 'key' => 'checkpoint', 'order' => 0, 'kind' => 'scalar', 'value' => $value, 'expected_revision' => null );
 	}
 
 	public function test_construction_is_storage_neutral(): void {
 		$db = new SnapshotTestWpdb();
-		new LegacyTableSnapshot( $db, 7 );
+		new TableSnapshot( $db, 7 );
 		$this->assertSame( array(), $db->queries );
 	}
 
 	public function test_raw_replaying_connection_is_not_admitted(): void {
 		$this->expectException( \RuntimeException::class );
-		new LegacyTableSnapshot( new \stdClass(), 7 );
+		new TableSnapshot( new \stdClass(), 7 );
 	}
 
 	public function test_read_key_byte_budget_is_checked_before_sql(): void {
 		$db = new SnapshotTestWpdb();
-		try { ( new LegacyTableSnapshot( $db, 7, 100, 10 ) )->read_bounded( str_repeat( 'x', 100 ) ); $this->fail(); }
+		try { ( new TableSnapshot( $db, 7, 100, 10 ) )->read_bounded( str_repeat( 'x', 100 ) ); $this->fail(); }
 		catch ( \RuntimeException $error ) { $this->assertSame( array(), $db->queries ); }
 	}
 
 	public function test_dirty_maintenance_validates_admission_before_sql(): void {
-		$db = new SnapshotTestWpdb(); $repo = new LegacyTableSnapshot( $db, 7 );
+		$db = new SnapshotTestWpdb(); $repo = new TableSnapshot( $db, 7 );
 		foreach ( array( array( 'migrated', 0, 10 ), array( true, 1, 10 ), array( 'migrated', 1, 0 ) ) as $args ) {
 			try { call_user_func_array( array( $repo, 'verify_digest' ), $args ); $this->fail( 'Expected maintenance refusal.' ); }
 			catch ( \RuntimeException $error ) { $this->assertSame( array(), $db->queries ); }
@@ -39,7 +41,7 @@ class LegacyTableSnapshotTest extends TestCase {
 
 	public function test_expired_caller_deadline_refuses_before_preflight_sql(): void {
 		$db = new SnapshotTestWpdb();
-		try { ( new LegacyTableSnapshot( $db, 7, 10000, 16777216, microtime( true ) - 1 ) )->replace_many( array( $this->change() ) ); $this->fail( 'Expected shared deadline refusal.' ); }
+		try { ( new TableSnapshot( $db, 7, 10000, 16777216, microtime( true ) - 1 ) )->replace_many( array( $this->change() ) ); $this->fail( 'Expected shared deadline refusal.' ); }
 		catch ( \RuntimeException $error ) {
 			$this->assertStringContainsString( 'time budget', $error->getMessage() );
 			$this->assertSame( array(), $db->queries );
@@ -49,7 +51,7 @@ class LegacyTableSnapshotTest extends TestCase {
 	/** @dataProvider invalidChanges */
 	public function test_preflight_refuses_before_sql( $changes ): void {
 		$db = new SnapshotTestWpdb();
-		try { ( new LegacyTableSnapshot( $db, 7 ) )->replace_many( $changes ); $this->fail( 'Expected preflight refusal.' ); }
+		try { ( new TableSnapshot( $db, 7 ) )->replace_many( $changes ); $this->fail( 'Expected preflight refusal.' ); }
 		catch ( \RuntimeException $error ) { $this->assertSame( array(), $db->queries ); }
 	}
 
@@ -66,8 +68,8 @@ class LegacyTableSnapshotTest extends TestCase {
 	}
 
 	public function test_aggregate_row_and_byte_limits_precede_sql(): void {
-		foreach ( array( new LegacyTableSnapshot( $db = new SnapshotTestWpdb(), 7, 1, 10000 ),
-			new LegacyTableSnapshot( $db2 = new SnapshotTestWpdb(), 7, 100, 10 ) ) as $repo ) {
+		foreach ( array( new TableSnapshot( $db = new SnapshotTestWpdb(), 7, 1, 10000 ),
+			new TableSnapshot( $db2 = new SnapshotTestWpdb(), 7, 100, 10 ) ) as $repo ) {
 			$change = $this->change( array( 'children' => array( false ) ) );
 			$change['kind'] = 'map'; $change['value'] = array( 'root' => $change['value'] );
 			try { $repo->replace_many( array( $change ) ); $this->fail(); }
@@ -85,7 +87,7 @@ class LegacyTableSnapshotTest extends TestCase {
 			$db->head = array( 'id' => '4', 'state_key_value' => ( new LegacyStateCodec() )->key_value( 'checkpoint' ),
 				'active_generation' => '2', 'revision' => '3', 'codec_version' => '1', 'state_order' => '0', 'state_kind' => 'scalar' );
 		}
-		try { ( new LegacyTableSnapshot( $db, 7 ) )->replace_many( array( $change ) ); $this->fail( 'Expected transaction refusal.' ); }
+		try { ( new TableSnapshot( $db, 7 ) )->replace_many( array( $change ) ); $this->fail( 'Expected transaction refusal.' ); }
 		catch ( \RuntimeException $error ) {
 			$this->assertContains( 'START TRANSACTION', $db->queries );
 			$this->assertSame( 'ROLLBACK', end( $db->queries ) );
@@ -100,7 +102,7 @@ class LegacyTableSnapshotTest extends TestCase {
 
 	public function test_commit_failure_taints_repository_and_reports_uncertain_outcome(): void {
 		$db = new SnapshotTestWpdb(); $db->fault = 'commit';
-		$repo = new LegacyTableSnapshot( $db, 7 );
+		$repo = new TableSnapshot( $db, 7 );
 		try { $repo->replace_many( array( $this->change() ) ); $this->fail(); }
 		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'uncertain', $error->getMessage() ); }
 		$count = count( $db->queries );
@@ -110,13 +112,13 @@ class LegacyTableSnapshotTest extends TestCase {
 
 	public function test_schema_failure_does_not_begin_transaction(): void {
 		$db = new SnapshotTestWpdb(); $db->fault = 'schema';
-		try { ( new LegacyTableSnapshot( $db, 7 ) )->replace_many( array( $this->change() ) ); $this->fail(); }
+		try { ( new TableSnapshot( $db, 7 ) )->replace_many( array( $this->change() ) ); $this->fail(); }
 		catch ( \RuntimeException $error ) { $this->assertNotContains( 'START TRANSACTION', $db->queries ); }
 	}
 
 	public function test_ambient_transaction_is_refused_without_begin_commit_or_rollback(): void {
 		$db = new SnapshotTestWpdb(); $db->fault = 'ambient';
-		try { ( new LegacyTableSnapshot( $db, 7 ) )->replace_many( array( $this->change() ) ); $this->fail(); }
+		try { ( new TableSnapshot( $db, 7 ) )->replace_many( array( $this->change() ) ); $this->fail(); }
 		catch ( \RuntimeException $error ) {
 			$this->assertContains( 'SET TRANSACTION ISOLATION LEVEL REPEATABLE READ', $db->queries );
 			foreach ( array( 'START TRANSACTION', 'COMMIT', 'ROLLBACK' ) as $sql ) { $this->assertNotContains( $sql, $db->queries ); }
@@ -135,6 +137,7 @@ class SnapshotTestWpdb extends LegacyTransactionConnection {
 	public $head;
 	public function prepare( $sql, $args ) {
 		$args = is_array( $args ) ? $args : array( $args );
+		$sql = IdentifierSqlFixture::bind( $sql, $args );
 		foreach ( $args as $arg ) {
 			$sql = preg_replace_callback( '/%[ds]/', function ( $match ) use ( $arg ) { return '%d' === $match[0] ? (string) (int) $arg : "'" . addslashes( $arg ) . "'"; }, $sql, 1 );
 		}

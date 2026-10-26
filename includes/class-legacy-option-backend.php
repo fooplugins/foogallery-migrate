@@ -44,7 +44,7 @@ class LegacyOptionBackend {
 
 	/** Raw map/list records only; compact wrapper interpretation stays above us. */
 	public function roots( $state_key, $keys ) {
-		if ( ! is_array( $keys ) || count( $keys ) > LegacyTableReader::MAX_ROWS ) {
+		if ( ! is_array( $keys ) || count( $keys ) > TableReader::MAX_ROWS ) {
 			throw new \RuntimeException( 'Need at most 100 exact root keys.' );
 		}
 		$seen = array();

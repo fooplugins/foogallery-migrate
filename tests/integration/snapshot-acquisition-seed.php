@@ -10,7 +10,7 @@ require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 require_once dirname( __DIR__ ) . '/support/SnapshotAcquisitionSeed.php';
 
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
 use FooPlugins\FooGalleryMigrate\StorageScaleAdmission;
@@ -39,7 +39,7 @@ $hooks = array(); foreach ( $wp_filter as $name => $hook ) {
 $runtime = array( 'php' => PHP_VERSION, 'sapi' => PHP_SAPI, 'binary' => PHP_BINARY, 'binary_sha256' => hash_file( 'sha256', PHP_BINARY ),
     'ini_loaded' => php_ini_loaded_file(), 'ini_scanned' => php_ini_scanned_files(), 'ini' => ini_get_all( null, false ),
     'extensions' => $extensions, 'hooks' => $hooks, 'wp' => $wp_version );
-$classes = array(); foreach ( array( 'LegacyTableSnapshot', 'LegacySnapshotRowReader', 'LegacyRecordCodec', 'LegacyStateCodec', 'LegacyTransactionConnection', 'StorageScalarObserver', 'SnapshotReadTraceStream' ) as $name ) {
+$classes = array(); foreach ( array( 'TableSnapshot', 'LegacySnapshotRowReader', 'LegacyRecordCodec', 'LegacyStateCodec', 'LegacyTransactionConnection', 'StorageScalarObserver', 'SnapshotReadTraceStream' ) as $name ) {
     $file = ( new ReflectionClass( 'FooPlugins\\FooGalleryMigrate\\' . $name ) )->getFileName();
     $assert( 0 === strpos( realpath( $file ), realpath( FOOGM_SEED_ROOT ) . '/' ), 'Wrong product source.' );
     $classes[$name] = array( 'path' => realpath( $file ), 'sha256' => hash_file( 'sha256', $file ) );
@@ -63,7 +63,7 @@ try {
         'memory_ceiling_bytes' => 268435456, 'max_seconds' => 10 );
     $scale = new StorageScaleAdmission( $limits, $policy, microtime( true ) + 10.0 );
     $scale->admit_additional( StorageScalarObserver::ACQUISITION_ALLOWANCE );
-    $repo = new LegacyTableSnapshot( $connection, (int) get_current_blog_id(), 1024, 1048576, null, null, $scale );
+    $repo = new TableSnapshot( $connection, (int) get_current_blog_id(), 1024, 1048576, null, null, $scale );
     // Producer witnesses/plans only. NO SnapshotReadProfile construction/reflection.
     $set( $repo, 'snapshot_authentication_enabled', true ); $set( $repo, 'snapshot_events_enabled', true );
     $repo->replace_many( array( array( 'key' => 'galleries', 'order' => 0, 'kind' => 'map', 'value' => $value, 'expected_revision' => null ) ) );

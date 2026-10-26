@@ -12,7 +12,7 @@ use FooPlugins\FooGalleryMigrate\LegacyOptionBackend;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
 use FooPlugins\FooGalleryMigrate\LegacyTableRepository;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
 
@@ -128,7 +128,7 @@ try {
 		'indexed attachment identity cannot change', 'Indexed queue attachment identity changed' );
 	$check( $other->summary()['revision'] === $revision + 1 &&
 		$other->nextBatch( 1 )['rows'][0]['value']['attachment_id'] === 1, 'identity refusal has no checkpoint side effect' );
-	$snapshot = new LegacyTableSnapshot( $db, (int) get_current_blog_id() );
+	$snapshot = new TableSnapshot( $db, (int) get_current_blog_id() );
 	$check( $snapshot->verify_digest( ImageTagQueueRepository::STATE_KEY, $revision + 1 ), 'explicit dirty queue maintenance proof' );
 	$current = $snapshot->read_bounded( ImageTagQueueRepository::STATE_KEY );
 	$check( $current['items'][0]['tags'] === array( 'checked' ) && count( $current['items'] ) === 205,

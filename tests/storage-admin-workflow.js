@@ -120,4 +120,16 @@ for (const operation of ['clear', 'remove_all']) {
   assert.ok(!f.change.disabled && !f.spinner.active && f.radios.every(r => !r.disabled));
   f.select('option'); assert.ok(f.change.disabled); checks++;
 }
+{
+  const payload = '</p><img id="fgm-probe" src=x onerror="alert(1)"><script>alert(1)</script>&';
+  const f = fixture({ backend: 'unavailable', problem: payload }, true, true);
+  f.start('remove_all');
+  f.requests[0].respond({ success: false, data: { code: 'fixture_error', message: payload, failed: [payload], residual: [payload] } }, 409);
+  assert.equal(f.errorDetail.textContent, 'fixture_error ' + payload + ' ' + payload + ' ' + payload);
+  assert.equal(f.errorDetail.innerHTML, undefined, 'Diagnostic data must not be assigned to an HTML sink');
+  assert.equal(f.result.innerHTML, undefined); assert.equal(f.reloads, 0); checks++;
+  const reopened = fixture({}, true, true, f.notices);
+  assert.equal(reopened.errorDetail.textContent, f.errorDetail.textContent);
+  assert.equal(reopened.errorDetail.innerHTML, undefined, 'Restored session diagnostics must also be text-only'); checks++;
+}
 console.log('PASS: ' + checks + ' rendered storage workflow checks (DOM/HTTP doubles).');

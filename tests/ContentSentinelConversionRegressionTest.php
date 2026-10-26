@@ -20,7 +20,7 @@ class ContentSentinelConversionRegressionTest extends StorageByteDomainAccountin
         $this->assertSame(1,$result['success']); $this->assertSame(array('[old]'),$admitted);
         $this->assertSame('[new]',get_post(71)->post_content); $this->assertSame(array(),$engine->writes);
         $this->assertSame('map',$db->head['state_kind']); $this->assertSame(0,$db->head['record_count']);
-        $state=(new \FooPlugins\FooGalleryMigrate\LegacyTableSnapshot($db,7))->read_bounded(ContentScanRepository::STATE_KEY);
+        $state=(new \FooPlugins\FooGalleryMigrate\TableSnapshot($db,7))->read_bounded(ContentScanRepository::STATE_KEY);
         $this->assertSame(array('items'=>array(),'progress'=>array()),$state);
         $windows=array_values(array_filter($db->queries,function($sql) { return strpos($sql,' AS window_bytes FROM `wp_foogallery_migrate_records`')!==false; }));
         $this->assertNotEmpty($windows,'The empty map must be read through the real keyset window.');

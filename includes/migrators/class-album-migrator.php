@@ -36,7 +36,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
             try {
                 $context = $this->render_album_form_body( $repository );
                 if ( $repository->view_context( $this->type ) !== $context ) { throw new \RuntimeException( 'Albums changed during form rendering.' ); }
-                $html = ob_get_clean(); echo $html;
+                $html = ob_get_clean();
+                // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Buffered render_album_form_body markup; dynamic text, attributes and URLs are escaped by the producer. Preserve form controls after the revision check.
+                echo $html;
             } catch ( \Exception $error ) { ob_end_clean(); throw $error; }
             catch ( \Throwable $error ) { ob_end_clean(); throw $error; }
         }

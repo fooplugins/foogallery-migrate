@@ -93,7 +93,7 @@ class LegacyRecordCodec {
 			'parent_buckets_upper_bound' => 0, 'sort_cow_entries_upper_bound' => 0, 'native_tokens' => 0, 'max_native_depth' => 0, 'max_row_native_tokens' => 0 );
 		foreach ( $rows as $row ) {
 			$this->tick(); $bytes = $this->footprint_encoded_bytes( $row );
-			if ( $bytes > LegacyTableReader::MAX_RECORD_BYTES || ! isset( $row['payload_hash'], $row['payload_bytes'], $row['depth'] ) ||
+			if ( $bytes > TableReader::MAX_RECORD_BYTES || ! isset( $row['payload_hash'], $row['payload_bytes'], $row['depth'] ) ||
 				! array_key_exists( 'parent_node_hash', $row ) || ! is_string( $row['payload'] ) || ! is_string( $row['mutable_payload'] ) ||
 				! is_string( $row['key_value'] ) || $this->number( $row['depth'] ) > $this->max_depth ) { $this->fail( 'Invalid footprint row.' ); }
 			$pair = StorageScaleAdmission::checked_add( strlen( $row['payload'] ), strlen( $row['mutable_payload'] ) );
@@ -130,7 +130,7 @@ class LegacyRecordCodec {
 			if ( 'legacy_identifier_value' === $field && ! isset( $row[$field] ) ) { continue; }
 			if ( ! array_key_exists( $field, $row ) || ( null !== $row[$field] && ! is_string( $row[$field] ) ) ) { $this->fail( 'Invalid footprint byte column.' ); }
 			$bytes = StorageScaleAdmission::checked_add( $bytes, null === $row[$field] ? 0 : strlen( $row[$field] ) );
-			if ( $bytes > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Row footprint exceeds byte budget.' ); }
+			if ( $bytes > TableReader::MAX_RECORD_BYTES ) { $this->fail( 'Row footprint exceeds byte budget.' ); }
 		}
 		return $bytes;
 	}
@@ -252,7 +252,7 @@ class LegacyRecordCodec {
 			$projection_bytes = StorageScaleAdmission::checked_add( $projection_bytes, $column_bytes );
 		}
 		$bytes = StorageScaleAdmission::checked_add( $pair, StorageScaleAdmission::checked_add( $key_bytes, $projection_bytes ) );
-		if ( $bytes > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Row footprint exceeds byte budget.' ); }
+		if ( $bytes > TableReader::MAX_RECORD_BYTES ) { $this->fail( 'Row footprint exceeds byte budget.' ); }
 		$this->footprint_add( $d, 'encoded_odd_rows', $bytes & 1 ); $this->footprint_add( $d, 'encoded_large_columns', $large_columns );
 		$this->footprint_add( $d, 'records', 1 ); $this->footprint_add( $d, 'payload_bytes', $pair );
 		$this->footprint_add( $d, 'encoded_bytes', $bytes ); $this->footprint_add( $d, 'typed_key_bytes', $key_bytes ); $this->footprint_add( $d, 'projection_bytes', $projection_bytes );
@@ -367,7 +367,7 @@ class LegacyRecordCodec {
 		// independently check DB column sizes BEFORE fetching these LONGTEXTs.
 		foreach ( $rows as $row ) {
 			$size = $this->encoded_bytes( $row );
-			if ( $size > LegacyTableReader::MAX_RECORD_BYTES || $size > $this->max_tree_bytes - $bytes ) { $this->fail( 'Tree exceeds the encoded byte budget.' ); }
+			if ( $size > TableReader::MAX_RECORD_BYTES || $size > $this->max_tree_bytes - $bytes ) { $this->fail( 'Tree exceeds the encoded byte budget.' ); }
 			$bytes += $size;
 		}
 		$phase = null; $sequence = 0; $preorder = false; $cursor = null;
@@ -545,7 +545,7 @@ class LegacyRecordCodec {
 
 	private function make_row( $state_hash, $parent, $key, $record, $order, $depth, $phase = null ) {
 		$this->tick();
-		$this->admit( null === $phase ? LegacyTableReader::MAX_RECORD_BYTES : 0 );
+		$this->admit( null === $phase ? TableReader::MAX_RECORD_BYTES : 0 );
 		$this->codec->key_value( $key );
 		$probe = array( $key => true ); $keys = array_keys( $probe );
 		if ( $keys[0] !== $key ) { $this->fail( 'Invalid or coercible typed key.' ); }
@@ -625,7 +625,7 @@ class LegacyRecordCodec {
 		if ( $depth > $this->max_depth || $stats['record_count'] >= $this->max_records ) { $this->fail( 'Tree exceeds the depth/record budget.' ); }
 		$row = $this->make_row( $state_hash, $parent, $key, $record, $order, $depth, $phase );
 		$bytes = $this->encoded_bytes( $row );
-		if ( $bytes > LegacyTableReader::MAX_RECORD_BYTES || $bytes > $this->max_tree_bytes - $stats['encoded_bytes'] ) {
+		if ( $bytes > TableReader::MAX_RECORD_BYTES || $bytes > $this->max_tree_bytes - $stats['encoded_bytes'] ) {
 			$this->fail( 'Row/tree exceeds the encoded byte budget.' );
 		}
 		$stats['record_count']++;
@@ -656,7 +656,7 @@ class LegacyRecordCodec {
 		$row = $this->make_row( $state_hash, $parent, $key, $record, $order, $depth, $phase );
 		$row['logical_hash'] = $slots[$index];
 		$bytes = $this->encoded_bytes( $row );
-		if ( $bytes > LegacyTableReader::MAX_RECORD_BYTES || $bytes > $this->max_tree_bytes - $stats['encoded_bytes'] ) {
+		if ( $bytes > TableReader::MAX_RECORD_BYTES || $bytes > $this->max_tree_bytes - $stats['encoded_bytes'] ) {
 			$this->fail( 'Row/tree exceeds the encoded byte budget.' );
 		}
 		$stats['record_count']++; $stats['payload_bytes'] += $row['payload_bytes']; $stats['encoded_bytes'] += $bytes;
@@ -712,7 +712,7 @@ class LegacyRecordCodec {
 		if ( $row['payload_bytes'] !== strlen( $row['payload'] ) + strlen( $row['mutable_payload'] ) ||
 			$row['payload_hash'] !== hash( 'sha256', $row['payload'] ) ) { $this->fail( 'Payload integrity/byte-count mismatch.' ); }
 		$row['encoded_bytes'] = $this->encoded_bytes( $row );
-		if ( $row['encoded_bytes'] > LegacyTableReader::MAX_RECORD_BYTES ) { $this->fail( 'Row exceeds the byte budget.' ); }
+		if ( $row['encoded_bytes'] > TableReader::MAX_RECORD_BYTES ) { $this->fail( 'Row exceeds the byte budget.' ); }
 		$row['key'] = $key;
 		return $row;
 	}
@@ -938,6 +938,7 @@ class LegacyRecordCodec {
 	private function admit( $bytes ) { if ( null !== $this->scale ) { $this->scale->admit_memory( $bytes ); } }
 
 	private function fail( $message ) {
+		// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Private callers use literals or fixed projection-field labels; decoded payloads are not included. Throwing preserves plain diagnostics, not HTML markup.
 		throw new \RuntimeException( 'Legacy storage record codec: ' . $message );
 	}
 

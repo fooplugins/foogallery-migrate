@@ -1,7 +1,7 @@
 <?php
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use PHPUnit\Framework\TestCase;
 require_once __DIR__ . '/support/SnapshotScaleConnection.php';
 require_once __DIR__ . '/StorageScaleAdmissionTest.php';
@@ -23,7 +23,7 @@ class StorageSnapshotOwnedEventTest extends TestCase {
 	}
 	private function change() { return array( array( 'key' => 'bucket', 'order' => 0, 'kind' => 'map', 'value' => $this->value(), 'expected_revision' => null ) ); }
 	private function snapshot( $db, $memory = null, $enabled = true ) {
-		$s = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, $memory );
+		$s = new TableSnapshot( $db, 7, 100, 1048576, null, $memory );
 		if ( $enabled ) { $this->property( $s, 'snapshot_events_enabled', true, true ); }
 		return $s;
 	}
@@ -137,7 +137,7 @@ class StorageSnapshotOwnedEventTest extends TestCase {
 			return $now;
 		};
 		$scale = StorageScaleAdmissionTest::admission( null, $clock, function () { return array( ini_get( 'memory_limit' ), memory_get_usage( true ) ); } );
-		$s = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, null, $scale );
+		$s = new TableSnapshot( $db, 7, 100, 1048576, null, null, $scale );
 		$this->property( $s, 'snapshot_events_enabled', true, true );
 		try { $s->replace_many( $this->change() ); $this->fail( 'Token/digest failure published.' ); }
 		catch ( \RuntimeException $e ) { $this->assertStringContainsString( 'scale admission refused', $e->getMessage() ); }
@@ -149,7 +149,7 @@ class StorageSnapshotOwnedEventTest extends TestCase {
 	public function test_descriptor_admission_cannot_replace_actual_backing_with_low_observer(): void {
 		$limits = StorageScaleAdmissionTest::policy(); $limits['memory_ceiling_bytes'] = 33554433;
 		$scale = StorageScaleAdmissionTest::admission( $limits, null, function () { return array( '-1', 0 ); } );
-		$db = new SnapshotScaleConnection(); $s = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, null, $scale );
+		$db = new SnapshotScaleConnection(); $s = new TableSnapshot( $db, 7, 100, 1048576, null, null, $scale );
 		$this->property( $s, 'snapshot_events_enabled', true, true );
 		try { $s->replace_many( $this->change() ); $this->fail( 'Low observer bypassed actual backing.' ); }
 		catch ( \RuntimeException $e ) { $this->assertStringContainsString( 'scale admission refused', $e->getMessage() ); }

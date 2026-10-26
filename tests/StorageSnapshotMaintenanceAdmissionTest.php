@@ -4,7 +4,7 @@ namespace FooPlugins\FooGalleryMigrate\Tests;
 use FooPlugins\FooGalleryMigrate\LegacyCollectionEnvelope;
 use FooPlugins\FooGalleryMigrate\LegacyRecordCodec;
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\StorageConversion;
 use FooPlugins\FooGalleryMigrate\StorageMaintenanceGate;
 use PHPUnit\Framework\TestCase;
@@ -51,7 +51,7 @@ class StorageSnapshotMaintenanceAdmissionTest extends TestCase {
 	}
 	public function test_never_proved_dirty_head_is_verified_before_bounded_reverse_read(): void {
 		$db = new MaintenanceAdmissionWpdb();
-		$snapshot = new LegacyTableSnapshot( $db, 7, 100, 1048576 );
+		$snapshot = new TableSnapshot( $db, 7, 100, 1048576 );
 		$verified = $snapshot->verify_digest( 'bucket', 1 );
 		$this->assertTrue( $db->published );
 		$this->assertSame( 1, $verified['digest_revision'] );
@@ -63,7 +63,7 @@ class StorageSnapshotMaintenanceAdmissionTest extends TestCase {
 		$old_digest = ( new LegacyStateCodec() )->snapshot_digest( $db->value );
 		$db->maintenance_digest_fields = array( 'digest_status' => 'dirty', 'digest_revision' => 1,
 			'logical_digest' => strtoupper( $old_digest ) );
-		$snapshot = new LegacyTableSnapshot( $db, 7, 100, 1048576 );
+		$snapshot = new TableSnapshot( $db, 7, 100, 1048576 );
 		$method = new \ReflectionMethod( $snapshot, 'maintenance_head' );
 		$head = $method->invoke( $snapshot, 'bucket' );
 		$this->assertSame( 2, $head['revision'] ); $this->assertSame( 1, $head['digest_revision'] );
@@ -73,7 +73,7 @@ class StorageSnapshotMaintenanceAdmissionTest extends TestCase {
 	public function test_dirty_and_current_digest_metadata_must_be_coherent( $status, $revision, $digest ): void {
 		$db = new MaintenanceAdmissionWpdb(); $db->maintenance_digest_fields = array( 'digest_status' => $status,
 			'digest_revision' => $revision, 'logical_digest' => $digest );
-		$snapshot = new LegacyTableSnapshot( $db, 7, 100, 1048576 );
+		$snapshot = new TableSnapshot( $db, 7, 100, 1048576 );
 		try { $snapshot->verify_digest( 'bucket', 1 ); $this->fail( 'Malformed digest metadata was accepted.' ); }
 		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'Invalid digest revision/hash', $error->getMessage() ); }
 		$this->assertFalse( $db->records_fetched ); $this->assertFalse( $db->published );
@@ -89,7 +89,7 @@ class StorageSnapshotMaintenanceAdmissionTest extends TestCase {
 		$db = new MaintenanceAdmissionWpdb(); $db->published = true;
 		$db->maintenance_digest_fields = array( 'digest_status' => 'current', 'digest_revision' => 1,
 			'logical_digest' => str_repeat( '0', 64 ) );
-		$snapshot = new LegacyTableSnapshot( $db, 7, 100, 1048576 );
+		$snapshot = new TableSnapshot( $db, 7, 100, 1048576 );
 		try { $snapshot->verify_digest( 'bucket', 1 ); $this->fail( 'Changed current digest accepted.' ); }
 		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'Current logical digest mismatch', $error->getMessage() ); }
 		$this->assertNotContains( 'COMMIT', $db->queries );
@@ -98,7 +98,7 @@ class StorageSnapshotMaintenanceAdmissionTest extends TestCase {
 		$db = new MaintenanceAdmissionWpdb();
 		$records = new \ReflectionProperty( $db, 'rows' ); $rows = $records->getValue( $db );
 		$rows[0]['payload'] .= 'X'; $records->setValue( $db, $rows );
-		$snapshot = new LegacyTableSnapshot( $db, 7, 100, 1048576 );
+		$snapshot = new TableSnapshot( $db, 7, 100, 1048576 );
 		try { $snapshot->verify_digest( 'bucket', 1 ); $this->fail( 'Corrupt dirty row was certified.' ); }
 		catch ( \RuntimeException $error ) { $this->assertNotEmpty( $error->getMessage() ); }
 		$this->assertFalse( $db->published ); $this->assertNotContains( 'COMMIT', $db->queries );
@@ -107,7 +107,7 @@ class StorageSnapshotMaintenanceAdmissionTest extends TestCase {
 		$db = new MaintenanceAdmissionWpdb(); $memory = new SnapshotAdmissionBaseline();
 		$manager = $this->coordinator( $db, $memory ); $db->published = true;
 		$snapshot = ( new \ReflectionProperty( $manager, 'snapshot' ) )->getValue( $manager );
-		$this->assertSame( LegacyTableSnapshot::class, get_class( $snapshot ) );
+		$this->assertSame( TableSnapshot::class, get_class( $snapshot ) );
 		$this->assertTrue( ( new \ReflectionMethod( $snapshot, 'read' ) )->isPrivate() );
 		$result = ( new \ReflectionMethod( $manager, 'source_metadata' ) )->invoke( $manager, 'table', false );
 		$this->assertSame( ( new LegacyStateCodec() )->snapshot_digest( array( 'bucket' => $db->value ) ), $result['logical'] );
@@ -142,7 +142,7 @@ class StorageSnapshotMaintenanceAdmissionTest extends TestCase {
 	public static function owningMetadataFailures(): array { return array( array( 'dirty' ), array( 'digest' ), array( 'memory' ), array( 'owner' ) ); }
 	public function test_direct_maintenance_refusal_precedes_root_hydration(): void {
 		$db = new MaintenanceAdmissionWpdb(); $seen = array();
-		$snapshot = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( &$seen ) { $seen[] = $bytes; return false; } );
+		$snapshot = new TableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( &$seen ) { $seen[] = $bytes; return false; } );
 		try { $snapshot->verify_digest( 'bucket', 1 ); $this->fail( 'Maintenance bypassed refusal.' ); }
 		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'memory admission', $error->getMessage() ); }
 		$this->assertCount( 1, $seen ); $this->assertGreaterThan( 0, $seen[0] );
@@ -167,7 +167,7 @@ class StorageSnapshotMaintenanceAdmissionTest extends TestCase {
 	/** @dataProvider maintenanceSeams */
 	public function test_material_maintenance_phases_are_rechecked( $seam ): void {
 		$db = new MaintenanceAdmissionWpdb(); $seen = 0;
-		$snapshot = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( $db, $seam, &$seen ) {
+		$snapshot = new TableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( $db, $seam, &$seen ) {
 			++$seen;
 			return 'page' === $seam ? ! $db->stats_fetched : ! $db->records_fetched;
 		} );
@@ -182,7 +182,7 @@ class StorageSnapshotMaintenanceAdmissionTest extends TestCase {
 	/** @dataProvider publicationFailures */
 	public function test_maintenance_callback_failure_in_publication_transaction_cleans_up( $class ): void {
 		$db = new MaintenanceAdmissionWpdb(); $fault = new $class( 'maintenance callback failure' );
-		$snapshot = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( $db, $fault ) {
+		$snapshot = new TableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( $db, $fault ) {
 			if ( in_array( 'START TRANSACTION', $db->queries, true ) ) { throw $fault; } return true;
 		} );
 		try { $snapshot->verify_digest( 'bucket', 1 ); $this->fail( 'Missing callback failure.' ); }

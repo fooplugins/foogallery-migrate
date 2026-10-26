@@ -8,7 +8,7 @@ use FooPlugins\FooGalleryMigrate\StorageRetirement;
 use FooPlugins\FooGalleryMigrate\StorageScalarObserver;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 
 if ( PHP_SAPI !== 'cli' || PHP_VERSION_ID < 70000 || empty( $GLOBALS['foogm_a7_bootstrap'] ) ||
@@ -149,7 +149,7 @@ try {
 					if ( 'table' === $target ) {
 						$check( null === $raw( FOOGALLERY_MIGRATE_OPTION_DATA ), 'Forward retained active option' );
 						$evidence_scale = $positive ? foogm_a7_positive_scale( $manifest['experimental_policy'] ) : null;
-						$value = ( new LegacyTableSnapshot( new LegacyTransactionConnection( $wpdb ), $blog, null === $evidence_scale ? 10000 : $evidence_scale->limit( 'max_rows' ), 16777216, null === $evidence_scale ? null : $evidence_scale->deadline(), null, $evidence_scale ) )->read_bounded( 'galleries' );
+						$value = ( new TableSnapshot( new LegacyTransactionConnection( $wpdb ), $blog, null === $evidence_scale ? 10000 : $evidence_scale->limit( 'max_rows' ), 16777216, null === $evidence_scale ? null : $evidence_scale->deadline(), null, $evidence_scale ) )->read_bounded( 'galleries' );
 						$logical = ( new LegacyStateCodec() )->snapshot_digest( array( 'galleries' => $value ) );
 					} else {
 						$evidence_scale = $positive ? foogm_a7_positive_scale( $manifest['experimental_policy'] ) : null;

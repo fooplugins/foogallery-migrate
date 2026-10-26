@@ -5,7 +5,7 @@ use FooPlugins\FooGalleryMigrate\LegacyCollectionEnvelope;
 use FooPlugins\FooGalleryMigrate\LegacyRecordCodec;
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
-use FooPlugins\FooGalleryMigrate\LegacyTableReader;
+use FooPlugins\FooGalleryMigrate\TableReader;
 use FooPlugins\FooGalleryMigrate\LegacyTableRepository;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
@@ -232,7 +232,7 @@ class CollectionMigrationSelectorTest extends TestCase {
 	}
 }
 
-class TurnSelectorReader extends LegacyTableReader {
+class TurnSelectorReader extends TableReader {
 	private $db;
 	public function __construct( $db ) { $this->db = $db; }
 	public function head( $key ) {

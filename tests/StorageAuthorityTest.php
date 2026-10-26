@@ -152,6 +152,7 @@ class AuthorityTestWpdb extends MaintenanceTestWpdb {
 
 	public function prepare( $query, ...$values ) {
 		if ( 1 === count( $values ) && is_array( $values[0] ) ) { $values = $values[0]; }
+		$query = IdentifierSqlFixture::bind( $query, $values );
 		foreach ( $values as $value ) {
 			$query = preg_replace_callback( '/%[ds]/', function ( $match ) use ( $value ) {
 				return '%d' === $match[0] ? (string) (int) $value : "'" . $value . "'";

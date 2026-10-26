@@ -39,6 +39,7 @@ class LegacyTransactionConnection {
 		try {
 			if ( ! is_array( $args ) ) { $args = array_slice( func_get_args(), 1 ); }
 			if ( ! $this->is_current() ) { throw new \RuntimeException( 'Storage connection changed.' ); }
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Preparation adapter: storage builders supply the SQL template and arguments; native wpdb::prepare performs placeholder binding on the pinned connection.
 			$result = $this->wpdb->prepare( $sql, $args );
 			if ( ! $this->is_current() || ! is_string( $result ) || '' === $result ) { throw new \RuntimeException( 'Invalid prepared query.' ); }
 			// wpdb normally removes its percent tokens in a query filter. This

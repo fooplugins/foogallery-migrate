@@ -18,7 +18,7 @@ require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
 use FooPlugins\FooGalleryMigrate\LegacyRecordCodec;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
-use FooPlugins\FooGalleryMigrate\LegacyTableReader;
+use FooPlugins\FooGalleryMigrate\TableReader;
 use FooPlugins\FooGalleryMigrate\StorageAuthority;
 
 global $wpdb;
@@ -101,13 +101,13 @@ try {
 				'legacy_identifier_value' => $codec->encode( 'MixedCase-' . str_repeat( 'x', 300 ) . $order ) ) );
 		}
 	}
-	$reader = new LegacyTableReader( $wpdb, $blog );
+	$reader = new TableReader( $wpdb, $blog );
 	$page1 = $reader->record_page( 'migrated', 2 );
 	$page2 = $reader->record_page( 'migrated', 2, $page1['cursor'] );
 	$check( array( 9, '009' ) === array_column( $page1['rows'], 'key' ) && array( -2 ) === array_column( $page2['rows'], 'key' ), 'keyset pages retain exact typed keys and legacy order' );
 	$check( "\xff\x00雪" === $page1['rows'][0]['base']['unknown']['bytes'], 'arbitrary string bytes and unknown nested data survive real LONGTEXT' );
 	$check( true === $page1['rows'][0]['mutable']['migrated'], 'mutable envelope preserves boolean separately' );
-	$check( $blog === $page1['rows'][0]['base']['site'] && $blog + 1 === ( new LegacyTableReader( $wpdb, $blog + 1 ) )->record_page( 'migrated', 1 )['rows'][0]['base']['site'], 'shared rows are strictly blog isolated' );
+	$check( $blog === $page1['rows'][0]['base']['site'] && $blog + 1 === ( new TableReader( $wpdb, $blog + 1 ) )->record_page( 'migrated', 1 )['rows'][0]['base']['site'], 'shared rows are strictly blog isolated' );
 	$check( array() === $reader->record_page( 'migrated', 2, $page2['cursor'] )['rows'], 'terminal keyset page is empty without rereading history' );
 	$wpdb->query( $wpdb->prepare( 'UPDATE `' . $tables[1] . '` SET item_order = 0 WHERE blog_id = %d AND id = %d', $blog, $ids[ $blog ][1] ) );
 	$tied = $reader->record_page( 'migrated', 2 );
@@ -115,7 +115,7 @@ try {
 	$tied_first = $reader->record_page( 'migrated', 1 );
 	$check( '009' === $reader->record_page( 'migrated', 1, $tied_first['cursor'] )['rows'][0]['key'], 'keyset cursor retains same-order rows with larger row IDs' );
 	$wpdb->query( $wpdb->prepare( 'UPDATE `' . $tables[1] . '` SET item_order = 1 WHERE blog_id = %d AND id = %d', $blog, $ids[ $blog ][1] ) );
-	$refuses( function () use ( $wpdb, $blog, $page1 ) { ( new LegacyTableReader( $wpdb, $blog + 1 ) )->record_page( 'migrated', 1, $page1['cursor'] ); }, 'cross-blog cursor is refused' );
+	$refuses( function () use ( $wpdb, $blog, $page1 ) { ( new TableReader( $wpdb, $blog + 1 ) )->record_page( 'migrated', 1, $page1['cursor'] ); }, 'cross-blog cursor is refused' );
 	$wpdb->query( $wpdb->prepare( 'UPDATE `' . $tables[0] . '` SET revision = 9 WHERE blog_id = %d AND id = %d', $blog, $heads[ $blog ] ) );
 	$refuses( function () use ( $reader, $page1 ) { $reader->record_page( 'migrated', 1, $page1['cursor'] ); }, 'cursor captured before logical revision change is refused' );
 
@@ -163,7 +163,7 @@ try {
 
 	$wpdb->query( $wpdb->prepare( 'UPDATE `' . $tables[1] . '` SET payload_hash = UNHEX(%s) WHERE blog_id = %d AND id = %d', str_repeat( '0', 64 ), $blog, $ids[ $blog ][0] ) );
 	$refuses( function () use ( $reader ) { $reader->record_page( 'migrated', 1 ); }, 'corrupt base payload hash fails closed' );
-	$wpdb->query( $wpdb->prepare( 'UPDATE `' . $tables[1] . '` SET payload = %s WHERE blog_id = %d AND id = %d', str_repeat( 'x', LegacyTableReader::MAX_RECORD_BYTES + 1 ), $blog, $ids[ $blog ][0] ) );
+	$wpdb->query( $wpdb->prepare( 'UPDATE `' . $tables[1] . '` SET payload = %s WHERE blog_id = %d AND id = %d', str_repeat( 'x', TableReader::MAX_RECORD_BYTES + 1 ), $blog, $ids[ $blog ][0] ) );
 	$refuses( function () use ( $reader ) { $reader->record_page( 'migrated', 1 ); }, 'oversized record is refused before payload fetch' );
 	$check( false === strpos( $wpdb->last_query, ', key_type, key_value' ) && false !== strpos( $wpdb->last_query, 'AS encoded_bytes' ), 'last SQL on size refusal only selected bounded metadata' );
 	$check( $schema->verify(), 'read/refusal paths do not modify schema health' );

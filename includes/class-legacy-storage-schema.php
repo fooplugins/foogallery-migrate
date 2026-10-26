@@ -155,6 +155,7 @@ class LegacyStorageSchema {
 	}
 
 	private function read( $sql ) {
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Private verify() callers pass a prepared LIKE value or fixed SHOW metadata SQL with table names from definitions(), which validates the prefix and fixes both suffixes.
 		$result = $this->wpdb->get_results( $sql, ARRAY_A );
 		if ( ! empty( $this->wpdb->last_error ) || ! is_array( $result ) ) {
 			$this->fail( 'Schema inspection failed; no backend selection was changed.' );
@@ -163,6 +164,7 @@ class LegacyStorageSchema {
 	}
 
 	private function fail( $message ) {
+		// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Private callers append only fixed definition column/index labels, never SQL metadata values; an internal exception is not HTML output.
 		throw new \RuntimeException( 'Legacy storage schema: ' . $message );
 	}
 }

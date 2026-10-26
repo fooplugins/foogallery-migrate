@@ -56,6 +56,7 @@ class StorageSourceCounts {
 
 	private static function count_sql( $sql ) {
 		global $wpdb;
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Private measure() callers use fixed COUNT templates, regex-validated identifiers and prepared values; no request SQL is accepted here.
 		$value = $wpdb->get_var( $sql );
 		if ( $wpdb->last_error || ( ! is_int( $value ) && ! is_string( $value ) ) || ! preg_match( '/^[0-9]+$/D', (string) $value ) ) { return null; }
 		return (int) $value;

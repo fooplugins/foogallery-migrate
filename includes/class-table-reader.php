@@ -1,8 +1,8 @@
 <?php
 /**
- * Bounded read-only table primitives. Not an authoritative engine backend yet.
+ * Bounded read-only table primitives used by the current table repository.
  * Returns compact base/mutable envelopes separately; reconstruction, projection
- * parity and complete logical-hash checks belong to the future repository layer.
+ * parity and complete logical-hash checks belong to the repository layer.
  * No reads provision resources, select authority or fall back to legacy options.
  *
  * @package FooPlugins\FooGalleryMigrate
@@ -13,7 +13,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-class LegacyTableReader {
+class TableReader {
 	const MAX_ROWS = 100;
 	const MAX_RECORD_BYTES = 1048576;
 	private $wpdb;
@@ -44,6 +44,7 @@ class LegacyTableReader {
 			. 'OCTET_LENGTH(root_payload) AS root_payload_bytes, '
 			. 'CASE WHEN OCTET_LENGTH(state_key_value) <= %d THEN state_key_value ELSE NULL END AS state_key_value '
 			. 'FROM `' . $this->state_table . '` WHERE blog_id = %d AND state_key_hash = UNHEX(%s) LIMIT 2';
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Fixed head template; the table comes from prefix-validated schema definitions, and key length, site and hash are bound below.
 		$rows = $this->read( $this->wpdb->prepare( $sql, array( strlen( $value ), $this->blog_id, $this->codec->key_hash( $state_key ) ) ) );
 		if ( ! count( $rows ) ) {
 			return false;
@@ -110,7 +111,9 @@ class LegacyTableReader {
 		$bytes = 'OCTET_LENGTH(payload) + OCTET_LENGTH(mutable_payload) + OCTET_LENGTH(key_value) + '
 			. 'COALESCE(OCTET_LENGTH(legacy_identifier_value),0) + COALESCE(OCTET_LENGTH(source_plugin_value),0) + COALESCE(OCTET_LENGTH(source_id_value),0)';
 		$args[] = $limit;
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- metadata/bytes are literal column expressions; all scope, cursor and limit values are placeholders bound by this call.
 		$rows = $this->read( $this->wpdb->prepare( 'SELECT ' . $metadata . ', ' . $bytes . ' AS encoded_bytes FROM `'
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- record_table comes from prefix-validated schema definitions; where contains only fixed fragments and placeholders assembled above.
 			. $this->record_table . '` WHERE ' . $where . ' ORDER BY item_order ASC, id ASC LIMIT %d', $args ) );
 		if ( count( $rows ) > $limit ) {
 			$this->fail( 'Database exceeded the requested row budget.' );
@@ -145,6 +148,7 @@ class LegacyTableReader {
 			$fetch = 'SELECT ' . $metadata . ', ' . $bytes . ' AS encoded_bytes, key_type, key_value, payload, mutable_payload, '
 				. 'legacy_identifier_value, source_plugin_value, source_id_value FROM `' . $this->record_table . '` '
 				. 'WHERE blog_id = %d AND state_id = %d AND generation = %d AND id = %d AND (' . $bytes . ') <= %d LIMIT 1';
+			// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Fixed columns/byte expressions and schema-owned table; site, state, generation, row ID and byte bound are prepared values.
 			$records = $this->read( $this->wpdb->prepare( $fetch, array( $this->blog_id, $head['id'], $head['active_generation'], $row['id'], $row['encoded_bytes'] ) ) );
 			if ( count( $records ) !== 1 ) {
 				$this->fail( 'Record changed or disappeared during the bounded read.' );
@@ -208,6 +212,7 @@ class LegacyTableReader {
 	}
 
 	private function read( $sql ) {
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared,PluginCheck.Security.DirectDB.UnescapedDBParameter -- Private head()/record_page() callers prepare every value before forwarding; identifiers and SQL fragments are schema-owned or fixed literals.
 		$rows = $this->wpdb->get_results( $sql, ARRAY_A );
 		if ( ! empty( $this->wpdb->last_error ) || ! is_array( $rows ) ) { $this->fail( 'Database read failed.' ); }
 		return $rows;

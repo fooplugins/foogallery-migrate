@@ -14,8 +14,8 @@ require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
-use FooPlugins\FooGalleryMigrate\LegacyTableReader;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableReader;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\StorageAuthority;
 
@@ -55,7 +55,7 @@ $refuses = function ( $callback, $label ) use ( $check ) {
 	try { $callback(); } catch ( RuntimeException $error ) { $check( true, $label ); return; }
 	$check( false, $label );
 };
-foreach ( array( LegacyTableSnapshot::class => 'class-legacy-table-snapshot.php', LegacyTransactionConnection::class => 'class-legacy-transaction-connection.php' ) as $class => $file ) {
+foreach ( array( TableSnapshot::class => 'class-table-snapshot.php', LegacyTransactionConnection::class => 'class-legacy-transaction-connection.php' ) as $class => $file ) {
 	$check( ( new ReflectionClass( $class ) )->getFileName() === realpath( $plugin_root . '/includes/' . $file ), 'actual bootstrap loaded expected source/package primitive: ' . $file );
 }
 $change = function ( $key, $order, $kind, $value, $revision = null ) {
@@ -71,8 +71,8 @@ try {
 	$check( $schema->verify(), 'exact shared InnoDB fixture schema is verified' );
 	$blog = (int) get_current_blog_id();
 	$connection = new FooGmSnapshotConnection( $wpdb );
-	$repo = new LegacyTableSnapshot( $connection, $blog );
-	$reader = new LegacyTableReader( $wpdb, $blog );
+	$repo = new TableSnapshot( $connection, $blog );
+	$reader = new TableReader( $wpdb, $blog );
 	$initial = array( '009' => array( 'object_type' => 'album', 'plugin_name' => 'Case', 'ID' => '009',
 		'title' => "\xff\x00雪", 'migrated' => false, 'error' => false, 'unknown' => array( 'zero' => -0.0 ),
 		'children' => array( 7 => array( 'object_type' => 'gallery', 'ID' => 7, 'plugin_name' => 'Case',
@@ -87,7 +87,7 @@ try {
 	$check( 7 === $repo->read_bounded( 'migrated-revision' ) && false === $repo->read_bounded( 'checkpoint' ) && array() === $repo->read_bounded( 'empty' ), 'revision, explicit false and empty list retain their exact presence and types' );
 	$head = $reader->head( 'migrated' );
 	$check( 1 === $head['active_generation'] && 1 === $head['revision'] && 6 === $head['record_count'], 'head publishes verified generation, revision and complete physical row count' );
-	$other = new LegacyTableSnapshot( new LegacyTransactionConnection( $wpdb ), $blog + 10 );
+	$other = new TableSnapshot( new LegacyTransactionConnection( $wpdb ), $blog + 10 );
 	$other->replace_many( array( $change( 'migrated', 0, 'map', array( 'other' => false ) ) ) );
 	$check( array( 'other' => false ) === $other->read_bounded( 'migrated' ) && $codec->encode( $initial ) === $codec->encode( $repo->read_bounded( 'migrated' ) ), 'same keys/orders are isolated across two blog IDs in shared tables' );
 
@@ -95,7 +95,7 @@ try {
 	// was internally flipped, then ALL new keys after commit.
 	$observer = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST );
 	$observer->base_prefix = $wpdb->base_prefix;
-	$observer_repo = new LegacyTableSnapshot( new LegacyTransactionConnection( $observer ), $blog );
+	$observer_repo = new TableSnapshot( new LegacyTransactionConnection( $observer ), $blog );
 	$observations = 0;
 	$connection->after_write = function ( $sql ) use ( $observer_repo, $codec, $initial, &$observations, $check ) {
 		if ( false !== strpos( $sql, 'SET active_generation' ) ) {
@@ -147,7 +147,7 @@ try {
 		$victim = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST ); $victim->base_prefix = $wpdb->base_prefix;
 		$victim_id = (int) $victim->get_var( 'SELECT CONNECTION_ID()' );
 		$loss = new FooGmSnapshotConnection( $victim );
-		$loss_repo = new LegacyTableSnapshot( $loss, $blog ); $killed = false;
+		$loss_repo = new TableSnapshot( $loss, $blog ); $killed = false;
 		$kill = function ( $sql ) use ( $boundary, $observer, $victim_id, &$killed, $check ) {
 			$at_boundary = 'before-commit' === $boundary ? 'COMMIT' === $sql : false !== strpos( $sql, 'SET active_generation' );
 			if ( ! $killed && $at_boundary ) {
@@ -179,7 +179,7 @@ try {
 	$wpdb->query( $wpdb->prepare( 'UPDATE `' . $tables[0] . '` SET snapshot_digest=UNHEX(%s) WHERE id=%d', str_repeat( '0', 64 ), $id ) );
 	$refuses( function () use ( $repo ) { $repo->read_bounded( 'migrated' ); }, 'complete snapshot digest corruption is refused' );
 	$wpdb->query( $wpdb->prepare( 'UPDATE `' . $tables[0] . '` SET snapshot_digest=UNHEX(%s) WHERE id=%d', $codec->snapshot_digest( $updated ), $id ) );
-	$small = new LegacyTableSnapshot( $connection, $blog, 2, 1000 );
+	$small = new TableSnapshot( $connection, $blog, 2, 1000 );
 	$before = count( $connection->queries );
 	$refuses( function () use ( $small ) { $small->read_bounded( 'migrated' ); }, 'oversized complete snapshot is refused from head metadata' );
 	$check( count( $connection->queries ) === $before + 1 && false !== strpos( end( $connection->queries ), 'OCTET_LENGTH(root_payload)' ), 'row-budget refusal does not fetch record/root payloads' );

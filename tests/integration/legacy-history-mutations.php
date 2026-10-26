@@ -10,9 +10,9 @@ require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 use FooPlugins\FooGalleryMigrate\LegacyOptionBackend;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
-use FooPlugins\FooGalleryMigrate\LegacyTableReader;
+use FooPlugins\FooGalleryMigrate\TableReader;
 use FooPlugins\FooGalleryMigrate\LegacyTableRepository;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\MigratedHistoryRepository;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
@@ -75,12 +75,12 @@ try {
 	for ( $i = 0; $i < 205; ++$i ) {
 		$child = new Image(); $child->source_url = 'https://example.test/First-' . $i . '.jpg'; $first_write[] = $child;
 	}
-	$empty_reader = new LegacyTableReader( $empty_db, $empty_blog );
+	$empty_reader = new TableReader( $empty_db, $empty_blog );
 	$check( false === $empty_reader->head( 'migrated' ) && false === $empty_reader->head( 'migrated-revision' ), 'second owned blog starts with absent history pair' );
 	$check( 205 === $empty_history->upsert_batch( $first_write, array( 'first-checkpoint' => 1 ) ), 'first 205-record history write creates both heads and scalar companion atomically' );
 	$check( 205 === $empty_history->count() && 1 === $empty_history->revision() &&
 		1 === ( new LegacyTableBackend( $empty_db, $empty_blog ) )->read( 'first-checkpoint' )['value'] &&
-		205 === count( ( new LegacyTableSnapshot( $empty_db, $empty_blog ) )->read_bounded( 'migrated' )['items'] ),
+		205 === count( ( new TableSnapshot( $empty_db, $empty_blog ) )->read_bounded( 'migrated' )['items'] ),
 		'empty-history publication retains every requested record and one revision' );
 	// Mirror the targeted check caller's 204 error children plus parent through
 	// the real engine batch and table history facade, then its 205-record reset.
@@ -120,7 +120,7 @@ try {
 		$caller_history->get( $gallery_uid )->migration_status === 'not_started',
 		'targeted retry reset publishes all 204 image histories and parent in one logical revision' );
 	$db = new LegacyTransactionConnection( $wpdb ); $backend = new LegacyTableBackend( $db, $blog );
-	$snapshot = new LegacyTableSnapshot( $db, $blog ); $reader = new LegacyTableReader( $db, $blog );
+	$snapshot = new TableSnapshot( $db, $blog ); $reader = new TableReader( $db, $blog );
 	$record = array( 'object_type' => 'future', 'migration_status' => 'custom', 'migration_parent_key' => 'Parent', 'opaque' => array( '09' => false, 9 => null, 'bytes' => "雪\x00" ) );
 	$history = array( 'before' => -0.0, 'items' => array( '09' => $record, 9 => null, 'false' => false, 'empty' => array() ), MigratorSettings::COMPACT_MARKER => 1, 'after' => '雪', 'type' => 'migratable' );
 	$data = array( 'migrated' => $history, 'migrated-revision' => 5, 'queue' => null );
@@ -206,7 +206,7 @@ try {
 	add_action( 'updated_option', $observe ); add_action( 'added_option', $observe ); $option_before = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
 	$check( $logical->set_status( '09', 'error' ), 'explicit table status mutation without options' );
 	$check( 0 === $writes && $option_before === get_option( FOOGALLERY_MIGRATE_OPTION_DATA ), 'table operations never read/write fallback options' );
-	$wrong_blog = $blog + 1000; $wrong_reader = new LegacyTableReader( $db, $wrong_blog ); $before = $heads();
+	$wrong_blog = $blog + 1000; $wrong_reader = new TableReader( $db, $wrong_blog ); $before = $heads();
 	$check( false === $wrong_reader->head( 'migrated' ) && false === $wrong_reader->head( 'migrated-revision' ), 'wrong-blog history pair is absent before mutation' );
 	$check( false === ( new MigratedHistoryRepository( new LegacyTableBackend( $db, $wrong_blog ), new MigratorSettings() ) )->delete( '09' ) &&
 		false === $wrong_reader->head( 'migrated' ) && false === $wrong_reader->head( 'migrated-revision' ) && $heads() === $before,

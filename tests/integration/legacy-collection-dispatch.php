@@ -12,7 +12,7 @@ use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
 use FooPlugins\FooGalleryMigrate\LegacyTableRepository;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\MigratableCollectionRepository;
 use FooPlugins\FooGalleryMigrate\MigratedHistoryRepository;
@@ -83,7 +83,7 @@ $physical = function () use ( $wpdb, $tables ) {
 try {
 	foreach ( $schema->statements() as $i => $ddl ) { $created[] = $tables[$i]; dbDelta( $ddl ); }
 	$check( $schema->verify(), 'schema v1 unchanged' );
-	$db = new LegacyTransactionConnection( $wpdb ); $backend = new LegacyTableBackend( $db, $blog ); $snapshot = new LegacyTableSnapshot( $db, $blog );
+	$db = new LegacyTransactionConnection( $wpdb ); $backend = new LegacyTableBackend( $db, $blog ); $snapshot = new TableSnapshot( $db, $blog );
 	$settings = new MigratorSettings(); $plugin = new \FooPlugins\FooGalleryMigrate\Plugins\Aigpl();
 	$queue = function ( $store, $bucket, $selection ) use ( $settings ) {
 		return ( new MigratableCollectionRepository( $store, $settings ) )->queue_selected( $bucket, $selection,

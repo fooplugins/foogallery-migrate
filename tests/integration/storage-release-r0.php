@@ -42,7 +42,7 @@ use FooPlugins\FooGalleryMigrate\StorageControl;
 use FooPlugins\FooGalleryMigrate\StorageCopyCursor;
 use FooPlugins\FooGalleryMigrate\StorageScalarObserver;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 
 global $wpdb, $wp_version;
 Journey::check( ! is_multisite() && DB_NAME === $manifest['database'] && DB_HOST === $manifest['host'] &&
@@ -163,7 +163,7 @@ if ( 'verify-table' === $step ) {
 		in_array( $record['phase'], array( 'flipped', 'stable' ), true ) &&
 		( new LegacyStorageSchema( $wpdb ) )->verify(), 'Selected owned table authority is required.' );
 	$expected = Native::value();
-	$snapshot = new LegacyTableSnapshot( new LegacyTransactionConnection( $wpdb ), get_current_blog_id(), 24576, 16777216 );
+	$snapshot = new TableSnapshot( new LegacyTransactionConnection( $wpdb ), get_current_blog_id(), 24576, 16777216 );
 	$actual = array( 'galleries' => $snapshot->read_bounded( 'galleries' ) );
 	Journey::check( serialize( $actual ) === serialize( $expected ), 'Table snapshot differs from exact native fixture.' );
 	Native::verify( $actual );

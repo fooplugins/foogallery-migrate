@@ -52,7 +52,7 @@ No measured candidate is emitted on failure. Method/profile approval stay false.
 Host verification, not native calibration:
   php tests/storage-a7-host.php
   python3 -B tests/storage-a7-runner-host.py
-  vendor/bin/phpunit --do-not-cache-result --filter 'StorageOperationsTest|StorageConversionTest|LegacyTableSnapshotTest|LegacyOptionDecoderTest|StorageScalarObserverTest|StorageCalibrationTest'
+  vendor/bin/phpunit --do-not-cache-result --filter 'StorageOperationsTest|StorageConversionTest|TableSnapshotTest|LegacyOptionDecoderTest|StorageScalarObserverTest|StorageCalibrationTest'
 
 Concrete CURRENT product blocker: real LegacyOptionDecoder::decode/scan refuses
 10K training and20K held-out bytes under unchanged30000-node/array-count budget.

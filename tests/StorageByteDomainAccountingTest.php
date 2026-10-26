@@ -2,7 +2,7 @@
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\StorageAuthority;
 use FooPlugins\FooGalleryMigrate\StorageConversion;
 use FooPlugins\FooGalleryMigrate\StorageMaintenanceGate;
@@ -77,7 +77,7 @@ class StorageByteDomainAccountingTest extends TestCase {
 		$changes = array(); $order = 0;
 		foreach ( $value as $key => $item ) { $changes[] = array( 'key' => $key, 'order' => $order++, 'kind' => is_array( $item ) ? 'list' : 'scalar', 'value' => $item, 'expected_revision' => null ); }
 		// Measure the existing representation, never inflate the policy or alter it.
-		$prepared = $this->invoke( new LegacyTableSnapshot( $this->db, 7 ), 'preflight', $changes );
+		$prepared = $this->invoke( new TableSnapshot( $this->db, 7 ), 'preflight', $changes );
 		return array( 'bytes' => array_sum( array_column( $prepared, 'encoded_bytes' ) ), 'rows' => array_sum( array_column( array_column( $prepared, 'stats' ), 'record_count' ) ), 'heads' => count( $prepared ) );
 	}
 	/** @dataProvider positives */

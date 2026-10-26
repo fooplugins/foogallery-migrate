@@ -2,7 +2,7 @@
 /** Disposable WP/MariaDB affected-tree checks. Never run on a live site. */
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTableRepository;
 use FooPlugins\FooGalleryMigrate\LegacyOptionBackend;
 use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
@@ -48,7 +48,7 @@ $expect_refusal = function ( $fn, $label ) use ( $check ) {
 	try { $fn(); } catch ( RuntimeException $error ) { $check( true, $label ); return; }
 	throw new RuntimeException( 'Expected refusal: ' . $label );
 };
-foreach ( array( 'LegacyOptionBackend' => 'legacy-option-backend', 'LegacyTableBackend' => 'legacy-table-backend', 'LegacyTableRepository' => 'legacy-table-repository', 'LegacyTableSnapshot' => 'legacy-table-snapshot', 'LegacyTransactionConnection' => 'legacy-transaction-connection', 'MigratorSettings' => 'migrator-settings' ) as $class => $file ) {
+foreach ( array( 'LegacyOptionBackend' => 'legacy-option-backend', 'LegacyTableBackend' => 'legacy-table-backend', 'LegacyTableRepository' => 'legacy-table-repository', 'TableSnapshot' => 'table-snapshot', 'LegacyTransactionConnection' => 'legacy-transaction-connection', 'MigratorSettings' => 'migrator-settings' ) as $class => $file ) {
 	$reflection = new ReflectionClass( 'FooPlugins\\FooGalleryMigrate\\' . $class );
 	$check( realpath( $reflection->getFileName() ) === realpath( dirname( $plugin ) . '/includes/class-' . $file . '.php' ), 'Actual bootstrap loaded expected source/package class: ' . $class );
 }
@@ -66,15 +66,15 @@ $root = array( 'object_type' => 'gallery', 'plugin_name' => 'Exact', 'ID' => '09
 try {
 	foreach ( $schema->statements() as $sql ) { if ( false === $wpdb->query( $sql ) ) { throw new RuntimeException( 'Fixture DDL failed.' ); } }
 	$schema->verify();
-	$probe = new FooGMRepositoryProbe( $wpdb ); $snapshot = new LegacyTableSnapshot( $probe, 1 );
+	$probe = new FooGMRepositoryProbe( $wpdb ); $snapshot = new TableSnapshot( $probe, 1 );
 	$fixture = array( '09' => $root, 9 => false, 'untouched' => array( 'opaque' => str_repeat( 'x', 100000 ) ) );
 	$snapshot->replace_many( array( array( 'key' => 'history', 'order' => 0, 'expected_revision' => null, 'kind' => 'map', 'value' => $fixture ),
 		array( 'key' => 'checkpoint', 'order' => 1, 'expected_revision' => null, 'kind' => 'scalar', 'value' => false ) ) );
-	( new LegacyTableSnapshot( $probe, 2 ) )->replace_many( array( array( 'key' => 'history', 'order' => 0, 'expected_revision' => null, 'kind' => 'map', 'value' => array( '09' => null ) ) ) );
+	( new TableSnapshot( $probe, 2 ) )->replace_many( array( array( 'key' => 'history', 'order' => 0, 'expected_revision' => null, 'kind' => 'map', 'value' => array( '09' => null ) ) ) );
 	$repo = new LegacyTableRepository( $probe, 1 );
 	// WP option writes reject invalid UTF-8; table-only binary parity is checked below.
 	$common = $fixture; $common['09']['future'] = "valid\x00雪";
-	( new LegacyTableSnapshot( $probe, 4 ) )->replace_many( array(
+	( new TableSnapshot( $probe, 4 ) )->replace_many( array(
 		array( 'key' => 'history', 'order' => 0, 'expected_revision' => null, 'kind' => 'map', 'value' => $common ),
 		array( 'key' => 'checkpoint', 'order' => 1, 'expected_revision' => null, 'kind' => 'scalar', 'value' => false ) ) );
 	$option_backend = new LegacyOptionBackend(); $table_backend = new LegacyTableBackend( $probe, 4 );
@@ -96,13 +96,13 @@ try {
 	if ( $options[FOOGALLERY_MIGRATE_OPTION_DATA] === $missing ) { delete_option( FOOGALLERY_MIGRATE_OPTION_DATA ); }
 	else { update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $options[FOOGALLERY_MIGRATE_OPTION_DATA], false ); }
 	$list = array( str_repeat( 'a', 1000 ), str_repeat( 'b', 1000 ) );
-	( new LegacyTableSnapshot( $probe, 3 ) )->replace_many( array( array( 'key' => 'list', 'order' => 0, 'expected_revision' => null, 'kind' => 'list', 'value' => $list ) ) );
+	( new TableSnapshot( $probe, 3 ) )->replace_many( array( array( 'key' => 'list', 'order' => 0, 'expected_revision' => null, 'kind' => 'list', 'value' => $list ) ) );
 	$limited_list = new LegacyTableBackend( $probe, 3, 100, 2500 );
 	$check( $limited_list->roots( 'list', array( 0 ) )[0]['value'] === $list[0] && $limited_list->roots( 'list', array( 1 ) )[0]['value'] === $list[1], 'Each list root fits individual byte budget' );
 	$expect_refusal( function () use ( $limited_list ) { $limited_list->roots( 'list', array( 0, 1 ) ); }, 'Multi-root byte budget is aggregate, not multiplied by request length' );
 	$race = new FooGMRepositoryProbe( $wpdb ); $race_backend = new LegacyTableBackend( $race, 3 );
 	$race_writer = new wpdb( DB_USER, DB_PASSWORD, DB_NAME, DB_HOST ); $race_writer->base_prefix = $wpdb->base_prefix;
-	$race_snapshot = new LegacyTableSnapshot( new LegacyTransactionConnection( $race_writer ), 3 ); $race_committed = false;
+	$race_snapshot = new TableSnapshot( new LegacyTransactionConnection( $race_writer ), 3 ); $race_committed = false;
 	$race->after_read = function ( $sql ) use ( $race, $race_snapshot, $list, &$race_committed ) {
 		if ( false === strpos( $sql, '`payload`' ) ) { return; }
 		$race->after_read = null; $next = $list; $next[1] = 'new committed value';

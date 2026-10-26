@@ -134,9 +134,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Envira' ) ) {
          */
         private function get_nextgen_galleries() {
             global $wpdb;
-            $gallery_table = $wpdb->prefix . FM_ENVIRA_TABLE_GALLERY;
- 
-            return $wpdb->get_results( "select * from {$gallery_table} WHERE post_type = '" . FM_ENVIRA_POST_TYPE . "' AND post_status = 'publish'" );
+            return $wpdb->get_results( $wpdb->prepare(
+                "select * from $wpdb->posts WHERE post_type = %s AND post_status = %s",
+                FM_ENVIRA_POST_TYPE, 'publish'
+            ) );
         }
 
         /**

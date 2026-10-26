@@ -203,7 +203,7 @@ final class StorageCapacityPolicy {
 			'storage-preflight', 'storage-conversion', 'storage-copy-cursor', 'storage-control', 'storage-maintenance-gate', 'storage-memory-baseline', 'storage-authority', 'storage-retirement',
 			'storage-scale-admission', 'storage-provisioning', 'generic-retaining-model', 'repository-flatten-model', 'snapshot-stats-model',
 			'legacy-option-decoder', 'legacy-option-structural-scan', 'legacy-option-durable-scan', 'legacy-state-codec', 'legacy-record-codec', 'legacy-collection-envelope',
-			'legacy-table-snapshot', 'legacy-table-reader', 'legacy-snapshot-row-reader', 'legacy-transaction-connection', 'legacy-storage-schema',
+			'table-snapshot', 'table-reader', 'legacy-snapshot-row-reader', 'legacy-transaction-connection', 'legacy-storage-schema',
 			'storage-scalar-observer', 'snapshot-read-plan', 'snapshot-read-phase', 'snapshot-read-profile', 'snapshot-page-witness', 'snapshot-owned-event-plan',
 			'migrator-settings', 'migrator-engine', 'content-scan-repository', 'image-tag-queue-repository', 'init' );
 		sort( $names, SORT_STRING ); $hashes = array();

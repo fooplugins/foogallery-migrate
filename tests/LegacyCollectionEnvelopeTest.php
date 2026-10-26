@@ -4,7 +4,7 @@ namespace FooPlugins\FooGalleryMigrate\Tests;
 use FooPlugins\FooGalleryMigrate\LegacyCollectionEnvelope;
 use FooPlugins\FooGalleryMigrate\ImageTagQueueRepository;
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
 use PHPUnit\Framework\TestCase;
@@ -50,7 +50,7 @@ class LegacyCollectionEnvelopeTest extends TestCase {
 	public function test_large_saved_queue_preflights_as_independent_roots_without_deduping_legacy_duplicates(): void {
 		$items = array(); for ( $i = 0; $i < 205; ++$i ) { $items[$i] = array( 'attachment_id' => 7, 'tags' => array( 'tag-' . $i ) ); }
 		$value = array( 'items' => $items, 'total' => 205, 'unknown' => array( '09' => false, 9 => true ) );
-		$db = new EnvelopeNoSqlConnection(); $snapshot = new LegacyTableSnapshot( $db, 1 );
+		$db = new EnvelopeNoSqlConnection(); $snapshot = new TableSnapshot( $db, 1 );
 		$preflight = new \ReflectionMethod( $snapshot, 'preflight' ); $preflight->setAccessible( true );
 		$prepared = $preflight->invoke( $snapshot, array( array( 'key' => ImageTagQueueRepository::STATE_KEY,
 			'order' => 0, 'kind' => 'map', 'value' => $value, 'expected_revision' => null ) ) );
@@ -91,7 +91,7 @@ class LegacyCollectionEnvelopeTest extends TestCase {
 	}
 	public function test_snapshot_preflight_counts_item_roots_not_wrapper_headers(): void {
 		$db = new EnvelopeNoSqlConnection();
-		$snapshot = new LegacyTableSnapshot( $db, 1 );
+		$snapshot = new TableSnapshot( $db, 1 );
 		$method = new \ReflectionMethod( $snapshot, 'preflight' );
 		if ( PHP_VERSION_ID < 80100 ) { $method->setAccessible( true ); }
 		$value = $this->wrapper();

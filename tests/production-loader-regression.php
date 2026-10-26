@@ -8,7 +8,7 @@ if (!$root || !in_array($mode, array('nonadmin', 'admin', 'native-preflight', 'u
 }
 define('WPINC', 'wp-includes');
 define('ABSPATH', $root . '/');
-$wp_version = 'unsupported-wp' === $mode ? '4.9' : '5.0';
+$wp_version = isset($argv[3]) ? $argv[3] : ('unsupported-wp' === $mode ? '6.1.9' : '6.2');
 $actions = array();
 $activation = array();
 $deactivation = array();
@@ -28,11 +28,11 @@ if ('native-preflight' === $mode) {
     spl_autoload_register('foogallery_migrate_autoloader');
 } else {
     require $root . '/migrate.php';
-    loader_check(FOOGM_MIN_PHP === '5.4.0' && FOOGM_MIN_WP === '5.0', 'Declared floors changed');
+    loader_check(FOOGM_MIN_PHP === '5.4.0' && FOOGM_MIN_WP === '6.2', 'Declared floors changed');
     if ('unsupported-wp' === $mode) {
         loader_check(isset($actions['admin_notices']) && $actions['admin_notices'] === 'foogallery_migrate_min_wp_admin_notice', 'WP startup refusal lost');
         loader_check(!spl_autoload_functions() && !$activation && !$deactivation, 'Unsupported WP initialized plugin');
-        echo json_encode(array('php' => PHP_VERSION, 'mode' => $mode, 'status' => 'pass')) . "\n";
+        echo json_encode(array('php' => PHP_VERSION, 'wp' => $wp_version, 'mode' => $mode, 'status' => 'pass')) . "\n";
         exit;
     }
     loader_check(!$activation && !$deactivation, 'Storage-neutral lifecycle must not register redundant hooks');
@@ -86,4 +86,4 @@ foreach ($included as $file) {
     loader_check(strpos(str_replace('\\', '/', $file), '/vendor/') === false, 'Production eagerly loaded dev vendor: ' . $file);
 }
 loader_check(!class_exists('PHPUnit\\Framework\\TestCase', false) && !function_exists('PHPUnit\\Framework\\assertTrue'), 'Production initialized PHPUnit');
-echo json_encode(array('php' => PHP_VERSION, 'mode' => $mode, 'status' => 'pass', 'classes' => array_keys($classes), 'included_files' => $included, 'autoloaders' => spl_autoload_functions(), 'admin_hooks' => array_keys($actions), 'callbacks' => $callback_readback, 'scope' => 'standalone startup doubles; actual native plugin classes; no WP/SQL acceptance')) . "\n";
+echo json_encode(array('php' => PHP_VERSION, 'wp' => $wp_version, 'mode' => $mode, 'status' => 'pass', 'classes' => array_keys($classes), 'included_files' => $included, 'autoloaders' => spl_autoload_functions(), 'admin_hooks' => array_keys($actions), 'callbacks' => $callback_readback, 'scope' => 'standalone startup doubles; actual native plugin classes; no WP/SQL acceptance')) . "\n";

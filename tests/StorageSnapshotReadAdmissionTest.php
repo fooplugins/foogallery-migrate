@@ -4,17 +4,17 @@ namespace FooPlugins\FooGalleryMigrate\Tests;
 use FooPlugins\FooGalleryMigrate\LegacyCollectionEnvelope;
 use FooPlugins\FooGalleryMigrate\LegacyRecordCodec;
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\StorageMemoryBaseline;
 use PHPUnit\Framework\TestCase;
 
-require_once __DIR__ . '/LegacyTableSnapshotTest.php';
+require_once __DIR__ . '/TableSnapshotTest.php';
 
 /** Real read/rebuild/digest consumers; physical transport is explicitly a spy. */
 class StorageSnapshotReadAdmissionTest extends TestCase {
 	public function test_ordinary_nested_binary_collection_keeps_complete_parity(): void {
 		$db = new SnapshotReadAdmissionWpdb(); $seen = array();
-		$snapshot = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( &$seen, $db ) {
+		$snapshot = new TableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( &$seen, $db ) {
 			$seen[] = array( $bytes, $db->fetched ); return true;
 		} );
 		$this->assertSame( $db->value, $snapshot->read_bounded( 'bucket' ) );
@@ -32,7 +32,7 @@ class StorageSnapshotReadAdmissionTest extends TestCase {
 
 	public function test_denied_read_budget_never_fetches_root_payload_or_driver_rows(): void {
 		$db = new SnapshotReadAdmissionWpdb();
-		$snapshot = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) { return false; } );
+		$snapshot = new TableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) { return false; } );
 		try { $snapshot->read_bounded( 'bucket' ); $this->fail( 'Read bypassed refusal.' ); }
 		catch ( \RuntimeException $error ) { $this->assertStringContainsString( 'memory admission', $error->getMessage() ); }
 		$this->assertFalse( $db->fetched );
@@ -42,7 +42,7 @@ class StorageSnapshotReadAdmissionTest extends TestCase {
 	public function test_driver_backing_is_sampled_before_rebuild_and_high_water_survives_refusal(): void {
 		$db = new SnapshotReadAdmissionWpdb(); $db->allocate_driver_slab = true;
 		$memory = new StorageMemoryBaseline(); $before = $memory->sample(); $during = 0;
-		$snapshot = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( $db, $memory, &$during ) {
+		$snapshot = new TableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( $db, $memory, &$during ) {
 			if ( $db->fetched ) { $during = $memory->sample(); return false; } return true;
 		} );
 		try { $snapshot->read_bounded( 'bucket' ); $this->fail( 'Read rebuilt despite refusal.' ); }
@@ -54,7 +54,7 @@ class StorageSnapshotReadAdmissionTest extends TestCase {
 
 	public function test_each_rebuilt_root_is_rechecked_with_previous_outputs_still_live(): void {
 		$db = new SnapshotReadAdmissionWpdb(); $after_fetch = 0;
-		$snapshot = new LegacyTableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( $db, &$after_fetch ) {
+		$snapshot = new TableSnapshot( $db, 7, 100, 1048576, null, function ( $bytes ) use ( $db, &$after_fetch ) {
 			if ( $db->fetched && ++$after_fetch === 3 ) { return false; } return true;
 		} );
 		try { $snapshot->read_bounded( 'bucket' ); $this->fail( 'Second root bypassed refusal.' ); }

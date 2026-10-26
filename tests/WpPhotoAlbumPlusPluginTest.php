@@ -566,6 +566,7 @@ class FakeWpPhotoAlbumPlusWpdb {
 		if ( 1 === count( $args ) && is_array( $args[0] ) ) {
 			$args = $args[0];
 		}
+		$query = IdentifierSqlFixture::bind( $query, $args );
 		$this->last_prepare_args = $args;
 		return $query;
 	}

@@ -1,7 +1,7 @@
 === FooGallery Migrate ===
 Contributors: fooplugins,bradvin,elviiso
 Tags: gallery, image gallery, photo gallery, wordpress gallery plugin, migrate
-Requires at least: 6.0
+Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 5.4
 Stable tag: 1.16
@@ -99,6 +99,11 @@ Uninstall removes plugin-owned internal storage, including retained history and 
 == Changelog ==
 
 = 1.16.1 =
+* Reviewed buffered migration forms, storage diagnostics and SQL preparation boundaries, documented clear scanner false positives, and added regression coverage for hostile source values and diagnostic messages.
+* Bound table identifiers with WordPress 6.2 identifier placeholders in storage administration, authority checks, snapshots and WP Photo Album Plus queries, preserving the existing filters and transaction safeguards.
+* Raised the minimum WordPress version to 6.2 and aligned the plugin header, readme and runtime requirement.
+* Renamed the active storage helpers to TableReader and TableSnapshot and corrected outdated integration comments; storage behavior and data formats are unchanged.
+* Prepared Envira and Modula gallery query values and simplified Robo query preparation without changing the generated SQL or gallery results.
 * Removed the unused prototype history store and its lifecycle code; made option history independent and simplified current table names to foogallery_migrate_state and foogallery_migrate_records.
 * Used WordPress URL, randomness, text and temporary-file helpers; made pagination tolerate missing request fields and photo timestamps independent of the server timezone.
 * Hardened direct PHP-file access and escaped storage error messages; corrected translation domains, placeholders and extractable preflight messages.

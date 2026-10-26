@@ -1,7 +1,7 @@
 <?php
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use PHPUnit\Framework\TestCase;
 
 require_once __DIR__ . '/StorageScaleAdmissionTest.php';
@@ -18,7 +18,7 @@ class StorageSnapshotRootDepthTest extends TestCase {
 		return StorageScaleAdmissionTest::admission( $p, function () { return 100.0; } );
 	}
 	private function snapshot( $db, $budget ) {
-		return new LegacyTableSnapshot( $db, 7, $budget->limit( 'max_rows' ), $budget->limit( 'max_bytes' ), null, null, $budget );
+		return new TableSnapshot( $db, 7, $budget->limit( 'max_rows' ), $budget->limit( 'max_bytes' ), null, null, $budget );
 	}
 	private function changes( $value ) {
 		return array( array( 'key' => 'galleries', 'order' => 0, 'kind' => 'map', 'value' => $value, 'expected_revision' => null ) );

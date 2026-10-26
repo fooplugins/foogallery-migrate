@@ -210,6 +210,7 @@ class StorageAdminAdviceWpdb {
 	public function __construct( $bytes ) { $this->bytes = $bytes; }
 	public function prepare( $query, ...$values ) {
 		if ( 1 === count( $values ) && is_array( $values[0] ) ) { $values = $values[0]; }
+		$query = IdentifierSqlFixture::bind( $query, $values );
 		foreach ( $values as $value ) { $query = preg_replace( '/%[ds]/', is_int( $value ) ? (string) $value : "'" . addslashes( (string) $value ) . "'", $query, 1 ); }
 		return $query;
 	}

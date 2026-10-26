@@ -1981,7 +1981,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				if ( $this->content_render_revision !== $check['revision'] || $this->content_render_total !== $check['total'] ) {
 					throw new \RuntimeException( 'Content changed during form rendering.' );
 				}
-				$html = ob_get_clean(); echo $html;
+				$html = ob_get_clean();
+				// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Buffered render_content_form_body markup; dynamic fields are escaped at their text/attribute/URL contexts before the final revision check. This is a form, not plain text.
+				echo $html;
 			} catch ( \Exception $error ) { ob_end_clean(); throw $error; }
 			catch ( \Throwable $error ) { ob_end_clean(); throw $error; }
 		}
@@ -2167,7 +2169,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 					</thead>
 					<tbody>
 					<?php
-					if ( null !== $repository ) { echo $table_rows['html']; }
+					if ( null !== $repository ) {
+						// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Produced only by table_content_rows/render_table_content_row; all occurrence text, identifiers and URLs are escaped there. Preserve checkbox/table markup.
+						echo $table_rows['html'];
+					}
 					foreach ( $paginated_items as $key => $item ) {
 						if ( is_array( $item ) && isset( $item['post_id'] ) ) { $this->render_table_content_row( $key, $item ); }
 					}

@@ -47,7 +47,7 @@ use FooPlugins\FooGalleryMigrate\StorageCli;
 use FooPlugins\FooGalleryMigrate\StorageAdmin;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\StorageCopyCursor;
 global $wpdb, $wp_version;
 function assisted_check( $yes, $message ) { if ( ! $yes ) { throw new RuntimeException( $message ); } }
@@ -74,9 +74,9 @@ $source_files = array( 'migrate.php', 'includes/class-storage-maintenance-gate.p
 	'includes/class-storage-provisioning.php', 'includes/class-legacy-storage-schema.php',
 	'includes/class-legacy-state-codec.php', 'includes/class-legacy-record-codec.php',
 	'includes/class-legacy-collection-envelope.php',
-	'includes/class-legacy-transaction-connection.php', 'includes/class-legacy-table-reader.php',
+	'includes/class-legacy-transaction-connection.php', 'includes/class-table-reader.php',
 	'includes/class-legacy-table-repository.php', 'includes/class-legacy-table-backend.php',
-	'includes/class-legacy-table-snapshot.php',
+	'includes/class-table-snapshot.php',
 	'tests/integration/storage-release-cleanup.php', 'tests/integration/storage-assisted-recovery.php',
 	'tests/integration/storage-assisted-recovery-worker.php' );
 $source = function () use ( $source_files, $manifest ) {
@@ -145,7 +145,7 @@ $table_equals_source = function ( $source_row ) use ( $wpdb, $tables ) {
 	$value = maybe_unserialize( $source_row['option_value'] );
 	assisted_check( is_array( $value ) && count( $value ) > 0 && count( $value ) <= 16,
 		'Bounded original source state differs.' );
-	$snapshot = new LegacyTableSnapshot( new LegacyTransactionConnection( $wpdb ), get_current_blog_id() );
+	$snapshot = new TableSnapshot( new LegacyTransactionConnection( $wpdb ), get_current_blog_id() );
 	foreach ( $value as $key => $item ) {
 		assisted_check( $snapshot->read_bounded( $key ) === $item,
 			'Staged/selected table state differs from exact original key.' );

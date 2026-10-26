@@ -10,8 +10,8 @@ require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 use FooPlugins\FooGalleryMigrate\LegacyOptionBackend;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
-use FooPlugins\FooGalleryMigrate\LegacyTableReader;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableReader;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\MigratedHistoryRepository;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
@@ -47,7 +47,7 @@ try {
 	foreach ( $schema->statements() as $i => $ddl ) { $created[] = $tables[$i]; dbDelta( $ddl ); }
 	$check( $schema->verify(), 'unchanged schema v1' );
 	$db = new LegacyTransactionConnection( $wpdb ); $backend = new LegacyTableBackend( $db, $blog );
-	$snapshot = new LegacyTableSnapshot( $db, $blog ); $reader = new LegacyTableReader( $db, $blog );
+	$snapshot = new TableSnapshot( $db, $blog ); $reader = new TableReader( $db, $blog );
 	$record = array( 'object_type' => 'image', 'plugin_name' => '', 'ID' => '009', 'migrated' => false, 'migrated_id' => 71,
 		'migration_status' => 'completed', 'source_url' => 'https://example.test/Case.jpg', 'migration_parent_key' => 'Parent',
 		'unknown' => '雪', 'settings' => array( '09' => false, 9 => null ), 'children' => array( '09' => false, 9 => null ) );

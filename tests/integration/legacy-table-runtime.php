@@ -12,7 +12,7 @@ use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
 use FooPlugins\FooGalleryMigrate\LegacyTableRepository;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\StorageAuthority;
 
@@ -52,7 +52,7 @@ $codec = new LegacyStateCodec(); $blog = (int) get_current_blog_id(); $created =
 try {
 	foreach ( $schema->statements() as $i => $ddl ) { $created[] = $tables[$i]; dbDelta( $ddl ); }
 	$check( $schema->verify(), 'exact unchanged shared schema verified' );
-	$db = new FooGmRuntimeConnection( $wpdb ); $repo = new LegacyTableRepository( $db, $blog ); $snapshot = new LegacyTableSnapshot( $db, $blog );
+	$db = new FooGmRuntimeConnection( $wpdb ); $repo = new LegacyTableRepository( $db, $blog ); $snapshot = new TableSnapshot( $db, $blog );
 	$check( array() === $db->queries, 'physical construction is inert' );
 	$fixture = \FooPlugins\FooGalleryMigrate\Tests\Fixtures\legacy_runtime_contract_fixture();
 	$refuses( function () use ( $snapshot, $change, $fixture ) { $snapshot->replace_many( array( $change( 'migrated', 0, 'map', $fixture['logical']['migrated'] ) ) ); }, 'shared historical objects refuse without narrowing' );
@@ -124,8 +124,8 @@ try {
 	$refuses( function () use ( $repo, $page ) { $repo->filtered_page( 'migrated', 1, array( 'object_type' => 'image', 'is_migrated' => 1 ), $page['cursor'] ); }, 'logical mutation invalidates filtered cursor' );
 	$export = $repo->export_page( 'migrated', 1 );
 	$check( 3 === $export['record_count'] && count( $export['rows'] ) === 1, 'explicit export page includes verified subtree accounting' );
-	$refuses( function () use ( $db, $blog ) { ( new LegacyTableSnapshot( $db, $blog, 1 ) )->verify_digest( 'migrated', 2 ); }, 'maintenance whole-operation row admission refuses' );
-	$refuses( function () use ( $db, $blog ) { ( new LegacyTableSnapshot( $db, $blog, 100, 500 ) )->verify_digest( 'migrated', 2 ); }, 'maintenance total byte admission refuses' );
+	$refuses( function () use ( $db, $blog ) { ( new TableSnapshot( $db, $blog, 1 ) )->verify_digest( 'migrated', 2 ); }, 'maintenance whole-operation row admission refuses' );
+	$refuses( function () use ( $db, $blog ) { ( new TableSnapshot( $db, $blog, 100, 500 ) )->verify_digest( 'migrated', 2 ); }, 'maintenance total byte admission refuses' );
 	$identifier_row = (int) $wpdb->get_var( $wpdb->prepare( 'SELECT id FROM `' . $tables[1] . '` WHERE state_id = %d AND generation = 1 AND legacy_identifier_hash = UNHEX(%s)', $state_id, $codec->key_hash( '09' ) ) );
 	$orphan = $wpdb->get_row( $wpdb->prepare( 'SELECT * FROM `' . $tables[1] . '` WHERE id = %d', $identifier_row ), ARRAY_A );
 	unset( $orphan['id'] ); $orphan['node_hash'] = hash( 'sha256', 'orphan-fixture', true ); $orphan['parent_node_hash'] = hash( 'sha256', 'missing-parent-fixture', true );
@@ -160,13 +160,13 @@ try {
 	$refuses( function () use ( $snapshot ) { $snapshot->verify_digest( 'migrated', 4 ); }, 'maintenance refuses disabled autocommit' ); $db->query( 'ROLLBACK' ); $db->query( 'SET autocommit = 1' );
 	$db->query( 'START TRANSACTION' );
 	$refuses( function () use ( $snapshot ) { $snapshot->verify_digest( 'migrated', 4 ); }, 'maintenance refuses ambient transaction without replacing it' ); $db->query( 'ROLLBACK' );
-	$uncertain_start = new LegacyTableSnapshot( $db, $blog ); $db->fail_start = true;
+	$uncertain_start = new TableSnapshot( $db, $blog ); $db->fail_start = true;
 	$refuses( function () use ( $uncertain_start ) { $uncertain_start->verify_digest( 'migrated', 4 ); }, 'started but unacknowledged maintenance transaction refuses' );
 	$db->fail_start = false; $db->query( 'ROLLBACK' ); $before = count( $db->queries );
 	$refuses( function () use ( $uncertain_start ) { $uncertain_start->verify_digest( 'migrated', 4 ); }, 'uncertain transaction start quarantines maintenance object' );
 	$check( $before === count( $db->queries ), 'uncertain start refusal performs zero SQL' );
 	$repo->patch_many( array( $patch( 'migrated', 4, array( array( 'key' => 'uncertain', 'value' => false ) ) ) ) );
-	$tainted = new LegacyTableSnapshot( $db, $blog ); $db->fail_commit = true;
+	$tainted = new TableSnapshot( $db, $blog ); $db->fail_commit = true;
 	$refuses( function () use ( $tainted ) { $tainted->verify_digest( 'migrated', 5 ); }, 'committed but unacknowledged maintenance reports uncertainty' ); $db->fail_commit = false; $before = count( $db->queries );
 	$refuses( function () use ( $tainted ) { $tainted->verify_digest( 'migrated', 5 ); }, 'uncertain maintenance object refuses replay' );
 	$check( $before === count( $db->queries ), 'tainted maintenance refusal performs zero SQL' );
@@ -175,7 +175,7 @@ try {
 		foreach ( $sites as $id ) { if ( (int) $id !== $blog ) { $other = (int) $id; break; } }
 		$check( null !== $other, 'actual multisite fixture includes another registered site' );
 		switch_to_blog( $other ); $switched = true;
-		$other_db = new LegacyTransactionConnection( $wpdb ); $other_snapshot = new LegacyTableSnapshot( $other_db, (int) get_current_blog_id() );
+		$other_db = new LegacyTransactionConnection( $wpdb ); $other_snapshot = new TableSnapshot( $other_db, (int) get_current_blog_id() );
 		$other_snapshot->replace_many( array( $change( 'migrated', 0, 'map', array( '09' => false ) ) ) );
 		$other_repo = new LegacyTableRepository( $other_db, (int) get_current_blog_id() );
 		$check( false === $other_repo->identifiers( 'migrated', array( '09' ) )[0]['value'] && $record === $repo->identifiers( 'migrated', array( '09' ) )[0]['value'], 'real switch_to_blog sites isolate identical identifiers in shared base-prefix tables' );

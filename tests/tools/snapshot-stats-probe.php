@@ -10,7 +10,7 @@ class WP_Error { public function __construct($code, $message) {} }
 function is_wp_error($v) { return $v instanceof WP_Error; }
 function __($v, $domain) { return $v; }
 function absint($v) { return abs((int) $v); }
-foreach (array('storage-scalar-observer', 'storage-preflight', 'storage-scale-admission', 'legacy-state-codec', 'legacy-record-codec', 'legacy-table-reader', 'generic-retaining-model', 'snapshot-stats-model', 'legacy-option-decoder') as $file) { require $root . '/includes/class-' . $file . '.php'; }
+foreach (array('storage-scalar-observer', 'storage-preflight', 'storage-scale-admission', 'legacy-state-codec', 'legacy-record-codec', 'table-reader', 'generic-retaining-model', 'snapshot-stats-model', 'legacy-option-decoder') as $file) { require $root . '/includes/class-' . $file . '.php'; }
 $shape = $argv[2];
 if ('original' === $shape) {
  require dirname(__DIR__) . '/support/StorageA7Fixture.php';

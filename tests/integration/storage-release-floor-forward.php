@@ -27,7 +27,7 @@ use FooPlugins\FooGalleryMigrate\StorageControl;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 
 global $wpdb;
 function floor_forward_check( $okay, $message ) {
@@ -124,7 +124,7 @@ if ( 'provision' === $step ) {
 		$heads[0]['state_key_value'] === $codec->key_value( 'galleries' ) &&
 		0 === (int) $heads[0]['state_order'] && 20208 === (int) $heads[0]['record_count'] &&
 		20208 === (int) $count, 'Floor native20K table row counts differ.' );
-	$snapshot = new LegacyTableSnapshot( new LegacyTransactionConnection( $wpdb ), get_current_blog_id(), 24576, 16777216 );
+	$snapshot = new TableSnapshot( new LegacyTransactionConnection( $wpdb ), get_current_blog_id(), 24576, 16777216 );
 	$actual = array( 'galleries' => $snapshot->read_bounded( 'galleries' ) );
 	$serialized = serialize( $actual );
 	floor_forward_check( $native_bytes === strlen( $serialized ) && $native_sha256 === hash( 'sha256', $serialized ),

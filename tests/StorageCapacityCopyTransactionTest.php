@@ -1,6 +1,6 @@
 <?php
 namespace FooPlugins\FooGalleryMigrate\Tests;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\StorageControl;
 use FooPlugins\FooGalleryMigrate\StorageCopyCursor;
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
@@ -21,7 +21,7 @@ class StorageCapacityCopyTransactionTest extends TestCase {
 		return array( $db, $value, $r, $scale );
 	}
 	private function batch( $db, $value, $r, $scale, $discard = false ) {
-		return ( new LegacyTableSnapshot( $db, 1, 24576, 16777216, null, null, $scale ) )->conversion_batch( $r, $value, new StorageControl( $db, 1 ), json_encode( array( 'version' => 1, 'blog_id' => 1, 'token' => str_repeat( 'a', 32 ), 'expires' => time() + 300 ) ), $discard );
+		return ( new TableSnapshot( $db, 1, 24576, 16777216, null, null, $scale ) )->conversion_batch( $r, $value, new StorageControl( $db, 1 ), json_encode( array( 'version' => 1, 'blog_id' => 1, 'token' => str_repeat( 'a', 32 ), 'expires' => time() + 300 ) ), $discard );
 	}
 	private function completed_copy() {
 		list( $db, $value, $r, $scale ) = $this->setup_copy();
@@ -30,7 +30,7 @@ class StorageCapacityCopyTransactionTest extends TestCase {
 		return array( $db, $value, $r, $scale );
 	}
 	private function verify_batch( $db, $value, $r, $scale ) {
-		return ( new LegacyTableSnapshot( $db, 1, 24576, 16777216, null, null, $scale ) )->conversion_verify_batch( $r, $value,
+		return ( new TableSnapshot( $db, 1, 24576, 16777216, null, null, $scale ) )->conversion_verify_batch( $r, $value,
 			new StorageControl( $db, 1 ), json_encode( array( 'version' => 1, 'blog_id' => 1, 'token' => str_repeat( 'a', 32 ), 'expires' => time() + 300 ) ) );
 	}
 	public function test_verified_cursor_requires_every_exact_page_and_old_v4_layout_resumes(): void {
@@ -78,7 +78,7 @@ class StorageCapacityCopyTransactionTest extends TestCase {
 		list( $db, $value, $r, $scale ) = $this->completed_copy();
 		for ( $i = 0; $i < 3; ++$i ) { $r = $this->verify_batch( $db, $value, $r, $scale )['record']; }
 		$r['phase'] = 'flipped'; $r['backend'] = 'table'; $r['epoch'] = 1; $db->control = json_encode( $r );
-		$repo = new LegacyTableSnapshot( $db, 1, 24576, 16777216, null, null, $scale );
+		$repo = new TableSnapshot( $db, 1, 24576, 16777216, null, null, $scale );
 		$this->assertTrue( $repo->conversion_verified_metadata( $r ) );
 		$db->heads[0]['revision'] = 2;
 		try { $repo->conversion_verified_metadata( $r ); $this->fail( 'Changed head reused a completed proof.' ); }
@@ -183,7 +183,7 @@ class StorageCapacityCopyTransactionTest extends TestCase {
 	}
 	public function test_valid_saved_image_tag_queue_has_lossless_indexed_conversion_shape(): void {
 		list( $db, $source, $record, $scale ) = $this->setup_copy();
-		$snapshot = new LegacyTableSnapshot( $db, 1, 24576, 16777216, null, null, $scale );
+		$snapshot = new TableSnapshot( $db, 1, 24576, 16777216, null, null, $scale );
 		$shape = new \ReflectionMethod( $snapshot, 'conversion_shape' ); $shape->setAccessible( true );
 		$value = array( 'future' => "\xff\x00", 'items' => array( '09' => array( 'attachment_id' => 3 ),
 			9 => array( 'attachment_id' => 3 ), 20 => false ), 'processed' => 7 );
@@ -224,7 +224,7 @@ class StorageCapacityCopyTransactionTest extends TestCase {
 			'record_count' => 0, 'payload_bytes' => strlen( $root ), 'digest_revision' => 1,
 			'digest_status' => 'current', 'root_payload' => $root,
 			'snapshot_digest' => hex2bin( $codec->snapshot_digest( $queue ) ) );
-		$snapshot = new LegacyTableSnapshot( $db, 1, 24576, 16777216, null, null, $scale );
+		$snapshot = new TableSnapshot( $db, 1, 24576, 16777216, null, null, $scale );
 		$heads = new \ReflectionMethod( $snapshot, 'copy_heads' ); $heads->setAccessible( true );
 		$r['copy_cursor']['state_order'] = 1;
 		$r['copy_cursor']['completed_heads_digest'] = hash( 'sha256',
@@ -239,7 +239,7 @@ class StorageCapacityCopyTransactionTest extends TestCase {
 	}
 	public function test_content_scan_array_and_false_sentinel_keep_distinct_existing_shapes(): void {
 		list( $db, $value, $r, $scale ) = $this->setup_copy();
-		$repo = new LegacyTableSnapshot( $db, 1, 24576, 16777216, null, null, $scale );
+		$repo = new TableSnapshot( $db, 1, 24576, 16777216, null, null, $scale );
 		$method = new \ReflectionMethod( $repo, 'conversion_shape' ); $method->setAccessible( true );
 		$this->assertSame( 'map', $method->invoke( $repo, ContentScanRepository::STATE_KEY,
 			array( 'items' => array(), 'progress' => array() ) )['kind'] );
@@ -283,7 +283,7 @@ class StorageCapacityCopyTransactionTest extends TestCase {
 	}
 	public function test_object_scalar_is_not_converted(): void {
 		list( $db, $value, $r, $scale ) = $this->setup_copy();
-		$repo = new LegacyTableSnapshot( $db, 1, 24576, 16777216, null, null, $scale );
+		$repo = new TableSnapshot( $db, 1, 24576, 16777216, null, null, $scale );
 		$method = new \ReflectionMethod( $repo, 'conversion_shape' ); $method->setAccessible( true );
 		try { $method->invoke( $repo, 'revision', new \stdClass() ); $this->fail( 'Object state accepted.' ); }
 		catch ( \RuntimeException $e ) { $this->assertNotEmpty( $e->getMessage() ); }
@@ -310,7 +310,7 @@ class StorageCapacityCopyTransactionTest extends TestCase {
 		$r = $this->batch( $db, $value, $r, $scale )['record'];
 		$codec = new LegacyStateCodec( 1048576, 64, 10000, $scale );
 		$walks = new CopyWalkCounter( $codec, 24576, 16777216, $scale );
-		$repo = new LegacyTableSnapshot( $db, 1, 24576, 16777216, null, null, $scale );
+		$repo = new TableSnapshot( $db, 1, 24576, 16777216, null, null, $scale );
 		$p = new \ReflectionProperty( $repo, 'records' ); $p->setAccessible( true ); $p->setValue( $repo, $walks );
 		$b = $repo->conversion_batch( $r, $value, new StorageControl( $db, 1 ), json_encode( array( 'version' => 1, 'blog_id' => 1, 'token' => str_repeat( 'a', 32 ), 'expires' => time() + 300 ) ) );
 		$this->assertSame( 4, $b['record']['copy_cursor']['committed_rows'] );
@@ -344,7 +344,7 @@ class StorageCapacityCopyTransactionTest extends TestCase {
 	}
 	public function test_uncertain_commit_does_not_rollback_or_replay_and_fresh_prefix_reconciles(): void {
 		list( $db, $value, $r, $scale ) = $this->setup_copy( 'commit' );
-		$repo = new LegacyTableSnapshot( $db, 1, 24576, 16777216, null, null, $scale );
+		$repo = new TableSnapshot( $db, 1, 24576, 16777216, null, null, $scale );
 		try { $repo->conversion_batch( $r, $value, new StorageControl( $db, 1 ), json_encode( array( 'version' => 1, 'blog_id' => 1, 'token' => str_repeat( 'a', 32 ), 'expires' => time() + 300 ) ) ); $this->fail( 'Uncertain commit ignored.' ); }
 		catch ( \RuntimeException $e ) { $this->assertStringContainsString( 'uncertain', $e->getMessage() ); }
 		$this->assertNotContains( 'ROLLBACK', $db->queries ); $durable = StorageControl::decode( $db->control, 1 ); $this->assertSame( 2, $durable['copy_cursor']['committed_rows'] );

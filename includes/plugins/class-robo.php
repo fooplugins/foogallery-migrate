@@ -354,8 +354,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
          */
         private function get_robo_galleries() {
             global $wpdb;
-            $query = "select * from $wpdb->posts WHERE post_type = %s AND post_status = %s";
-            return $wpdb->get_results( $wpdb->prepare( $query, 'robo_gallery_table', 'publish' ) );
+            return $wpdb->get_results( $wpdb->prepare( "select * from $wpdb->posts WHERE post_type = %s AND post_status = %s", 'robo_gallery_table', 'publish' ) );
         }
 
         /**

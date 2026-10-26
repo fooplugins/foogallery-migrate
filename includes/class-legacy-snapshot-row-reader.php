@@ -20,7 +20,7 @@ final class LegacySnapshotRowReader {
 		$this->bytes_sql = $bytes_sql; $this->scope = $scope;
 		if ( ! is_int( $window_rows ) || $window_rows < 1 || $window_rows > 256 ) { $this->fail( 'Invalid finite window size.' ); }
 		$this->window_rows = $window_rows;
-		$this->window_bytes = min( LegacyTableReader::MAX_RECORD_BYTES, $max_bytes );
+		$this->window_bytes = min( TableReader::MAX_RECORD_BYTES, $max_bytes );
 		$this->admit = $admit; $this->witness = $witness;
 		if ( null !== $witness && ( ! $witness instanceof SnapshotPageWitness || ! $witness->scope_matches( $scope ) ) ) { $this->fail( 'Wrong producer witness scope.' ); }
 	}

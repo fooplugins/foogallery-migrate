@@ -6,7 +6,7 @@ require_once $root . '/migrate.php'; require_once ABSPATH . 'wp-admin/includes/u
 use FooPlugins\FooGalleryMigrate\LegacyOptionBackend;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\MigratableCollectionRepository;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
@@ -19,7 +19,7 @@ $physical = function () use ( $wpdb, $tables ) { $all = array(); foreach ( $tabl
 try {
 	foreach ( $schema->statements() as $i => $ddl ) { $created[] = $tables[$i]; dbDelta( $ddl ); }
 	$settings = new MigratorSettings(); $ob = new LegacyOptionBackend(); $ob->replace_all( array( 'queue' => false ) ); $db = new LegacyTransactionConnection( $wpdb ); $blog = (int) get_current_blog_id(); $tb = new LegacyTableBackend( $db, $blog );
-	( new LegacyTableSnapshot( $db, $blog ) )->replace_many( array( array( 'key' => 'queue', 'kind' => 'scalar', 'order' => 0, 'value' => false, 'expected_revision' => null ) ) );
+	( new TableSnapshot( $db, $blog ) )->replace_many( array( array( 'key' => 'queue', 'kind' => 'scalar', 'order' => 0, 'value' => false, 'expected_revision' => null ) ) );
 	$o = new MigratableCollectionRepository( $ob, $settings ); $t = new MigratableCollectionRepository( $tb, $settings );
 	$call = function ( $method, $args ) use ( $o, $t, &$checks ) {
 		$a = call_user_func_array( array( $o, $method ), $args ); $b = call_user_func_array( array( $t, $method ), $args );
@@ -34,7 +34,7 @@ try {
 	$before = $physical(); $call( 'update_with_state', array( 'galleries', array( 9 => clone $gallery, '09' => $gallery ), 'reordered' ) );
 	if ( $before !== $physical() ) { throw new RuntimeException( 'Collection no-op changed physical bytes.' ); }
 	$values = array( clone $gallery, clone $gallery, clone $gallery ); $raw = $settings->compact_state_value( 'albums', $values );
-	( new LegacyTableSnapshot( $db, $blog ) )->replace_many( array( array( 'key' => 'albums', 'kind' => 'list', 'order' => 3, 'value' => $raw, 'expected_revision' => null ) ) );
+	( new TableSnapshot( $db, $blog ) )->replace_many( array( array( 'key' => 'albums', 'kind' => 'list', 'order' => 3, 'value' => $raw, 'expected_revision' => null ) ) );
 	$settings->set_migrator_setting( 'albums', $values );
 	$call( 'update_with_state', array( 'albums', array( $values[2], $values[0] ), 'removed' ) );
 	if ( $tb->read( 'albums-state' )['value'] !== 'removed' ) { throw new RuntimeException( 'List removal checkpoint failed.' ); }

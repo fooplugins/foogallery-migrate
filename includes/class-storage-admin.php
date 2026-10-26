@@ -144,10 +144,10 @@ class StorageAdmin {
 					// PHP5's native SQL object result loses numeric property names when
 					// wpdb projects them through get_object_vars(). Keep the exact byte
 					// ownership predicate, but give its literal result a named column.
-					if ( ! preg_match( '/^[A-Za-z0-9_]+$/D', $metadata ) || '1' !== (string) $wpdb->get_var( $wpdb->prepare( 'SELECT 1 AS owned FROM `' . $metadata . '` WHERE option_name=%s AND BINARY option_value=BINARY %s', LegacyStorageSchema::VERSION_OPTION, (string) LegacyStorageSchema::VERSION ) ) || $wpdb->last_error ) { throw new \RuntimeException( 'Shared schema ownership is not verified.' ); }
+					if ( ! preg_match( '/^[A-Za-z0-9_]+$/D', $metadata ) || '1' !== (string) $wpdb->get_var( $wpdb->prepare( 'SELECT 1 AS owned FROM %i WHERE option_name=%s AND BINARY option_value=BINARY %s', $metadata, LegacyStorageSchema::VERSION_OPTION, (string) LegacyStorageSchema::VERSION ) ) || $wpdb->last_error ) { throw new \RuntimeException( 'Shared schema ownership is not verified.' ); }
 					$schema->verify(); $s['schema'] = 'verified';
 					$tables = array_keys( $schema->definitions() ); $table = $tables[1];
-					$s['records'] = $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM `' . $table . '` WHERE blog_id=%d', $blog ) );
+					$s['records'] = $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM %i WHERE blog_id=%d', $table, $blog ) );
 					if ( $wpdb->last_error ) { throw new \RuntimeException( __( 'Record count is unavailable.', 'foogallery-migrate' ) ); }
 				} catch ( \RuntimeException $error ) {
 					$s['schema'] = 'not ready';

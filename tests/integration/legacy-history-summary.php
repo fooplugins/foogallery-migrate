@@ -10,8 +10,8 @@ require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 use FooPlugins\FooGalleryMigrate\LegacyOptionBackend;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
-use FooPlugins\FooGalleryMigrate\LegacyTableReader;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableReader;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
 use FooPlugins\FooGalleryMigrate\MigratedHistoryRepository;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
@@ -47,7 +47,7 @@ $blog = (int) get_current_blog_id();
 try {
 	foreach ( $schema->statements() as $i => $ddl ) { $created[] = $tables[$i]; dbDelta( $ddl ); }
 	$check( $schema->verify(), 'unchanged schema v1' );
-	$db = new LegacyTransactionConnection( $wpdb ); $snapshot = new LegacyTableSnapshot( $db, $blog ); $reader = new LegacyTableReader( $db, $blog );
+	$db = new LegacyTransactionConnection( $wpdb ); $snapshot = new TableSnapshot( $db, $blog ); $reader = new TableReader( $db, $blog );
 	$observed = new HistorySummaryObservedConnection( $wpdb ); $backend = new LegacyTableBackend( $observed, $blog );
 	$logical = new MigratedHistoryRepository( $backend, new MigratorSettings() );
 	$option = new MigratedHistoryRepository( new LegacyOptionBackend(), new MigratorSettings() );

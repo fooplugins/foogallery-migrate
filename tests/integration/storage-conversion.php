@@ -12,7 +12,7 @@ use FooPlugins\FooGalleryMigrate\StorageConversion;
 use FooPlugins\FooGalleryMigrate\StorageMaintenanceGate;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 use FooPlugins\FooGalleryMigrate\LegacyTransactionConnection;
-use FooPlugins\FooGalleryMigrate\LegacyTableSnapshot;
+use FooPlugins\FooGalleryMigrate\TableSnapshot;
 use FooPlugins\FooGalleryMigrate\LegacyTableBackend;
 use FooPlugins\FooGalleryMigrate\LegacyStateCodec;
 
@@ -61,7 +61,7 @@ try {
 	$check( $schema->verify(), 'verified existing InnoDB schema; coordinator performs no provisioning' );
 	$db = new LegacyTransactionConnection( $wpdb );
 	$other = $blog + 1000;
-	( new LegacyTableSnapshot( $db, $other ) )->replace_many( array( array( 'key' => 'checkpoint', 'order' => 0, 'kind' => 'scalar', 'value' => 'other-blog-retained', 'expected_revision' => null ) ) );
+	( new TableSnapshot( $db, $other ) )->replace_many( array( array( 'key' => 'checkpoint', 'order' => 0, 'kind' => 'scalar', 'value' => 'other-blog-retained', 'expected_revision' => null ) ) );
 	$other_raw = $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM `' . $tables[0] . '` WHERE blog_id = %d', $other ), ARRAY_A );
 	$other_records = $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM `' . $tables[1] . '` WHERE blog_id = %d', $other ), ARRAY_A );
 
@@ -110,7 +110,7 @@ try {
 	$check( null === $wpdb->get_var( $wpdb->prepare( 'SELECT 1 FROM `' . $wpdb->options . '` WHERE option_name = %s', FOOGALLERY_MIGRATE_OPTION_DATA ) ), 'live stale option name removed after table flip' );
 	$backup = $wpdb->get_var( $wpdb->prepare( 'SELECT option_value FROM `' . $wpdb->options . '` WHERE option_name = %s', StorageAuthority::STORAGE_BACKUP_OPTION ) );
 	$check( $raw_before === $backup, 'distinct retained backup contains exact original physical option bytes' );
-	$reader = new LegacyTableSnapshot( $db, $blog );
+	$reader = new TableSnapshot( $db, $blog );
 	$actual = array(); foreach ( $initial as $key => $value ) { $actual[$key] = $reader->read_bounded( $key ); }
 	$check( $codec->snapshot_digest( $initial ) === $codec->snapshot_digest( $actual ), 'full typed-key/order/revision/unknown/binary/negative-zero parity' );
 	$check( $other_raw === $wpdb->get_results( $wpdb->prepare( 'SELECT * FROM `' . $tables[0] . '` WHERE blog_id = %d', $other ), ARRAY_A ), 'forward switch retains other SQL blog scope byte-identically' );

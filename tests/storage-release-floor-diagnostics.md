@@ -1,5 +1,12 @@
 # Native PHP 5 release-policy diagnostics
 
+**Historical runtime fixtures:** The plugin now requires WordPress 6.2. The
+WP 5.0/6.0 fixture pairs and matching `storage-release-floor-*` scripts below
+are historical diagnostics, not current minimum-version acceptance. Do not
+relabel their results or merely change their hard-coded versions. Native current
+floor validation needs a fresh WordPress 6.2 fixture on a PHP version supported
+by that WordPress release; standalone PHP 5.4 syntax probes are not that evidence.
+
 This is a negative-only diagnostic checkpoint, not a release-policy qualification
 or proof of the large customer journey. No release class or capacity coefficient
 is introduced by these tools. An empty shipped policy remains fail-closed.

@@ -4,7 +4,7 @@ namespace FooPlugins\FooGalleryMigrate\Tests;
 
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
 
-require_once dirname( __DIR__ ) . '/LegacyTableSnapshotTest.php';
+require_once dirname( __DIR__ ) . '/TableSnapshotTest.php';
 require_once __DIR__ . '/SnapshotScaleRow.php';
 
 class SnapshotScaleConnection extends SnapshotTestWpdb {
@@ -98,6 +98,7 @@ class SnapshotScaleConnection extends SnapshotTestWpdb {
 	}
 
 	public function prepare( $sql, $args ) {
+		$sql = IdentifierSqlFixture::bind( $sql, $args );
 		$handle = 'host-prepared-' . ++$this->serial;
 		$this->statement = array( $handle, $sql, $args );
 		return $handle;
