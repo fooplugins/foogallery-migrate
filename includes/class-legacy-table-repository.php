@@ -714,7 +714,7 @@ class LegacyTableRepository {
 			$existing = $this->read( $this->db->prepare( 'SELECT id FROM `' . $this->table . '` WHERE blog_id = %d AND state_id = %d AND generation = %d LIMIT 1',
 				array( $this->blog, $id, $generation ) ) );
 			if ( count( $existing ) ) { $this->fail( 'Inactive queue generation is owned or requires assisted recovery.' ); }
-			$token = hash( 'sha256', uniqid( '', true ) . ':' . mt_rand() . ':' . $id . ':' . microtime( true ) );
+			$token = hash( 'sha256', uniqid( '', true ) . ':' . wp_rand() . ':' . $id . ':' . microtime( true ) );
 			$shadow = array( 'id' => $id, 'active_generation' => $generation,
 				'state_key_value' => $this->codec->key_value( $key ) );
 			$repo = $this; $sentinel_hash = null;

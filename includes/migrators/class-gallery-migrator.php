@@ -120,18 +120,23 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                     $url = foogallery_migrate_admin_url( 'galleries' );
                     $page = 1;
                     if ( defined( 'DOING_AJAX' ) ) {
-                        if ( array_key_exists( 'foogallery_migrate_paged', $_POST ) ) {
-                            $url = esc_url_raw( wp_unslash( $_POST['foogallery_migrate_url'] ) );
+                        if ( isset( $_POST['foogallery_migrate_paged'] ) && is_scalar( $_POST['foogallery_migrate_paged'] ) ) {
+                            if ( isset( $_POST['foogallery_migrate_url'] ) && is_string( $_POST['foogallery_migrate_url'] ) ) {
+                                $url = esc_url_raw( wp_unslash( $_POST['foogallery_migrate_url'] ) );
+                            }
                             $page = absint( wp_unslash( $_POST['foogallery_migrate_paged'] ) );
                         } else {
-                            $url = wp_get_referer();
-                            $parts = parse_url($url);
-                            parse_str( $parts['query'], $query );
+                            $referer = wp_get_referer();
+                            if ( is_string( $referer ) && '' !== $referer ) { $url = $referer; }
+                            $parts = wp_parse_url( $url );
+                            $query = array();
+                            if ( isset( $parts['query'] ) ) { parse_str( $parts['query'], $query ); }
                             $page = isset( $query['gallery_paged'] ) ? absint( $query['gallery_paged'] ) : 1;
                         }
                     } else if ( array_key_exists( 'gallery_paged', $_GET ) ) {
                         $page = absint( wp_unslash( $_GET['gallery_paged'] ) );
                     }
+                    $page = max( 1, $page );
                     $url = add_query_arg( 'gallery_paged', $page, $url );
                     $preflight_gallery_count = 0;
                     $preflight_image_count = 0;

@@ -955,7 +955,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\WpPhotoAlbumPlus' ) )
                     }
                 }
                 if ( ctype_digit( $value ) && (int) $value > 0 ) {
-                    return date( 'Y-m-d H:i:s', (int) $value );
+                    return gmdate( 'Y-m-d H:i:s', (int) $value );
                 }
             }
 

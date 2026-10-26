@@ -193,6 +193,10 @@ function wp_generate_password( $length = 12, $special_chars = true, $extra_speci
 	return substr( bin2hex( random_bytes( $length ) ), 0, $length );
 }
 
+function wp_rand( $min = 0, $max = 4294967295 ) {
+	return random_int( $min, $max );
+}
+
 function wp_cache_delete( $key, $group = '' ) {
 	$GLOBALS['foogallery_migrate_test_cache_deletes'][] = array( $key, $group );
 	return true;

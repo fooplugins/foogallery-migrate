@@ -191,7 +191,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
                 $sideload = wp_handle_sideload( $file_array, array( 'test_form' => false ) );
                 foogallery_migrate_migrator_instance()->assert_storage_writer();
                 if ( ! empty( $sideload['error'] ) ) {
-                    @unlink( $tmp );
+                    wp_delete_file( $tmp );
                     $this->mark_error( new \WP_Error( 'foogallery_migrate_sideload_failed', $sideload['error'] ) );
                     return;
                 }
@@ -208,7 +208,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
                     foogallery_migrate_migrator_instance()->assert_storage_writer();
                     if ( ! $tmp || ! @copy( $file, $tmp ) ) {
                         if ( $tmp ) {
-                            @unlink( $tmp );
+                            wp_delete_file( $tmp );
                         }
                         $this->mark_error( new \WP_Error( 'foogallery_migrate_local_copy_failed', __( 'Unable to copy local image for migration.', 'foogallery-migrate' ) ) );
                         return;
@@ -223,7 +223,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Image' ) ) {
                     $sideload = wp_handle_sideload( $file_array, array( 'test_form' => false ) );
                     foogallery_migrate_migrator_instance()->assert_storage_writer();
                     if ( ! empty( $sideload['error'] ) ) {
-                        @unlink( $tmp );
+                        wp_delete_file( $tmp );
                         $this->mark_error( new \WP_Error( 'foogallery_migrate_sideload_failed', $sideload['error'] ) );
                         return;
                     }

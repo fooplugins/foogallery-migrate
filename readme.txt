@@ -99,6 +99,7 @@ Uninstall removes plugin-owned internal storage, including retained history and 
 == Changelog ==
 
 = 1.16.1 =
+* Used WordPress URL, randomness, text and temporary-file helpers; made pagination tolerate missing request fields and photo timestamps independent of the server timezone.
 * Hardened direct PHP-file access and escaped storage error messages; corrected translation domains, placeholders and extractable preflight messages.
 * Sorted production ZIP entries and normalized archive timestamps for consistent packaging without changing migration or storage behavior.
 * Fixed third-party gallery blocks incorrectly failing with "changed after detection" by recording exact block positions and original markup, including repeated and nested blocks. Use Rescan Content once after updating to refresh older block findings.

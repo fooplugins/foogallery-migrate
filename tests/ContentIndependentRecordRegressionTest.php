@@ -530,4 +530,7 @@ namespace FooPlugins\FooGalleryMigrate\Migrators;
 function foogallery_migrate_admin_url($tab) { return 'https://example.test/admin.php?tab='.$tab; }
 function add_query_arg($key,$value,$url) { return preg_replace('/([?&])'.preg_quote($key,'/').'=[^&#]*&?/', '$1', $url).(strpos($url,'?')===false?'?':'&').$key.'='.$value; }
 function esc_url_raw($url) { return $url; }
-function wp_get_referer() { return 'https://example.test/admin.php?content_paged=900'; }
+function wp_get_referer() {
+    return array_key_exists('foogallery_migrate_test_referer', $GLOBALS)
+        ? $GLOBALS['foogallery_migrate_test_referer'] : 'https://example.test/admin.php?content_paged=900';
+}

@@ -1450,7 +1450,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 				return wp_kses_post( $caption );
 			}
 
-			return strip_tags( $caption );
+			return wp_strip_all_tags( $caption );
 		}
 
 		/**
@@ -1992,13 +1992,16 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			$url = foogallery_migrate_admin_url( 'content' );
 			$page = 1;
 			if ( defined( 'DOING_AJAX' ) ) {
-				if ( array_key_exists( 'foogallery_content_migrate_paged', $_POST ) ) {
-					$url = esc_url_raw( wp_unslash( $_POST['foogallery_content_migrate_url'] ) );
+				if ( isset( $_POST['foogallery_content_migrate_paged'] ) && is_scalar( $_POST['foogallery_content_migrate_paged'] ) ) {
+					if ( isset( $_POST['foogallery_content_migrate_url'] ) && is_string( $_POST['foogallery_content_migrate_url'] ) ) {
+						$url = esc_url_raw( wp_unslash( $_POST['foogallery_content_migrate_url'] ) );
+					}
 					$page = absint( wp_unslash( $_POST['foogallery_content_migrate_paged'] ) );
 				} else {
-					$url = wp_get_referer();
-					if ( $url ) {
-						$parts = parse_url( $url );
+					$referer = wp_get_referer();
+					if ( is_string( $referer ) && '' !== $referer ) {
+						$url = $referer;
+						$parts = wp_parse_url( $url );
 						if ( isset( $parts['query'] ) ) {
 							parse_str( $parts['query'], $query );
 							if ( isset( $query['content_paged'] ) ) {
