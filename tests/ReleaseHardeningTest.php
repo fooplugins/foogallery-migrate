@@ -56,7 +56,7 @@ class ReleaseHardeningTest extends TestCase {
         $GLOBALS['foogallery_migrate_test_options'] = array('protected'=>'unchanged');
         try { StorageCleanup::uninstall(); $this->fail('Uninstall must abort on unknown ownership.'); }
         catch (\FooGalleryMigrateTestDie $error) {
-            $message = 'FooGallery Migrate cleanup could not establish its single-site ownership. Plugin files were retained.';
+            $message = 'FooGallery Migrate cleanup could not complete. Plugin files were retained.';
             $this->assertSame(\esc_html(\FooPlugins\FooGalleryMigrate\__($message, 'foogallery-migrate')), $error->getMessage());
             $this->assertSame(array('protected'=>'unchanged'), $GLOBALS['foogallery_migrate_test_options']);
         }

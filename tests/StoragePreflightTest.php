@@ -51,7 +51,7 @@ class StoragePreflightTest extends TestCase {
 	public function test_scope_target_confirmation_and_site_are_not_coerced_or_taken_from_request(): void {
 		foreach ( array(
 			array( 'blog_id', '8' ), array( 'blog_id', '07' ), array( 'blog_id', 7.0 ), array( 'blog_id', array( 7 ) ),
-			array( 'scope', 'network' ), array( 'target', 'option' ), array( 'target', 'wp_foogallery_migrate_legacy_state' ),
+			array( 'scope', 'network' ), array( 'target', 'option' ), array( 'target', 'wp_foogallery_migrate_state' ),
 			array( 'confirmation', true ), array( 'confirmation', '1' ), array( 'nonce', array( 'valid-nonce' ) )
 		) as $change ) {
 			$request = $this->request();

@@ -2,7 +2,6 @@
 
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
-use FooPlugins\FooGalleryMigrate\MigratedStore;
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
 use FooPlugins\FooGalleryMigrate\OptionMigratedStore;
@@ -22,7 +21,7 @@ class AigplPluginTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_plugins'] = array();
 		$GLOBALS['foogallery_migrate_test_posts'] = array();
 		$GLOBALS['foogallery_migrate_test_post_meta'] = array();
-		$GLOBALS['foogallery_migrate_engine_instance'] = new MigratorEngine( new MigratedStore( false, new MigratorSettings() ) );
+		$GLOBALS['foogallery_migrate_engine_instance'] = new MigratorEngine( new OptionMigratedStore( new MigratorSettings() ) );
 		$GLOBALS['wpdb'] = new FakeAigplWpdb();
 	}
 
@@ -154,9 +153,9 @@ class AigplPluginTest extends TestCase {
 		$this->assertSame( $before, $GLOBALS['foogallery_migrate_test_posts'], 'A completed job must not create destinations again.' );
 	}
 
-	public function test_204_image_turn_stays_bounded_with_thousands_of_migrated_records(): void {
+	public function test_five_image_option_turn_preserves_thousands_of_history_records(): void {
 		$plugin = new Aigpl();
-		$store = new MigratedStore( false, new MigratorSettings() );
+		$store = new OptionMigratedStore( new MigratorSettings() );
 		$engine = new MigratorEngine( $store );
 		$GLOBALS['foogallery_migrate_engine_instance'] = $engine;
 		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
@@ -187,22 +186,18 @@ class AigplPluginTest extends TestCase {
 		$this->assertArrayNotHasKey( 'children', $raw[ MigratorEngine::KEY_GALLERIES ]['items'][0] );
 		$this->assertSame( 204, $raw[ MigratorEngine::KEY_GALLERIES ]['items'][0]['children_count'] );
 
-		$store->reset_diagnostics();
+		$revision = $store->revision();
 		$migrator->migrate();
-		$diagnostics = $store->diagnostics();
-
-		$this->assertSame( 1, $diagnostics['write_queries'] );
-		$this->assertSame( 5, $diagnostics['rows_written'] );
-		// One bulk parent lookup plus at most one indexed lookup per five-item turn.
-		$this->assertLessThanOrEqual( 8, $diagnostics['read_queries'] );
-		$this->assertSame( 0, $diagnostics['full_history_hydrations'] );
+		// Options intentionally read the whole option. Table boundedness has its
+		// own repository tests; this checks one atomic history batch/revision.
+		$this->assertSame( $revision + 1, $store->revision() );
 		$this->assertCount( 5, $store->get_by_parent( $gallery_key ) );
 		$this->assertSame( 5005, $store->count() );
 	}
 
 	public function test_retry_targets_one_204_image_gallery_and_only_its_error_records(): void {
 		$plugin = new Aigpl();
-		$store = new MigratedStore( false, new MigratorSettings() );
+		$store = new OptionMigratedStore( new MigratorSettings() );
 		$engine = new MigratorEngine( $store );
 		$GLOBALS['foogallery_migrate_engine_instance'] = $engine;
 		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
@@ -237,21 +232,15 @@ class AigplPluginTest extends TestCase {
 		$this->assertSame( 205, $store->upsert_batch( $records ) );
 		$engine->set_migrator_setting( MigratorEngine::KEY_GALLERIES, array( $gallery ) );
 
-		$store->reset_diagnostics();
 		$this->assertTrue( $engine->retry_gallery_migration( $gallery_key ) );
-		$diagnostics = $store->diagnostics();
-
-		$this->assertLessThanOrEqual( 4, $diagnostics['read_queries'] );
-		$this->assertSame( 2, $diagnostics['write_queries'] );
-		$this->assertSame( 4, $diagnostics['rows_written'] );
-		$this->assertSame( 0, $diagnostics['full_history_hydrations'] );
+		$this->assertSame( 205, $store->count() );
 		$this->assertCount( 204, $store->get_by_parent( $gallery_key ) );
 		$this->assertSame( Migratable::PROGRESS_COMPLETED, $store->get( $gallery_key )->migration_status );
 	}
 
 	public function test_error_check_reads_and_updates_only_one_204_image_gallery(): void {
 		$plugin = new Aigpl();
-		$store = new MigratedStore( false, new MigratorSettings() );
+		$store = new OptionMigratedStore( new MigratorSettings() );
 		$engine = new MigratorEngine( $store );
 		$GLOBALS['foogallery_migrate_engine_instance'] = $engine;
 		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
@@ -280,15 +269,10 @@ class AigplPluginTest extends TestCase {
 		$this->assertSame( 205, $store->upsert_batch( $records ) );
 		$engine->set_migrator_setting( MigratorEngine::KEY_GALLERIES, array( $gallery ) );
 
-		$store->reset_diagnostics();
 		$result = $engine->check_gallery_migration_errors( $gallery_key );
-		$diagnostics = $store->diagnostics();
 
 		$this->assertSame( array( 'checked' => 204, 'errors' => 204 ), $result );
-		$this->assertLessThanOrEqual( 2, $diagnostics['read_queries'] );
-		$this->assertSame( 1, $diagnostics['write_queries'] );
-		$this->assertSame( 205, $diagnostics['rows_written'] );
-		$this->assertSame( 0, $diagnostics['full_history_hydrations'] );
+		$this->assertSame( 205, $store->count() );
 		$this->assertSame( Migratable::PROGRESS_ERROR, $store->get( $gallery_key )->migration_status );
 		$this->assertSame( Migratable::PROGRESS_ERROR, $store->get_by_parent( $gallery_key )[0]->migration_status );
 	}

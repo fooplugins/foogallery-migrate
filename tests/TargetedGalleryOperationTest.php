@@ -1,7 +1,7 @@
 <?php
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
-use FooPlugins\FooGalleryMigrate\MigratedStore;
+use FooPlugins\FooGalleryMigrate\OptionMigratedStore;
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
 use FooPlugins\FooGalleryMigrate\MigratedHistoryRepository;
@@ -231,14 +231,14 @@ class TargetOperationPlugin extends Plugin {
 	public function get_gallery_template( $gallery ) { return 'default'; }
 	public function get_gallery_settings( $gallery, $default_settings ) { return $default_settings; }
 }
-class TargetOperationStore extends MigratedStore {
+class TargetOperationStore extends OptionMigratedStore {
 	public $events;
 	public $records = array();
 	public $fail = false;
-	public function __construct( &$events ) { $this->events =& $events; }
+	public function __construct( &$events ) { parent::__construct(); $this->events =& $events; }
 	public function manages_revision() { return true; }
 	public function get_by_parent( $parent_key ) { return array(); }
-	public function upsert_batch( $records ) {
+	public function upsert_batch( $records, $companions = array() ) {
 		$this->events[] = 'history';
 		if ( $this->fail ) { return false; }
 		$this->records = $records;

@@ -153,7 +153,7 @@ class StorageSnapshotMaintenanceAdmissionTest extends TestCase {
 		$property = new \ReflectionProperty( $db, 'rows' ); $row = $property->getValue( $db )[0];
 		$property->setValue( $db, array( array_merge( $row, array( 'id' => 9, 'item_order' => 1 ) ),
 			array_merge( $row, array( 'id' => 2 ) ), $row ) );
-		$select = 'SELECT id, item_order, (OCTET_LENGTH(payload)) AS window_bytes FROM `wp_foogallery_legacy_records` WHERE parent_node_hash IS NULL AND ';
+		$select = 'SELECT id, item_order, (OCTET_LENGTH(payload)) AS window_bytes FROM `wp_foogallery_records` WHERE parent_node_hash IS NULL AND ';
 		$seek = function ( $order, $id, $limit ) use ( $db, $select ) {
 			return $db->get_results( $select . '(item_order > ' . $order . ' OR (item_order = ' . $order . ' AND id > ' . $id . ')) ORDER BY item_order ASC, id ASC LIMIT ' . $limit, ARRAY_A );
 		};
@@ -247,7 +247,7 @@ class MaintenanceAdmissionWpdb extends SnapshotTestWpdb {
 		}
 		if ( false !== strpos( $sql, 'SELECT root_payload FROM' ) ) { $this->payload_fetched = true; return array( array( 'root_payload' => $this->root ) ); }
 		if ( false !== strpos( $sql, 'AS record_count' ) ) { $this->stats_fetched = true; return array( $this->stats ); }
-		if ( 0 === strpos( $sql, 'SELECT' ) && false !== strpos( $sql, 'legacy_records`' ) ) {
+		if ( 0 === strpos( $sql, 'SELECT' ) && false !== strpos( $sql, 'records`' ) ) {
 			if ( false !== strpos( $sql, 'parent_node_hash = UNHEX' ) ) { return array(); }
 			$rows = $this->rows;
 			if ( preg_match( '/\(item_order > (\d+) OR \(item_order = (\d+) AND id > (\d+)\)\)/', $sql, $cursor ) ) {

@@ -8,7 +8,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Language-Team: FooPlugins <info@fooplugins.com>\n"
 "Last-Translator: Brad Vincent <brad@fooplugins.com>\n"
-"POT-Creation-Date: 2026-10-26 08:59+0000\n"
+"POT-Creation-Date: 2026-10-26 13:20+0000\n"
 "Report-Msgid-Bugs-To: https://fooplugins.com\n"
 "X-Poedit-Basepath: ..\n"
 "X-Poedit-KeywordsList: __;_e;_ex:1,2c;_n:1,2;_n_noop:1,2;_nx:1,2,4c;_nx_noop:1,2,3c;_x:1,2c;esc_attr__;esc_attr_e;esc_attr_x:1,2c;esc_html__;esc_html_e;esc_html_x:1,2c\n"
@@ -611,11 +611,11 @@ msgstr ""
 msgid "The connection ended. Reload to check storage before continuing."
 msgstr ""
 
-#: includes/class-storage-authority.php:28
+#: includes/class-storage-authority.php:26
 msgid "Table migration storage is supported on single-site installations only. Multisite continues to use options. No storage was changed; retain any existing table or recovery evidence for administrator assistance."
 msgstr ""
 
-#: includes/class-storage-authority.php:150
+#: includes/class-storage-authority.php:136
 msgid "Migration storage requires recovery before continuing. No migration state was changed. Retain the database and contact your site administrator; do not delete storage markers, restore the legacy history snapshot over current state, or restart migrations from stale options."
 msgstr ""
 
@@ -623,19 +623,19 @@ msgstr ""
 msgid "No approved migration storage calibration matches this runtime and implementation. No conversion was started. Retain all storage; administrator-assisted calibration is required."
 msgstr ""
 
-#: includes/class-storage-capacity-policy.php:224
+#: includes/class-storage-capacity-policy.php:226
 msgid "The bundled release storage policy is missing or invalid. Retain storage; no conversion was started."
 msgstr ""
 
 #: includes/class-storage-cleanup.php:36, includes/class-storage-cleanup.php:37
-msgid "FooGallery Migrate cleanup could not establish its single-site ownership. Plugin files were retained."
+msgid "FooGallery Migrate cleanup could not complete. Plugin files were retained."
 msgstr ""
 
 #: includes/class-storage-cleanup.php:40
 msgid "FooGallery Migrate internal cleanup is incomplete. Plugin files were retained; resolve the reported storage ownership or retry uninstall."
 msgstr ""
 
-#: includes/class-storage-cleanup.php:378
+#: includes/class-storage-cleanup.php:377
 msgid "Migration storage cleanup refused. Retain current storage and ownership evidence."
 msgstr ""
 
@@ -703,7 +703,7 @@ msgstr ""
 msgid "Schema provisioning refused. Check permission, confirmation, schema ownership and storage health; no backend switch was requested."
 msgstr ""
 
-#: includes/functions.php:82
+#: includes/functions.php:81
 msgid "Migration storage recovery required"
 msgstr ""
 

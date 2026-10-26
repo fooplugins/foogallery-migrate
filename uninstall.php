@@ -23,15 +23,9 @@ require_once FOOGM_PATH . 'includes/class-legacy-transaction-connection.php';
 require_once FOOGM_PATH . 'includes/class-legacy-option-backend.php';
 require_once FOOGM_PATH . 'includes/class-migrator-settings.php';
 require_once FOOGM_PATH . 'includes/class-storage-discovery-summary.php';
-require_once FOOGM_PATH . 'includes/class-migrated-store.php';
 require_once FOOGM_PATH . 'includes/class-storage-authority.php';
 require_once FOOGM_PATH . 'includes/class-storage-maintenance-gate.php';
 require_once FOOGM_PATH . 'includes/class-legacy-storage-schema.php';
 require_once FOOGM_PATH . 'includes/class-storage-cleanup.php';
 
-if ( function_exists( 'is_multisite' ) && is_multisite() ) {
-	// First-release multisite remains on the existing option-storage behavior.
-	\FooPlugins\FooGalleryMigrate\MigratedStore::uninstall( true );
-} else {
-	\FooPlugins\FooGalleryMigrate\StorageCleanup::uninstall();
-}
+\FooPlugins\FooGalleryMigrate\StorageCleanup::uninstall();

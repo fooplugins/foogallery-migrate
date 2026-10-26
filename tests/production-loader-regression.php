@@ -35,8 +35,7 @@ if ('native-preflight' === $mode) {
         echo json_encode(array('php' => PHP_VERSION, 'mode' => $mode, 'status' => 'pass')) . "\n";
         exit;
     }
-    loader_check(isset($activation[FOOGM_FILE]) && $activation[FOOGM_FILE] === 'foogallery_migrate_activate', 'Activation hook missing');
-    loader_check(isset($deactivation[FOOGM_FILE]) && $deactivation[FOOGM_FILE] === 'foogallery_migrate_deactivate', 'Deactivation hook missing');
+    loader_check(!$activation && !$deactivation, 'Storage-neutral lifecycle must not register redundant hooks');
     loader_check(('admin' === $mode) === isset($actions['wp_ajax_foogallery_migrate']), 'Admin init not conditional');
     loader_check(('admin' === $mode) === class_exists('FooPlugins\\FooGalleryMigrate\\Init', false), 'Init startup mismatch');
     foreach ($actions as $hook => $callback) {

@@ -89,7 +89,7 @@ const equal = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     await page.screenshot({ path: config.screenshots + '-after.png', fullPage: true });
     const after = snapshot(), newTables = Object.keys(after).filter(k => !initial[k]);
     fs.writeFileSync(config.snapshotPrefix + '-after.json', JSON.stringify(after));
-    check(equal(newTables.sort(), ['wp_foogallery_migrate_legacy_records', 'wp_foogallery_migrate_legacy_state']), 'HTTP provisioning creates only the fixed owned shared schema');
+    check(equal(newTables.sort(), ['wp_foogallery_migrate_records', 'wp_foogallery_migrate_state']), 'HTTP provisioning creates only the fixed owned shared schema');
     for (const table of Object.keys(initial)) {
       if (table === 'wp_options') continue;
       check(equal(initial[table], after[table]), 'HTTP provisioning preserves unrelated/cross-blog table: ' + table);

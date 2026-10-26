@@ -34,6 +34,16 @@ class StorageCleanupTest extends TestCase {
 	private function authorize( $action ) {
 		$GLOBALS['foogallery_migrate_test_nonce']['action'] = 'foogallery_migrate_storage_' . $action . '_1';
 	}
+	public function test_remove_all_only_drops_current_tables_and_leaves_prototype_resources_alone(): void {
+		$this->authorize( 'remove_all' );
+		$ignored = array('wp_foogallery_migrate_objects'=>true, 'wp_foogallery_migrate_legacy_state'=>true, 'wp_foogallery_migrate_legacy_records'=>true);
+		$this->db->tables = $ignored + array('wp_foogallery_migrate_state'=>true, 'wp_foogallery_migrate_records'=>true);
+		$GLOBALS['foogallery_migrate_test_options'] = array('foogallery-migrate-store-schema-version'=>1, 'unrelated'=>'keep');
+		$r = StorageCleanup::dispatch( 'remove_all', $this->request('remove_all') );
+		$this->assertTrue($r['complete'],json_encode($r));
+		$this->assertSame($ignored,$this->db->tables);
+		$this->assertSame(array('foogallery-migrate-store-schema-version'=>1,'unrelated'=>'keep'),$GLOBALS['foogallery_migrate_test_options']);
+	}
 	public function test_clear_keeps_preferences_mode_and_output_but_drops_current_state_and_cache_only_transient(): void {
 		$control = array( 'version' => 1, 'blog_id' => 1, 'backend' => 'option', 'epoch' => 1,
 			'switch_id' => str_repeat( 'a', 32 ), 'from' => 'table', 'to' => 'option', 'phase' => 'stable',
@@ -62,9 +72,9 @@ class StorageCleanupTest extends TestCase {
 	}
 	public function test_remove_all_partial_schema_failure_blocks_then_same_scope_finishes_idempotently(): void {
 		$this->authorize( 'remove_all' );
-		$this->db->tables = array( 'wp_foogallery_migrate_state' => true, 'wp_foogallery_migrate_legacy_records' => true );
+		$this->db->tables = array( 'wp_foogallery_migrate_state' => true, 'wp_foogallery_migrate_records' => true );
 		$this->db->output = array( 101 => 'source post', 202 => 'migrated attachment' );
-		$this->db->fail_drop_once = 'wp_foogallery_migrate_legacy_records';
+		$this->db->fail_drop_once = 'wp_foogallery_migrate_records';
 		$GLOBALS['foogallery_migrate_test_options'][FOOGALLERY_MIGRATE_OPTION_DATA] = 'old history';
 		$GLOBALS['foogallery_migrate_test_options'][FOOGALLERY_MIGRATE_OPTION_SETTINGS] = 'preferences';
 		$GLOBALS['foogallery_migrate_test_options'][StorageDiscoverySummary::OPTION] = array( 'old' );
@@ -75,10 +85,10 @@ class StorageCleanupTest extends TestCase {
 		$this->assertArrayHasKey( StorageAuthority::AUTHORITY_OPTION, $GLOBALS['foogallery_migrate_test_options'], 'Sentinel is last, not removed before tables.' );
 		$this->assertArrayNotHasKey( FOOGALLERY_MIGRATE_OPTION_DATA, $GLOBALS['foogallery_migrate_test_options'] );
 		$this->assertArrayNotHasKey( StorageDiscoverySummary::OPTION, $GLOBALS['foogallery_migrate_test_options'] );
-		$this->assertArrayHasKey( 'wp_foogallery_migrate_legacy_records', $this->db->tables );
+		$this->assertArrayHasKey( 'wp_foogallery_migrate_records', $this->db->tables );
 		$this->assertContains( StorageCleanup::MARKER, $first['residual'] );
 		$this->assertContains( StorageAuthority::AUTHORITY_OPTION, $first['residual'] );
-		$this->assertContains( 'wp_foogallery_migrate_legacy_records', $first['residual'] );
+		$this->assertContains( 'wp_foogallery_migrate_records', $first['residual'] );
 		$second = StorageCleanup::dispatch( 'remove_all', $this->request( 'remove_all' ) );
 		$this->assertTrue( $second['complete'], json_encode( $second ) );
 		$this->assertSame( array(), $this->db->tables );

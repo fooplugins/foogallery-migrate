@@ -31,14 +31,32 @@ class StorageCleanup {
 
 	/** Uninstall has WordPress's own authorization, not an admin nonce. */
 	public static function uninstall() {
-		if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) || is_multisite() ) { return self::error( 'invalid_request' ); }
-		try { $result = ( new self() )->run( 'remove_all' ); }
-		catch ( \Exception $error ) { wp_die( esc_html__( 'FooGallery Migrate cleanup could not establish its single-site ownership. Plugin files were retained.', 'foogallery-migrate' ) ); return self::error( 'recovery_required' ); }
-		catch ( \Throwable $error ) { wp_die( esc_html__( 'FooGallery Migrate cleanup could not establish its single-site ownership. Plugin files were retained.', 'foogallery-migrate' ) ); return self::error( 'recovery_required' ); }
+		if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) ) { return self::error( 'invalid_request' ); }
+		try { $result = is_multisite() ? self::uninstall_multisite_options() : ( new self() )->run( 'remove_all' ); }
+		catch ( \Exception $error ) { wp_die( esc_html__( 'FooGallery Migrate cleanup could not complete. Plugin files were retained.', 'foogallery-migrate' ) ); return self::error( 'recovery_required' ); }
+		catch ( \Throwable $error ) { wp_die( esc_html__( 'FooGallery Migrate cleanup could not complete. Plugin files were retained.', 'foogallery-migrate' ) ); return self::error( 'recovery_required' ); }
 		// WordPress proceeds to remove plugin files when uninstall.php returns.
 		// A bounded cleanup yield or any refusal must therefore abort deletion.
 		if ( empty( $result['complete'] ) ) { wp_die( esc_html__( 'FooGallery Migrate internal cleanup is incomplete. Plugin files were retained; resolve the reported storage ownership or retry uninstall.', 'foogallery-migrate' ) ); }
 		return $result;
+	}
+
+	/** Multisite remains option-only. Never provision, inspect or drop tables here. */
+	private static function uninstall_multisite_options() {
+		$complete = true;
+		$absent = new \stdClass();
+		foreach ( get_sites( array( 'fields' => 'ids', 'number' => 0 ) ) as $blog ) {
+			switch_to_blog( $blog );
+			try {
+				foreach ( array( FOOGALLERY_MIGRATE_OPTION_DATA, FOOGALLERY_MIGRATE_OPTION_SETTINGS, StorageDiscoverySummary::OPTION ) as $name ) {
+					delete_option( $name );
+					if ( $absent !== get_option( $name, $absent ) ) { $complete = false; }
+				}
+			} catch ( \Exception $error ) { restore_current_blog(); throw $error; }
+			catch ( \Throwable $error ) { restore_current_blog(); throw $error; }
+			restore_current_blog();
+		}
+		return array( 'complete' => $complete );
 	}
 
 	public static function quiescent() {
@@ -87,16 +105,11 @@ class StorageCleanup {
 				$this->required( $this->gate->release_maintenance(), 'maintenance release' );
 				return $this->receipt;
 			}
-			$this->delete_option( MigratedStore::LEGACY_BACKUP_OPTION );
 			$this->delete_option( StorageAuthority::STORAGE_BACKUP_OPTION );
-			$this->delete_option( 'foogallery_migrate_storage' );
 			$this->delete_option( StorageDiscoverySummary::OPTION );
 			if ( 'clear' === $action ) {
 				$this->clear_option();
 				$this->delete_rows();
-				$this->drop_old_tables();
-				$this->delete_option( MigratedStore::SCHEMA_OPTION );
-				$this->delete_option( MigratedStore::MIGRATION_OPTION );
 			} else {
 				$this->delete_option( FOOGALLERY_MIGRATE_OPTION_DATA );
 				$this->delete_option( FOOGALLERY_MIGRATE_OPTION_SETTINGS );
@@ -104,8 +117,6 @@ class StorageCleanup {
 				// Mode evidence is retired only after both backends are gone.
 				$this->delete_option( StorageAuthority::AUTHORITY_OPTION );
 				$this->delete_option( StorageAuthority::CONTROL_OPTION );
-				$this->delete_option( MigratedStore::SCHEMA_OPTION );
-				$this->delete_option( MigratedStore::MIGRATION_OPTION );
 				$this->delete_option( LegacyStorageSchema::VERSION_OPTION );
 			}
 			$this->audit( $action );
@@ -130,8 +141,7 @@ class StorageCleanup {
 		try {
 			$db = $this->gate->connection();
 			$names = array( self::MARKER, StorageAuthority::MAINTENANCE_OPTION,
-				MigratedStore::LEGACY_BACKUP_OPTION, StorageAuthority::STORAGE_BACKUP_OPTION, 'foogallery_migrate_storage',
-				MigratedStore::SCHEMA_OPTION, MigratedStore::MIGRATION_OPTION, StorageDiscoverySummary::OPTION );
+				StorageAuthority::STORAGE_BACKUP_OPTION, StorageDiscoverySummary::OPTION );
 			if ( 'remove_all' === $action ) { $names = array_merge( $names, array( FOOGALLERY_MIGRATE_OPTION_DATA,
 				FOOGALLERY_MIGRATE_OPTION_SETTINGS, StorageAuthority::AUTHORITY_OPTION, StorageAuthority::CONTROL_OPTION,
 				LegacyStorageSchema::VERSION_OPTION, LegacyStorageSchema::LOCK_OPTION ) ); }
@@ -145,7 +155,7 @@ class StorageCleanup {
 				if ( ! empty( $db->last_error ) ) { throw new \RuntimeException( 'Residual state probe unavailable.' ); }
 				if ( null !== $hash && $hash !== hash( 'sha256', serialize( array() ) ) ) { $this->receipt['residual'][] = FOOGALLERY_MIGRATE_OPTION_DATA . ':state'; }
 			}
-			$tables = array( $db->prefix . MigratedStore::TABLE_SUFFIX, $db->prefix . StorageAuthority::STATE_TABLE_SUFFIX );
+			$tables = array();
 			if ( 'remove_all' === $action ) { $tables[] = $db->base_prefix . StorageAuthority::SHARED_RECORDS_TABLE_SUFFIX;
 				$tables[] = $db->base_prefix . StorageAuthority::SHARED_STATE_TABLE_SUFFIX; }
 			foreach ( $tables as $table ) {
@@ -311,11 +321,7 @@ class StorageCleanup {
 			$this->receipt[(int) $count ? 'removed' : 'absent'][] = $table . ':site-rows';
 		}
 	}
-	private function drop_old_tables() {
-		foreach ( array( MigratedStore::TABLE_SUFFIX, StorageAuthority::STATE_TABLE_SUFFIX ) as $suffix ) { $this->drop_table( $this->db->prefix . $suffix ); }
-	}
 	private function drop_all_tables() {
-		$this->drop_old_tables();
 		foreach ( array( StorageAuthority::SHARED_RECORDS_TABLE_SUFFIX, StorageAuthority::SHARED_STATE_TABLE_SUFFIX ) as $suffix ) { $this->drop_table( $this->db->base_prefix . $suffix ); }
 	}
 	private function drop_table( $table ) {
@@ -325,7 +331,7 @@ class StorageCleanup {
 		$this->receipt[$had ? 'removed' : 'absent'][] = $table;
 	}
 	private function audit( $action ) {
-		foreach ( array( MigratedStore::LEGACY_BACKUP_OPTION, StorageAuthority::STORAGE_BACKUP_OPTION, 'foogallery_migrate_storage', StorageDiscoverySummary::OPTION ) as $name ) {
+		foreach ( array( StorageAuthority::STORAGE_BACKUP_OPTION, StorageDiscoverySummary::OPTION ) as $name ) {
 			if ( $this->present( $name ) ) { $this->receipt['residual'][] = $name; }
 		}
 		if ( 'clear' === $action ) {
@@ -335,22 +341,15 @@ class StorageCleanup {
 				$hash = $this->scalar( $this->connection()->prepare( 'SELECT SHA2(option_value,256) FROM `' . $this->options . '` WHERE option_name=%s', array( FOOGALLERY_MIGRATE_OPTION_DATA ) ) );
 				if ( null !== $hash && $hash !== hash( 'sha256', $empty ) || null !== $control && null === $hash ) { $this->receipt['residual'][] = FOOGALLERY_MIGRATE_OPTION_DATA; }
 			} elseif ( null !== $control && $this->present( FOOGALLERY_MIGRATE_OPTION_DATA ) ) { $this->receipt['residual'][] = FOOGALLERY_MIGRATE_OPTION_DATA; }
-			foreach ( array( MigratedStore::TABLE_SUFFIX, StorageAuthority::STATE_TABLE_SUFFIX ) as $suffix ) {
-				if ( $this->table_present( $this->db->prefix . $suffix ) ) { $this->receipt['residual'][] = $this->db->prefix . $suffix; }
-			}
-			foreach ( array( MigratedStore::SCHEMA_OPTION, MigratedStore::MIGRATION_OPTION ) as $name ) {
-				if ( $this->present( $name ) ) { $this->receipt['residual'][] = $name; }
-			}
 			foreach ( array( StorageAuthority::SHARED_RECORDS_TABLE_SUFFIX, StorageAuthority::SHARED_STATE_TABLE_SUFFIX ) as $suffix ) {
 				$table = $this->db->base_prefix . $suffix;
 				if ( $this->table_present( $table ) && '0' !== (string) $this->scalar( $this->connection()->prepare( 'SELECT COUNT(*) FROM `' . $table . '` WHERE blog_id=%d', array( $this->blog ) ) ) ) { $this->receipt['residual'][] = $table; }
 			}
 		} else {
 			foreach ( array( FOOGALLERY_MIGRATE_OPTION_DATA, FOOGALLERY_MIGRATE_OPTION_SETTINGS, StorageAuthority::CONTROL_OPTION,
-				StorageAuthority::AUTHORITY_OPTION, MigratedStore::SCHEMA_OPTION, MigratedStore::MIGRATION_OPTION,
+				StorageAuthority::AUTHORITY_OPTION,
 				LegacyStorageSchema::VERSION_OPTION ) as $name ) { if ( $this->present( $name ) ) { $this->receipt['residual'][] = $name; } }
-			foreach ( array( MigratedStore::TABLE_SUFFIX, StorageAuthority::STATE_TABLE_SUFFIX,
-				StorageAuthority::SHARED_STATE_TABLE_SUFFIX, StorageAuthority::SHARED_RECORDS_TABLE_SUFFIX ) as $suffix ) {
+			foreach ( array( StorageAuthority::SHARED_STATE_TABLE_SUFFIX, StorageAuthority::SHARED_RECORDS_TABLE_SUFFIX ) as $suffix ) {
 				if ( $this->table_present( $this->db->base_prefix . $suffix ) ) { $this->receipt['residual'][] = $suffix; }
 			}
 		}

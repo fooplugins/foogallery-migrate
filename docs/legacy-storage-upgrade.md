@@ -18,6 +18,17 @@
 
 ## Decision
 
+**26 October 2026 cleanup:** The unused PR #15 prototype `MigratedStore` and its
+no-op activation/deactivation wrappers are retired. `OptionMigratedStore` is now
+standalone; the current history facade continues to select option or table
+storage. Current table names are `{base_prefix}foogallery_migrate_state` and
+`{base_prefix}foogallery_migrate_records`, without `legacy`. Existing authority,
+schema verification, conversion and cleanup checks still apply. There is no
+compatibility migration, rename or cleanup for unreleased prototype resources
+or the previous table names, as agreed with Brad. The test site is unchanged.
+Historical checkpoints below describe the code at their stated dates; current
+cleanup evidence is recorded in [the retirement validation](release-testing/history-store-retirement.md).
+
 Upgrade storage before undertaking any new migration-engine work.
 
 The existing option-backed behavior remains the default. Reuse the storage contracts, option/table implementations, and switching infrastructure already introduced by PR #15. Exercise a real single-site migration journey immediately in a disposable environment, then complete bounded access and essential cleanup before release. Multisite table support is deferred backlog, not an automatic next milestone or a first-release gate. Do not restart the extraction or introduce a replacement engine.
@@ -133,7 +144,7 @@ Source entry points: [table repository](../includes/class-legacy-table-repositor
 This list records the original blockers at `206655c`, not the current remaining backlog. R0–R4 implementation and qualification have since passed within the approved scope; final implementation is committed locally in `57103ca`. Current evidence, limits and commit identities live in [the execution tracker](dev-plan.md), not this historical inventory. Deferred network/engine/advisor work is not an unfinished first-release requirement.
 
 1. **Run the journey and classify the baseline (R0).** Prepare one owned disposable runner and attempt the public customer path immediately. Record its first failure and classify suite failures as product/safety/performance, environment, or superseded implementation diagnostics. Historical focused passes do not certify this head.
-2. **Make one integrated candidate testable (R1 / M1).** The shipped [capacity policy](../includes/storage-capacity-policy.json) has empty classes and null digests, so public conversion refuses. Establish a small evidenced release policy without customer calibration, then fix the first failing migration/edit/reversal/cleanup step. [Uninstall](../uninstall.php) still requires excluded `vendor/autoload.php`; [MigratedStore](../includes/class-migrated-store.php) targets the older table layout. Complete essential single-site cleanup/package loading as part of the journey, not after UI polish. Use real SQL/runtime-floor/source+ZIP evidence, not an injected policy.
+2. **Make one integrated candidate testable (R1 / M1).** At this historical checkpoint the shipped [capacity policy](../includes/storage-capacity-policy.json) had empty classes and null digests, so public conversion refused. Establish a small evidenced release policy without customer calibration, then fix the first failing migration/edit/reversal/cleanup step. Uninstall then required excluded `vendor/autoload.php`; the now-retired `MigratedStore` targeted the older table layout. Complete essential single-site cleanup/package loading as part of the journey, not after UI polish. Use real SQL/runtime-floor/source+ZIP evidence, not an injected policy.
 3. **Finish remaining supported bounded paths and safety (R2).** History `get_all()`, `log_page()` and `get_by_parent()` remain option-only; valid-URL table lookup is unsupported. Gallery/album reads and `replace_collection()` still reconstruct whole collections; the image-tag builder loads whole history. Complete page/query/affected-tree/queue access and remaining content consumers while preserving identities, ordering, revisions, atomic checkpoints and legacy behavior. Admission caps do not prove page-size scaling.
 4. **Finish the minimal operator workflow (R3).** Add the basic size suggestion, explicit confirmation, status/errors and essential cleanup controls. Reuse existing admin/CLI services. Do not make advanced notices, separate reset/stale-copy buttons or a command matrix prerequisites.
 5. **Accept the first release (R4 / M2).** Validate all supported flows, safety, memory scaling, maintained tests and the actual ZIP on applicable runtimes. Keep multisite options working and table operations rejected. No general table-mode rollout before M2.
@@ -428,7 +439,7 @@ Retain existing PR resource names; R0 reconciles this original inventory with ac
 - New installation-wide resources: `foogallery_migrate_storage_schema_version` and `foogallery_migrate_storage_schema_lock`, stored as regular options in the main site's options table so `option_name` uniqueness can arbitrate lock acquisition.
 - Deferred per-network resource: a bounded/chunked `foogallery_migrate_storage_sites_` site registry; do not introduce it for the first release.
 - Existing transient prefix: `foogallery_migrate_content_result_`, including timeout rows.
-- New tables: `{base_prefix}foogallery_migrate_legacy_state` and `{base_prefix}foogallery_migrate_legacy_records`.
+- New tables: `{base_prefix}foogallery_migrate_state` and `{base_prefix}foogallery_migrate_records`.
 
 The notice resource is likewise not required for the basic advisor. Any owned artifact that actually exists must be covered by cleanup; do not create a deferred resource merely to satisfy this inventory. If implementation changes a name, this list, the lifecycle resource manifest, and cleanup tests must change together.
 
@@ -452,10 +463,11 @@ The original option-only extraction is already present in PR #15. Verify its log
 
 Retain the two PR plugin-owned tables based on `$wpdb->base_prefix`, including their `blog_id` scoping. They are provisioned/used only on single-site for this release:
 
-- `{base_prefix}foogallery_migrate_legacy_state`
-- `{base_prefix}foogallery_migrate_legacy_records`
+- `{base_prefix}foogallery_migrate_state`
+- `{base_prefix}foogallery_migrate_records`
 
-The `legacy` qualifier is intentional. These tables persist the current engine's state; they must not be reused as a future engine ledger.
+These tables persist the current engine's state. Their names do not include an
+engine-version qualifier; a future engine's storage design remains separate work.
 
 On a non-multisite installation, `$wpdb->base_prefix` and `$wpdb->prefix` are equivalent. The schema can support future shared-network use without a rename; that capability does not enable multisite table mode now.
 

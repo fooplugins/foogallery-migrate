@@ -173,7 +173,7 @@ try {
 	$check( $query_count === count( $lost->reads ) + count( $lost->writes ), 'Tainted repository sends no subsequent SQL' );
 	$limited = new FooGMRepositoryProbe( $wpdb );
 	$expect_refusal( function () use ( $limited ) { ( new LegacyTableRepository( $limited, 1, 100, 5000 ) )->root( 'history', 'untouched' ); }, 'Oversized root is refused from byte metadata' );
-	$payload_reads = array_filter( $limited->reads, function ( $sql ) { return false !== strpos( $sql, '`payload`' ) && false !== strpos( $sql, 'legacy_records' ); } );
+	$payload_reads = array_filter( $limited->reads, function ( $sql ) { return false !== strpos( $sql, '`payload`' ) && false !== strpos( $sql, 'records' ); } );
 	$check( ! $payload_reads, 'Oversized root refusal occurs before any LONGTEXT record fetch' );
 	$checkpoint = $wpdb->get_row( "SELECT id, HEX(snapshot_digest) AS digest FROM `{$tables['state']}` WHERE blog_id=1 AND state_order=1", ARRAY_A );
 	$wpdb->query( "UPDATE `{$tables['state']}` SET snapshot_digest=UNHEX('" . str_repeat( '0', 64 ) . "') WHERE id=" . (int) $checkpoint['id'] );

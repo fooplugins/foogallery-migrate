@@ -214,6 +214,7 @@ class LegacyTableReader {
 	}
 
 	private function fail( $message ) {
+		// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- All private call sites supply fixed diagnostic literals, not SQL results or input; this constructs an exception, not markup.
 		throw new \RuntimeException( 'Legacy storage reader: ' . $message );
 	}
 }

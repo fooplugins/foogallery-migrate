@@ -173,18 +173,14 @@ $r2j_fixed_options = array( FOOGALLERY_MIGRATE_OPTION_DATA,
 	StorageAuthority::CONTROL_OPTION, StorageAuthority::AUTHORITY_OPTION,
 	StorageAuthority::MAINTENANCE_OPTION, StorageAuthority::CLEANUP_OPTION,
 	StorageAuthority::STORAGE_BACKUP_OPTION, LegacyStorageSchema::VERSION_OPTION,
-	LegacyStorageSchema::LOCK_OPTION, 'foogallery-migrate-settings',
-	'foogallery-migrate-migrated-legacy-backup', 'foogallery_migrate_storage',
-	'foogallery-migrate-store-schema-version', 'foogallery-migrate-store-migration-version' );
+	LegacyStorageSchema::LOCK_OPTION, 'foogallery-migrate-settings' );
 $r2j_schema = new LegacyStorageSchema( $wpdb );
 $r2j_assert_pristine = function () use ( $r2j_raw, $r2j_fixed_options, $r2j_schema,
 	$wpdb, $r2j_owned_posts, $r2j_dir ) {
 	foreach ( $r2j_fixed_options as $name ) {
 		r2j_check( null === $r2j_raw( $name ), 'Existing migration option/marker forbids R2j seed: ' . $name );
 	}
-	$tables = array_unique( array_merge( array_keys( $r2j_schema->definitions() ),
-		array( $wpdb->prefix . 'foogallery_migrate_objects',
-			$wpdb->prefix . 'foogallery_migrate_state' ) ) );
+	$tables = array_keys( $r2j_schema->definitions() );
 	foreach ( $tables as $table ) {
 		$found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
 		r2j_check( ! $wpdb->last_error && null === $found, 'Existing storage table forbids R2j seed.' );

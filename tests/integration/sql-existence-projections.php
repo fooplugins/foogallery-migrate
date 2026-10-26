@@ -1,6 +1,5 @@
 <?php
 /** Real WordPress/SQL presence regression; run only in an admitted disposable fixture. */
-use FooPlugins\FooGalleryMigrate\MigratedStore;
 use FooPlugins\FooGalleryMigrate\StorageAuthority;
 use FooPlugins\FooGalleryMigrate\Plugins\Aigpl;
 use FooPlugins\FooGalleryMigrate\Plugins\Envira;
@@ -24,7 +23,6 @@ if ( ! ( $handle instanceof mysqli ) || false !== StorageAuthority::option_mode_
 $definitions = array(
 	$wpdb->base_prefix . StorageAuthority::SHARED_STATE_TABLE_SUFFIX => 'blog_id bigint NOT NULL',
 	$wpdb->base_prefix . StorageAuthority::SHARED_RECORDS_TABLE_SUFFIX => 'blog_id bigint NOT NULL',
-	$wpdb->prefix . MigratedStore::TABLE_SUFFIX => 'object_key varchar(191) NOT NULL, payload longtext NOT NULL',
 	$wpdb->prefix . Nextgen::NEXTGEN_TABLE_GALLERY => 'gid bigint NOT NULL',
 	$wpdb->prefix . Nextgen::NEXTGEN_TABLE_PICTURES => 'pid bigint NOT NULL',
 	$wpdb->prefix . Photo::FM_PHOTO_TABLE_GALLERY => 'id bigint NOT NULL',
@@ -72,12 +70,6 @@ try {
 		$table = $wpdb->base_prefix . $suffix;
 		$sql( 'INSERT INTO `' . $table . '` VALUES (999999)' );
 	}
-	// The PR15 object table itself correctly blocks option authority, even while empty.
-	$object_table = $wpdb->prefix . MigratedStore::TABLE_SUFFIX;
-	$sql( 'DROP TABLE `' . $object_table . '`' );
-	$created = array_values( array_diff( $created, array( $object_table ) ) );
-	// DDL committed the initial rows; all tables remain exclusively owned and are dropped below.
-	$sql( 'START TRANSACTION' );
 	$check( false === StorageAuthority::option_mode_error(), 'authority ignores only other-blog rows' );
 	foreach ( array( StorageAuthority::SHARED_STATE_TABLE_SUFFIX, StorageAuthority::SHARED_RECORDS_TABLE_SUFFIX ) as $suffix ) {
 		$table = $wpdb->base_prefix . $suffix;
@@ -87,13 +79,6 @@ try {
 		$sql( 'DELETE FROM `' . $table . '` WHERE blog_id = ' . (int) get_current_blog_id() );
 		$check( false === StorageAuthority::option_mode_error(), $suffix . ' absent current-blog rows allow options' );
 	}
-	// Build the owned presence-only store table before restarting the pinned transaction.
-	$sql( 'CREATE TABLE `' . $object_table . '` (' . $definitions[$object_table] . ') ENGINE=InnoDB' ); $created[] = $object_table;
-	$sql( 'START TRANSACTION' );
-	$store = new MigratedStore( $wpdb );
-	$check( false === $store->has( 'sql-existence-owned' ), 'store missing row is false' );
-	$sql( "INSERT INTO `" . $object_table . "` VALUES ('sql-existence-owned', 'invalid payload proves existence shortcut')" );
-	$check( true === $store->has( 'sql-existence-owned' ), 'store present row is true without hydration' );
 	foreach ( $post_plugins as $entry ) {
 		$plugin = $entry[0]; $type = $entry[1];
 		$check( false === $plugin->detect(), $plugin->name() . ' absent source is false' );

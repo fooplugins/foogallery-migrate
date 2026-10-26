@@ -22,13 +22,13 @@ class ContentSentinelConversionRegressionTest extends StorageByteDomainAccountin
         $this->assertSame('map',$db->head['state_kind']); $this->assertSame(0,$db->head['record_count']);
         $state=(new \FooPlugins\FooGalleryMigrate\LegacyTableSnapshot($db,7))->read_bounded(ContentScanRepository::STATE_KEY);
         $this->assertSame(array('items'=>array(),'progress'=>array()),$state);
-        $windows=array_values(array_filter($db->queries,function($sql) { return strpos($sql,' AS window_bytes FROM `wp_foogallery_migrate_legacy_records`')!==false; }));
+        $windows=array_values(array_filter($db->queries,function($sql) { return strpos($sql,' AS window_bytes FROM `wp_foogallery_migrate_records`')!==false; }));
         $this->assertNotEmpty($windows,'The empty map must be read through the real keyset window.');
         $window=end($windows);
         foreach (array(
             str_replace('blog_id = 7','blog_id = 8',$window),
             str_replace('LIMIT 32','LIMIT 31',$window),
-            'SELECT id FROM `wp_foogallery_migrate_legacy_records` ORDER BY id ASC',
+            'SELECT id FROM `wp_foogallery_migrate_records` ORDER BY id ASC',
         ) as $unsupported) {
             try { $db->get_results($unsupported,ARRAY_A); $this->fail('The sentinel SQL double accepted an unsupported or wrong-scope query.'); }
             catch (\RuntimeException $error) { $this->assertStringContainsString('Unsupported sentinel host rows',$error->getMessage()); }
@@ -158,7 +158,7 @@ class SentinelRoundtripConnection extends CoordinatorSourceConnection {
         if (strpos($sql,'SHOW ')===0 || strpos($sql,'SELECT @@SESSION.autocommit')===0 || strpos($sql,'FROM information_schema.TABLES')!==false) { return parent::get_results($sql,$format); }
         if (strpos($sql,'MAX(state_order)')!==false) { return array(array('last_order'=>null)); }
         if (strpos($sql,'SELECT 1 AS present FROM `wp_options`')===0) { $args=$this->bindings[$sql]; return isset($this->options[$args[0]])?array(array('present'=>1)):array(); }
-        if (strpos($sql,' AS window_bytes FROM `wp_foogallery_migrate_legacy_records`')!==false) {
+        if (strpos($sql,' AS window_bytes FROM `wp_foogallery_migrate_records`')!==false) {
             $head=$this->head;
             if (!is_array($head) || 0!==$head['record_count']) { throw new \RuntimeException('Unsupported sentinel host rows: '.$sql); }
             // A new head has active_generation=0 until the empty generation 1 is committed.
@@ -166,7 +166,7 @@ class SentinelRoundtripConnection extends CoordinatorSourceConnection {
             $args=array(7,$head['id'],$generation,0,0,0,32);
             $template='SELECT id, item_order, (OCTET_LENGTH(payload) + OCTET_LENGTH(mutable_payload) + OCTET_LENGTH(key_value) + '
                 .'COALESCE(OCTET_LENGTH(legacy_identifier_value),0) + COALESCE(OCTET_LENGTH(source_plugin_value),0) + '
-                .'COALESCE(OCTET_LENGTH(source_id_value),0)) AS window_bytes FROM `wp_foogallery_migrate_legacy_records` '
+                .'COALESCE(OCTET_LENGTH(source_id_value),0)) AS window_bytes FROM `wp_foogallery_migrate_records` '
                 .'WHERE blog_id = %d AND state_id = %d AND generation = %d AND parent_node_hash IS NULL '
                 .'AND (item_order > %d OR (item_order = %d AND id > %d)) ORDER BY item_order ASC, id ASC LIMIT %d';
             if (!isset($this->bindings[$sql]) || $this->bindings[$sql]!==$args || $sql!==parent::prepare($template,$args)) {
@@ -178,7 +178,7 @@ class SentinelRoundtripConnection extends CoordinatorSourceConnection {
         if (strpos($sql,' AS key_value, state_order')!==false) { return null===$this->head?array():array($this->summary()); }
         if (strpos($sql,'SELECT root_payload')===0) { return array(array('root_payload'=>$this->head['root_payload'])); }
         if (strpos($sql,'HEX(snapshot_digest) AS digest')!==false) { return array(array('digest'=>$this->head['snapshot_digest'],'digest_revision'=>$this->head['digest_revision'],'digest_status'=>$this->head['digest_status'])); }
-        if (strpos($sql,'_legacy_state`')!==false) {
+        if (strpos($sql,'_state`')!==false) {
             if (null===$this->head) { return array(); }
             $head=$this->head; $head['root_payload_bytes']=strlen($head['root_payload']); $head['snapshot_digest']=strtoupper($head['snapshot_digest']); return array($head);
         }
@@ -189,12 +189,12 @@ class SentinelRoundtripConnection extends CoordinatorSourceConnection {
         if (in_array($sql,array('START TRANSACTION','COMMIT','ROLLBACK','SET TRANSACTION ISOLATION LEVEL REPEATABLE READ'),true)) { return 0; }
         $args=null;
         foreach ($this->bindings as $query=>$values) { if (strpos($sql,$query)===0 && (null===$args || strlen($query)>$length)) { $args=$values; $length=strlen($query); } }
-        if (strpos($sql,'INSERT INTO `wp_foogallery_migrate_legacy_state`')===0) {
+        if (strpos($sql,'INSERT INTO `wp_foogallery_migrate_state`')===0) {
             $this->head=array('id'=>++$this->insert_id,'blog_id'=>$args[0],'state_key_hash'=>$args[1],'state_key_value'=>$args[2],
                 'state_order'=>$args[3],'state_kind'=>$args[4],'active_generation'=>$args[5],'revision'=>$args[6],'codec_version'=>$args[7],
                 'digest_status'=>$args[11],'root_payload'=>$args[12],'snapshot_digest'=>'','record_count'=>0,'payload_bytes'=>0,'digest_revision'=>0); return 1;
         }
-        if (strpos($sql,'UPDATE `wp_foogallery_migrate_legacy_state` SET active_generation')===0) {
+        if (strpos($sql,'UPDATE `wp_foogallery_migrate_state` SET active_generation')===0) {
             foreach (array('active_generation','revision','state_order','state_kind','codec_version','record_count','payload_bytes','snapshot_digest','digest_revision','root_payload') as $i=>$key) { $this->head[$key]=$args[$i]; } $this->head['digest_status']='current'; return 1;
         }
         if (strpos($sql,'INSERT INTO `wp_options`')===0) { if (isset($this->options[$args[0]])) { return 0; } $this->options[$args[0]]=$args[1]; return 1; }

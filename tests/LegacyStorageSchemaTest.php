@@ -10,7 +10,7 @@ class LegacyStorageSchemaTest extends TestCase {
 		$db->prefix = 'wp_7_';
 		$schema = new LegacyStorageSchema( $db );
 		$definitions = $schema->definitions();
-		$this->assertSame( array( 'wp_foogallery_migrate_legacy_state', 'wp_foogallery_migrate_legacy_records' ), array_keys( $definitions ) );
+		$this->assertSame( array( 'wp_foogallery_migrate_state', 'wp_foogallery_migrate_records' ), array_keys( $definitions ) );
 		$this->assertSame( array(), $db->reads );
 		$this->assertCount( 2, $schema->statements() );
 		foreach ( $schema->statements() as $sql ) {

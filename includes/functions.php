@@ -7,7 +7,6 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
-use FooPlugins\FooGalleryMigrate\MigratedStore;
 
 /**
  * Custom Autoloader used throughout FooGallery Migrate
@@ -85,54 +84,6 @@ function foogallery_migrate_migrator_instance() {
     }
 
     return $foogallery_migrate_engine_instance;
-}
-
-/**
- * Installs/upgrades and migrates the current site's dedicated object store.
- *
- * @return bool
- */
-function foogallery_migrate_install_store_current_site() {
-    return MigratedStore::install_current_site();
-}
-
-/**
- * Activates the store for one site or every site in a network.
- *
- * @param bool $network_wide Whether the plugin is network activated.
- * @return void
- */
-function foogallery_migrate_activate( $network_wide = false ) {
-    MigratedStore::activate( $network_wide );
-}
-
-/**
- * Retains all migration state for later reactivation and resume.
- *
- * @param bool $network_wide Whether the plugin is network deactivated.
- * @return void
- */
-function foogallery_migrate_deactivate( $network_wide = false ) {
-    MigratedStore::deactivate( $network_wide );
-}
-
-/**
- * Runs inexpensive schema/version checks on admin requests.
- *
- * @return void
- */
-function foogallery_migrate_upgrade_store() {
-    // Automatic conversion is forbidden. Kept for compatibility with old hooks.
-}
-
-/**
- * Removes store-owned data for one site or every site in a network.
- *
- * @param bool $network_wide Whether the plugin is network active.
- * @return void
- */
-function foogallery_migrate_uninstall( $network_wide = false ) {
-    MigratedStore::uninstall( $network_wide );
 }
 
 function foogallery_migrate_array_to_table($arr, $first=true, $sub_arr=false){

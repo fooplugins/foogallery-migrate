@@ -182,14 +182,10 @@ $verify_real = function ( $state ) use ( $uploads, $raw, $manifest, $wpdb ) {
 $fixed_options = array( 'foogallery-migrate-data', 'foogallery-migrate-settings',
 	'foogallery_migrate_storage_control', 'foogallery_migrate_storage_authority',
 	'foogallery_migrate_storage_maintenance', 'foogallery_migrate_storage_cleanup',
-	'foogallery-migrate-data-storage-backup', 'foogallery_migrate_storage',
-	'foogallery-migrate-store-schema-version', 'foogallery-migrate-store-migration-version',
-	'foogallery-migrate-migrated-legacy-backup', 'foogallery_migrate_storage_schema_version',
+	'foogallery-migrate-data-storage-backup', 'foogallery_migrate_storage_schema_version',
 	'foogallery_migrate_storage_schema_lock' );
-$fixed_tables = array( $wpdb->prefix . 'foogallery_migrate_objects',
-	$wpdb->prefix . 'foogallery_migrate_state',
-	$wpdb->base_prefix . 'foogallery_migrate_legacy_state',
-	$wpdb->base_prefix . 'foogallery_migrate_legacy_records' );
+$fixed_tables = array( $wpdb->base_prefix . 'foogallery_migrate_state',
+	$wpdb->base_prefix . 'foogallery_migrate_records' );
 $no_internal = function () use ( $fixed_options, $fixed_tables, $raw, $table_exists, $wpdb ) {
 	foreach ( $fixed_options as $name ) {
 		floor_cleanup_check( null === $raw( $name ), 'Internal option remains: ' . $name );

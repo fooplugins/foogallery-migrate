@@ -93,7 +93,7 @@ class SnapshotReadAdmissionWpdb extends SnapshotTestWpdb {
 		}
 		if ( false !== strpos( $sql, 'AS record_count' ) ) { return array( $this->stats ); }
 		if ( false !== strpos( $sql, 'SELECT root_payload FROM' ) ) { return array( array( 'root_payload' => $this->root ) ); }
-		if ( false !== strpos( $sql, 'legacy_records`' ) ) {
+		if ( false !== strpos( $sql, 'records`' ) ) {
 			if ( false !== strpos( $sql, 'ORDER BY item_order ASC, id ASC' ) ) {
 				$metadata = 0 === strpos( $sql, 'SELECT id, item_order,' ); $parent = null;
 				if ( preg_match( '/parent_node_hash = UNHEX\(\'([a-f0-9]+)\'\)/', $sql, $m ) ) { $parent = $m[1]; }

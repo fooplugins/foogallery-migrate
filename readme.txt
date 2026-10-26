@@ -99,6 +99,7 @@ Uninstall removes plugin-owned internal storage, including retained history and 
 == Changelog ==
 
 = 1.16.1 =
+* Removed the unused prototype history store and its lifecycle code; made option history independent and simplified current table names to foogallery_migrate_state and foogallery_migrate_records.
 * Used WordPress URL, randomness, text and temporary-file helpers; made pagination tolerate missing request fields and photo timestamps independent of the server timezone.
 * Hardened direct PHP-file access and escaped storage error messages; corrected translation domains, placeholders and extractable preflight messages.
 * Sorted production ZIP entries and normalized archive timestamps for consistent packaging without changing migration or storage behavior.

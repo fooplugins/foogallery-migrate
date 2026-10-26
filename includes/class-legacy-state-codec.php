@@ -378,6 +378,7 @@ class LegacyStateCodec {
 	}
 
 	private function fail( $message ) {
+		// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- All private call sites supply diagnostic literals, not decoded values; preserve the plain exception and escape at any display boundary.
 		throw new \RuntimeException( 'Legacy storage codec: ' . $message );
 	}
 }

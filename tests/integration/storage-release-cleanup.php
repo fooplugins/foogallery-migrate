@@ -43,7 +43,6 @@ use FooPlugins\FooGalleryMigrate\StorageAuthority;
 use FooPlugins\FooGalleryMigrate\StorageCli;
 use FooPlugins\FooGalleryMigrate\StorageAdmin;
 use FooPlugins\FooGalleryMigrate\LegacyStorageSchema;
-use FooPlugins\FooGalleryMigrate\MigratedStore;
 use FooPlugins\FooGalleryMigrate\StorageMaintenanceGate;
 global $wpdb, $wp_version;
 function cleanup_check( $yes, $message ) { if ( ! $yes ) { throw new RuntimeException( $message ); } }
@@ -166,11 +165,10 @@ $verify_real = function ( $state ) use ( $uploads, $raw, $manifest, $wpdb ) {
 };
 $fixed_options = array( 'foogallery-migrate-data', 'foogallery-migrate-settings',
 	'foogallery_migrate_storage_control', 'foogallery_migrate_storage_authority', 'foogallery_migrate_storage_maintenance',
-	'foogallery_migrate_storage_cleanup', 'foogallery-migrate-data-storage-backup', 'foogallery_migrate_storage',
-	'foogallery-migrate-store-schema-version', 'foogallery-migrate-store-migration-version',
-	'foogallery-migrate-migrated-legacy-backup', 'foogallery_migrate_storage_schema_version', 'foogallery_migrate_storage_schema_lock' );
-$fixed_tables = array( $wpdb->prefix . 'foogallery_migrate_objects', $wpdb->prefix . 'foogallery_migrate_state',
-	$wpdb->base_prefix . 'foogallery_migrate_legacy_state', $wpdb->base_prefix . 'foogallery_migrate_legacy_records' );
+	'foogallery_migrate_storage_cleanup', 'foogallery-migrate-data-storage-backup',
+	'foogallery_migrate_storage_schema_version', 'foogallery_migrate_storage_schema_lock' );
+$fixed_tables = array(
+	$wpdb->base_prefix . 'foogallery_migrate_state', $wpdb->base_prefix . 'foogallery_migrate_records' );
 $fault_source = function () use ( $plugin_dir ) {
 	$files = array( 'migrate.php', 'includes/class-storage-cleanup.php', 'includes/class-storage-maintenance-gate.php',
 		'includes/class-legacy-transaction-connection.php', 'includes/class-storage-cli.php',
@@ -421,7 +419,7 @@ if ( 'verify-clear' === $step ) {
 		( 'option' === $selected_backend ? null === $raw( StorageAuthority::AUTHORITY_OPTION ) : null !== $raw( StorageAuthority::AUTHORITY_OPTION ) ) &&
 		null !== $raw( LegacyStorageSchema::VERSION_OPTION ) &&
 		( 'option' === $selected_backend ? ( is_string( $current ) && maybe_unserialize( $current ) === array() ) : null === $current ) &&
-		null === $raw( StorageAuthority::STORAGE_BACKUP_OPTION ) && null === $raw( MigratedStore::LEGACY_BACKUP_OPTION ) &&
+		null === $raw( StorageAuthority::STORAGE_BACKUP_OPTION ) &&
 		null === $raw( StorageAuthority::CLEANUP_OPTION ), 'Clear mode, stale-copy or marker mismatch.' );
 	foreach ( array_slice( $fixed_tables, 2 ) as $table ) {
 		cleanup_check( $exists_table( $table ) && '0' === (string) $wpdb->get_var( $wpdb->prepare( 'SELECT COUNT(*) FROM `' . $table . '` WHERE blog_id=%d', 1 ) ) && ! $wpdb->last_error, 'Cleared shared table still has site state.' );

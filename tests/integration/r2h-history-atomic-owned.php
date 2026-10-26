@@ -40,11 +40,10 @@ if ( ini_get( 'memory_limit' ) !== '256M' || is_multisite() ||
 	throw new RuntimeException( 'R2h loaded site, SQL, admin, protected posts, or memory differs.' );
 }
 $r2h_owned_options = array( 'foogallery-migrate-data', 'foogallery-migrate-settings',
-	'foogallery-migrate-migrated-legacy-backup', 'foogallery-migrate-data-storage-backup',
-	'foogallery_migrate_storage', 'foogallery_migrate_storage_control', 'foogallery_migrate_storage_authority',
+	'foogallery-migrate-data-storage-backup',
+	'foogallery_migrate_storage_control', 'foogallery_migrate_storage_authority',
 	'foogallery_migrate_storage_maintenance', 'foogallery_migrate_storage_cleanup',
 	'foogallery_migrate_storage_schema_version', 'foogallery_migrate_storage_schema_lock',
-	'foogallery-migrate-store-schema-version', 'foogallery-migrate-store-migration-version',
 	'fgm_r2e_native_turn_pending_v1', 'fgm_r2g_native_target_pending_v1' );
 foreach ( $r2h_owned_options as $r2h_option ) {
 	$r2h_found = $wpdb->get_results( $wpdb->prepare( 'SELECT option_name FROM `' . $wpdb->options . '` WHERE option_name=%s LIMIT 2', $r2h_option ), ARRAY_A );
@@ -52,8 +51,7 @@ foreach ( $r2h_owned_options as $r2h_option ) {
 		throw new RuntimeException( 'Owned R2h state, option, or marker is not absent.' );
 	}
 }
-foreach ( array( 'foogallery_migrate_legacy_state', 'foogallery_migrate_legacy_records',
-	'foogallery_migrate_objects', 'foogallery_migrate_state' ) as $r2h_suffix ) {
+foreach ( array( 'foogallery_migrate_state', 'foogallery_migrate_records' ) as $r2h_suffix ) {
 	$r2h_table = $wpdb->base_prefix . $r2h_suffix;
 	$r2h_found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $r2h_table ) ) );
 	if ( $wpdb->last_error || null !== $r2h_found ) { throw new RuntimeException( 'Owned R2h SQL table is not absent.' ); }

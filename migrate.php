@@ -42,9 +42,6 @@ if ( require_once FOOGM_PATH . 'includes/startup-checks.php' ) {
         FooPlugins\FooGalleryMigrate\StorageCli::register();
     }
 
-    register_activation_hook( FOOGM_FILE, 'foogallery_migrate_activate' );
-    register_deactivation_hook( FOOGM_FILE, 'foogallery_migrate_deactivate' );
-
     if ( is_admin() ) {
         // Start the plugin!
         new FooPlugins\FooGalleryMigrate\Init();

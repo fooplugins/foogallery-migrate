@@ -11,18 +11,16 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-class OptionMigratedStore extends MigratedStore {
+class OptionMigratedStore {
 	private $option_settings;
 	private $option_backend;
 
-	public function __construct( $wpdb = null, $settings = null, $backend = null ) {
+	public function __construct( $settings = null, $backend = null ) {
 		if ( null !== $backend && ! $backend instanceof LegacyOptionBackend ) {
 			throw new \RuntimeException( 'Unsupported option-history backend. No fallback.' );
 		}
 		$this->option_backend = null === $backend ? new LegacyOptionBackend() : $backend;
 		$this->option_settings = $settings instanceof MigratorSettings ? $settings : new MigratorSettings();
-		// Never attach this backend to a database history table.
-		parent::__construct( false, $this->option_settings );
 	}
 
 	/** @return array Raw compact records, preserving unknown records. */
@@ -326,10 +324,6 @@ class OptionMigratedStore extends MigratedStore {
 		return $this->save_records( array() );
 	}
 
-	public function install_schema() {
-		return true;
-	}
-
 	public function manages_revision() {
 		return true;
 	}
@@ -350,8 +344,4 @@ class OptionMigratedStore extends MigratedStore {
 		return null;
 	}
 
-	public function migrate_legacy() {
-		// There is no automatic option-to-table conversion.
-		return true;
-	}
 }

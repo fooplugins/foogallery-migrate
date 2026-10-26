@@ -143,15 +143,13 @@ if ( 'seed' === $r2k_phase ) {
 		$found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
 		r2k_tag_check( ! $wpdb->last_error && null === $found, 'Test-only NextGEN source table collision.' );
 	}
-	foreach ( array( FOOGALLERY_MIGRATE_OPTION_DATA, 'foogallery-migrate-settings', 'foogallery_migrate_storage',
-		'foogallery-migrate-migrated-legacy-backup', StorageAuthority::CONTROL_OPTION,
+	foreach ( array( FOOGALLERY_MIGRATE_OPTION_DATA, 'foogallery-migrate-settings', StorageAuthority::CONTROL_OPTION,
 		StorageAuthority::AUTHORITY_OPTION, StorageAuthority::MAINTENANCE_OPTION,
 		StorageAuthority::CLEANUP_OPTION, StorageAuthority::STORAGE_BACKUP_OPTION,
-		LegacyStorageSchema::VERSION_OPTION, LegacyStorageSchema::LOCK_OPTION,
-		'foogallery-migrate-store-schema-version', 'foogallery-migrate-store-migration-version' ) as $name ) {
+		LegacyStorageSchema::VERSION_OPTION, LegacyStorageSchema::LOCK_OPTION ) as $name ) {
 		r2k_tag_check( null === $r2k_raw( $name ), 'Seed refuses existing plugin storage.' );
 	}
-	foreach ( array( 'foogallery_migrate_legacy_state', 'foogallery_migrate_legacy_records', 'foogallery_migrate_objects', 'foogallery_migrate_state' ) as $suffix ) {
+	foreach ( array( 'foogallery_migrate_state', 'foogallery_migrate_records' ) as $suffix ) {
 		$table = $wpdb->base_prefix . $suffix;
 		r2k_tag_check( null === $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) ) && ! $wpdb->last_error,
 			'Seed refuses plugin table remnant.' );
@@ -308,7 +306,7 @@ if ( 'fault-continue' === $r2k_phase ) {
 	$prior = wp_get_object_terms( $last, FOOGALLERY_ATTACHMENT_TAXONOMY_TAG, array( 'fields' => 'names' ) );
 	r2k_tag_check( is_array( $prior ) && ! is_wp_error( $prior ) && count( $prior ) === 0,
 		'Final owned target already has migrated terms.' );
-	$state_table = $wpdb->base_prefix . 'foogallery_migrate_legacy_state';
+	$state_table = $wpdb->base_prefix . 'foogallery_migrate_state';
 	$codec = new LegacyStateCodec(); $key_hash = strtoupper( $codec->key_hash( ImageTagQueueRepository::STATE_KEY ) );
 	$heads = $wpdb->get_results( $wpdb->prepare( "SELECT id,revision FROM `$state_table` WHERE blog_id=%d AND HEX(state_key_hash)=%s LIMIT 2",
 		get_current_blog_id(), $key_hash ), ARRAY_A );

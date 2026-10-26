@@ -116,7 +116,7 @@ class OptionMigratedStoreTest extends TestCase {
 		$this->assertTrue( $store->has( $image->unique_identifier() ) );
 		$this->assertSame( 44, $store->get( $image->unique_identifier() )->migrated_id );
 		$this->assertSame( $data, get_option( FOOGALLERY_MIGRATE_OPTION_DATA ) );
-		$this->assertFalse( get_option( 'foogallery_migrate_legacy_migrated_backup' ) );
+		$this->assertFalse( get_option( 'foogallery_migrate_migrated_backup' ) );
 	}
 
 	public function test_unknown_compact_record_survives_an_unrelated_history_write(): void {

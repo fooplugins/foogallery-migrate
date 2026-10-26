@@ -13,14 +13,12 @@ require_once FOOGM_STORAGE_TEST_ROOT . '/migrate.php';
 
 use FooPlugins\FooGalleryMigrate\StorageAuthority;
 use FooPlugins\FooGalleryMigrate\StoragePreflight;
-use FooPlugins\FooGalleryMigrate\MigratedStore;
 
 // Refuse any pre-existing plugin state, including false/empty backup rows.
 global $wpdb;
 $options = array( FOOGALLERY_MIGRATE_OPTION_DATA, FOOGALLERY_MIGRATE_OPTION_SETTINGS,
 	StorageAuthority::CONTROL_OPTION, StorageAuthority::AUTHORITY_OPTION, StorageAuthority::MAINTENANCE_OPTION,
-	StorageAuthority::STORAGE_BACKUP_OPTION, MigratedStore::LEGACY_BACKUP_OPTION,
-	MigratedStore::SCHEMA_OPTION, MigratedStore::MIGRATION_OPTION, 'foogallery_migrate_storage' );
+	StorageAuthority::STORAGE_BACKUP_OPTION );
 foreach ( $options as $name ) {
 	if ( null !== $wpdb->get_var( $wpdb->prepare( 'SELECT 1 AS present FROM `' . $wpdb->options . '` WHERE option_name = %s LIMIT 1', $name ) ) || ! empty( $wpdb->last_error ) ) {
 		throw new RuntimeException( 'Refusing existing plugin options or an unhealthy fixture.' );
@@ -57,7 +55,7 @@ try {
 	// Synthetic fixture policy, NOT a production calibration.
 	$policy = array( 'max_raw_bytes' => 1048576, 'amplification' => 32, 'reserve_bytes' => 16777216 );
 	$preflight = new StoragePreflight( $wpdb, $policy );
-	foreach ( array( FOOGALLERY_MIGRATE_OPTION_DATA, StorageAuthority::STORAGE_BACKUP_OPTION, MigratedStore::LEGACY_BACKUP_OPTION ) as $name ) {
+	foreach ( array( FOOGALLERY_MIGRATE_OPTION_DATA, StorageAuthority::STORAGE_BACKUP_OPTION ) as $name ) {
 		$hook = 'pre_option_' . $name;
 		add_filter( $hook, $forbid_option );
 		$filters[] = $hook;
@@ -88,7 +86,7 @@ try {
 	$deny = $policy;
 	$deny['max_raw_bytes'] = 1;
 	$check( 'foogallery_migrate_storage_decode_refused' === ( new StoragePreflight( $wpdb, $deny ) )->option_import( $request )->get_error_code(), 'oversize option refused without hydration or staging' );
-	foreach ( array( StorageAuthority::STORAGE_BACKUP_OPTION, MigratedStore::LEGACY_BACKUP_OPTION ) as $name ) {
+	foreach ( array( StorageAuthority::STORAGE_BACKUP_OPTION ) as $name ) {
 		$owned[] = $name;
 		// Direct SQL avoids the deliberate get_option trap during fixture setup.
 		$check( false !== $wpdb->insert( $wpdb->options, array( 'option_name' => $name, 'option_value' => '', 'autoload' => 'no' ) ), 'seed empty backup-only row: ' . $name );

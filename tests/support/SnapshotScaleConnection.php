@@ -124,7 +124,7 @@ class SnapshotScaleConnection extends SnapshotTestWpdb {
 		}
 		if ( 'COMMIT' === $sql ) { $this->saved = null; $this->event( 'commit' ); return 0; }
 		if ( preg_match( '/^INSERT INTO `([^`]+)` \(([^)]+)\) VALUES \((.*)\)$/D', $sql, $m ) ) {
-			if ( 'wp_foogallery_migrate_legacy_records' === $m[1] ) {
+			if ( 'wp_foogallery_migrate_records' === $m[1] ) {
 				// Cache only SQL shape, never arguments, rows or fixture/source graphs.
 				if ( ! isset( $this->record_layouts[$sql] ) ) {
 					$columns = explode( ',', str_replace( '`', '', $m[2] ) );
@@ -143,18 +143,18 @@ class SnapshotScaleConnection extends SnapshotTestWpdb {
 			$expressions = explode( ',', $m[3] ); $row = array(); $i = 0;
 			foreach ( $columns as $n => $column ) { $row[$column] = 'NULL' === $expressions[$n] ? null : $a[$i++]; }
 			$row['id'] = $this->insert_id = $this->next_id++;
-			if ( 'wp_foogallery_migrate_legacy_state' === $m[1] ) {
+			if ( 'wp_foogallery_migrate_state' === $m[1] ) {
 				foreach ( $this->heads as $head ) { if ( $head['blog_id'] === $row['blog_id'] && $head['state_key_hash'] === $row['state_key_hash'] ) { throw new \LogicException( 'Duplicate host head.' ); } }
 				$this->heads[$row['id']] = $row; $this->event( 'head-insert' );
 			} else { throw new \LogicException( 'Unexpected host table.' ); }
 			return 1;
 		}
-		if ( 0 === strpos( $sql, 'UPDATE `wp_foogallery_migrate_legacy_state` SET root_payload' ) ) {
+		if ( 0 === strpos( $sql, 'UPDATE `wp_foogallery_migrate_state` SET root_payload' ) ) {
 			if ( ! isset( $this->heads[$a[2]] ) ) { return 0; } $h =& $this->heads[$a[2]];
 			if ( $h['blog_id'] !== $a[1] || $h['revision'] !== $a[3] || $h['active_generation'] !== $a[4] ) { return 0; }
 			$changed = $h['root_payload'] !== $a[0]; $h['root_payload'] = $a[0]; $this->event( 'root-update' ); return $changed ? 1 : 0;
 		}
-		if ( 0 === strpos( $sql, 'UPDATE `wp_foogallery_migrate_legacy_state` SET active_generation' ) ) {
+		if ( 0 === strpos( $sql, 'UPDATE `wp_foogallery_migrate_state` SET active_generation' ) ) {
 			if ( ! isset( $this->heads[$a[12]] ) ) { return 0; } $h =& $this->heads[$a[12]];
 			if ( $h['blog_id'] !== $a[11] || $h['active_generation'] !== $a[13] || $h['revision'] !== $a[14] || $h['state_key_hash'] !== $a[15] ) { return 0; }
 			foreach ( array( 'active_generation', 'revision', 'state_order', 'state_kind', 'codec_version', 'record_count', 'payload_bytes', 'snapshot_digest', 'digest_revision', 'root_payload', 'updated_gmt' ) as $i => $field ) { $h[$field] = $a[$i]; }
@@ -182,7 +182,7 @@ class SnapshotScaleConnection extends SnapshotTestWpdb {
 			}
 			$this->event( 'stats' ); return array( $stats );
 		}
-		if ( false !== strpos( $sql, 'FROM `wp_foogallery_migrate_legacy_records`' ) ) {
+		if ( false !== strpos( $sql, 'FROM `wp_foogallery_migrate_records`' ) ) {
 			if ( false !== strpos( $sql, 'ORDER BY item_order ASC, id ASC' ) ) {
 				$metadata = 0 === strpos( $sql, 'SELECT id, item_order,' );
 				$root = false !== strpos( $sql, 'parent_node_hash IS NULL' ); $p = $root ? 3 : 4;

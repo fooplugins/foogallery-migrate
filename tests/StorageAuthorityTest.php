@@ -2,7 +2,6 @@
 
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
-use FooPlugins\FooGalleryMigrate\MigratedStore;
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
 use FooPlugins\FooGalleryMigrate\StorageAuthority;
 use PHPUnit\Framework\TestCase;
@@ -30,19 +29,18 @@ class StorageAuthorityTest extends TestCase {
 		$this->assertSame( array(), $GLOBALS['wpdb']->writes );
 	}
 
-	public function test_any_existing_plugin_table_blocks_missing_control_instead_of_falling_back(): void {
-		foreach ( array( 'foogallery_migrate_objects', 'foogallery_migrate_state' ) as $suffix ) {
+	public function test_unreleased_prototype_tables_do_not_participate_in_authority(): void {
+		foreach ( array( 'foogallery_migrate_objects' ) as $suffix ) {
 			$GLOBALS['wpdb']->existing = 'wp_' . $suffix;
-			$this->assertInstanceOf( \WP_Error::class, StorageAuthority::option_mode_error() );
+			$this->assertFalse( StorageAuthority::option_mode_error() );
 			$this->assertSame( array(), $GLOBALS['foogallery_migrate_test_options'] );
 		}
 	}
 
-	public function test_old_installation_markers_block_even_when_a_table_is_missing(): void {
-		update_option( MigratedStore::MIGRATION_OPTION, 1 );
-		$error = StorageAuthority::option_mode_error();
-		$this->assertInstanceOf( \WP_Error::class, $error );
-		$this->assertSame( 'foogallery_migrate_storage_recovery_required', $error->get_error_code() );
+	public function test_unreleased_prototype_markers_are_left_alone(): void {
+		update_option( 'foogallery-migrate-store-migration-version', 1 );
+		$this->assertFalse( StorageAuthority::option_mode_error() );
+		$this->assertSame( 1, get_option( 'foogallery-migrate-store-migration-version' ) );
 		$this->assertSame( array(), $GLOBALS['wpdb']->writes );
 	}
 
@@ -61,7 +59,7 @@ class StorageAuthorityTest extends TestCase {
 	}
 
 	public function test_default_engine_refuses_to_mutate_when_authority_is_ambiguous(): void {
-		update_option( MigratedStore::SCHEMA_OPTION, 1 );
+		update_option( StorageAuthority::AUTHORITY_OPTION, 'ambiguous authority' );
 		$before = $GLOBALS['foogallery_migrate_test_options'];
 		try {
 			new MigratorEngine();
@@ -75,12 +73,10 @@ class StorageAuthorityTest extends TestCase {
 	public function test_authority_probes_use_the_current_site_prefix_and_exact_names(): void {
 		$GLOBALS['wpdb']->prefix = 'wp_7_';
 		$this->assertFalse( StorageAuthority::option_mode_error() );
-		$this->assertCount( 6, $GLOBALS['wpdb']->reads );
-		$this->assertStringContainsString( 'wp\\_7\\_foogallery\\_migrate\\_objects', $GLOBALS['wpdb']->reads[1] );
-		$this->assertStringContainsString( 'wp\\_7\\_foogallery\\_migrate\\_state', $GLOBALS['wpdb']->reads[2] );
-		$this->assertStringContainsString( 'wp\\_foogallery\\_migrate\\_legacy\\_state', $GLOBALS['wpdb']->reads[3] );
-		$this->assertStringContainsString( 'wp\\_foogallery\\_migrate\\_legacy\\_records', $GLOBALS['wpdb']->reads[4] );
-		$this->assertSame( "SELECT 1 AS present FROM `wp_7_options` WHERE option_name IN ('foogallery-migrate-migrated-legacy-backup', 'foogallery-migrate-data-storage-backup') LIMIT 1", $GLOBALS['wpdb']->reads[5] );
+		$this->assertCount( 4, $GLOBALS['wpdb']->reads );
+		$this->assertStringContainsString( 'wp\\_foogallery\\_migrate\\_state', $GLOBALS['wpdb']->reads[1] );
+		$this->assertStringContainsString( 'wp\\_foogallery\\_migrate\\_records', $GLOBALS['wpdb']->reads[2] );
+		$this->assertSame( "SELECT 1 AS present FROM `wp_7_options` WHERE option_name IN ('foogallery-migrate-data-storage-backup') LIMIT 1", $GLOBALS['wpdb']->reads[3] );
 	}
 
 	public function test_new_control_sentinel_and_pending_switch_markers_block_options(): void {
@@ -93,15 +89,15 @@ class StorageAuthorityTest extends TestCase {
 	}
 
 	public function test_shared_tables_without_this_sites_rows_do_not_adopt_table_authority(): void {
-		$GLOBALS['wpdb']->existing = 'wp_foogallery_migrate_legacy_state';
+		$GLOBALS['wpdb']->existing = 'wp_foogallery_migrate_state';
 		$this->assertFalse( StorageAuthority::option_mode_error() );
-		$this->assertStringContainsString( 'SELECT 1 AS present FROM', $GLOBALS['wpdb']->reads[4] );
-		$this->assertStringContainsString( 'WHERE blog_id = 1 LIMIT 1', $GLOBALS['wpdb']->reads[4] );
+		$this->assertStringContainsString( 'SELECT 1 AS present FROM', $GLOBALS['wpdb']->reads[2] );
+		$this->assertStringContainsString( 'WHERE blog_id = 1 LIMIT 1', $GLOBALS['wpdb']->reads[2] );
 		$this->assertSame( array(), $GLOBALS['foogallery_migrate_test_options'] );
 	}
 
 	public function test_shared_state_or_orphan_records_for_this_site_require_recovery(): void {
-		foreach ( array( 'wp_foogallery_migrate_legacy_state', 'wp_foogallery_migrate_legacy_records' ) as $table ) {
+		foreach ( array( 'wp_foogallery_migrate_state', 'wp_foogallery_migrate_records' ) as $table ) {
 			$GLOBALS['wpdb']->existing = $table;
 			$GLOBALS['wpdb']->site_rows = true;
 			$this->assertInstanceOf( \WP_Error::class, StorageAuthority::option_mode_error() );
@@ -109,7 +105,7 @@ class StorageAuthorityTest extends TestCase {
 	}
 
 	public function test_backup_only_evidence_blocks_options_without_reading_or_restoring_the_backup(): void {
-		foreach ( array( MigratedStore::LEGACY_BACKUP_OPTION, 'foogallery-migrate-data-storage-backup' ) as $name ) {
+		foreach ( array( StorageAuthority::STORAGE_BACKUP_OPTION ) as $name ) {
 			foreach ( array( false, null, array(), 'corrupt', array( 'stale' => 'never restore' ) ) as $value ) {
 				$GLOBALS['foogallery_migrate_test_options'] = array( $name => $value );
 				$GLOBALS['foogallery_migrate_test_option_reads'] = array();
@@ -130,8 +126,7 @@ class StorageAuthorityTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_option_reads'] = array();
 		try {
 			$this->assertInstanceOf( \WP_Error::class, StorageAuthority::option_mode_error() );
-			$this->assertCount( 6, $GLOBALS['wpdb']->reads );
-			$this->assertNotContains( MigratedStore::LEGACY_BACKUP_OPTION, $GLOBALS['foogallery_migrate_test_option_reads'] );
+			$this->assertCount( 4, $GLOBALS['wpdb']->reads );
 			$this->assertNotContains( StorageAuthority::STORAGE_BACKUP_OPTION, $GLOBALS['foogallery_migrate_test_option_reads'] );
 			$this->assertSame( array(), $GLOBALS['wpdb']->writes );
 		} finally {
@@ -170,7 +165,7 @@ class AuthorityTestWpdb extends MaintenanceTestWpdb {
 		$this->reads[] = $query;
 		$this->last_error = $this->fail_probe ? 'probe failed' : '';
 		if ( false !== strpos( $query, 'WHERE option_name IN' ) ) {
-			if ( $this->fail_backup_probe && false !== strpos( $query, MigratedStore::LEGACY_BACKUP_OPTION ) ) { $this->last_error = 'backup probe failed'; return null; }
+			if ( $this->fail_backup_probe && false !== strpos( $query, StorageAuthority::STORAGE_BACKUP_OPTION ) ) { $this->last_error = 'backup probe failed'; return null; }
 			preg_match_all( "/'([^']+)'/", $query, $names );
 			foreach ( $names[1] as $name ) {
 				if ( array_key_exists( $name, $GLOBALS['foogallery_migrate_test_options'] ) ) { return '1'; }

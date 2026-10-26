@@ -41,9 +41,8 @@ if ( ini_get( 'memory_limit' ) !== '256M' || is_multisite() || DB_NAME !== $mani
 }
 $fixed_options = array( 'foogallery-migrate-data', 'foogallery-migrate-settings',
 	'foogallery_migrate_storage_control', 'foogallery_migrate_storage_authority', 'foogallery_migrate_storage_maintenance',
-	'foogallery_migrate_storage_cleanup', 'foogallery-migrate-data-storage-backup', 'foogallery_migrate_storage',
-	'foogallery-migrate-store-schema-version', 'foogallery-migrate-store-migration-version',
-	'foogallery-migrate-migrated-legacy-backup', 'foogallery_migrate_storage_schema_version', 'foogallery_migrate_storage_schema_lock' );
+	'foogallery_migrate_storage_cleanup', 'foogallery-migrate-data-storage-backup',
+	'foogallery_migrate_storage_schema_version', 'foogallery_migrate_storage_schema_lock' );
 foreach ( $fixed_options as $name ) {
 	$rows = $wpdb->get_results( $wpdb->prepare( 'SELECT option_name FROM `' . $wpdb->options . '` WHERE option_name=%s LIMIT 2', $name ), ARRAY_A );
 	if ( ! is_array( $rows ) || $wpdb->last_error || count( $rows ) ) { throw new RuntimeException( 'Owned option is not pristine: ' . $name ); }
@@ -55,8 +54,7 @@ foreach ( $prefixes as $prefix ) {
 		$wpdb->esc_like( $prefix ) . '%' ), ARRAY_A );
 	if ( ! is_array( $rows ) || $wpdb->last_error || count( $rows ) ) { throw new RuntimeException( 'Owned writer or transient family is not pristine.' ); }
 }
-foreach ( array( $wpdb->prefix . 'foogallery_migrate_objects', $wpdb->prefix . 'foogallery_migrate_state',
-	$wpdb->base_prefix . 'foogallery_migrate_legacy_state', $wpdb->base_prefix . 'foogallery_migrate_legacy_records' ) as $table ) {
+foreach ( array( $wpdb->base_prefix . 'foogallery_migrate_state', $wpdb->base_prefix . 'foogallery_migrate_records' ) as $table ) {
 	$found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
 	if ( $wpdb->last_error || null !== $found ) { throw new RuntimeException( 'Owned legacy or shared table is not pristine.' ); }
 }

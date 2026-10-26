@@ -84,5 +84,6 @@ final class LegacySnapshotRowReader {
 		if ( ( ! is_int( $v ) && ! is_string( $v ) ) || (string) (int) $v !== (string) $v || (int) $v < 0 ) { $this->fail( 'Invalid window integer.' ); }
 		return (int) $v;
 	}
+	// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Private callers supply fixed diagnostic literals only, never row payloads; exception construction is not HTML output.
 	private function fail( $message ) { throw new \RuntimeException( 'Legacy snapshot row source: ' . $message ); }
 }

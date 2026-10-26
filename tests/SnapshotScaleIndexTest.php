@@ -16,7 +16,7 @@ class SnapshotScaleIndexTest extends TestCase {
 			$columns[] = '`' . $key . '`'; $expressions[] = null === $value ? 'NULL' : ( is_int( $value ) ? '%d' : '%s' );
 			if ( null !== $value ) { $args[] = $value; }
 		}
-		$sql = 'INSERT INTO `wp_foogallery_migrate_legacy_records` (' . implode( ',', $columns ) . ') VALUES (' . implode( ',', $expressions ) . ')';
+		$sql = 'INSERT INTO `wp_foogallery_migrate_records` (' . implode( ',', $columns ) . ') VALUES (' . implode( ',', $expressions ) . ')';
 		$this->assertSame( 1, $db->query( $db->prepare( $sql, $args ) ) );
 	}
 	private function window( $db, $scope, $parent, $order, $id, $limit, $maximum = null ) {
@@ -24,7 +24,7 @@ class SnapshotScaleIndexTest extends TestCase {
 		if ( null !== $parent ) { $where = 'parent_node_hash = UNHEX(%s)'; $args[] = $parent; }
 		$args = array_merge( $args, array( $order, $order, $id ) );
 		$sql = null === $maximum ? 'SELECT id, item_order, bytes AS window_bytes' : 'SELECT *';
-		$sql .= ' FROM `wp_foogallery_migrate_legacy_records` WHERE blog_id = %d AND state_id = %d AND generation = %d AND ' . $where;
+		$sql .= ' FROM `wp_foogallery_migrate_records` WHERE blog_id = %d AND state_id = %d AND generation = %d AND ' . $where;
 		$sql .= ' AND (item_order > %d OR (item_order = %d AND id > %d))';
 		if ( null !== $maximum ) { $sql .= ' AND bytes <= %d'; $args[] = $maximum; }
 		$sql .= ' ORDER BY item_order ASC, id ASC LIMIT %d'; $args[] = $limit;
@@ -77,7 +77,7 @@ class SnapshotScaleIndexTest extends TestCase {
 		$held = $db->records; $rows = array(); foreach ( $held as $row ) { $rows[] = iterator_to_array( $row ); }
 		$rows[0]['parent_node_hash'] = str_repeat( 'B', 64 ); $rows[0]['item_order'] = 2; $rows[0]['id'] = 999;
 		$rows[0]['payload'] = 'changed'; $rows[0]['blog_id'] = 8; $rows[0]['generation'] = 2;
-		$handle = $db->prepare( 'SELECT id, item_order, bytes AS window_bytes FROM `wp_foogallery_migrate_legacy_records` WHERE parent_node_hash IS NULL ORDER BY item_order ASC, id ASC LIMIT %d', array( 7, 12, 1, 0, 0, 0, 32 ) );
+		$handle = $db->prepare( 'SELECT id, item_order, bytes AS window_bytes FROM `wp_foogallery_migrate_records` WHERE parent_node_hash IS NULL ORDER BY item_order ASC, id ASC LIMIT %d', array( 7, 12, 1, 0, 0, 0, 32 ) );
 		$db->records = $rows;
 		$this->assertSame( $this->oracle( $db, $scope, null, 0, 0, 32, null ), $db->get_results( $handle, ARRAY_A ) );
 		$this->compare( $db, $scope, null ); $this->compare( $db, array( 8, 12, 2 ), str_repeat( 'b', 64 ) );

@@ -138,9 +138,7 @@ $names = array( FOOGALLERY_MIGRATE_OPTION_DATA, StorageAuthority::CONTROL_OPTION
 	StorageAuthority::AUTHORITY_OPTION, StorageAuthority::MAINTENANCE_OPTION,
 	StorageAuthority::STORAGE_BACKUP_OPTION, StorageAuthority::CLEANUP_OPTION,
 	LegacyStorageSchema::VERSION_OPTION, LegacyStorageSchema::LOCK_OPTION,
-	'foogallery-migrate-settings', 'foogallery-migrate-migrated-legacy-backup',
-	'foogallery_migrate_storage', 'foogallery-migrate-store-schema-version',
-	'foogallery-migrate-store-migration-version' );
+	'foogallery-migrate-settings' );
 $tables = array_keys( ( new LegacyStorageSchema( $wpdb ) )->definitions() );
 $table_equals_source = function ( $source_row ) use ( $wpdb, $tables ) {
 	assisted_check( is_array( $source_row ) && isset( $source_row['option_value'] ), 'Original source option is absent.' );

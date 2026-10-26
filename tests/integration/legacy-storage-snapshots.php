@@ -126,7 +126,7 @@ try {
 		$flips = 0;
 		$connection->before_write = function ( $sql ) use ( $fault, &$flips ) {
 			if ( false !== strpos( $sql, 'SET active_generation' ) ) { $flips++; }
-			if ( ( 'record-insert' === $fault && false !== strpos( $sql, 'INSERT INTO' ) && false !== strpos( $sql, '_legacy_records`' ) ) ||
+			if ( ( 'record-insert' === $fault && false !== strpos( $sql, 'INSERT INTO' ) && false !== strpos( $sql, '_records`' ) ) ||
 				( 'first-flip' === $fault && 1 === $flips && false !== strpos( $sql, 'SET active_generation' ) ) ||
 				( 'second-flip' === $fault && 2 === $flips && false !== strpos( $sql, 'SET active_generation' ) ) ) {
 				throw new RuntimeException( 'Injected fixture failure: ' . $fault );

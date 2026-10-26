@@ -38,7 +38,7 @@ class HistoryMutationFaultConnection extends LegacyTransactionConnection {
 	}
 	public function query( $sql ) {
 		if ( $this->before_start && 'START TRANSACTION' === $sql ) { $action = $this->before_start; $this->before_start = null; $action(); }
-		if ( null !== $this->fail_queue_head_id && 0 === strpos( $sql, 'UPDATE `' . $this->base_prefix . 'foogallery_migrate_legacy_state` SET ' ) &&
+		if ( null !== $this->fail_queue_head_id && 0 === strpos( $sql, 'UPDATE `' . $this->base_prefix . 'foogallery_migrate_state` SET ' ) &&
 			false !== strpos( $sql, "digest_status = 'current'" ) &&
 			preg_match( '/ WHERE blog_id = [0-9]+ AND id = ' . preg_quote( (string) $this->fail_queue_head_id, '/' ) . ' AND active_generation = [0-9]+ AND revision = [0-9]+$/', $sql ) ) {
 			$this->fail_queue_head_id = null; $this->record_writes_at_fault = $this->record_writes;
@@ -48,7 +48,7 @@ class HistoryMutationFaultConnection extends LegacyTransactionConnection {
 			$this->fail_revision = false; ++$this->revision_fault_fired; throw new RuntimeException( 'Injected scalar CAS failure.' );
 		}
 		$result = parent::query( $sql );
-		if ( false !== $result && 0 === strpos( $sql, 'INSERT INTO `' . $this->base_prefix . 'foogallery_migrate_legacy_records` ' ) ) { ++$this->record_writes; }
+		if ( false !== $result && 0 === strpos( $sql, 'INSERT INTO `' . $this->base_prefix . 'foogallery_migrate_records` ' ) ) { ++$this->record_writes; }
 		return $result;
 	}
 }

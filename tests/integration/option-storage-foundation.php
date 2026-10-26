@@ -15,18 +15,15 @@ if ( ! defined( 'ABSPATH' ) || ! defined( 'FOOGM_STORAGE_TEST_DISPOSABLE' ) || t
 
 require_once dirname( dirname( __DIR__ ) ) . '/migrate.php';
 
-use FooPlugins\FooGalleryMigrate\MigratedStore;
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
 use FooPlugins\FooGalleryMigrate\Objects\Image;
 use FooPlugins\FooGalleryMigrate\StorageAuthority;
 
 global $wpdb, $foogallery_migrate_engine_instance;
 $options = array( FOOGALLERY_MIGRATE_OPTION_DATA, FOOGALLERY_MIGRATE_OPTION_SETTINGS,
-	MigratedStore::SCHEMA_OPTION, MigratedStore::MIGRATION_OPTION,
 	StorageAuthority::CONTROL_OPTION, StorageAuthority::AUTHORITY_OPTION, StorageAuthority::MAINTENANCE_OPTION,
-	'foogallery_migrate_storage' );
-$tables = array( $wpdb->prefix . MigratedStore::TABLE_SUFFIX, $wpdb->prefix . StorageAuthority::STATE_TABLE_SUFFIX,
-	$wpdb->base_prefix . StorageAuthority::SHARED_STATE_TABLE_SUFFIX,
+	StorageAuthority::STORAGE_BACKUP_OPTION );
+$tables = array( $wpdb->base_prefix . StorageAuthority::SHARED_STATE_TABLE_SUFFIX,
 	$wpdb->base_prefix . StorageAuthority::SHARED_RECORDS_TABLE_SUFFIX );
 foreach ( $tables as $table ) {
 	$found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) );
@@ -59,9 +56,8 @@ try {
 	update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $data, false );
 	$check( $data === get_option( FOOGALLERY_MIGRATE_OPTION_DATA ), 'seed exact WordPress option fixture' );
 	$check( false === StorageAuthority::option_mode_error(), 'virgin option authority is read-only' );
-	foogallery_migrate_activate();
-	foogallery_migrate_upgrade_store();
-	$check( $data === get_option( FOOGALLERY_MIGRATE_OPTION_DATA ), 'activation and admin upgrade retain original options' );
+	do_action( 'activate_' . plugin_basename( FOOGM_FILE ), false );
+	$check( $data === get_option( FOOGALLERY_MIGRATE_OPTION_DATA ), 'activation retains original options without storage hooks' );
 	foreach ( $tables as $table ) {
 		$check( null === $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $wpdb->esc_like( $table ) ) ), 'no implicit table: ' . $table );
 	}
@@ -83,13 +79,13 @@ try {
 	$check( $queue === get_option( FOOGALLERY_MIGRATE_OPTION_DATA )['queue'], 'history mutation retains resumable queue' );
 
 	$snapshot = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
-	foogallery_migrate_deactivate( true );
-	foogallery_migrate_activate( true );
+	do_action( 'deactivate_' . plugin_basename( FOOGM_FILE ), true );
+	do_action( 'activate_' . plugin_basename( FOOGM_FILE ), true );
 	$check( $snapshot === get_option( FOOGALLERY_MIGRATE_OPTION_DATA ), 'deactivate/reactivate retains byte-exact state' );
 	$check( $destination === ( new MigratorEngine() )->get_migrated_object( $image->unique_identifier() )->migrated_id, 'mapping survives deactivate/reactivate' );
 	$check( null !== get_post( $destination ), 'lifecycle never removes migrated output' );
 
-	foreach ( array( StorageAuthority::CONTROL_OPTION, StorageAuthority::AUTHORITY_OPTION, StorageAuthority::MAINTENANCE_OPTION, MigratedStore::MIGRATION_OPTION ) as $option ) {
+	foreach ( array( StorageAuthority::CONTROL_OPTION, StorageAuthority::AUTHORITY_OPTION, StorageAuthority::MAINTENANCE_OPTION ) as $option ) {
 		update_option( $option, array( 'test' => 'ambiguous-authority' ), false );
 		$check( is_wp_error( StorageAuthority::option_mode_error() ), 'persisted authority evidence blocks: ' . $option );
 		try {

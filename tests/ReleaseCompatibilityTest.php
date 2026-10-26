@@ -1,7 +1,7 @@
 <?php
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
-use FooPlugins\FooGalleryMigrate\MigratedStore;
+use FooPlugins\FooGalleryMigrate\OptionMigratedStore;
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
 use FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator;
@@ -102,7 +102,7 @@ class ReleaseCompatibilityTest extends TestCase {
         $GLOBALS['foogallery_migrate_test_attachment_url_to_postid']=array();
         $GLOBALS['foogallery_migrate_test_imported_attachments']=array();
         $GLOBALS['foogallery_migrate_test_posts']=array();
-        $GLOBALS['foogallery_migrate_engine_instance']=new MigratorEngine(new MigratedStore(false,new MigratorSettings()));
+        $GLOBALS['foogallery_migrate_engine_instance']=new MigratorEngine(new OptionMigratedStore( new MigratorSettings() ));
         $image = new Image();
         $image->source_url=$local ? 'https://example.test/'.basename($source) : 'https://remote.example.test/new.jpg';
         $GLOBALS['foogallery_migrate_test_attachment_url_to_postid'][$image->source_url]=0;

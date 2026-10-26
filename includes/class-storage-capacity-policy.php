@@ -127,6 +127,7 @@ final class StorageCapacityPolicy {
 		};
 		if ( ! \ob_start( $discard, 4096 ) ) { return null; }
 		$ok = false;
+		// phpcs:ignore WordPress.PHP.DevelopmentFunctions.prevent_path_disclosure_phpinfo -- The bounded discard handler above returns no output; only the allocator enum leaves this method.
 		try { $ok = \phpinfo( INFO_GENERAL ); }
 		catch ( \Exception $error ) { $ok = false; }
 		catch ( \Throwable $error ) { $ok = false; }
@@ -158,6 +159,7 @@ final class StorageCapacityPolicy {
 		return array( 'php_versions' => PHP_VERSION, 'wp_versions' => $wp_version, 'sapi' => PHP_SAPI, 'word_bytes' => PHP_INT_SIZE,
 			'endian' => '01000000' === bin2hex( pack( 'L', 1 ) ) ? 'little' : 'big', 'os_family' => 0 === strpos( PHP_OS, 'WIN' ) ? 'Windows' : PHP_OS,
 			'allocator' => self::allocator(), 'debug' => (bool) PHP_DEBUG, 'zts' => (bool) PHP_ZTS, 'driver_family' => function_exists( 'mysqli_query' ) ? 'mysqli' : null,
+			// phpcs:ignore WordPress.DB.RestrictedFunctions.mysql_mysqli_get_client_info -- Reads client-library version metadata only; does not connect to or query a database.
 			'driver_versions' => function_exists( 'mysqli_get_client_info' ) ? mysqli_get_client_info() : null, 'required_ini' => $ini,
 			'required_capabilities' => $capabilities, 'instrumented' => $instrumented );
 	}

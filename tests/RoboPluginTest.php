@@ -2,7 +2,7 @@
 
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
-use FooPlugins\FooGalleryMigrate\MigratedStore;
+use FooPlugins\FooGalleryMigrate\OptionMigratedStore;
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
 use FooPlugins\FooGalleryMigrate\Objects\Gallery;
@@ -19,7 +19,7 @@ class RoboPluginTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_post_meta_updates'] = array();
 		$GLOBALS['foogallery_migrate_test_plugins'] = array();
 		$GLOBALS['foogallery_migrate_test_gallery_templates'] = array();
-		$GLOBALS['foogallery_migrate_engine_instance'] = new MigratorEngine( new MigratedStore( false, new MigratorSettings() ) );
+		$GLOBALS['foogallery_migrate_engine_instance'] = new MigratorEngine( new OptionMigratedStore( new MigratorSettings() ) );
 		unset( $GLOBALS['wpdb'] );
 		set_error_handler( function ( $level, $message, $file, $line ) {
 			throw new \ErrorException( $message, 0, $level, $file, $line );

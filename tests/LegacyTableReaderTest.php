@@ -95,7 +95,7 @@ class LegacyReaderTestWpdb {
 	public function get_results( $sql, $format ) {
 		$this->queries[] = $sql;
 		if ( 'query' === $this->fault ) { $this->last_error = 'fixture error'; return null; }
-		if ( false !== strpos( $sql, '_legacy_state`' ) ) {
+		if ( false !== strpos( $sql, '_state`' ) ) {
 			$this->head_reads++;
 			if ( null === $this->head ) { return array(); }
 			$head = $this->head;

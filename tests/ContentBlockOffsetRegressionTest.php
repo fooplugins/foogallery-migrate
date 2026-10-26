@@ -2,7 +2,7 @@
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
 use FooPlugins\FooGalleryMigrate\ContentScanRepository;
-use FooPlugins\FooGalleryMigrate\MigratedStore;
+use FooPlugins\FooGalleryMigrate\OptionMigratedStore;
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
 use FooPlugins\FooGalleryMigrate\Objects\Gallery;
@@ -21,7 +21,7 @@ class ContentBlockOffsetRegressionTest extends TestCase {
         $GLOBALS['foogallery_migrate_test_options'] = array();
         $GLOBALS['foogallery_migrate_test_posts'] = array();
         $GLOBALS['fgm_test_block_parses'] = array();
-        $this->engine = new BlockOffsetEngine(new MigratedStore(false, new MigratorSettings()));
+        $this->engine = new BlockOffsetEngine(new OptionMigratedStore( new MigratorSettings() ));
         $GLOBALS['foogallery_migrate_engine_instance'] = $this->engine;
         $this->plugin = new BlockOffsetPlugin(); $this->plugin->is_detected = true;
         $GLOBALS['foogallery_migrate_test_plugins'] = array($this->plugin);

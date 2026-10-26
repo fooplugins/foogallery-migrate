@@ -2,7 +2,7 @@
 
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
-use FooPlugins\FooGalleryMigrate\MigratedStore;
+use FooPlugins\FooGalleryMigrate\OptionMigratedStore;
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
 use FooPlugins\FooGalleryMigrate\MigratorSettings;
 use FooPlugins\FooGalleryMigrate\StorageDiscoverySummary;
@@ -39,7 +39,7 @@ class MigrationFlowTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_foogallery_fs']     = null;
 		unset( $GLOBALS['foogallery_migrate_test_failed_options'] );
 		unset( $GLOBALS['foogallery_migrate_test_failed_deletes'] );
-		$GLOBALS['foogallery_migrate_engine_instance'] = new MigratorEngine( new MigratedStore( false, new MigratorSettings() ) );
+		$GLOBALS['foogallery_migrate_engine_instance'] = new MigratorEngine( new OptionMigratedStore( new MigratorSettings() ) );
 		unset( $GLOBALS['wpdb'] );
 	}
 
@@ -280,7 +280,7 @@ class MigrationFlowTest extends TestCase {
 	}
 
 	public function test_reusing_failed_image_history_keeps_the_error_when_rebinding_its_parent(): void {
-		$store = new MigratedStore( false, new MigratorSettings() );
+		$store = new OptionMigratedStore( new MigratorSettings() );
 		$engine = $GLOBALS['foogallery_migrate_engine_instance'] = new MigratorEngine( $store );
 		$image = $this->create_image( 'https://example.test/shared-failed.jpg' );
 		$image->migrated = true; $image->migration_status = Migratable::PROGRESS_ERROR;
@@ -1274,7 +1274,7 @@ class MigrationFlowTest extends TestCase {
 	}
 
 	public function test_content_migration_replaces_gallery_shortcodes_and_singlepic_images(): void {
-		$store = new MigratedStore( false, new MigratorSettings() );
+		$store = new OptionMigratedStore( new MigratorSettings() );
 		$GLOBALS['foogallery_migrate_engine_instance'] = new MigratorEngine( $store );
 		$plugin = new FakeSourcePlugin();
 		$plugin->shortcode_patterns = array(
@@ -1337,13 +1337,11 @@ class MigrationFlowTest extends TestCase {
 		$this->create_test_post( 501, 'post', 'Legacy Shortcodes', $original_content );
 
 		$content_migrator = $engine->get_content_migrator();
-		$store->reset_diagnostics();
+		$revision = $store->revision();
 		$content_items = $this->find_content_items( $content_migrator, get_post( 501 ), array( $plugin ) );
-		$diagnostics = $store->diagnostics();
 
 		$this->assertCount( 3, $content_items );
-		$this->assertSame( 0, $diagnostics['full_history_hydrations'] );
-		$this->assertLessThanOrEqual( 12, $diagnostics['read_queries'] );
+		$this->assertSame( $revision, $store->revision(), 'Detection must not mutate option history.' );
 		$this->assertSame( 'gallery', $content_items[0]['object_type'] );
 		$this->assertSame( 199, $content_items[0]['migrated_foogallery_id'] );
 		$this->assertSame( 'image', $content_items[1]['object_type'] );
@@ -1438,7 +1436,7 @@ class MigrationFlowTest extends TestCase {
 	}
 
 	public function test_child_lookup_falls_back_to_its_key_when_parent_association_belongs_to_another_gallery(): void {
-		$store = new MigratedStore( false, new MigratorSettings() );
+		$store = new OptionMigratedStore( new MigratorSettings() );
 		$engine = new MigratorEngine( $store );
 		$GLOBALS['foogallery_migrate_engine_instance'] = $engine;
 		$plugin = new FakeSourcePlugin();
@@ -1472,7 +1470,7 @@ class MigrationFlowTest extends TestCase {
 	}
 
 	public function test_gallery_migration_reports_a_store_write_failure_without_advancing_saved_state(): void {
-		$store = new ToggleFailingMigratedStore( false, new MigratorSettings() );
+		$store = new ToggleFailingMigratedStore( new MigratorSettings() );
 		$engine = new MigratorEngine( $store );
 		$GLOBALS['foogallery_migrate_engine_instance'] = $engine;
 		$plugin = new FakeSourcePlugin();
@@ -1503,7 +1501,7 @@ class MigrationFlowTest extends TestCase {
 	}
 
 	public function test_retry_reports_a_store_write_failure(): void {
-		$store = new ToggleFailingMigratedStore( false, new MigratorSettings() );
+		$store = new ToggleFailingMigratedStore( new MigratorSettings() );
 		$engine = new MigratorEngine( $store );
 		$GLOBALS['foogallery_migrate_engine_instance'] = $engine;
 		$plugin = new FakeSourcePlugin();
@@ -1616,11 +1614,11 @@ class MigrationFlowTest extends TestCase {
 	}
 }
 
-class ToggleFailingMigratedStore extends MigratedStore {
+class ToggleFailingMigratedStore extends OptionMigratedStore {
 	public $fail_writes = false;
 
-	public function upsert_batch( $records ) {
-		return $this->fail_writes ? false : parent::upsert_batch( $records );
+	public function upsert_batch( $records, $companions = array() ) {
+		return $this->fail_writes ? false : parent::upsert_batch( $records, $companions );
 	}
 }
 

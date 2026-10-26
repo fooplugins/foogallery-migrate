@@ -39,10 +39,12 @@ final class SnapshotReadWorkspace {
 	}
 	private function read( $name, $offset, $bytes ) {
 		if ( fseek( $this->files[$name], $offset ) !== 0 ) { self::fail(); }
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fread -- Fixed-width random-access read from this instance's anonymous tmpfile, not a caller-supplied path.
 		$data = fread( $this->files[$name], $bytes ); if ( false === $data ) { self::fail(); }
 		return str_pad( $data, $bytes, "\0" );
 	}
 	private function write( $name, $offset, $data ) {
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite -- Fixed-width random-access write to an owned tmpfile; reject failed seeks and short writes without buffering the workspace.
 		if ( fseek( $this->files[$name], $offset ) !== 0 || fwrite( $this->files[$name], $data ) !== strlen( $data ) ) { self::fail(); }
 	}
 	private function numbers( $data ) { return array( (int) substr( $data, 0, 20 ), (int) substr( $data, 20, 20 ), (int) substr( $data, 40, 20 ) ); }
@@ -80,5 +82,6 @@ final class SnapshotReadWorkspace {
 		}
 		return $spread;
 	}
+	// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- Native close releases this instance's anonymous tmpfiles, including failure paths; WP_Filesystem cannot close these handles.
 	public function __destruct() { foreach ( $this->files as $file ) { if ( is_resource( $file ) ) { fclose( $file ); } } }
 }

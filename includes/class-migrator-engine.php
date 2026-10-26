@@ -36,7 +36,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          */
         protected $settings;
 
-        /** @var MigratedStore|MigratedHistoryRepository */
+        /** @var OptionMigratedStore|MigratedHistoryRepository */
         protected $migrated_store;
 
         /** @var array Records queued for one request-level upsert. */
@@ -60,10 +60,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         private $storage_operation_depth = 0;
 
         /**
-         * @param MigratedStore|MigratedHistoryRepository|null $migrated_store Optional injected store.
+         * @param OptionMigratedStore|MigratedHistoryRepository|null $migrated_store Optional injected store.
          */
         public function __construct( $migrated_store = null ) {
-            if ( $migrated_store instanceof MigratedStore || $migrated_store instanceof MigratedHistoryRepository ) {
+            if ( $migrated_store instanceof OptionMigratedStore || $migrated_store instanceof MigratedHistoryRepository ) {
                 $this->migrated_store = $migrated_store;
                 if ( $migrated_store instanceof MigratedHistoryRepository ) { $this->settings = new MigratorSettings( $migrated_store->state_backend() ); }
                 return;
@@ -170,7 +170,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
             return $this->settings;
         }
 
-        /** @return MigratedStore|MigratedHistoryRepository */
+        /** @return OptionMigratedStore|MigratedHistoryRepository */
         protected function migrated_store() {
             $this->assert_storage_context();
             if ( ! isset( $this->migrated_store ) ) {

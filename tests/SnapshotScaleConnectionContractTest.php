@@ -22,14 +22,14 @@ class SnapshotScaleConnectionContractTest extends TestCase {
 			$columns[] = '`' . $key . '`'; $expressions[] = null === $value ? 'NULL' : ( is_int( $value ) ? '%d' : '%s' );
 			if ( null !== $value ) { $args[] = $value; }
 		}
-		$sql = 'INSERT INTO `wp_foogallery_migrate_legacy_' . $table . '` (' . implode( ',', $columns ) . ') VALUES (' . implode( ',', $expressions ) . ')';
+		$sql = 'INSERT INTO `wp_foogallery_migrate_' . $table . '` (' . implode( ',', $columns ) . ') VALUES (' . implode( ',', $expressions ) . ')';
 		$this->assertSame( 1, $db->query( $db->prepare( $sql, $args ) ) );
 		$values['id'] = $db->insert_id; return $values;
 	}
 	private function named( $row ) { $out = array(); foreach ( $row as $k => $v ) { $out[$k] = $v; } return $out; }
 	private function driver( $row ) { foreach ( $row as $k => $v ) { if ( is_int( $v ) ) { $row[$k] = (string) $v; } } return $row; }
 	private function read( $db, $args ) {
-		return $db->get_results( $db->prepare( 'SELECT * FROM `wp_foogallery_migrate_legacy_records` WHERE blog_id = %d AND state_id = %d AND generation = %d AND bytes <= %d ORDER BY id ASC LIMIT %d', $args ), ARRAY_A );
+		return $db->get_results( $db->prepare( 'SELECT * FROM `wp_foogallery_migrate_records` WHERE blog_id = %d AND state_id = %d AND generation = %d AND bytes <= %d ORDER BY id ASC LIMIT %d', $args ), ARRAY_A );
 	}
 	private function rejected( $call, $message ) {
 		try { $call(); } catch ( \LogicException $error ) { $this->assertStringContainsString( $message, $error->getMessage() ); return; }
@@ -59,7 +59,7 @@ class SnapshotScaleConnectionContractTest extends TestCase {
 	public function test_every_schema_column_and_typed_arguments_survive_layout_reuse(): void {
 		$db = new SnapshotScaleConnection();
 		$definitions = ( new \FooPlugins\FooGalleryMigrate\LegacyStorageSchema( $db ) )->definitions();
-		$columns = $definitions['wp_foogallery_migrate_legacy_records']['columns'];
+		$columns = $definitions['wp_foogallery_migrate_records']['columns'];
 		foreach ( array( false, true, false ) as $nullable ) {
 			$values = array();
 			foreach ( $columns as $column => $spec ) {
@@ -89,7 +89,7 @@ class SnapshotScaleConnectionContractTest extends TestCase {
 		$this->assertSame( array(), $this->read( $db, array( 7, 12, 1, 7, 10 ) ) );
 		$this->assertSame( array(), $this->read( $db, array( 7, 12, 1, 100, 0 ) ) );
 		$this->assertCount( 1, $this->read( $db, array( 7, 12, 1, 100, 1 ) ) );
-		$stats = $db->get_results( $db->prepare( 'SELECT COUNT(*) AS record_count FROM `wp_foogallery_migrate_legacy_records`', array( 7, 12, 1 ) ), ARRAY_A );
+		$stats = $db->get_results( $db->prepare( 'SELECT COUNT(*) AS record_count FROM `wp_foogallery_migrate_records`', array( 7, 12, 1 ) ), ARRAY_A );
 		$this->assertSame( array( array( 'record_count' => 2, 'payload_bytes' => 23, 'encoded_bytes' => 33 ) ), $stats );
 		$db->corrupt_readback = true;
 		$this->assertCount( 1, $this->read( $db, array( 7, 12, 1, 100, 10 ) ) );
@@ -113,8 +113,8 @@ class SnapshotScaleConnectionContractTest extends TestCase {
 			'active_generation' => 1, 'revision' => 1, 'root_payload' => "\0root", 'digest_status' => 'current',
 			'snapshot_digest' => 'digest1', 'digest_revision' => 1 ), 'state' );
 	}
-	private function root_update( $db, $args ) { return $db->query( $db->prepare( 'UPDATE `wp_foogallery_migrate_legacy_state` SET root_payload = %s', $args ) ); }
-	private function publish( $db, $args ) { return $db->query( $db->prepare( 'UPDATE `wp_foogallery_migrate_legacy_state` SET active_generation = %d', $args ) ); }
+	private function root_update( $db, $args ) { return $db->query( $db->prepare( 'UPDATE `wp_foogallery_migrate_state` SET root_payload = %s', $args ) ); }
+	private function publish( $db, $args ) { return $db->query( $db->prepare( 'UPDATE `wp_foogallery_migrate_state` SET active_generation = %d', $args ) ); }
 	public function test_head_cas_metadata_limits_and_schema_delegation(): void {
 		$db = new SnapshotScaleConnection(); $head = $this->head( $db ); $id = $head['id'];
 		$this->rejected( function () use ( $db ) { $this->head( $db ); }, 'Duplicate host head' );
@@ -189,7 +189,7 @@ class SnapshotScaleConnectionContractTest extends TestCase {
 	}
 	public function test_unsupported_sql_including_delete_remains_fail_closed(): void {
 		$db = new SnapshotScaleConnection(); $this->insert( $db, $this->values() ); $records = $db->records;
-		foreach ( array( 'DELETE FROM `wp_foogallery_migrate_legacy_records`', 'TRUNCATE TABLE records', 'UPDATE records SET payload = 1' ) as $sql ) { $this->rejected( function () use ( $db, $sql ) { $db->query( $db->prepare( $sql, array() ) ); }, 'Unsupported host write' ); }
+		foreach ( array( 'DELETE FROM `wp_foogallery_migrate_records`', 'TRUNCATE TABLE records', 'UPDATE records SET payload = 1' ) as $sql ) { $this->rejected( function () use ( $db, $sql ) { $db->query( $db->prepare( $sql, array() ) ); }, 'Unsupported host write' ); }
 		$this->rejected( function () use ( $db ) { $db->get_results( 'SELECT unsupported', ARRAY_A ); }, 'Unsupported host read' );
 		$this->assertSame( $records, $db->records );
 	}

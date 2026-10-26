@@ -121,5 +121,6 @@ class LegacyCollectionEnvelope {
 			foreach ( $value as $key => $item ) { $this->digest_value( $hash, $key, $depth + 1 ); $this->digest_value( $hash, $item, $depth + 1 ); }
 		} else { $encoded = $this->codec->encode( $value ); hash_update( $hash, 'value:' . strlen( $encoded ) . ':' . $encoded ); }
 	}
+	// phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Private callers pass fixed diagnostic literals only, never collection values; throwing is not HTML output.
 	private function fail( $message ) { throw new \RuntimeException( $message ); }
 }

@@ -17,7 +17,7 @@ class MigratedHistoryRepository {
 			throw new \RuntimeException( 'Unsupported history backend. No option fallback.' );
 		}
 		$this->backend = $backend; $this->settings = $settings;
-		$this->store = $backend instanceof LegacyOptionBackend ? new OptionMigratedStore( false, $settings, $backend ) : null;
+		$this->store = $backend instanceof LegacyOptionBackend ? new OptionMigratedStore( $settings, $backend ) : null;
 	}
 	public function get( $identifier ) {
 		if ( null !== $this->store ) { return $this->store->get( $identifier ); }
