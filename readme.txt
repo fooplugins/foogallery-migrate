@@ -86,14 +86,32 @@ Update now to get all the latest features, bug fixes and improvements!
 
 == Frequently Asked Questions ==
 
+= What happens when I deactivate FooGallery Migrate? =
+
+Deactivation retains migrated history, preferences and operational state so that you can reactivate the plugin and resume. It does not delete or roll back migrated FooGallery galleries, albums, media, source-plugin data or replaced post content. Network deactivation also retains each site's state.
+
+Uninstall removes plugin-owned internal storage, including retained history and preferences. It does not undo migrations or delete source or destination content. Back up your database before uninstalling if you need to retain migration state.
+
 = I need to import from another plugin. How can I request that? =
 
 [Contact us](https://fooplugins.com/support/) and we will build an importer to help you migrate to FooGallery.
 
 == Changelog ==
 
+= 1.16.1 =
+* Fixed third-party gallery blocks incorrectly failing with "changed after detection" by recording exact block positions and original markup, including repeated and nested blocks. Use Rescan Content once after updating to refresh older block findings.
+* Fixed the content migration dialog showing 100% completion after a failed replacement. Errors and partial results now appear inside the dialog without a success percentage.
+
 = 1.16 =
+* Fixed Robo Gallery migration warnings when older galleries have missing or incomplete settings, using safe defaults while preserving existing layout mappings.
+* Fixed gallery image loading after retry or saved history, and migrations staying at 0% when a gallery has no images.
+* Added one shared, accessible progress dialog across Galleries, Albums, Blocks / Shortcodes and Image Tags, with current-gallery image progress and safe stopping between batches.
 * Added WP Photo Album Plus migration for galleries, nested albums, locally stored images and metadata, plus supported numeric-album shortcodes and blocks; the source plugin can remain inactive, and migration form actions are now handled reliably.
+* Added optional database-table storage for larger single-site migrations, with verified storage switching, progress reset and removal of plugin-owned data and tables without deleting galleries or media.
+* Added simple Migration Storage controls alongside the other migration settings, with recommendations based on saved data size and detected gallery or image counts without loading source image lists.
+* Saved small gallery and image-entry totals after successful discovery for storage advice; existing collections gain totals on the next Refresh Galleries.
+* Added a Troubleshooting tab with plain-language help, visible Reset & cleanup actions, technical details and a collapsible support summary. Interrupted storage changes remain recoverable, and destructive actions still require confirmation.
+* Renamed user-facing FooGallery Template settings to Layout settings.
 
 = 1.15 =
 * Added stale-status detection for Blocks / Shortcodes when the migrated gallery map changes after a content scan.
@@ -135,7 +153,7 @@ Update now to get all the latest features, bug fixes and improvements!
 
 = 1.9 =
 * Added Override Gallery Settings and Override Album Settings options to inherit settings from existing FooGallery galleries and albums during migration.
-* Migrated albums can now inherit album template, settings, sort order and custom CSS from a selected source album while preserving the migrated child gallery list.
+* Migrated albums can now inherit album layout, settings, sort order and custom CSS from a selected source album while preserving the migrated child gallery list.
 * Migrated galleries can now inherit settings and custom CSS from a selected source gallery while preserving migrated attachments and source-plugin migration mappings.
 * Fixed migrated albums so edited album names entered in the migration form are used for the created FooGallery album.
 

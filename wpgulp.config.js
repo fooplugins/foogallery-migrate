@@ -15,7 +15,7 @@ module.exports = {
 			package: 'FooGallery Migrate'
 		},
 		files: {
-			'./languages/foogallery-migrate.pot': './**/*.php'
+			'./languages/foogallery-migrate.pot': [ './*.php', './includes/**/*.php' ]
 		}
 	},
 

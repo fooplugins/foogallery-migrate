@@ -1,33 +1,169 @@
 # Legacy storage upgrade for large sites
 
-**Status:** Proposed  
-**Date:** 2026-08-28  
-**Scope:** Storage and storage lifecycle for the existing migration engine  
+**Status:** Single-site first-release candidate passed scoped implementation and independent QA; committed locally in `57103ca`. Not published or approved for release.
+
+**Qualification:** 2026-10-23; current results, package identity and retained evidence are in [the final acceptance closure](dev-plan.md#final-acceptance-closure). Runtime validation is complete within the documented limits; historical PR inventory below is not the remaining backlog.
+
+**Design date:** 2026-08-28
+
+**Implementation reconciliation:** 2026-10-22, PR head `206655cbfd49541b0f957d32028d1e53c17f39a1`
+
+**Scope:** Single-site table storage and essential lifecycle for the existing migration engine
+
+**Scope approval:** Brad adopted the five simplification cuts on 2026-10-22, then authorized development using the plan and instructed “dont worry about budget - just go”. Local development/validation/commits are authorized; publishing is not.
+
+**Execution tracker:** [Prioritised completion plan](dev-plan.md)
+
 **Related future work:** [GitHub issue #14](https://github.com/fooplugins/foogallery-migrate/issues/14), which is deliberately not part of this design
 
 ## Decision
 
 Upgrade storage before undertaking any new migration-engine work.
 
-The existing option-backed behavior remains the default. Storage is first extracted behind explicit contracts and proven with an option implementation. A table implementation is then introduced for high-cardinality legacy state, followed by safe switching, a size-based recommendation, cleanup, uninstall, multisite support, and legacy persisted-state hardening.
+The existing option-backed behavior remains the default. Reuse the storage contracts, option/table implementations, and switching infrastructure already introduced by PR #15. Exercise a real single-site migration journey immediately in a disposable environment, then complete bounded access and essential cleanup before release. Multisite table support is deferred backlog, not an automatic next milestone or a first-release gate. Do not restart the extraction or introduce a replacement engine.
 
 This project does **not** create or redesign a migration engine. It preserves the existing engine's sources, object model, identities, queue states, batching, AJAX flow, destination writes, content replacements, and retry behavior. Bounded persistence access may replace a whole-collection read with a page, count, aggregate, or single-record query so that table mode does not reconstruct every stored object. The existing engine continues to own every selection, transition, ordering, retry, title, and completion decision; storage only answers queries and applies engine-supplied patches.
 
-Table mode is an administrator-confirmed storage choice. It is never enabled automatically.
+Table mode is an administrator-selected storage choice. It is never enabled automatically.
 
-## Why the upgrade is needed
+### Storage settings and Troubleshooting (24 October 2026 amendment)
 
-FooGallery Migrate currently stores almost all operational state in one non-autoloaded `foogallery-migrate-data` option, while user preferences live in `foogallery-migrate-settings` ([constants](../includes/constants.php#L9-L14)).
+Use **FooGallery → Migrate → Settings → Migration Settings → Migration Storage**, at
+`edit.php?post_type=foogallery&page=foogallery-migrate&tab=settings#migration-storage`.
+The former `options-general.php?page=foogallery-migrate-storage` bookmark redirects here;
+there is no separate WordPress Settings submenu. Recommendations link to this section.
+
+Select **Database tables** and choose **Change storage** to perform the existing guarded
+steps sequentially: read-only capacity preflight → provision/verify owned tables if
+needed → start conversion → continue successful bounded copy/verification phases
+until stable table authority. Keep the settings page open. Each request retains the
+existing exact fields, purpose-specific nonce, permission checks and receiver safety
+checks. Provisioning alone does not select tables, and no prerequisite CLI command
+or separate provisioning button is required. CLI schema-only provisioning remains
+available for operators; the conversion coordinator and migration engine are unchanged.
+
+The normal section shows two labelled choices, a readable migration-data size
+(or record count in table mode), and one Change storage button. Selecting a mode
+alone performs no request; the button is disabled for the current mode. Routine
+switching has no acknowledgement checkbox, backup acceptance or confirmation
+dialog. A spinner reports progress and an inline success message survives reload.
+Technical details and Reset & cleanup now live in the separate **Troubleshooting**
+tab at `edit.php?post_type=foogallery&page=foogallery-migrate&tab=troubleshooting`.
+Use the Troubleshooting navigation tab; Settings does not repeat a separate link
+or render recovery/destructive forms inline.
+The tab starts with "If you are having trouble with a migration, try the following:"
+and three plain-language help bullets about interrupted migrations, memory errors
+and trying table storage for larger migrations. **Reset & cleanup** follows,
+always expanded, with this description:
+"Galleries and media are kept. Migrating again after a reset or removal may create
+duplicates." Next is **Technical details**, a labelled table with runtime
+versions/memory and source-count estimates, followed by collapsed **Information for
+support**. Its copyable summary contains only allow-listed metadata (no migration
+contents, credentials or server paths). There is no routine healthy-status banner
+or Open migration settings link. Raw debug-history output is not loaded by this tab.
+
+Cleanup actions use labelled native settings rows; reset/removal/cancel each retain
+one confirmation describing kept data and duplicate-migration implications.
+Cancelling sends no request. Conditional warnings and **Continue storage change**
+remain visible for unfinished cleanup, errors or interrupted switches. Underlying
+permissions, purpose-specific nonce/intent fields, exact request
+shapes and receiver checks are unchanged. The tab is rendered without constructing
+the engine, including during unhealthy authority or incomplete cleanup; conditional
+engine-derived Log/Debug navigation is not probed on this diagnostic route.
+
+Failure details from a storage request can be inspected in Troubleshooting in the
+same browser tab. These use site-scoped browser session storage, not a database
+option, server log, telemetry upload or migration payload dump. A successful storage
+operation clears the last browser-local error. All error text is escaped/text-only.
+
+Normal successful continuation is not error retry or ambiguous-owner takeover.
+An error, malformed reply, unexpected receipt, timeout or connection loss stops the
+sequence. Reload to inspect durable status before explicitly continuing; a browser
+session sends at most 256 continuation turns. If preparation succeeded but conversion
+did not, options remain authoritative unless the recorded conversion phase says
+otherwise; prepared tables may remain for an explicit retry or owned-data cleanup.
+Switching back to options uses current table data and the same safety/size limits.
+The Troubleshooting navigation tab remains available even when normal preferences
+and the migration engine cannot safely load. It keeps recovery/cleanup controls
+reachable in those states. Cleanup still preserves
+source/destination galleries, attachments and content.
+
+Redis is not a third storage mode or a dependency. A site may use Redis through WordPress's optional persistent object cache; the option or MySQL tables remain authoritative. Caching a large serialized option does not avoid its PHP decode-memory cost. Validation includes persistent caching so authority switches and cleanup cannot leave stale owned cache entries.
+
+## Approved first-release boundary
+
+On 2026-10-22 Brad approved all five cuts in the [October 20 PR simplification proposal](https://github.com/fooplugins/foogallery-migrate/pull/15#issuecomment-6287530658). That approval supersedes the broader original design and the S0–S9 plan committed in `cb8aa51` where they conflict with this boundary. The initial approval covered documentation; Brad's subsequent development request authorizes implementation within this boundary, **not public release**. Historical checkpoint “not waived” statements remain historical, not authority to undo these approved amendments.
+
+1. **Release-owned capacity policy, not customer calibration.** Ship a small tested policy with conservative limits/headroom and clear refusal conditions. Detailed allocator, binary/host identity and dataset qualification belong in engineering diagnostics, not customer prerequisites. Retain useful PR foundations; simplify obsolete machinery with reviewed replacement coverage.
+2. **Single-site table mode only.** Multisite continues on options, with table provisioning/conversion explicitly unavailable. Defer network registry/provisioning, shared-network lifecycle expansion, large-network uninstall preparation and the topology matrix. Existing shared table names/`blog_id` fields need not be rewritten merely to narrow the release.
+3. **Assisted recovery for uncertain hard crashes.** Preserve resume after ordinary handled failures. If an old worker may still resume, block safely and require a documented procedure establishing quiescence before recovery. No automatic ambiguous-owner takeover, new fencing platform, or lock removal based only on age, PID absence or browser closure.
+4. **Minimal maintenance interface.** Inspect → explicitly enable → copy and verify → switch; reverse from current table data only when safe. Keep a basic size recommendation, actionable status/errors, existing state clear, on-demand remove-all and uninstall. Defer elaborate advice tiers/re-notification and separate convenience controls. Cleanup must still remove all owned stale resources.
+5. **Initial full decode and separate test domains.** Accept one full legacy-option decode per applicable request within measured limits; bound later copy/verification. Keep lossless codec behavior and refuse unsupported inputs without normalization. Test native WordPress text conversion separately from arbitrary-byte codec fidelity/refusal; do not demand a byte-preserving invalid-UTF-8 round trip through native text storage or build a universal streaming decoder.
+
+Authorization, default option behavior, identities/edits, one authoritative backend, safe interruption, owned-data cleanup and realistic large-migration tests remain mandatory. Do not raise the PHP/WordPress minimums or change engine/source behavior to achieve a pass.
+
+### Two delivery milestones
+
+- **M1 — Testable integrated candidate:** In a disposable single-site environment, use production entry points to enable tables, run a representative large migration, edit table-backed state, and clean up/uninstall without touching output. Separately prove successful reversal from current edited data when it fits safely, and refusal without authority/data changes when oversized. Exercise the supported journeys on the runtime floor and a matching ZIP without dev dependencies. Begin trying them in R0; repair the first failing step in R1. M1 is controlled-test evidence, not permission for general use.
+- **M2 — First-release readiness:** Finish all supported bounded paths, parity, fault/recovery/cleanup checks and basic recommendations; pass the maintained release suite and source/package validation. Deferred features do not block M2. Publishing still requires explicit approval.
+
+[dev-plan.md](dev-plan.md) is the sole execution tracker, including test classification and the workflow rules for avoiding repeated blockers. Later sections retain detailed storage contracts; any network or advanced-advisor material explicitly marked deferred is reference only. New requirements outside this approved boundary require a new scope decision.
+
+## PR #15 implementation status
+
+This section is a source-review snapshot of [PR #15](https://github.com/fooplugins/foogallery-migrate/pull/15) at the revision above, not a claim that its tests or release acceptance pass. The remaining design sections define contracts within the approved release boundary (or labelled deferred reference); they are not an inventory of finished features. [dev-plan.md](dev-plan.md) is the single forward task/status tracker. Older checkpoint documents remain historical evidence, not competing plans.
+
+### Already implemented — retain and complete
+
+| Area | Code present at the reviewed revision | Remaining acceptance |
+|---|---|---|
+| Compatibility and option storage | `LegacyStateCodec`, `LegacyRecordCodec`, collection envelopes, `LegacyOptionBackend`, and five domain repositories | Re-establish option parity against the pre-PR engine, including child loading, typed keys, status transitions, retry, and resume. Extraction is not work to start again. |
+| Table schema and access | Two shared legacy tables, typed-key/raw-key checks, generations, revisions, indexed projections, table reader/repository/backend and snapshots | Finish bounded production callers; schema/repository tests alone do not prove request memory is bounded. |
+| Scalar state | `ScalarStateRepository` and table scalar mutation, including creation of missing state and deletion | Preserve unknown scalars and atomic coupling to collection metadata; earlier checkpoints describing scalar creation/deletion as absent are superseded. |
+| Migrated history | Direct/batch/presence/source-identity access, revision-aware writes, cursor pages, summaries, retry/export/clear primitives | Wire all log, migration, content and tag consumers to supported table operations; whole-history methods remain option-only. |
+| Content scans | Window/get-many access, metadata/checkpoints, batch append/patch and atomic reset primitives; partial caller integration | Audit the entire scan/list/count/selection/replacement path and eliminate residual whole-collection work. |
+| Authority and maintenance | Control/authority records, maintenance gate, writer markers, pinned transactions, quiescence checks and authority-selected production backend | Verify actual request lifecycle and recovery. Do not weaken conservative ownership checks to make tests pass. |
+| Provisioning and conversion | Provisioning, preflight, staged copying, verification, recovery and inactive-copy retirement services; admin and CLI entry points | Qualify supported public paths with real finite capacity evidence. Existing primitives are not a completed user journey. |
+| Lifecycle | Activation/deactivation retain existing state without automatic conversion; an uninstall entry point exists | Uninstall still targets an older storage layout and is not sufficient for the current schema; see blockers below. |
+
+Source entry points: [table repository](../includes/class-legacy-table-repository.php), [history repository](../includes/class-migrated-history-repository.php), [content repository](../includes/class-content-scan-repository.php), [schema](../includes/class-legacy-storage-schema.php), [authority](../includes/class-storage-authority.php), and [storage operations](../includes/class-storage-operations.php).
+
+### Implementation priorities at the reviewed PR revision
+
+This list records the original blockers at `206655c`, not the current remaining backlog. R0–R4 implementation and qualification have since passed within the approved scope; final implementation is committed locally in `57103ca`. Current evidence, limits and commit identities live in [the execution tracker](dev-plan.md), not this historical inventory. Deferred network/engine/advisor work is not an unfinished first-release requirement.
+
+1. **Run the journey and classify the baseline (R0).** Prepare one owned disposable runner and attempt the public customer path immediately. Record its first failure and classify suite failures as product/safety/performance, environment, or superseded implementation diagnostics. Historical focused passes do not certify this head.
+2. **Make one integrated candidate testable (R1 / M1).** The shipped [capacity policy](../includes/storage-capacity-policy.json) has empty classes and null digests, so public conversion refuses. Establish a small evidenced release policy without customer calibration, then fix the first failing migration/edit/reversal/cleanup step. [Uninstall](../uninstall.php) still requires excluded `vendor/autoload.php`; [MigratedStore](../includes/class-migrated-store.php) targets the older table layout. Complete essential single-site cleanup/package loading as part of the journey, not after UI polish. Use real SQL/runtime-floor/source+ZIP evidence, not an injected policy.
+3. **Finish remaining supported bounded paths and safety (R2).** History `get_all()`, `log_page()` and `get_by_parent()` remain option-only; valid-URL table lookup is unsupported. Gallery/album reads and `replace_collection()` still reconstruct whole collections; the image-tag builder loads whole history. Complete page/query/affected-tree/queue access and remaining content consumers while preserving identities, ordering, revisions, atomic checkpoints and legacy behavior. Admission caps do not prove page-size scaling.
+4. **Finish the minimal operator workflow (R3).** Add the basic size suggestion, explicit confirmation, status/errors and essential cleanup controls. Reuse existing admin/CLI services. Do not make advanced notices, separate reset/stale-copy buttons or a command matrix prerequisites.
+5. **Accept the first release (R4 / M2).** Validate all supported flows, safety, memory scaling, maintained tests and the actual ZIP on applicable runtimes. Keep multisite options working and table operations rejected. No general table-mode rollout before M2.
+
+Multisite table enablement, network lifecycle and advanced advisor/convenience features are **deferred**, not R5 or another required release task. The [ordered plan](dev-plan.md#ordered-work) supersedes the previous full-roadmap sequence.
+
+### Evidence and scope qualifications
+
+These bullets describe the reviewed PR and original checkpoints. Current candidate acceptance is recorded separately above; retain their original limitations rather than treating an old source review as proof of the final source.
+
+- [The October 20 review checkpoint](pr15-review-checkpoint-2026-10-20.md) records a failing/timed-out full PHPUnit run and explicitly incomplete release acceptance. Its focused passes and package checks apply to that checkpoint, not automatically to this reviewed head.
+- [The single-site release scope](storage-single-site-release-scope.md) records empty-policy admission and outstanding positive native 20K / actual 10K AIGPL journeys. Retain realistic positive workload coverage; classify historical exact-byte/host-qualification evidence under the approved native-text vs codec/refusal split. A fixture double or injected policy is not a production release pass.
+- Table mode is wired into production backend selection; it is not merely an unused prototype. Nevertheless, supported public conversion and complete table-backed flows are not yet qualified.
+- PR #15 contains structural serialization scanning and native decode/round-trip verification. This is additional storage-admission machinery, not proof of streaming option hydration. The initial design's exclusion of a new streaming PHP serialization decoder remains: measure and simplify existing overhead where necessary, rather than expanding parser architecture as a prerequisite.
+- The capacity-policy JSON is storage admission configuration, **not** the migration-config JSON or v2 engine proposed in issue #14. That engine work remains excluded.
+- Persistence-facing edits to the existing engine are necessary to call bounded repositories. They must not change execution decisions. Existing changes to compaction/child handling and retry paths require golden parity evidence; class names alone do not demonstrate unchanged behavior.
+
+## Why the upgrade is needed — original baseline
+
+The following describes the 2026-08-28/pre-PR option implementation, not the current PR's completed capabilities. The reference source is [the pre-PR develop revision](https://github.com/fooplugins/foogallery-migrate/tree/3bb151465818fbb164edb35866118794563ce12a). It stored almost all operational state in one non-autoloaded `foogallery-migrate-data` option, while user preferences lived in `foogallery-migrate-settings`.
 
 The option is compacted before persistence, but its scaling characteristics remain problematic:
 
-- Every operational read loads the complete option and every mutation rewrites it ([MigratorSettings](../includes/class-migrator-settings.php#L46-L86)).
-- Gallery and album collections recursively embed loaded child objects in the same payload ([compaction](../includes/class-migrator-settings.php#L461-L560)).
-- Discovery, queue selection, cancellation, and every migration turn operate on and persist complete collections ([MigratorBase](../includes/migrators/class-migrator-base.php#L74-L130), [migration turn](../includes/migrators/class-migrator-base.php#L218-L233)).
-- Adding, checking, updating, or deleting one migrated-history record loads and often rewrites the entire migrated map ([MigratorEngine](../includes/class-migrator-engine.php#L776-L891)).
-- Content scanning is time- and keyset-bounded, but all accumulated findings and its checkpoint are rewritten together in the same option ([ContentMigrator](../includes/migrators/class-content-migrator.php#L93-L184), [persistence](../includes/migrators/class-content-migrator.php#L544-L562)).
-- The migration log loads every migrated object, filters in PHP, and only then slices the requested page ([log view](../includes/views/view-migrate-tab-log.php#L5-L90)).
-- The plugin has no table schema lifecycle or uninstall cleanup ([bootstrap](../migrate.php#L30-L47)).
+- Every operational read loaded the complete option and every mutation rewrote it.
+- Gallery and album collections recursively embedded loaded child objects in the same payload.
+- Discovery, queue selection, cancellation, and every migration turn operated on complete collections.
+- Adding, checking, updating, or deleting one migrated-history record loaded and often rewrote the entire migrated map.
+- Content scanning was time- and keyset-bounded, but accumulated findings and its checkpoint were rewritten together in the same option.
+- The migration log loaded every migrated object, filtered in PHP, and only then sliced the requested page.
+- There was no table schema lifecycle or uninstall cleanup.
 
 A development-site measurement on 2026-08-28 found a 402,231-byte operational option containing 507 top-level gallery records, one album embedding 500 galleries, 17 migrated-history records, and six content findings. This is not a release threshold, but it demonstrates how nested duplication and full rewrites appear before a site is exceptionally large.
 
@@ -54,7 +190,7 @@ The separate `foogallery-migrate-settings` option currently contains six user pr
 
 The current transient family is `foogallery_migrate_content_result_{user_id}` with the corresponding timeout rows. The `_foogallery_migrate` post-meta name is declared but unused; this storage project does not begin writing it and cleanup must not delete matching post meta unless a future, separately reviewed feature owns such rows.
 
-Phase 0 must repeat this inventory from all call sites and add a compatibility fixture for every key before extraction begins. Unknown scalar keys remain losslessly accessible through `ScalarStateRepository`.
+R0 must reconcile this original inventory with all PR call sites, metadata and compatibility fixtures before further implementation. The resource manifest must include PR control/authority/schema/backup/writer resources and any older storage artifacts. Unknown scalar keys remain losslessly accessible through `ScalarStateRepository`.
 
 ## Outcomes
 
@@ -64,10 +200,10 @@ The completed storage upgrade must:
 2. Preserve the current compact-v1 logical contract and runtime behavior, and never silently normalize a readable legacy non-compact payload.
 3. Make table-backed requests scale primarily with the requested page or affected root tree rather than unrelated stored records.
 4. Avoid rewriting unrelated root trees or state buckets during normal table-backed mutations.
-5. Recommend table mode when observed state crosses documented, filterable thresholds.
+5. Give a basic recommendation when observed option size crosses a documented, filterable threshold, without auto-switching.
 6. Switch backends through a resumable, verified copy with exactly one authoritative backend.
-7. Make it easy to inspect storage health, remove stale copies, clear migration state, and remove all plugin-owned data.
-8. Remove all plugin-owned options, transients, locks, rows, and tables during uninstall on single sites and within the documented prepared/supported multisite scope; any multisite installation above the supported synchronous bound must first pass the full zero-remnant preparation described below.
+7. Make it easy to inspect status, clear migration state, and remove all plugin-owned data including stale copies. Separate stale-copy/reset convenience controls are not required.
+8. Remove all plugin-owned options, transients, locks, rows, and tables during single-site uninstall, and preserve existing multisite option-mode behavior. New network table/uninstall preparation support is deferred.
 9. Never delete or alter migrated FooGallery galleries, albums, attachments, source-plugin data, or changed post content during storage cleanup or uninstall.
 
 ## Compatibility invariants
@@ -161,7 +297,7 @@ Current compact-v1 writes intentionally retain only a whitelist of object proper
 - A table switch must detect non-compact object values before staging. It may proceed only if a tested, allowlisted lossless legacy encoder can preserve every currently observable property needed by the runtime.
 - The initial implementation must block conversion of an unsupported non-compact payload with an actionable explanation. It must not silently compact it, discard properties, or clear history.
 
-Phase 0 decides which historical non-compact shapes require a lossless encoder. “Parity” does not mean that a table import is allowed to normalize old objects into the narrower compact-v1 shape without an explicit, separately approved compatibility policy.
+R0/R1 identify which historical non-compact shapes the first release can safely convert; unsupported shapes must refuse without data loss. “Parity” does not mean that a table import is allowed to normalize old objects into the narrower compact-v1 shape without an explicit, separately approved compatibility policy.
 
 ### ScalarStateRepository
 
@@ -270,9 +406,10 @@ The existing queue builder may consume migrated history through a bounded page i
 | Backend authority/switch status | Small dedicated non-autoloaded control option | Same option |
 | Table-authority safety sentinel | Dedicated non-autoloaded per-site option when a table flip is pending or table mode is authoritative | Same option |
 | Storage-maintenance lock | Dedicated non-autoloaded per-site lock option | Same option |
-| Recommendation dismissal/observed metrics | Dedicated non-autoloaded per-site option | Same option |
+| Last successful gallery discovery counts | Small non-autoloaded `foogallery_migrate_discovery_summary` option | Same option |
+| Advanced recommendation dismissal/observed metrics (deferred) | Optional dedicated non-autoloaded per-site option if later implemented | Same option |
 | Installation-wide shared-table schema version/upgrade lock | Regular options in the main site's options table | Same resource |
-| Sites using new storage | Bounded/chunked network registry where required | Same resource plus table-state rows |
+| Sites using new storage (deferred multisite feature) | Future bounded/chunked network registry | Same resource plus table-state rows |
 | Detected-plugin records | `foogallery-migrate-data` | Legacy state table |
 | Small engine/adapter values | `foogallery-migrate-data` | Legacy state table |
 | Gallery discovery/queue | `foogallery-migrate-data` | Flattened legacy records |
@@ -284,16 +421,16 @@ The existing queue builder may consume migrated history through a bounded page i
 
 The control option is deliberately outside both backends so backend selection never depends on first selecting a backend. It contains no migratable records. Every newly introduced option, option prefix, table, transient prefix, and registry chunk is part of the cleanup manifest; cleanup must be driven by that manifest rather than separate hand-maintained lists.
 
-Proposed owned names are fixed before implementation:
+Retain existing PR resource names; R0 reconciles this original inventory with actual code and superseded artifacts. This list does not require creating deferred resources:
 
 - Existing per-site options: `foogallery-migrate-data`, `foogallery-migrate-settings`.
 - New per-site options/prefixes: `foogallery_migrate_storage_control`, `foogallery_migrate_storage_authority`, `foogallery_migrate_storage_maintenance`, `foogallery_migrate_storage_writer_`, `foogallery_migrate_storage_notice`, and `foogallery-migrate-data-storage-backup`.
 - New installation-wide resources: `foogallery_migrate_storage_schema_version` and `foogallery_migrate_storage_schema_lock`, stored as regular options in the main site's options table so `option_name` uniqueness can arbitrate lock acquisition.
-- New per-network resource: a bounded/chunked `foogallery_migrate_storage_sites_` site registry.
+- Deferred per-network resource: a bounded/chunked `foogallery_migrate_storage_sites_` site registry; do not introduce it for the first release.
 - Existing transient prefix: `foogallery_migrate_content_result_`, including timeout rows.
 - New tables: `{base_prefix}foogallery_migrate_legacy_state` and `{base_prefix}foogallery_migrate_legacy_records`.
 
-If implementation changes a name, this list, the lifecycle resource manifest, and cleanup tests must change together.
+The notice resource is likewise not required for the basic advisor. Any owned artifact that actually exists must be covered by cleanup; do not create a deferred resource merely to satisfy this inventory. If implementation changes a name, this list, the lifecycle resource manifest, and cleanup tests must change together.
 
 ## Option backend
 
@@ -305,24 +442,24 @@ Option mode remains the initial and fallback-compatible mode.
 - `update_option()` returning `false` is still treated as success when the requested value is already stored.
 - It reads old un-compacted payloads without a write-time conversion.
 - It does not create per-record or per-run options.
-- It remains appropriate for small sites. All current tests execute through option storage, although they do not yet cover every option semantic or lifecycle behavior.
+- It remains appropriate for small sites. PR #15 tests both option and table storage; R0/R4 must verify complete option semantics and lifecycle coverage rather than assuming extraction proves parity.
 
-The first implementation release must route existing behavior through this backend only. Its pass condition is logical snapshot parity and the complete existing regression suite, not a performance improvement.
+The original option-only extraction is already present in PR #15. Verify its logical/behavioral parity; do not restart an option-only release stage. The first release now includes explicitly selected single-site table mode once M2 passes.
 
 ## Table backend
 
 ### Physical scope
 
-Use two network-shared plugin-owned tables based on `$wpdb->base_prefix`, with mandatory `blog_id` isolation:
+Retain the two PR plugin-owned tables based on `$wpdb->base_prefix`, including their `blog_id` scoping. They are provisioned/used only on single-site for this release:
 
 - `{base_prefix}foogallery_migrate_legacy_state`
 - `{base_prefix}foogallery_migrate_legacy_records`
 
 The `legacy` qualifier is intentional. These tables persist the current engine's state; they must not be reused as a future engine ledger.
 
-On a non-multisite installation, `$wpdb->base_prefix` and `$wpdb->prefix` are equivalent. On multisite, one schema can be upgraded or dropped without creating a table pair for every site.
+On a non-multisite installation, `$wpdb->base_prefix` and `$wpdb->prefix` are equivalent. The schema can support future shared-network use without a rename; that capability does not enable multisite table mode now.
 
-Because that schema is shared, provisioning and schema upgrades require network-level authority on multisite. The schema version and atomic upgrade lock have one installation-wide authority: both are regular options in the main site's options table, even on a multi-network installation, so two networks cannot run independent upgrades against the same base-prefix tables. Acquire the lock by switching to the resolved main site and calling `add_option()` with autoload disabled; the unique `option_name` index is the arbitration primitive. Token-checked renewal/release and stale takeover use compare-and-swap semantics on that exact row, and every path restores the prior blog context. A site administrator may select table mode only after an authorized network administrator has provisioned and verified the shared schema; site-level enablement then creates rows only for that blog. Multi-network provisioning/repair requires super-administrator authority.
+Use the existing regular-option schema version and atomic upgrade lock on the single site. Ownership remains token-checked; uncertain owners require assisted recovery. Network-level provisioning authority, main-site coordination and cross-network upgrade behavior are part of the [deferred multisite design](#multisite), not additional first-release infrastructure.
 
 ### State-head table
 
@@ -468,7 +605,7 @@ The table backend only solves total-state memory pressure if callers use its bou
 
 Compatibility full-collection reads may remain for option mode and tests, but table-mode production paths must not call them. A table backend that merely reconstructs every array on every request is not considered complete and must not be presented as a stored-state scaling solution.
 
-During development, table-backend compatibility `getAll()` methods should be instrumented to fail tests when invoked from a registered production path. The Phase 2 inventory must cover object factories, retry/error repair, content scanning/status/rendering/replacement, image-tag queue building, the migration log, and debug diagnostics—not only the main migration loop.
+During development, table-backend compatibility `getAll()` methods should be instrumented to fail tests when invoked from a registered production path. The R0/R2 inventory must cover object factories, retry/error repair, content scanning/status/rendering/replacement, image-tag queue building, the migration log, and debug diagnostics—not only the main migration loop.
 
 The existing `page_size = 0` setting explicitly means “disable pagination” and remains valid. In table mode, it is one logical all-record result, but the repository and renderer must keyset-iterate fixed internal batches, batch related history lookups, and emit rows in exact legacy order without first building one complete PHP collection. Selection controls, counts, row keys, and visible output remain unchanged. The response body and rendering time are still O(N), and WordPress, PHP, web-server, proxy, or browser output buffering may retain that body in memory; table storage cannot guarantee bounded end-to-end memory for this deliberate no-pagination view. The Storage screen should explain that limitation and recommend a positive page size on large sites without changing the saved value automatically.
 
@@ -482,34 +619,25 @@ Performance claims exclude initial/forced source refresh, adapter fallback scans
 
 Those limitations must be visible in release notes and benchmarks. Fixing them would require source/engine contract changes and belongs to separate future work.
 
+Image-tag fallback resolves at most 100 requested URLs against revision-pinned history pages. It retains only the current requested set and results, but an unresolved URL can require a full history scan for each fallback page. This is a bounded-memory path, not an indexed-URL or constant-time claim; source adapters may still return their full fallback array.
+
+Table storage does not make every bulk action unlimited. The shared repository operation budget remains 10,000 admitted rows, 16 MiB of admitted bytes and 10 seconds by default, including applicable old/new affected trees. Whole-collection queue changes and the global gallery check may refuse when that operation cannot fit; the collection-wide root selector also retains its 10,000-root cap. Fixed-page reads and exact-gallery actions must not inherit that cap merely because unrelated roots exist. A successful 20,000-record conversion or fixed-page benchmark is not a promise that a 20,000-root bulk queue/check action fits one request.
+
 ## Storage recommendation policy
 
-### Inputs
+The first release includes a basic saved-size or source-count suggestion, not an advanced notification system.
 
-The advisor uses storage observations only:
+- Observe serialized bytes using SQL `OCTET_LENGTH()` on the fixed option name without hydrating its value. Reuse cheap existing metrics where available; do not invoke adapters or add source discovery merely to advise.
+- Use one byte threshold, default **1 MiB (1,048,576 bytes)**, through `foogallery_migrate_storage_advice_threshold_bytes`. Only a positive PHP integer is accepted; invalid types, zero, negatives and overflowing numeric values fall back to the default. The notice begins at the threshold. Explain the observed size, expected benefit and largest-tree/no-pagination limitations.
+- Also recommend tables at **100 source gallery records or 1,000 source image entries**. These conservative heuristics are inclusive and independently filterable through `foogallery_migrate_storage_advice_threshold_galleries` and `foogallery_migrate_storage_advice_threshold_images`; each accepts only a positive PHP integer, otherwise its default is retained. They are not measured memory forecasts or conversion-admission limits.
+- After successful gallery discovery or Refresh Galleries, save one small, non-autoloaded `foogallery_migrate_discovery_summary` option with the discovered gallery total, summed known image-entry total, image-count completeness, and refresh time. The count uses only objects already discovered and their `get_children_count()` values; it never loads children for advice. The notice and Troubleshooting technical details prefer this same snapshot. Its timestamp is shown only in technical details and the support summary, not as a notice prefix. These are source-entry totals from the most recently saved discovery snapshot, including already migrated entries, not unique media or remaining migration work. Saving this advisory option is best effort: if deletion and replacement both fail, an older dated snapshot can remain, so it is not authoritative current source state. Existing collections gain the summary on the next successful Refresh Galleries; an upgrade never forces discovery or loads persisted collections to backfill it.
+- Count source records directly with scalar SQL aggregates, never by constructing the engine, invoking adapter detection/discovery, selecting source rows, decoding image lists or scanning post content. Published Envira, Modula and Robo galleries are counted; AIGPL requires its existing nonempty image metadata and uses `EXISTS` to avoid duplicate-meta overcounting. NextGEN counts galleries and non-excluded images joined to existing galleries. 10Web counts published galleries and their image rows. WPPA uses its active table constants (or current-site defaults), public albums and supported-looking photo statuses/extensions, without validating files. These are advisory source-record estimates, not the exact selected/unmigrated queue, attachment uniqueness or a guarantee that every row can migrate.
+- Before a valid discovery summary exists, scalar SQL provides partial source-record estimates. Serialized image lists (including Envira, Modula, Robo and AIGPL) and unscanned WordPress core gallery occurrences remain **unknown**, not zero. Label positive SQL image counts as partial and show an incomplete/unknown hint when a gallery threshold triggers with no known images. Their gallery counts can still trigger advice. Do not hydrate those formats solely to obtain image counts. Source query failures are ignored for advice; successful known counts can still justify a recommendation. With all current providers present there are at most 14 source-count/existence queries and only scalar results retained; SQL may still scan source indexes/tables, so this is a PHP-memory bound, not a constant-time SQL promise.
+- Recommend only on a supported, healthy, stable, single-site option backend, without pending cleanup. If the byte threshold already triggers, skip source counts. Otherwise prefer a valid last-discovery summary; use scalar SQL only while that summary is absent or invalid. Clear/redetection, progress reset, remove-all and standalone uninstall remove the summary. The Settings screen suppresses the duplicate global notice.
+- Link to **Migrate → Settings → Migration Storage**, without a separate Migration Settings heading. The native label/control row shares the settings layout; technical details and cleanup live in **Troubleshooting**. Cleanup is expanded below the help bullets; Information for support is collapsed. Switching remains an explicit **Change storage** action, without routine confirmation dialogs or acknowledgement checkboxes. If switching is unsupported, explain the limit and safe next action rather than offering a broken enable button.
+- Do not auto-create tables, select a backend, or treat a recommendation threshold as permission to bypass admission. Reverse conversion is governed by measured safety limits, not this advisory threshold.
 
-- Serialized bytes of the current legacy option, queried with SQL `LENGTH()` using the fixed option name so the option need not be hydrated.
-- Encoded bytes reported by the codec during a write or import.
-- Root and nested record count.
-- Largest collection and largest single record/tree.
-- Effective PHP memory limit and a benchmarked hydration amplification factor.
-
-It does not invoke source adapters, add source-count queries, or perform a new preflight. Before relevant state has been discovered, a storage-only advisor may have insufficient evidence to recommend a mode.
-
-### Initial thresholds
-
-Use provisional, filterable defaults and confirm them with Phase 0/Phase 6 benchmarks:
-
-- Show an early warning at 512 KiB encoded state or 1,000 compact records.
-- Recommend table mode at 1 MiB encoded state or 2,000 compact records.
-- Also recommend when estimated hydrated state would consume at least 20% of the effective PHP memory limit.
-- Count galleries, albums, nested gallery/image children, migrated-history records, content findings, and image-tag queue items—not only top-level galleries.
-
-The recommendation shows the exact trigger, current metrics, expected benefit, and known largest-tree limitation. When `page_size` is zero, it also explains the no-pagination response-memory limitation and suggests a positive value. It links to the Storage & Cleanup screen with “Use table storage” as the recommended action, but requires an administrator confirmation; it does not change either setting automatically.
-
-Thresholds must be filterable. Dismissing the notice records the observed size, not a permanent opt-out; show it again when encoded bytes or record count grows by at least 25% or the hard recommendation tier changes.
-
-There is no silent switch. Even far above the threshold, the plugin shows a stronger warning rather than creating tables or changing authority without approval.
+The original 512 KiB/1,000-saved-record warning tier, 2,000-record and hydrated-memory tiers, dismissal growth tracking and repeated notifications remain deferred. The separate source-image count heuristic above is now included; it does not revive the multi-tier notification system.
 
 ## Backend authority and switching
 
@@ -526,9 +654,9 @@ Use a small, non-autoloaded `foogallery_migrate_storage_control` option outside 
 - Start/update timestamps and last verified health result.
 - Stale retained backend copies available for removal.
 
-The per-site maintenance gate is a separate exact option acquired atomically with `add_option()`, with a random ownership token, expiry, and token-aware stale takeover. Each active storage writer uses a separate short-lived marker option. A writer checks the maintenance gate, acquires its marker, and checks the gate again; maintenance acquires the gate first and then waits for pre-existing writer markers to finish. This closes the check-then-start race without adding engine worker leases.
+The per-site maintenance gate is a separate exact option acquired atomically with `add_option()`, with a random ownership token and expiry recorded for diagnostics. Expiry does not authorize takeover; uncertain ownership requires assisted recovery. Each active storage writer uses a separate short-lived marker option. A writer checks the maintenance gate, acquires its marker, and checks the gate again; maintenance acquires the gate first and then waits for pre-existing writer markers to finish. This closes the check-then-start race without adding engine worker leases.
 
-Writer acquisition is request-scoped and re-entrant so nested legacy calls share one marker rather than creating an unbounded marker chain. Only the owner token may renew or release a gate/marker; expiry is recovery evidence, not permission to delete an unexpired writer blindly.
+Writer acquisition is request-scoped and re-entrant so nested legacy calls share one marker rather than creating an unbounded marker chain. Only the owner token may renew or release a gate/marker; expiry is recovery evidence, not permission to delete either an expired or unexpired writer without proving it can no longer run.
 
 `foogallery_migrate_storage_authority` is a second, non-autoloaded safety sentinel, not a second authority source. Before a table-authority flip, write its site ID, switch ID, and next authority epoch; require it to match the valid control option for every table-mode read. It remains while table mode is authoritative and is removed only after a verified reverse flip makes option mode authoritative. This gives empty table-mode state durable evidence even when no state-head row exists.
 
@@ -571,7 +699,7 @@ Retaining a distinct backup avoids accidental reads by table-mode code. It does 
 5. Remove the table-authority sentinel only after the option-authority flip is durably verified.
 6. Retain table generations as stale until explicitly removed.
 
-Warn strongly and normally refuse a reverse switch above the recommendation thresholds unless an explicit developer filter or WP-CLI override is used.
+Admit reversal only when the current table snapshot can safely fit the option representation under the measured release policy. Advisory notice thresholds are not safety limits. A CLI request may use explicitly configured additional memory, but neither filters nor CLI flags may bypass integrity, authority or headroom checks.
 
 The retained pre-switch backup is stale and must never be used for reverse switching; reverse switching always exports the current authoritative table state.
 
@@ -579,11 +707,27 @@ The retained pre-switch backup is stale and must never be used for reverse switc
 
 - Until the final control-option flip, the source backend remains authoritative.
 - A failure records a bounded error and resume cursor without changing authority.
-- Retrying resumes or discards the destination staging generation.
+- After an ordinary handled failure with known released ownership, retrying resumes or discards the destination staging generation. Uncertain ownership follows the assisted procedure below.
 - Source and destination state are never merged.
 - Immediately before a flip, recheck the source raw digest/revision captured behind the maintenance gate. A mismatch aborts the switch.
 - After a successful flip, a destination health failure blocks migration and offers an explicit recovery path; it never silently reads the stale source.
-- Cleanup removes incomplete generations and expired maintenance gates/writer markers only after proving they are not authoritative.
+- Cleanup removes incomplete generations only after proving they are not authoritative; gate/writer removal also requires proof that the old worker cannot resume. Age alone is never sufficient.
+
+**Assisted hard-crash recovery:** preserve state/markers; an authorized operator prevents old web/CLI workers from continuing or restarting, establishes quiescence, inspects the authority/control/sentinel and source/staging health, then explicitly resumes or discards verified work through the maintenance service. Record what was verified and the next safe action. If quiescence or authority cannot be established, remain blocked with actionable instructions. No automatic takeover or new worker-fencing platform is required. Test this procedure independently from ordinary handled-failure resume.
+
+Operator checklist (not an automatic unlock command):
+
+1. **Identify and freeze the exact site.** Record its canonical path, database, table prefix, plugin revision and current operation. Stop new requests at the serving layer and disable relevant cron, queue, CLI and supervisor restart entry points. A WordPress maintenance page alone does not drain existing workers. Keep the entry points frozen throughout intervention and verification.
+2. **Drain every possible writer and output operation.** Inventory the relevant web/CLI workers, descendants and database sessions/transactions. Establish that each has finished or been terminated and cannot resume or restart; include attachment/file writes and other external output, not only SQL. An expired marker, missing PID, closed browser or absence of one database session is insufficient. If the environment cannot establish this, stop and retain the block.
+3. **Preserve evidence and a recoverable backup.** Capture exact raw control, authority sentinel, maintenance/writer/cleanup marker rows, current option, retained backup and table heads/generations, together with protected output/media checks and the worker/session evidence. Back up the affected database and files under the freeze. Do not paste credentials into reports. Identify the recorded phase and authoritative backend without rewriting either.
+4. **Verify health before intervention.** Check that the control/sentinel agree, the authoritative source and staged destination match their recorded identities, and no unexpected owner, cleanup operation or out-of-band change exists. A fresh public recovery attempt should remain blocked while the uncertain marker exists. Do not use cleanup/uninstall as a substitute for recovery or merge source and destination.
+5. **Remove only a proven-dead owner's exact marker.** A site-qualified operator may compare-and-delete the captured marker row using its exact name and byte-identical raw value on a pinned connection. Require exactly one affected row, absent readback and invalidation of that option's caches. A mismatch, reconnect, unexpected row or uncertain drain aborts the procedure; never use a prefix-wide delete or unconditional `delete_option()` to force progress. This is an exceptional operator action under the verified freeze, not a public stale-owner release API. Do not delete control, authority, backup, staging or cleanup evidence.
+6. **Resume through the existing public service in fresh requests.** For a healthy nonstable recorded switch, use an authorized administrator and the recorded target with `wp --path=EXACT_SITE --user=ADMIN foogallery-migrate storage recover --target=RECORDED_TARGET --confirm=recover-storage`. Inspect each result before another request. The service must follow the recorded phase; it may require several bounded requests. A stable phase needs health verification, not a forced recovery. Explicit discard is only available for the supported incomplete forward-copy phase and requires the normal confirmation; do not invent a reverse/discard shortcut.
+7. **Verify and reopen.** Confirm stable authority, expected current data, absence of stale ownership and unchanged protected migration output/media. Retain the backup and intervention receipt. Re-enable entry points only after those checks pass. Any failed or ambiguous step leaves the site frozen/blocked with its evidence intact.
+
+Keep backups and raw intervention evidence outside the web-accessible document root, or otherwise inaccessible, before reopening a real served site. The CLI-only disposable fixture may retain private evidence in its nonserved root; that is not a production placement recommendation.
+
+The owned integration proof must cover a killed worker, fresh refusal, externally established quiescence, exact-marker intervention and successful public recovery separately. Passing handled-exception recovery does not prove this hard-crash procedure; a fixture with synthetic protected output is not an actual migration acceptance receipt.
 
 ### Existing oversized options
 
@@ -591,23 +735,26 @@ An option-to-table switch must deserialize the old WordPress option at least onc
 
 For a time-bounded web import, the maintenance gate keeps the source option immutable. Each resumed request may re-read that immutable snapshot, re-decode it, skip already verified destination records, and continue from the stored cursor. The cursor bounds database work and request time; it does not reduce the source option's decode-memory peak. Do not imply that a resumable web copy can deserialize once across separate PHP requests unless a separately designed internal staging resource actually owns the snapshot.
 
-Provide storage-only WP-CLI commands for those recovery cases, for example status, switch, verify, and purge commands that can run with an explicitly increased CLI memory limit. Do not implement a custom streaming PHP-serialization parser in the initial release. Never discard legacy history automatically to make a switch fit.
+The current candidate's release-owned policy admits at most 3 MiB of raw option data, forecasts 16× raw bytes for decoding, reserves 128 MiB, and requires 32 MiB phase headroom. These are admission inputs, not a guaranteed memory requirement or universal performance promise; structural limits and current process memory also apply. A suggestion at 1 MiB does not override them. Low-memory or oversized requests must refuse without changing authority. If the existing option exceeds the supported shape/size, retain it and its backup; do not delete history or edit the policy merely to force a pass.
+
+Use the existing storage-only WP-CLI commands for these cases: `status`, `preflight`, `provision`, `switch`, `recover`, `replace`, `discard`, `clear`, and `remove_all`. Verification is part of the recorded switch/recovery, not a separate new command. Requests can use explicitly configured additional CLI memory, within the same admission rules. Do not implement a custom streaming PHP-serialization parser in the initial release. Never discard legacy history automatically to make a switch fit.
 
 ## Storage and cleanup administration
 
-Add a Storage & Cleanup section to the existing admin area. This is the only new workflow in scope.
+Use the existing storage admin/CLI entry points for one minimal Storage & Cleanup workflow. Inspect → explicitly enable → copy/verify → switch, with safe current-data reversal, handled-failure resume or assisted recovery, state clear and remove-all. A new interface framework is not in scope.
 
 It displays:
 
 - Active backend and whether it is recommended for the observed size.
-- Encoded bytes, root/nested record counts, and largest collection/tree.
-- Option bytes and table row/payload bytes.
-- Schema and codec versions and health.
+- Option bytes and the site table-record count, including retained copies. Additional payload/codec diagnostics are optional, not a release gate.
+- Schema readiness and health.
 - In-progress or failed switch status with resume/discard actions.
-- Stale option/table copies and their size.
+- Whether a previous table copy is retained after reversal; do not add a separate stale-copy inspector.
 - A clear explanation that storage cleanup does not undo migrations.
 
-Every mutating action requires `manage_options`, a dedicated nonce, exact target resolution, and a confirmation appropriate to its scope.
+Every mutating admin action requires `manage_options`, a dedicated nonce, exact target resolution, and scope-appropriate confirmation; CLI requires equivalent authorization and explicit confirmation through the shared service.
+
+The matrix records resource semantics, not a requirement to ship a button for every row. First release requires the existing clear-state action and single-site remove-all/uninstall. Cleanup must remove stale resources; separate stale-copy and reset controls are deferred conveniences. Network/installation-wide multisite actions are deferred entirely.
 
 | Action | Removes | Keeps |
 |---|---|---|
@@ -626,20 +773,22 @@ Cleanup spans resources that cannot share one transaction, so it is explicitly i
 ### Lifecycle behavior
 
 - Register lifecycle hooks at plugin bootstrap scope.
-- Normal activation does not create the legacy tables; table creation is lazy after explicit single-site selection or multisite network provisioning.
+- Normal activation does not create the legacy tables; first-release creation occurs only through explicit single-site provisioning/selection. Multisite table provisioning is unavailable.
 - Deactivation retains all state and allows a later resume.
 - Schema upgrades are versioned, idempotent, and run only when table storage exists or is being enabled.
-- Shared-table schema version and schema-upgrade lock are regular options stored once in the main site's options table; on single-site, the current site is the main site. All networks resolve the same installation-wide lock before DDL. Per-site control records only the last schema version it verified.
+- Schema version and schema-upgrade lock remain regular options on the single site; control records the last schema version it verified. Installation-wide coordination across networks is deferred.
 - `dbDelta()` and DDL can auto-commit or partially apply. Upgrades must be additive, backward-compatible, stepwise, and health-checked after each step. Block table-mode requests during an incompatible partial upgrade and provide resumable repair; do not promise transactional DDL rollback.
 - `uninstall.php` must check `WP_UNINSTALL_PLUGIN` and load a minimal uninstall-safe cleanup dependency directly. It must not bootstrap the normal admin engine.
 - Uninstall removes internal storage only. It does not attempt rollback and does not delete galleries, albums, attachments, source data, or edited post content.
 - Drop only exact fixed plugin-owned table names; never accept a table name from a request or wildcard.
 
-Known transient families, including per-user content result transients, must be enumerated with a prepared, escaped fixed prefix and removed with their timeout rows. Use the Transients/Object Cache APIs for each resolved key where practical so a persistent object cache is invalidated; direct SQL cleanup alone is not sufficient. Cleanup code must also remove storage-control, table-authority-sentinel, schema, maintenance-gate, active-writer, recommendation-dismissal, backup, and site-registry resources introduced by this project.
+Known transient families, including per-user content result transients, must be enumerated with a prepared, escaped fixed prefix and removed with their timeout rows. Use the Transients/Object Cache APIs for each resolved key where practical so a persistent object cache is invalidated; direct SQL cleanup alone is not sufficient. Cleanup code must also remove owned storage-control, table-authority-sentinel, schema, maintenance-gate, active-writer and backup resources. Include any owned notice/registry artifacts that actually exist; this is not an instruction to implement the deferred advisor or registry.
 
 ## Multisite
 
-The selected design uses network-shared tables and per-site rows:
+**Deferred design reference — not first-release implementation or acceptance.** In this release, existing multisite option behavior must remain compatible and table operations must refuse before mutation. Unexpected existing table authority blocks with preserved evidence, never stale-option fallback. Do not add network registry/provisioning, a topology matrix or large-network uninstall preparation now. Existing physical names/blog scoping may remain; no schema rewrite is required merely to defer support.
+
+The following retained design applies only to a future separately scheduled multisite feature:
 
 - Every read, write, update, delete, aggregate, and integrity query requires the current `blog_id`.
 - Storage mode and switch state remain per-site.
@@ -673,99 +822,43 @@ On a multi-network installation, a network cleanup may delete only rows and per-
 
 ## Delivery plan
 
-Each phase is independently testable. Public table mode is not enabled until all table-backed hot paths and cleanup behavior are complete.
+Execute [R0–R4 in the dev plan](dev-plan.md#ordered-work), not the superseded greenfield phases or S0–S9 roadmap.
 
-### Phase 0 — Characterize current storage
+| Order | Outcome | Required milestone |
+|---|---|---|
+| R0 | Owned test environment, runnable customer journey, first failure and classified baseline | Begin integration immediately |
+| R1 | Small safe repairs to supported admission, actual migration/edit/reversal and essential cleanup | M1: testable source/ZIP candidate, including runtime floor |
+| R2 | Remaining supported bounded consumers, parity and fault/recovery/cleanup coverage | Keep M1 green |
+| R3 | Basic recommendation and minimal operator controls | No advanced advisor gate |
+| R4 | Maintained suite, real-source/package/browser and scaling acceptance | M2: first-release readiness |
 
-- Capture representative fixtures for old un-compacted data and current compact payloads.
-- Inventory every operational state key, including adapter-specific scalar values, content scan state, and image-tag sync state.
-- Add golden logical-snapshot tests covering missing versus `false`, typed keys, order, errors, and nested children.
-- Benchmark option mode with 1,000, 5,000, and 20,000 root/nested records.
-- Record peak memory, bytes read/written, request duration, and rows/option bytes changed.
-- Finalize thresholds from evidence before table mode is public.
-
-**Exit:** Existing state behavior and baseline costs are reproducible.
-
-### Phase 1 — Extract codec and option backend
-
-- Move compaction/hydration into `LegacyStateCodec` without changing its logical format.
-- Add the storage facade, repository contracts, and `LegacyOptionBackend`.
-- Route current state operations through the option backend only.
-- Preserve exact option names, autoload behavior, and legacy read behavior.
-- Run the complete existing PHPUnit, content-scan, AJAX JavaScript, and integration suites.
-
-**Exit:** Option mode is a behavior-compatible refactor and no table exists.
-
-### Phase 2 — Introduce bounded repository call paths
-
-Refactor only persistence-facing access in this order:
-
-1. Migrated-history direct/batched lookups, log paging, adapter factory reuse checks, scan-time occurrence resolution, and bounded debug diagnostics.
-2. Content occurrence deduplication, indexed legacy source-identity resolution, findings/checkpoints, status reconciliation, exact selector retrieval, replacement access, content-list paging, and the filtered WordPress Core finding count.
-3. Gallery/album paging (including internally batched no-pagination rendering), atomic selection patches, first-by-current-status lookup, requested-gallery retry access, bounded global gallery error-audit iteration, progress aggregates, and one-tree saves.
-4. Incremental image-tag queue construction, page-local source resolution, and queue execution paging.
-
-Run these paths first against the option backend to prove semantic compatibility. Full-array compatibility methods remain available for small option mode, but no production table path may depend on them.
-
-**Exit:** Every high-cardinality operation has a bounded repository method and unchanged visible behavior. Golden transition/result fixtures remain exactly equivalent for queue order, selection effects, status transitions, revision increments, retry outcomes, content occurrence keys, and image-tag merging. Any difference is rejected as engine work.
-
-### Phase 3 — Add table lifecycle and backend
-
-- Add the fixed legacy tables, schema versioning, health checks, and table-backend contract suite.
-- Implement typed-key hashing, flattening/reconstruction, indexed projections, staged generations, row-level mutations, and transactional batch/checkpoint writes.
-- Add internal feature gating so table mode is available to automated tests and controlled development sites only.
-- Implement cleanup services and uninstall handling before any public table-mode switch is offered.
-
-**Exit:** Both backends pass the same logical and legacy-flow contracts; all owned table data can be removed safely.
-
-### Phase 4 — Add switching, recommendation, and administration
-
-- Add the external authority/control option, atomic maintenance gate, request-scoped writer markers, and repeated quiescence checks.
-- Implement resumable option-to-table and table-to-option copies with full verification.
-- Add metrics and filterable recommendation thresholds.
-- Add Storage & Cleanup status and actions.
-- Keep table mode opt-in and require confirmation.
-- Exercise failures before, during, and immediately after authority flips.
-- Enable the public switch on single-site only; keep multisite table selection gated until Phase 5 is complete.
-
-**Exit:** Single-site administrators can safely enable, inspect, recover, reverse, and clean table storage.
-
-### Phase 5 — Multisite and operational recovery
-
-- Add strict blog isolation, the network-activation prerequisite, site-deletion cleanup, orphan-row audit, network registry, network purge, and network uninstall coverage.
-- Add storage-only WP-CLI status, switch, verify, cleanup, and purge commands for oversized legacy options and large networks.
-- Document operational recovery for interrupted switches, corrupt staged generations, and insufficient table privileges.
-
-**Exit:** Multisite lifecycle behavior is complete and recoverable, the supported synchronous network-cleanup bound is benchmarked/documented, and multisite table selection may be enabled.
-
-### Phase 6 — Persisted-state performance hardening and conservative rollout
-
-- Benchmark nested and flat 1K/5K/20K fixtures plus larger stress fixtures where practical.
-- Verify table list/migrate/log/content requests do not scale memory with unrelated stored records outside the requested page or affected root tree.
-- Tune batch sizes and indexes from query plans.
-- Test a largest-single-gallery and largest-single-album fixture and publish the remaining limitation.
-- Roll out option mode unchanged and table mode as an explicit recommendation for large persisted state.
-
-**Exit:** Recommendation thresholds and the persisted-state scaling claim are supported by repeatable measurements.
-
-No phase in this plan introduces JSON configuration or a new execution engine.
+A positive journey is not a release by itself; remaining supported paths still need coverage. Conversely, do not wait for complete repositories, every historical diagnostic or UI polish before trying it. The dev plan defines standing authority after kickoff, limited repair loops, test classification and concrete escalation rules. No phase adds migration-config JSON or a new execution engine. Deferred multisite work is not an automatic next task.
 
 ## Test strategy
 
+### Release requirements versus historical diagnostics
+
+Classify tests under the [approved plan](dev-plan.md#test-classification-and-simplification-guardrails): product compatibility, safety, supported performance, superseded implementation diagnostics, or environment defects. Record rationale, replacement coverage, reviewer and commit before retiring/reclassifying a test. Do not rebuild abandoned machinery merely to satisfy its diagnostic suite; do not silently skip failures or weaken data-safety guarantees.
+
+Native WordPress text conversion must succeed for supported customer-shaped inputs. Arbitrary-byte codec round trips remain lossless where supported, while unsupported native-text inputs must refuse without mutation. A native-text normalization mismatch is not permission to lose bytes, nor a requirement for a universal decoder. Historical host certificates and exact-binary allocator proofs are not customer prerequisites.
+
+The following tests apply to first-release supported behavior unless explicitly labelled deferred. Start with the integrated journey, then expand coverage for M2.
+
 ### Existing baseline and gaps
 
-The repository audit on 2026-08-28 recorded these exact baseline commands:
+The repository audit on 2026-08-28 recorded these historical baseline commands. These results do not describe PR #15 or validate its current head:
 
 - `composer test` — passed on PHP 8.4.6 with 40 tests and 336 assertions.
 - `php tests/content-scan-regression.php` — passed.
 - `node tests/ajax-js-regression.js` — passed.
 - `wp eval-file tests/integration/core-gallery-migration.php` — mutates a live WordPress database, so it was not run during this documentation-only work and must run only against an isolated disposable site.
 
-- PHPUnit currently discovers only `*Test.php`; the content-scan PHP regression and AJAX JavaScript regression are separate commands and must remain separate required checks unless the test runner is deliberately unified.
-- The PHPUnit bootstrap mocks only the Options API. Its `update_option()` stub always returns success, so new tests must cover same-value `false`, the non-autoload requirement, object-cache invalidation, and raw option bytes in a real WordPress database.
+- PHPUnit discovers `*Test.php`; the content-scan PHP regression and AJAX JavaScript regression are separate commands and must remain separate required checks unless the test runner is deliberately unified.
+- The original PHPUnit bootstrap mocked only the Options API and its `update_option()` stub always returned success. PR #15 adds substantial fixtures and table doubles; those do not replace same-value `false`, non-autoload, object-cache invalidation, and raw option-byte checks in a real WordPress database.
 - The AJAX JavaScript regression is focused on content scanning; it is not evidence for every gallery, album, log, or storage administration flow.
-- The current live integration script protects only `foogallery-migrate-data`; table/control/backup resources need their own isolated setup and teardown.
-- There is no existing coverage for Clear Migration History resource scope, activation/deactivation, schema upgrades, table permissions, switching/gates, cleanup, uninstall, multisite, or persistent object caches. These are new required suites.
+- The original live integration script protected only `foogallery-migrate-data`; current table/control/backup resources require explicit fixture ownership and isolated setup/teardown. Never run these tests against Brad's working site without a separately authorized disposable environment.
+- PR #15 adds codec/repository, table, maintenance, conversion, lifecycle, compatibility and native integration coverage. Audit what each test actually exercises: lifecycle retention is not complete uninstall coverage, fault-free transport recovery is not process-death recovery, and fake-table benchmarks are not native database scaling evidence.
+- R0 records/reproduces relevant failures and classifies historical diagnostics before attributing regressions. R4 must complete the maintained release suite and package validation with no unexplained failures/timeouts. Report excluded diagnostic groups and their reviewed rationale; focused passes are not a substitute.
 
 PHPUnit 9.6 cannot execute on PHP 5.4. In addition to modern PHPUnit/WordPress integration tests, the built production package needs a PHP 5.4 syntax/runtime smoke job with the declared WordPress 5.0 runtime floor. New production code cannot use generators, `finally`, `Throwable`, scalar/return type declarations, null coalescing, or unpolyfilled modern randomness. Repository methods named `iteratePages()` describe repeated bounded page calls/callbacks, not a PHP generator.
 
@@ -827,32 +920,33 @@ Run identical behavioral tests against option and table implementations:
 - Stale source is never read after the flip.
 - Resume and discard staging.
 - Quiescence rejection during active writes.
-- Writer/gate acquisition races, token ownership, expiry takeover, re-entrant request handling, and release on errors.
+- Writer/gate acquisition races, token ownership, re-entrant request handling and release on errors; expired/ambiguous ownership remains blocked until assisted quiescence is proven.
 - Stable queued, started, paused, and incomplete persisted work is not rejected merely because of its status; switching follows the existing engine's opaque quiescence verdict after active writers drain.
 - Compare-and-swap rejection when a source digest or state-head generation/revision changes.
 - Missing/corrupt control data with a table-authority sentinel, retained table heads/staging, or backup blocks instead of reviving option mode; empty authoritative table state is covered by the sentinel.
 - A valid table control with a missing or mismatched authority sentinel blocks until explicit repair.
 - Downgrade warning and verified table-to-option preparation path.
-- Reverse-switch threshold warning.
+- Reverse-switch headroom/representation admission independently of advisory notice thresholds.
 - Oversized web-import refusal and CLI recovery.
 
 ### Cleanup, uninstall, and multisite
 
+First-release gates:
+
 - Each cleanup action removes exactly its documented scope.
 - Interrupted cleanup reports exact residual resources, blocks migration, and completes idempotently when rerun.
 - Cleanup removes active and stale copies where promised.
-- Site cleanup leaves other blog IDs untouched.
-- Global table cleanup drops only the two exact plugin tables; one-network cleanup cannot drop installation-shared tables still in use.
-- Concurrent schema provisioning from different networks serializes through the one main-site regular-option schema lock, including token-checked stale takeover.
-- Multisite table provisioning is blocked unless the plugin is network-active for that network; orphan-row audit covers a deletion that occurred while hooks were unavailable.
-- Site deletion removes its rows.
-- Uninstall removes old and new options, transients, locks, registry, rows, and tables on single sites and within the documented supported/prepared multisite scope; above the synchronous bound, tests cover the full owned-resource zero-remnant audit, including both registered and pre-registry sites.
+- Single-site remove-all/uninstall removes old and new owned options, transients, locks, backups, rows and exact tables, including any superseded artifacts actually present.
+- The real production ZIP uninstalls without development dependencies and without booting the normal admin engine.
+- Existing multisite option behavior remains compatible, table operations refuse before mutation, and unexpected table authority preserves evidence instead of falling back to stale options.
 - Deactivation retains resumable state.
 - Migrated galleries, albums, attachments, source data, and content remain untouched.
 
+Deferred network tests belong to the future [multisite design](#multisite): cross-network schema coordination and cleanup isolation, site deletion/orphan audit, registry completeness, and supported/prepared large-network uninstall. They are not first-release required runs.
+
 ### Performance fixtures
 
-At minimum, benchmark:
+Use representative native-text workloads for M1 first. For M2, measure supported flat/nested state and fixed-page/affected-tree scaling, including the native20K and actual10K AIGPL journeys. The larger/stress shapes below are useful boundary fixtures, not a promise that all fit every supported memory setting; unsupported conversion shapes must refuse safely rather than trigger an open-ended host-qualification project:
 
 - 20,000 top-level records with no children.
 - 2,000 galleries with 50 images each.
@@ -866,27 +960,27 @@ For table-backed paginated list, log, content-page, history lookup, and next-mig
 
 ## Acceptance criteria
 
-The storage upgrade is complete only when all of the following are true:
+The **first release** is ready at M2 when the following pass. Deferred network/advanced-advisor requirements are not part of this checklist.
 
-- An upgrade with no administrator action continues in option mode without creating a table or changing state.
-- Existing state, including pre-compaction data, remains readable in option mode; unsupported non-compact data blocks table conversion rather than being normalized silently.
-- Current adapters, identities, queue/status semantics, output, content behavior, and AJAX flow are unchanged.
-- For payloads admitted by the conversion preflight, option and table backends produce equivalent logical snapshots and runtime objects.
-- Table-mode list, log, content, history, queue, and first-by-status operations are bounded and do not reconstruct unrelated stored state outside the requested page or affected root tree; no-pagination views internally iterate bounded batches while retaining their documented O(N) response/buffering limitation.
-- Content findings/checkpoints and image-tag item/checkpoint writes remain atomic.
-- Table mode updates only affected records during normal operation.
-- The plugin recommends but never automatically enables table mode.
-- The recommendation identifies the threshold that was crossed.
-- Switching is permission-protected, quiescent, resumable, fully verified, and leaves exactly one authoritative backend.
-- A stale backend is never used automatically.
-- No tables are created until table mode is explicitly selected or network-provisioned.
-- Deactivation retains state.
-- On-demand cleanup can remove all plugin-owned state and, at the correct site/network scope, all plugin-owned tables.
-- Uninstall removes both legacy and new internal storage completely on single sites and on prepared/supported multisite networks, and always drops the exact shared tables; every multisite installation above the documented synchronous bound must pass the preparatory audit showing zero owned per-site resources.
-- Cleanup and uninstall never undo migrations or delete source/destination content or media.
-- Multisite queries are blog-isolated and covered by tests.
-- The existing suite passes unchanged in option mode; shared behavioral contracts pass against both backends; table-specific physical-storage tests pass separately.
-- The known source-discovery and largest-active-tree memory limitations are documented and measured.
+- Upgrade/activation remain option-backed and storage-neutral without an explicit administrator choice; multisite options remain compatible and table operations refuse safely.
+- Existing compact and pre-compaction state remains readable in option mode; unsupported conversion shapes refuse without silent normalization or data loss.
+- Existing source adapters, identities, ordering, queue/status/retry semantics, output, content behavior and AJAX flow remain unchanged.
+- A representative large real WordPress migration can enable tables, migrate, edit and clean up on the runtime floor and matching production ZIP without dev dependencies.
+- A fitting current-data reversal preserves table edits (the final PHP5.4 ZIP proves1K); oversized reversal refuses without changing authority or data (the modern10K journey proves refusal, not successful reversal). These are separate size/runtime receipts, not a claim that the large10K journey positively reversed on the floor.
+- Supported native-text conversion produces equivalent logical state/runtime objects; arbitrary-byte codec/refusal coverage is separate and does not weaken integrity.
+- Table-mode list/log/content/history/queue/next-object operations do not rebuild unrelated state. Mutations affect only required records/trees; content and tag queue checkpoints remain atomic.
+- Show-all uses internal batches with its documented O(N) output limitation; source-discovery and largest-active-tree limits are measured and disclosed.
+- A small tested release policy admits supported inputs and safely refuses unsupported ones; no customer/host-specific certificate is needed.
+- A basic filterable size suggestion reports its trigger and never automatically enables/provisions table mode.
+- Switching is authorized, quiescent, resumable for ordinary handled failures, verified before authority changes and never falls back to stale state.
+- Uncertain hard-crash ownership blocks until the documented assisted procedure establishes that old workers cannot resume; no age-based automatic takeover.
+- Reversal preserves current table edits and runs only when the option representation fits safely.
+- Deactivation retains state. Single-site on-demand remove-all and uninstall remove all owned old/new options, transients, locks, backups, rows and tables; partial cleanup is resumable and accurately reports residuals.
+- Cleanup never deletes migrated/source galleries, albums, attachments or edited content, and never rolls back migrations.
+- Retained product/safety/performance tests and applicable source/ZIP/runtime/browser checks pass; any superseded diagnostic tests have a recorded, independently reviewed disposition.
+- No public release occurs without explicit approval.
+
+M1 alone does not satisfy these criteria. Multisite table support and advanced advice/convenience operations require a future scope decision, not another mandatory first-release phase.
 
 ## Risks and mitigations
 
@@ -901,9 +995,9 @@ The storage upgrade is complete only when all of the following are true:
 | Existing option is too large for a web import | Raw-size check, safe refusal, dedicated request, and storage-only CLI recovery |
 | Table creation/transactions are unavailable | Health check; remain in option mode with an actionable error |
 | DDL partially applies | Additive stepwise upgrades, post-step health checks, request blocking, and resumable repair |
-| Shared multisite query leaks another site's state | Mandatory `blog_id`, composite indexes, and cross-site contract tests |
+| Future multisite query leaks another site's state | Deferred: mandatory `blog_id`, composite indexes and cross-site contracts before enabling that future feature |
 | Uninstall removes migrated output | Cleanup owns only fixed internal resources; output-removal code is absent |
-| Large-network uninstall times out | Registry, preparatory batched cleanup, bounded final enumeration, and CLI tooling |
+| Future large-network table uninstall times out | Deferred network registry/preparation design; do not claim new large-network support in this release |
 | Recommendation thresholds are inaccurate | Filters, visible evidence, benchmarks, and conservative opt-in behavior |
 | Retained copies double storage temporarily | Display exact stale-copy size and provide explicit removal |
 | Table schema is forced into future v2 work | Legacy-qualified names and a hard rule that future engine repositories are separate |

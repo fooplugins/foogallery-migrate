@@ -65,7 +65,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Photo' ) ) {
                     return false;
                 }
 
-                return (bool) $wpdb->get_var( "SELECT 1 FROM {$gallery_table} LIMIT 1" );
+                return (bool) $wpdb->get_var( "SELECT 1 AS present FROM {$gallery_table} LIMIT 1" );
             }
         }
 

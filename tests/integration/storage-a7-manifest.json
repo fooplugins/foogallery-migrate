@@ -1,0 +1,59 @@
+{
+    "format": "a7-compact-v1",
+    "domain": "native-cli-only",
+    "status": "measurement_only",
+    "method_approved": false,
+    "profile_approved": false,
+    "limits": {
+        "raw_bytes": 8388608,
+        "worker_seconds": 45,
+        "response_bytes": 262144,
+        "fixture_depth": 9,
+        "product_decoder_nodes": 30000,
+        "product_snapshot_records": 10000,
+        "product_snapshot_bytes": 16777216,
+        "product_deadline_seconds": 10
+    },
+    "experimental_policy": {
+        "max_raw_bytes": 2998293,
+        "amplification": 64,
+        "reserve_bytes": 33554432
+    },
+    "experimental_policy_reason": "Test-only finite held-out byte ceiling, existing synthetic factor64/reserve32MiB. NOT a measured or approved profile; no production bounds changed.",
+    "cells": {
+        "1000": {
+            "images": 1000,
+            "role": "training",
+            "raw_bytes": 142957,
+            "sha256": "91b5aaeb77b412260b8db95d36cf13cb126164624569a23a8210c1223855b15d",
+            "logical_sha256": "8a58348585c23889e5a1b03710a20ef8f3a5585e228083bfa97a43134a3fef12"
+        },
+        "2000": {
+            "images": 2000,
+            "role": "training",
+            "raw_bytes": 288957,
+            "sha256": "9acf5793acd9b04e328604be5e1a6a264727b458068507d18bca2433b70ac980",
+            "logical_sha256": "3228d8b97ab4fe6344f2a2e3a3cb6e6bcbede277ef0126ff5e0ab5ed4fb0d7c0"
+        },
+        "10000": {
+            "images": 10000,
+            "role": "training",
+            "raw_bytes": 1456958,
+            "sha256": "e351089f2d108e77028e5fa0d8b8672352ccad8cbf47dd29963fd69f6b2a0f0f",
+            "logical_sha256": "beeb80628a37eb4a65c5fbea9b8e274016f0e40beca36cb02e7e59c0ddd11589"
+        },
+        "20000": {
+            "images": 20000,
+            "role": "held_out",
+            "raw_bytes": 2998293,
+            "sha256": "6022f4ad5a1e8ef9a39a5b5284dc576c7eb75d02a0d69949a58e3967ca9dd4be",
+            "logical_sha256": "a3d122b4a3219a31ffefd28d1063f753caeb289eefc3597b38582ab1090ff695"
+        },
+        "over-bound": {
+            "images": 0,
+            "role": "byte_refusal_only",
+            "raw_bytes": 2998294,
+            "sha256": "743fe8066cef3f230be1a3cc73baedf4f73f8c0df3ee8221dd9329bae3d9fc5c"
+        }
+    }
+}

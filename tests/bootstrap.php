@@ -93,6 +93,10 @@ $GLOBALS['foogallery_migrate_test_remote_head'] = array();
 $GLOBALS['foogallery_migrate_test_gallery_templates'] = array();
 $GLOBALS['foogallery_migrate_test_taxonomies'] = array();
 $GLOBALS['foogallery_migrate_test_foogallery_fs'] = null;
+$GLOBALS['foogallery_migrate_test_dbdelta'] = array();
+$GLOBALS['foogallery_migrate_test_is_multisite'] = false;
+$GLOBALS['foogallery_migrate_test_site_ids'] = array();
+$GLOBALS['foogallery_migrate_test_blog_prefix_stack'] = array();
 
 class FooGalleryMigrateTestFreemius {
 	private $can_use_premium_code;
@@ -136,20 +140,97 @@ if ( ! class_exists( 'WP_Error' ) ) {
 	}
 }
 
+class FooGalleryMigrateTestJsonResponse extends RuntimeException {
+	public $data;
+	public $status_code;
+
+	public function __construct( $data, $status_code ) {
+		parent::__construct( isset( $data['message'] ) ? $data['message'] : '' );
+		$this->data = $data;
+		$this->status_code = $status_code;
+	}
+}
+
 function get_option( $name, $default = false ) {
+	if ( isset( $GLOBALS['foogallery_migrate_test_option_reads'] ) ) {
+		$GLOBALS['foogallery_migrate_test_option_reads'][] = $name;
+	}
+	if ( ! empty( $GLOBALS['foogallery_migrate_test_serialized_reads'][$name] ) && array_key_exists( $name, $GLOBALS['foogallery_migrate_test_options'] ) ) {
+		return unserialize( serialize( $GLOBALS['foogallery_migrate_test_options'][$name] ) );
+	}
 	return array_key_exists( $name, $GLOBALS['foogallery_migrate_test_options'] )
 		? $GLOBALS['foogallery_migrate_test_options'][ $name ]
 		: $default;
 }
 
 function update_option( $name, $value, $autoload = null ) {
+	if ( isset( $GLOBALS['foogallery_migrate_test_option_update_callback'] ) ) {
+		call_user_func( $GLOBALS['foogallery_migrate_test_option_update_callback'], $name );
+	}
+	if ( isset( $GLOBALS['foogallery_migrate_test_option_writes'] ) ) {
+		$GLOBALS['foogallery_migrate_test_option_writes'][] = array( $name, $autoload );
+	}
+	if ( ! empty( $GLOBALS['foogallery_migrate_test_failed_options'][ $name ] ) ) {
+		return false;
+	}
+	if ( array_key_exists( $name, $GLOBALS['foogallery_migrate_test_options'] ) && $GLOBALS['foogallery_migrate_test_options'][ $name ] === $value ) {
+		return false;
+	}
+
 	$GLOBALS['foogallery_migrate_test_options'][ $name ] = $value;
 	return true;
 }
 
 function delete_option( $name ) {
+	if ( ! empty( $GLOBALS['foogallery_migrate_test_failed_deletes'][ $name ] ) ) {
+		return false;
+	}
 	unset( $GLOBALS['foogallery_migrate_test_options'][ $name ] );
 	return true;
+}
+
+function wp_generate_password( $length = 12, $special_chars = true, $extra_special_chars = false ) {
+	return substr( bin2hex( random_bytes( $length ) ), 0, $length );
+}
+
+function wp_cache_delete( $key, $group = '' ) {
+	$GLOBALS['foogallery_migrate_test_cache_deletes'][] = array( $key, $group );
+	return true;
+}
+
+function delete_transient( $key ) {
+	$GLOBALS['foogallery_migrate_test_deleted_transients'][] = $key;
+	unset( $GLOBALS['foogallery_migrate_test_transients'][ $key ] );
+	return true;
+}
+
+function dbDelta( $sql ) {
+	$GLOBALS['foogallery_migrate_test_dbdelta'][] = $sql;
+	return array( 'created' );
+}
+
+function is_multisite() {
+	return ! empty( $GLOBALS['foogallery_migrate_test_is_multisite'] );
+}
+
+function get_sites( $args = array() ) {
+	return $GLOBALS['foogallery_migrate_test_site_ids'];
+}
+
+function switch_to_blog( $site_id ) {
+	$GLOBALS['foogallery_migrate_test_blog_id_stack'][] = get_current_blog_id();
+	$GLOBALS['foogallery_migrate_test_blog_id'] = (int) $site_id;
+	$GLOBALS['foogallery_migrate_test_blog_prefix_stack'][] = $GLOBALS['wpdb']->prefix;
+	$GLOBALS['wpdb']->prefix = 1 === (int) $site_id ? 'wp_' : 'wp_' . (int) $site_id . '_';
+}
+
+function restore_current_blog() {
+	$GLOBALS['foogallery_migrate_test_blog_id'] = array_pop( $GLOBALS['foogallery_migrate_test_blog_id_stack'] );
+	$GLOBALS['wpdb']->prefix = array_pop( $GLOBALS['foogallery_migrate_test_blog_prefix_stack'] );
+}
+
+function get_current_blog_id() {
+	return isset( $GLOBALS['foogallery_migrate_test_blog_id'] ) ? $GLOBALS['foogallery_migrate_test_blog_id'] : 1;
 }
 
 function absint( $maybeint ) {
@@ -185,7 +266,100 @@ function is_wp_error( $thing ) {
 	return $thing instanceof WP_Error;
 }
 
+function check_admin_referer( $action = -1, $query_arg = '_wpnonce' ) {
+	return true;
+}
+
+function check_ajax_referer( $action = -1, $query_arg = false, $die = true ) { return true; }
+class FooGalleryMigrateTestDie extends RuntimeException {}
+function wp_die( $message ) { throw new FooGalleryMigrateTestDie( $message ); }
+
+function current_user_can( $capability, ...$args ) {
+	if ( isset( $GLOBALS['foogallery_migrate_test_capabilities'] ) ) {
+		return ! empty( $GLOBALS['foogallery_migrate_test_capabilities'][$capability] );
+	}
+	return true;
+}
+
+function wp_create_nonce( $action = -1 ) { return 'nonce-' . $action; }
+
+function wp_verify_nonce( $nonce, $action = -1 ) {
+	$expected = isset( $GLOBALS['foogallery_migrate_test_nonce'] ) ? $GLOBALS['foogallery_migrate_test_nonce'] : array();
+	return isset( $expected['action'], $expected['value'], $expected['result'] ) &&
+		$action === $expected['action'] && $nonce === $expected['value'] ? $expected['result'] : false;
+}
+
+function wp_unslash( $value ) {
+	// Test-only receiver seam: model work released during WordPress unslashing.
+	if ( isset( $GLOBALS['foogallery_migrate_test_unslash_callback'] ) ) {
+		call_user_func( $GLOBALS['foogallery_migrate_test_unslash_callback'] );
+	}
+	return $value;
+}
+
+function wp_json_encode( $value, $flags = 0, $depth = 512 ) {
+	return json_encode( $value, $flags, $depth );
+}
+
+function wp_send_json_error( $data = null, $status_code = null, $flags = 0 ) {
+	throw new FooGalleryMigrateTestJsonResponse( $data, $status_code );
+}
+
+function wp_send_json_success( $data = null, $status_code = null, $flags = 0 ) {
+	throw new FooGalleryMigrateTestJsonResponse( $data, $status_code );
+}
+
+function sanitize_text_field( $value ) {
+	return is_scalar( $value ) ? trim( (string) $value ) : '';
+}
+
+function esc_html( $text ) {
+	return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
+}
+
+function esc_textarea( $text ) {
+	return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
+}
+
+function esc_html__( $text, $domain = 'default' ) {
+	return esc_html( $text );
+}
+
+function esc_html_e( $text, $domain = 'default' ) {
+	echo esc_html__( $text, $domain );
+}
+
+function esc_attr_e( $text, $domain = 'default' ) {
+	echo esc_attr( $text );
+}
+
+function admin_url( $path = '' ) {
+	return 'https://example.test/wp-admin/' . ltrim( $path, '/' );
+}
+
+function wp_nonce_field( $action = -1, $name = '_wpnonce', $referer = true, $display = true ) {
+	$field = '<input type="hidden" name="' . esc_attr( $name ) . '" value="test-nonce">';
+	if ( $display ) {
+		echo $field;
+	}
+
+	return $field;
+}
+
+function checked( $checked, $current = true, $display = true ) {
+	$result = $checked === $current ? ' checked="checked"' : '';
+	if ( $display ) {
+		echo $result;
+	}
+
+	return $result;
+}
+
 function apply_filters( $hook_name, $value ) {
+	// Opt-in test instrumentation; never loaded by the plugin or its ZIP.
+	if ( isset( $GLOBALS['foogallery_migrate_test_filters'][$hook_name] ) ) {
+		return call_user_func( $GLOBALS['foogallery_migrate_test_filters'][$hook_name], $value );
+	}
 	return $value;
 }
 
@@ -238,6 +412,9 @@ function wp_set_object_terms( $object_id, $terms, $taxonomy, $append = false ) {
 	$terms = array_values( array_unique( array_filter( array_map( 'strval', $terms ) ) ) );
 	$GLOBALS['foogallery_migrate_test_object_terms'][ $taxonomy ][ $object_id ] = $terms;
 	$GLOBALS['foogallery_migrate_test_set_object_terms'][] = compact( 'object_id', 'terms', 'taxonomy', 'append' );
+	if ( isset( $GLOBALS['foogallery_migrate_test_terms_callback'] ) ) {
+		call_user_func( $GLOBALS['foogallery_migrate_test_terms_callback'] );
+	}
 
 	return $terms;
 }
@@ -285,6 +462,9 @@ function foogallery_migrate_migrator_instance() {
 }
 
 function foogallery_default_gallery_template() {
+	if ( isset( $GLOBALS['foogallery_migrate_test_default_template_callback'] ) ) {
+		call_user_func( $GLOBALS['foogallery_migrate_test_default_template_callback'] );
+	}
 	return 'default';
 }
 
@@ -293,6 +473,9 @@ function foogallery_gallery_templates() {
 }
 
 function foogallery_get_setting( $key ) {
+	if ( isset( $GLOBALS['foogallery_migrate_test_gallery_setting_callback'] ) ) {
+		call_user_func( $GLOBALS['foogallery_migrate_test_gallery_setting_callback'], $key );
+	}
 	return '';
 }
 
@@ -301,6 +484,9 @@ function wp_insert_post( $args ) {
 	$post_id++;
 	$post = (object) array_merge( $args, array( 'ID' => $post_id ) );
 	$GLOBALS['foogallery_migrate_test_posts'][ $post_id ] = $post;
+	if ( isset( $GLOBALS['foogallery_migrate_test_post_insert_callback'] ) ) {
+		call_user_func( $GLOBALS['foogallery_migrate_test_post_insert_callback'] );
+	}
 	return $post_id;
 }
 
@@ -365,17 +551,29 @@ function get_posts( $args = array() ) {
 }
 
 function add_post_meta( $post_id, $meta_key, $meta_value, $unique = false ) {
+	if ( $unique && isset( $GLOBALS['foogallery_migrate_test_post_meta'][ $post_id ] ) && array_key_exists( $meta_key, $GLOBALS['foogallery_migrate_test_post_meta'][ $post_id ] ) ) {
+		return false;
+	}
+
+	$GLOBALS['foogallery_migrate_test_post_meta'][ $post_id ][ $meta_key ] = $meta_value;
 	$GLOBALS['foogallery_migrate_test_post_meta_updates'][] = compact( 'post_id', 'meta_key', 'meta_value', 'unique' );
 	return true;
 }
 
 function update_post_meta( $post_id, $meta_key, $meta_value ) {
+	$GLOBALS['foogallery_migrate_test_post_meta'][ $post_id ][ $meta_key ] = $meta_value;
 	$GLOBALS['foogallery_migrate_test_post_meta_updates'][] = compact( 'post_id', 'meta_key', 'meta_value' );
+	if ( isset( $GLOBALS['foogallery_migrate_test_meta_update_callback'] ) ) {
+		call_user_func( $GLOBALS['foogallery_migrate_test_meta_update_callback'] );
+	}
 	return true;
 }
 
 function get_post_meta( $post_id, $meta_key = '', $single = false ) {
 	$post_id = absint( $post_id );
+	if ( isset( $GLOBALS['foogallery_migrate_test_meta_read_callback'] ) ) {
+		call_user_func( $GLOBALS['foogallery_migrate_test_meta_read_callback'], $post_id, $meta_key );
+	}
 
 	if ( ! isset( $GLOBALS['foogallery_migrate_test_post_meta'][ $post_id ] ) ) {
 		return $single ? '' : array();

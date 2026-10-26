@@ -1,0 +1,13 @@
+.foogm-progress-dialog.components-modal__frame { width: 520px; max-width: calc(100% - 32px); }
+.foogm-progress-content { padding-top: 8px; }
+.foogm-progress-heading { display: flex; align-items: center; gap: 12px; min-height: 48px; margin-bottom: 16px; }
+.foogm-progress-heading p { margin: 0; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.foogm-progress-heading .components-spinner { flex-shrink: 0; margin: 0; }
+.foogm-progress-meter { height: 8px; overflow: hidden; background: #f0f0f0; border-radius: 4px; }
+.foogm-progress-meter span { display: block; height: 100%; background: var(--wp-admin-theme-color, #2271b1); transition: width 180ms ease; }
+.foogm-progress-meter .is-indeterminate { opacity: .45; }
+.foogm-progress-meta { display: flex; justify-content: space-between; gap: 16px; margin: 12px 0 24px; font-variant-numeric: tabular-nums; }
+.foogm-progress-meta strong { font-size: 18px; }
+.foogm-progress-actions { display: flex; justify-content: flex-end; margin-top: 24px; }
+@media (max-width: 600px) { .foogm-progress-dialog.components-modal__frame { width: 100%; max-width: 100%; } }
+@media (prefers-reduced-motion: reduce) { .foogm-progress-meter span { transition: none; } }

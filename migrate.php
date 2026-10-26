@@ -2,7 +2,7 @@
 /*
 Plugin Name: FooGallery Migrate
 Description: Migrate to FooGallery from Envira, NextGen, Modula and other gallery plugins.
-Version:     1.16
+Version:     1.16.1
 Author:      FooPlugins
 Author URI:  https://fooplugins.com/
 Text Domain: foogallery-migrate
@@ -22,7 +22,7 @@ if ( ! defined( 'FOOGM_SLUG' ) ) {
     define( 'FOOGM_PATH', plugin_dir_path( __FILE__ ) );
     define( 'FOOGM_URL', plugin_dir_url( __FILE__ ) );
     define( 'FOOGM_FILE', __FILE__ );
-    define( 'FOOGM_VERSION', '1.16' );
+    define( 'FOOGM_VERSION', '1.16.1' );
     define( 'FOOGM_MIN_PHP', '5.4.0' ); // Minimum of PHP 5.4 required for autoloading, namespaces, etc.
     define( 'FOOGM_MIN_WP', '5.0' );  // Minimum of WordPress 5 required.
 }
@@ -36,10 +36,14 @@ require_once FOOGM_PATH . 'includes/functions.php';
 // Check minimum requirements before loading the plugin.
 if ( require_once FOOGM_PATH . 'includes/startup-checks.php' ) {
 
-    // Start autoloader.
-    require_once FOOGM_PATH . 'vendor/autoload.php';
-
+    // Production uses the native loader; Composer is for development tools only.
     spl_autoload_register( 'foogallery_migrate_autoloader' );
+    if ( defined( 'WP_CLI' ) && WP_CLI ) {
+        FooPlugins\FooGalleryMigrate\StorageCli::register();
+    }
+
+    register_activation_hook( FOOGM_FILE, 'foogallery_migrate_activate' );
+    register_deactivation_hook( FOOGM_FILE, 'foogallery_migrate_deactivate' );
 
     if ( is_admin() ) {
         // Start the plugin!

@@ -139,6 +139,7 @@ class FakePlugin {
 }
 
 class FakeEngine {
+	public function assert_storage_writer() {}
 	public $settings = array();
 	public $fail_next_write = false;
 	public $migration_revision = 0;
@@ -171,6 +172,18 @@ class FakeEngine {
 
 	public function get_migrated_objects() {
 		return $this->migrated_objects;
+	}
+
+	public function get_migrated_object( $identifier ) {
+		foreach ( $this->migrated_objects as $object ) {
+			$type = method_exists( $object, 'type' ) ? $object->type() : 'gallery';
+			$candidate = $type . '_' . $object->plugin->name() . '_' . $object->ID;
+			if ( $identifier === $candidate ) {
+				return $object;
+			}
+		}
+
+		return false;
 	}
 
 	public function get_migrated_revision() {
@@ -236,6 +249,7 @@ $progress = $migrator->scan_content_batch( true );
 $state = $engine->settings['content_scan_state'];
 assert_same( 2, $progress['scanned'], 'the first request processes only the configured batch size' );
 assert_same( 2, count( $state['items'] ), 'findings are persisted in the atomic state' );
+assert_same( 2, $migrator->count_scanned_items_for_plugin( 'Example Gallery' ), 'option-mode plugin count preserves the existing finding list' );
 assert_true( false !== stripos( $wpdb->queries[0], 'LIMIT 3' ), 'the bounded query fetches one lookahead row' );
 assert_true( false !== stripos( $wpdb->queries[0], 'ID > 0' ), 'the query uses a keyset cursor' );
 assert_same( false, $progress['complete'], 'lookahead reports more work' );

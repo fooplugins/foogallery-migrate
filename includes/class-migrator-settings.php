@@ -38,19 +38,35 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		const SETTING_IMAGES_PER_TURN = 'images_per_turn';
 		const SETTING_DEBUG_ENABLED = 'debug_enabled';
 
+		private $state_backend;
+		private $writer_admission;
+		public function __construct( $backend = null, $writer_admission = null ) {
+			if ( null !== $backend && ! $backend instanceof LegacyOptionBackend && ! $backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Unsupported injected settings backend.' ); }
+			if ( null !== $writer_admission && ! is_callable( $writer_admission ) ) { throw new \RuntimeException( 'Invalid storage writer admission.' ); }
+			$this->writer_admission = $writer_admission;
+			$this->state_backend = null === $backend ? new LegacyOptionBackend() : $backend;
+		}
+		public function content_scan_repository() { return new ContentScanRepository( $this->state_backend, $this ); }
+		public function table_collection_repository() { return $this->state_backend instanceof LegacyTableBackend ? new MigratableCollectionRepository( $this->state_backend, $this ) : null; }
+		public function can_clear_migrator_state() { return $this->state_backend instanceof LegacyOptionBackend; }
+
 		/**
 		 * Returns a setting for the migrator.
 		 *
 		 * @return mixed
 		 */
 		public function get_migrator_setting( $name, $default = false ) {
-			$settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
-
-			if ( isset( $settings ) && is_array( $settings ) && array_key_exists( $name, $settings ) ) {
-				return $this->hydrate_migrator_setting( $name, $settings[ $name ] );
+			if ( $this->state_backend instanceof LegacyTableBackend ) {
+				if ( in_array( $name, array( self::KEY_PLUGINS, self::KEY_GALLERIES, self::KEY_ALBUMS ), true ) ) {
+					$setting = $this->state_backend->read_collection( $name );
+					return $setting['found'] ? $this->hydrate_migrator_setting( $name, $setting['value'] ) : $default;
+				}
+				$setting = $this->state_backend->read( $name );
+				return $setting['found'] ? $this->hydrate_migrator_setting( $name, $setting['value'] ) : $default;
 			}
-
-			return $default;
+			try { $setting = $this->state_backend->read( $name ); }
+			catch ( \RuntimeException $error ) { return $default; }
+			return $setting['found'] ? $this->hydrate_migrator_setting( $name, $setting['value'] ) : $default;
 		}
 
 		/**
@@ -61,38 +77,67 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @return bool Whether the setting was persisted.
 		 */
 		public function set_migrator_setting( $name, $value ) {
-			$settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+			return $this->set_migrator_settings( array( $name => $value ) );
+		}
 
-			if ( ! isset( $settings ) || ! is_array( $settings ) ) {
-				$settings = array();
+		/**
+		 * Persist one logical multi-key operation in one non-autoloaded option
+		 * update. History and its derived revision cannot be published separately.
+		 * Option mode retains its existing whole-option memory/concurrency costs.
+		 *
+		 * @param array $values Ordered setting-name/value changes.
+		 * @return bool Whether the complete operation was persisted.
+		 */
+		public function set_migrator_settings( $values ) {
+			if ( ! is_array( $values ) || ( array_key_exists( self::KEY_MIGRATED, $values ) &&
+				array_key_exists( self::KEY_MIGRATED_REVISION, $values ) ) ) {
+				return false;
 			}
-
-			$previous_value = array_key_exists( $name, $settings ) ? $settings[ $name ] : null;
-			$compacted_value = $this->compact_migrator_setting( $name, $value );
-			$settings[ $name ] = $compacted_value;
-
-			if ( self::KEY_MIGRATED === $name && $previous_value !== $compacted_value ) {
-				$current_revision = isset( $settings[ self::KEY_MIGRATED_REVISION ] )
-					? absint( $settings[ self::KEY_MIGRATED_REVISION ] )
-					: ( $this->raw_setting_has_items( $previous_value ) ? 1 : 0 );
-				$settings[ self::KEY_MIGRATED_REVISION ] = $current_revision + 1;
+			if ( $this->state_backend instanceof LegacyTableBackend ) {
+				if ( array_key_exists( ContentScanRepository::STATE_KEY, $values ) ) {
+					if ( count( $values ) !== 1 ) { throw new \RuntimeException( 'Content snapshot cannot accompany unrelated settings.' ); }
+					return $this->state_backend->replace_content_state( $values[ContentScanRepository::STATE_KEY] );
+				}
+				$collections = array_intersect( array_keys( $values ), array( self::KEY_PLUGINS, self::KEY_GALLERIES, self::KEY_ALBUMS ) );
+				if ( count( $collections ) ) {
+					if ( count( $collections ) !== 1 ) { throw new \RuntimeException( 'Cross-collection replacement is not admitted. No partial write.' ); }
+					$name = reset( $collections ); $companions = $values; unset( $companions[$name] );
+					if ( self::KEY_PLUGINS === $name ) {
+						if ( count( $companions ) ) { throw new \RuntimeException( 'Plugin detection replacement cannot accompany other settings.' ); }
+						if ( ! is_array( $values[$name] ) ) { return false; }
+						return $this->state_backend->replace_collection( $name, $this->compact_migrator_setting( $name, $values[$name] ) );
+					}
+					if ( count( $companions ) && array_keys( $companions ) !== array( $name . '-state' ) ) { throw new \RuntimeException( 'Only the collection checkpoint may accompany a collection replacement.' ); }
+					if ( ! is_array( $values[$name] ) ) { return false; }
+					$repository = new MigratableCollectionRepository( $this->state_backend, $this );
+					return count( $companions ) ? $repository->update_with_state( $name, $values[$name], $companions[$name . '-state'] ) : $repository->replace_snapshot( $name, $values[$name] );
+				}
+				$compact = array(); foreach ( $values as $name => $value ) { $compact[$name] = $this->compact_migrator_setting( $name, $value ); }
+				return $this->state_backend->mutate_scalars( $compact );
 			}
-
-			if ( update_option( FOOGALLERY_MIGRATE_OPTION_DATA, $settings, false ) ) {
-				return true;
-			}
-
-			// update_option() also returns false when the requested value is already stored.
-			return $settings === get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
+			return $this->state_backend->mutate( function ( $settings ) use ( $values ) {
+				$previous_value = array_key_exists( self::KEY_MIGRATED, $settings ) ? $settings[ self::KEY_MIGRATED ] : null;
+				foreach ( $values as $name => $value ) {
+					$settings[ $name ] = $this->compact_migrator_setting( $name, $value );
+				}
+				if ( array_key_exists( self::KEY_MIGRATED, $values ) && $previous_value !== $settings[ self::KEY_MIGRATED ] ) {
+					$current_revision = isset( $settings[ self::KEY_MIGRATED_REVISION ] )
+						? absint( $settings[ self::KEY_MIGRATED_REVISION ] )
+						: ( $this->raw_setting_has_items( $previous_value ) ? 1 : 0 );
+					$settings[ self::KEY_MIGRATED_REVISION ] = $current_revision + 1;
+				}
+				return $settings;
+			} );
 		}
 
 		/**
 		 * Clear migrator settings.
 		 *
-		 * @return void
+		 * @return bool Whether the settings were cleared.
 		 */
 		public function clear_migrator_setting() {
-			update_option( FOOGALLERY_MIGRATE_OPTION_DATA, array(), false );
+			if ( ! $this->can_clear_migrator_state() ) { throw new \RuntimeException( 'Whole table-state reset requires the approved maintenance owner. No partial clear or option fallback.' ); }
+			return $this->state_backend->replace_all( array() );
 		}
 
 		/**
@@ -101,9 +146,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @return bool
 		 */
 		public function has_migrator_settings() {
-			$settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
-
-			return isset( $settings ) && is_array( $settings );
+			if ( $this->state_backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Whole table-state presence is not admitted; use scoped collection/history counts.' ); }
+			return $this->state_backend->exists();
 		}
 
 		/**
@@ -116,13 +160,13 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @return bool
 		 */
 		public function has_migrator_setting_items( $name ) {
-			$settings = get_option( FOOGALLERY_MIGRATE_OPTION_DATA );
-
-			if ( ! isset( $settings ) || ! is_array( $settings ) || ! array_key_exists( $name, $settings ) ) {
-				return false;
+			if ( $this->state_backend instanceof LegacyTableBackend ) {
+				$entry = $this->state_backend->metadata_many( array( $name ) )[0];
+				return 'scalar' === $entry['head']['state_kind'] ? $this->raw_setting_has_items( $entry['root']['value'] ) : $entry['root']['root_count'] > 0;
 			}
-
-			return $this->raw_setting_has_items( $settings[ $name ] );
+			try { $setting = $this->state_backend->read( $name ); }
+			catch ( \RuntimeException $error ) { return false; }
+			return $setting['found'] && $this->raw_setting_has_items( $setting['value'] );
 		}
 
 		/**
@@ -178,6 +222,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @return void
 		 */
 		public function save_settings( $settings ) {
+			if ( null !== $this->writer_admission && true !== call_user_func( $this->writer_admission ) ) { throw new \RuntimeException( 'Storage writer was not admitted.' ); }
 			$current_settings = $this->get_settings();
 
 			if ( ! is_array( $settings ) ) {
@@ -304,6 +349,50 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		}
 
 		/**
+		 * Compacts one migrated object for table storage.
+		 *
+		 * Child records are stored independently and linked by parent_key.
+		 *
+		 * @param mixed $object Migratable object.
+		 * @return mixed
+		 */
+		public function compact_migrated_object( $object ) {
+			return $this->compact_migratable_object( $object, false );
+		}
+
+		/**
+		 * Hydrates one compact table record.
+		 *
+		 * @param mixed $record Compact record.
+		 * @return mixed
+		 */
+		public function hydrate_migrated_object( $record ) {
+			return $this->hydrate_migratable_object( $record );
+		}
+
+		/** Runtime codec bridge only; never use compaction as a raw conversion preflight. */
+		public function compact_state_value( $name, $value ) {
+			return $this->compact_migrator_setting( $name, $value );
+		}
+
+		/** Historical runtime objects are returned unchanged, without a read-time rewrite. */
+		public function hydrate_state_value( $name, $value ) {
+			return $this->hydrate_migrator_setting( $name, $value );
+		}
+
+		private function validate_compact_setting( $name, $value ) {
+			if ( ! $this->is_compact_payload( $value ) || ! in_array( $name,
+				array( self::KEY_PLUGINS, self::KEY_GALLERIES, self::KEY_ALBUMS, self::KEY_MIGRATED ), true ) ) {
+				return;
+			}
+			$type = self::KEY_PLUGINS === $name ? self::KEY_PLUGINS : 'migratable';
+			if ( self::COMPACT_VERSION !== $value[self::COMPACT_MARKER] || ! isset( $value['type'], $value['items'] ) ||
+				$type !== $value['type'] || ! is_array( $value['items'] ) ) {
+				throw new \RuntimeException( 'Unsupported compact state. No state was changed.' );
+			}
+		}
+
+		/**
 		 * Compacts large migration settings before they are persisted.
 		 *
 		 * @param string $name Setting name.
@@ -311,6 +400,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @return mixed
 		 */
 		protected function compact_migrator_setting( $name, $value ) {
+			$this->validate_compact_setting( $name, $value );
 			if ( $this->is_compact_payload( $value ) ) {
 				return $value;
 			}
@@ -320,7 +410,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 					return $this->compact_plugins( $value );
 				case self::KEY_GALLERIES:
 				case self::KEY_ALBUMS:
-					return $this->compact_migratable_collection( $value, false );
+					return $this->compact_migratable_collection( $value, true );
 				case self::KEY_MIGRATED:
 					return $this->compact_migratable_collection( $value, true );
 			}
@@ -336,6 +426,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @return mixed
 		 */
 		protected function hydrate_migrator_setting( $name, $value ) {
+			$this->validate_compact_setting( $name, $value );
 			if ( ! $this->is_compact_payload( $value ) ) {
 				return $value;
 			}
@@ -345,7 +436,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 					return $this->hydrate_plugins( $value );
 				case self::KEY_GALLERIES:
 				case self::KEY_ALBUMS:
-					return $this->hydrate_migratable_collection( $value, false );
+					return $this->hydrate_migratable_collection( $value, true );
 				case self::KEY_MIGRATED:
 					return $this->hydrate_migratable_collection( $value, true );
 			}
@@ -375,7 +466,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @return bool
 		 */
 		protected function is_compact_payload( $value ) {
-			return is_array( $value ) && isset( $value[ self::COMPACT_MARKER ] );
+			return is_array( $value ) && array_key_exists( self::COMPACT_MARKER, $value );
 		}
 
 		/**
@@ -507,14 +598,22 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 		 * @param mixed $object Migratable object.
 		 * @return mixed
 		 */
-		protected function compact_migratable_object( $object ) {
+		protected function compact_migratable_object( $object, $include_children = true ) {
 			if ( ! is_object( $object ) || ! method_exists( $object, 'type' ) ) {
 				return $this->compact_plain_value( $object );
+			}
+
+			if ( 'gallery' === $object->type() ) {
+				$include_children = false;
 			}
 
 			$record = array(
 				'object_type' => $object->type(),
 			);
+
+			if ( 'gallery' === $object->type() && method_exists( $object, 'get_children_errors' ) ) {
+				$record['children_errors'] = $object->get_children_errors();
+			}
 
 			if ( isset( $object->plugin ) && is_object( $object->plugin ) && method_exists( $object->plugin, 'name' ) ) {
 				$record['plugin_name'] = $object->plugin->name();
@@ -552,10 +651,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 				$record['settings'] = $this->compact_plain_value( $object->settings );
 			}
 
-			if ( isset( $object->children ) && is_array( $object->children ) && count( $object->children ) > 0 ) {
+			if ( $include_children && isset( $object->children ) && is_array( $object->children ) && count( $object->children ) > 0 ) {
 				$children = array();
-				foreach ( $object->children as $child ) {
-					$children[] = $this->compact_migratable_object( $child );
+				foreach ( $object->children as $key => $child ) {
+					$children[$key] = $this->compact_migratable_object( $child, $include_children );
 				}
 				$record['children'] = $children;
 			}
@@ -625,6 +724,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 				'migrated_id',
 				'migrated_title',
 				'children_count',
+				'children_errors',
 			);
 
 			foreach ( $properties as $property ) {
@@ -639,8 +739,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 
 			if ( isset( $record['children'] ) && is_array( $record['children'] ) ) {
 				$children = array();
-				foreach ( $record['children'] as $child_record ) {
-					$children[] = $this->hydrate_migratable_object( $child_record );
+				foreach ( $record['children'] as $key => $child_record ) {
+					$children[$key] = $this->hydrate_migratable_object( $child_record );
 				}
 				$object->children = $children;
 

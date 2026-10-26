@@ -30,10 +30,29 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
          * @return void
          */
         function render_gallery_form() {
-            $galleries = $this->get_objects_to_migrate();
+            $repository = $this->table_collection_repository();
+            if ( null === $repository ) { $this->render_gallery_form_body( null ); return; }
+            ob_start();
+            try {
+                $context = $this->render_gallery_form_body( $repository );
+                if ( $repository->view_context( $this->type ) !== $context ) { throw new \RuntimeException( 'Galleries changed during form rendering.' ); }
+                $html = ob_get_clean(); echo $html;
+            } catch ( \Exception $error ) { ob_end_clean(); throw $error; }
+            catch ( \Throwable $error ) { ob_end_clean(); throw $error; }
+        }
+
+        private function render_gallery_form_body( $repository ) {
+            $context = null;
+            if ( null === $repository ) { $galleries = $this->get_objects_to_migrate(); $gallery_count = count( $galleries ); }
+            else {
+                $context = $repository->view_context( $this->type );
+                if ( ! $context['found'] ) { $this->get_objects_to_migrate(); $context = $repository->view_context( $this->type ); }
+                if ( ! $context['found'] ) { throw new \RuntimeException( 'Gallery discovery did not publish a collection.' ); }
+                $galleries = array(); $gallery_count = $context['total'];
+            }
             wp_nonce_field( 'foogallery_migrate', 'foogallery_migrate', false );
 
-            if ( count( $galleries ) === 0 ) {
+            if ( $gallery_count === 0 ) {
                 echo '<p>' . esc_html__( 'No galleries found!', 'foogallery-migrate' ) . '</p>';
                 $show_refresh = true;
                 $migrating = false;
@@ -51,7 +70,22 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                     }
                 }
                 $migrating = $has_migrations && defined( 'DOING_AJAX' ) && DOING_AJAX;
-                $current_gallery_id = $this->get_current_object_being_migrated();
+                // Reuse the bounded current-root lookup; do not load its image
+                // list or rely on the active gallery being on the visible page.
+                $current_gallery = null;
+                if ( null !== $repository ) {
+                    $started = $repository->first_started( $this->type );
+                    if ( $started['found'] ) { $current_gallery = $started['value']; }
+                } else {
+                    foreach ( $galleries as $candidate ) {
+                        if ( Migratable::PROGRESS_STARTED === $candidate->migration_status ) {
+                            $current_gallery = $candidate; break;
+                        }
+                    }
+                }
+                $current_gallery_id = null === $current_gallery ? 0 : $current_gallery->unique_identifier();
+                $current_image_total = null === $current_gallery ? 0 : $current_gallery->get_children_count();
+                $current_image_processed = null === $current_gallery ? 0 : min( $current_image_total, absint( $current_gallery->migrated_child_count ) );
                 $show_refresh = !$has_migrations;
                 ?>
                 <table class="wp-list-table widefat fixed striped table-view-list pages">
@@ -99,7 +133,6 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                         $page = absint( wp_unslash( $_GET['gallery_paged'] ) );
                     }
                     $url = add_query_arg( 'gallery_paged', $page, $url );
-                    $gallery_count = count( $galleries );
                     $preflight_gallery_count = 0;
                     $preflight_image_count = 0;
                     $page_size = $this->migrator_engine->get_page_size();
@@ -120,11 +153,20 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                         $end = $gallery_count - 1;
                     }
 
+                    $table_rows = array(); $table_end = $start;
                     for ($counter = $start; $counter <= $end; $counter++ ) {
                         if ( $counter >= $gallery_count ) {
                             break;
                         }
-                        $gallery = $galleries[$counter];
+                        if ( null !== $repository ) {
+                            if ( $counter >= $table_end ) {
+                                $take = min( 100, $end - $counter + 1, $gallery_count - $counter );
+                                $chunk = $repository->view_page( $this->type, $counter, $take );
+                                if ( $chunk['head'] !== $context['head'] || count( $chunk['rows'] ) !== $take ) { throw new \RuntimeException( 'Gallery page changed during form rendering.' ); }
+                                $table_rows = $chunk['rows']; $table_end = $counter + $take;
+                            }
+                            $gallery = $table_rows[$counter - ( $table_end - count( $table_rows ) )]['value'];
+                        } else { $gallery = $galleries[$counter]; }
                         $progress    = $gallery->progress;
                         $done        = $gallery->migrated;
                         $edit_link   = '';
@@ -171,7 +213,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                                 <?php echo esc_html( $gallery->plugin->name() ); ?>
                             </td>
                             <td>
-                                <?php esc_html_e( 'Template : ', 'foogallery-migrate' ); ?>
+                                <?php esc_html_e( 'Layout : ', 'foogallery-migrate' ); ?>
                                 <?php echo esc_html( $gallery->plugin->get_migration_gallery_template( $gallery ) ); ?>
                                 <br />
                                 <?php esc_html_e( 'Images : ', 'foogallery-migrate' ); ?>
@@ -278,6 +320,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                 echo '<input type="hidden" name="foogallery_migrate_paged" value="' . esc_attr( $page ) . '" />';
                 echo '<input type="hidden" name="foogallery_migrate_url" value="' . esc_url( $url ) . '" />';
                 echo '<input type="hidden" class="migrate_progress" value="' . esc_attr( $overall_progress ) . '" />';
+                echo '<input type="hidden" class="foogm-migration-summary" data-queued="' . esc_attr( false === $migration_state ? 0 : $migration_state['queued'] ) . '" data-completed="' . esc_attr( false === $migration_state ? 0 : $migration_state['completed'] ) . '" data-image-title="' . esc_attr( null === $current_gallery ? '' : $current_gallery->title ) . '" data-image-processed="' . esc_attr( $current_image_processed ) . '" data-image-total="' . esc_attr( $current_image_total ) . '" />';
                 echo '<input type="hidden" name="foogallery_migrate_retry_gallery_id" value="" />';
                 echo '<input type="hidden" name="foogallery_migrate_check_gallery_id" value="" />';
 
@@ -306,18 +349,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                 <button name="foogallery_migrate_action" value="foogallery_refresh_gallery"
                         class="button refresh_gallery"><?php esc_html_e( 'Refresh Galleries', 'foogallery-migrate' ); ?></button>
             <?php }
-            ?><div id="foogallery_migrate_gallery_spinner" style="width:20px">
-                <span class="spinner"></span>
-            </div>
-            <?php if ( $migrating ) { ?>
-                <div class="foogallery-migrate-progressbar">
-                    <span style="width:<?php echo esc_attr( $overall_progress ); ?>%"></span>
-                </div>
-                <?php echo esc_html( intval( $overall_progress ) ); ?>%
-                <div style="width:20px; display: inline-block;">
-                    <span class="spinner shown"></span>
-                </div>
-            <?php }
+            return $context;
         }
 	}
 }
