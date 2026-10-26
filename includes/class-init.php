@@ -133,6 +133,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
                 'Stop migration' => __( 'Stop migration', 'foogallery-migrate' ),
                 'Done' => __( 'Done', 'foogallery-migrate' ),
                 'Migration finished.' => __( 'Migration finished.', 'foogallery-migrate' ),
+                'Some selected items could not be migrated. Review their results in the table and retry.' => __( 'Some selected items could not be migrated. Review their results in the table and retry.', 'foogallery-migrate' ),
                 'Migration paused. Review the error and try again.' => __( 'Migration paused. Review the error and try again.', 'foogallery-migrate' ),
                 'Migration stopped. Completed work is kept.' => __( 'Migration stopped. Completed work is kept.', 'foogallery-migrate' ),
                 'Processing selected items…' => __( 'Processing selected items…', 'foogallery-migrate' ),

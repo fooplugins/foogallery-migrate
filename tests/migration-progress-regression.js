@@ -116,9 +116,24 @@ assert.equal(requests.length, 6, 'stop still waits for the in-flight image batch
 form.summary['data-image-processed'] = '20'; requests[5].success('<form>');
 assert.ok(requests[6].data.endsWith('action=cancel-action')); requests[6].success('<form>');
 assert.equal(meterValue(), 20, 'stopped progress retains the last completed image batch');
-click('resume'); form.percent = '100'; requests[7].success('<form>');
+click('resume'); form.percent = '100'; form.summary['data-completed'] = '2'; requests[7].success('<form>');
 assert.equal(meterValue(), 100); assert.equal(requests.length, 8, 'overall completion ends polling');
 assert.equal(tree.props.isDismissible, true);
+// Failed roots also advance queue progress. The final receipt must distinguish
+// all-success/no-work from partial or total failure, even on a different page.
+for (const [completed, percent] of [['0', '100'], ['1', '100'], ['2', '150'], ['2', '200']]) {
+    click('resume');
+    form.percent = percent; form.summary = { 'data-queued': '2', 'data-completed': completed };
+    requests.at(-1).success('<form>');
+    assert.equal(nodes(tree, 'Notice')[0].props.status, 'error');
+    assert.ok(JSON.stringify(tree).includes('Some selected items could not be migrated'));
+    assert.equal(nodes(tree, 'div').filter(n => n.props.role === 'progressbar').length, 0,
+        'a finished queue with failures cannot display a successful 100% meter');
+    assert.equal(nodes(tree, 'Spinner').length, 0);
+    assert.equal(tree.props.isDismissible, true);
+}
+click('resume'); form.percent = '100'; form.summary = { 'data-queued': '2', 'data-completed': '2' }; requests.at(-1).success('<form>');
+assert.equal(meterValue(), 100, 'successful retries and no-work items still finish normally');
 for (const tab of ['galleries', 'albums', 'content', 'image-tags']) {
     const php = fs.readFileSync('includes/views/view-migrate-tab-' + tab + '.php', 'utf8');
     const script = php.match(/<script>([\s\S]*?)<\/script>/)[1].replace(/<\?php[\s\S]*?\?>/g, '"test message"');
@@ -196,4 +211,8 @@ assert.equal(tags.messages.at(-1)[2], true);
 tags.click('.foogallery-migrate-image-tags-start'); assert.equal(tags.calls[1].data.reset, 0, 'stopped tag sync resumes its existing queue');
 tags.calls[1].success({ success: true, data: { complete: true, total: 100, processed: 100, progress: 100 } });
 assert.equal(tags.messages.at(-1)[0], 'finish');
+tags.click('.foogallery-migrate-image-tags-start');
+tags.calls[2].success({ success: true, data: { complete: true, total: 100, processed: 100, progress: 100, error_count: 1 } });
+assert.equal(tags.messages.at(-1)[0], 'fail', 'completed tag processing with errors must show an error dialog');
+assert.equal(tags.messages.filter(m => m[0] === 'finish').length, 2, 'tag errors cannot add a successful finish');
 console.log('PASS: shared dialog lifecycle, all four tabs, serial stop, completion, resume and failure regression checks');

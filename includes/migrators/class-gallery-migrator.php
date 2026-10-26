@@ -275,6 +275,13 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
 										}
 									}
 
+									// Compact saved galleries retain error messages without their
+									// image objects. Display these without loading the image list.
+									if ( empty( $error_rows ) ) {
+										foreach ( $gallery->get_children_errors() as $message ) {
+											$error_rows[] = array( 'source_url' => '', 'message' => $message );
+										}
+									}
 									$error_count = count( $error_rows );
 									/* translators: %d: image error count. */
 									$error_label = sprintf( _n( '%d error', '%d errors', $error_count, 'foogallery-migrate' ), $error_count );
@@ -307,6 +314,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
 												</tbody>
 											</table>
 										</details>
+									<?php } ?>
+									<?php if ( $error_count > 0 || ( $done && Migratable::PROGRESS_ERROR === $gallery->migration_status ) ) { ?>
                                         <button type="button" class="button retry_migrate_gallery" data-gallery-id="<?php echo esc_attr( $gallery->unique_identifier() ); ?>">
                                             <?php esc_html_e( 'Retry Migration', 'foogallery-migrate' ); ?>
                                         </button>

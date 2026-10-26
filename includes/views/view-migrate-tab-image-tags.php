@@ -12,6 +12,7 @@ $show_image_tag_sync = $has_migratable_image_tags || $image_tag_sync_status['tot
         var imageTagSyncErrorMessage = <?php echo wp_json_encode( __( 'Something went wrong syncing image tags and the page will now reload. You can start the tag sync again after the page reloads.', 'foogallery-migrate' ) ); ?>;
         var imageTagSyncCompleteMessage = <?php echo wp_json_encode( __( 'Image tag sync complete.', 'foogallery-migrate' ) ); ?>;
         var imageTagSyncRunningMessage = <?php echo wp_json_encode( __( 'Syncing image tags...', 'foogallery-migrate' ) ); ?>;
+        var imageTagSyncFailedMessage = <?php echo wp_json_encode( __( 'Some image tags could not be synced. Review the results below before trying again.', 'foogallery-migrate' ) ); ?>;
         var $imageTagSync = $('#foogallery_migrate_image_tags');
         var dialog = window.foogalleryMigrateProgress;
         var tagSyncReset = <?php echo $image_tag_sync_status['complete'] ? 'true' : 'false'; ?>;
@@ -44,7 +45,8 @@ $show_image_tag_sync = $has_migratable_image_tags || $image_tag_sync_status['tot
             if (status.complete) {
                 syncInProgress = false;
                 tagSyncReset = true;
-                dialog.finish(imageTagSyncCompleteMessage);
+                if (errors > 0) { dialog.fail(imageTagSyncFailedMessage); }
+                else { dialog.finish(imageTagSyncCompleteMessage); }
                 $imageTagSync.find('.spinner').removeClass('is-active');
                 $imageTagSync.find('.foogallery-migrate-image-tags-start').prop('disabled', false);
             }

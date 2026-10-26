@@ -157,7 +157,18 @@
             // 100% must not stop the remaining queued galleries.
             if (!isFinite(percent)) { progress.fail(); return; }
             if (stopping) { cancel(); return; }
-            if (percent >= 100) { progress.finish(); return; }
+            if (percent >= 100) {
+                // The saved queue percentage adds errors to the completed
+                // count (which can also include failed roots). Recover that
+                // error count without loading roots or changing saved state.
+                var queued = Number(summary.attr('data-queued'));
+                var completed = Number(summary.attr('data-completed'));
+                var errors = Math.round(percent * queued / 100 - completed);
+                if (isFinite(errors) && errors > 0) {
+                    progress.fail(__('Some selected items could not be migrated. Review their results in the table and retry.', 'foogallery-migrate'));
+                } else { progress.finish(); }
+                return;
+            }
             request(config.continue, next);
         }
         function begin(action) {

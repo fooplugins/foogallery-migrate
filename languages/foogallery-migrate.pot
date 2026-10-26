@@ -8,7 +8,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Language-Team: FooPlugins <info@fooplugins.com>\n"
 "Last-Translator: Brad Vincent <brad@fooplugins.com>\n"
-"POT-Creation-Date: 2026-10-26 20:58+0000\n"
+"POT-Creation-Date: 2026-10-26 22:02+0000\n"
 "Report-Msgid-Bugs-To: https://fooplugins.com\n"
 "X-Poedit-Basepath: ..\n"
 "X-Poedit-KeywordsList: __;_e;_ex:1,2c;_n:1,2;_n_noop:1,2;_nx:1,2,4c;_nx_noop:1,2,3c;_x:1,2c;esc_attr__;esc_attr_e;esc_attr_x:1,2c;esc_html__;esc_html_e;esc_html_x:1,2c\n"
@@ -74,109 +74,113 @@ msgid "Migration finished."
 msgstr ""
 
 #: includes/class-init.php:136
+msgid "Some selected items could not be migrated. Review their results in the table and retry."
+msgstr ""
+
+#: includes/class-init.php:137
 msgid "Migration paused. Review the error and try again."
 msgstr ""
 
-#: includes/class-init.php:137, includes/views/view-migrate-tab-content.php:42, includes/views/view-migrate-tab-image-tags.php:88
+#: includes/class-init.php:138, includes/views/view-migrate-tab-content.php:42, includes/views/view-migrate-tab-image-tags.php:90
 msgid "Migration stopped. Completed work is kept."
 msgstr ""
 
-#: includes/class-init.php:138
+#: includes/class-init.php:139
 msgid "Processing selected items…"
 msgstr ""
 
 #. translators: 1: finished item count, 2: selected item count.
-#: includes/class-init.php:140
+#: includes/class-init.php:141
 msgid "%1$s of %2$s finished"
 msgstr ""
 
 #. translators: 1: finished gallery count, 2: selected gallery count.
-#: includes/class-init.php:142
+#: includes/class-init.php:143
 msgid "%1$s of %2$s galleries finished"
 msgstr ""
 
 #. translators: 1: processed image count, 2: current gallery image count.
 #. translators: 1: processed image count, 2: total image count.
-#: includes/class-init.php:144, includes/views/view-migrate-tab-image-tags.php:34
+#: includes/class-init.php:145, includes/views/view-migrate-tab-image-tags.php:35
 msgid "%1$s of %2$s images processed"
 msgstr ""
 
-#: includes/class-init.php:145
+#: includes/class-init.php:146
 msgid "Preparing next gallery…"
 msgstr ""
 
-#: includes/class-init.php:146
+#: includes/class-init.php:147
 msgid "Current gallery"
 msgstr ""
 
-#: includes/class-init.php:176, includes/class-init.php:217, includes/class-init.php:248, includes/class-init.php:269, includes/class-init.php:298, includes/class-init.php:424, includes/class-init.php:463, includes/class-init.php:486, includes/class-init.php:507, includes/class-init.php:537, includes/class-init.php:558, includes/class-init.php:578, includes/class-init.php:603, includes/class-init.php:642, includes/class-init.php:665, includes/class-init.php:685, includes/class-init.php:710, includes/class-init.php:763, includes/class-init.php:814, includes/class-init.php:859, includes/class-init.php:917, includes/views/view-migrate-tab-sources.php:8, includes/views/view-migrate-tab-sources.php:61, includes/views/view-migrate.php:357
+#: includes/class-init.php:177, includes/class-init.php:218, includes/class-init.php:249, includes/class-init.php:270, includes/class-init.php:299, includes/class-init.php:425, includes/class-init.php:464, includes/class-init.php:487, includes/class-init.php:508, includes/class-init.php:538, includes/class-init.php:559, includes/class-init.php:579, includes/class-init.php:604, includes/class-init.php:643, includes/class-init.php:666, includes/class-init.php:686, includes/class-init.php:711, includes/class-init.php:764, includes/class-init.php:815, includes/class-init.php:860, includes/class-init.php:918, includes/views/view-migrate-tab-sources.php:8, includes/views/view-migrate-tab-sources.php:61, includes/views/view-migrate.php:357
 msgid "Unauthorized."
 msgstr ""
 
-#: includes/class-init.php:185
+#: includes/class-init.php:186
 msgid "Choose a valid WordPress gallery migration mode."
 msgstr ""
 
-#: includes/class-init.php:188
+#: includes/class-init.php:189
 msgid "The WordPress gallery migration mode could not be saved."
 msgstr ""
 
-#: includes/class-init.php:450, includes/class-init.php:473, includes/class-init.php:629, includes/class-init.php:652
+#: includes/class-init.php:451, includes/class-init.php:474, includes/class-init.php:630, includes/class-init.php:653
 msgid "Migration state could not be saved. Please retry."
 msgstr ""
 
-#: includes/class-init.php:533, includes/class-init.php:758, includes/class-init.php:809, includes/class-init.php:856, includes/class-init.php:914
+#: includes/class-init.php:534, includes/class-init.php:759, includes/class-init.php:810, includes/class-init.php:857, includes/class-init.php:915
 msgid "Invalid request."
 msgstr ""
 
 #. translators: %d: migrated occurrence count.
-#: includes/class-init.php:730, includes/views/view-migrate-tab-content.php:12
+#: includes/class-init.php:731, includes/views/view-migrate-tab-content.php:12
 msgid "Successfully migrated and replaced %d gallery occurrence."
 msgid_plural "Successfully migrated and replaced %d gallery occurrences."
 msgstr[0] ""
 msgstr[1] ""
 
-#: includes/class-init.php:737
+#: includes/class-init.php:738
 msgid "Errors:"
 msgstr ""
 
-#: includes/class-init.php:796, includes/views/view-migrate-tab-content.php:24
+#: includes/class-init.php:797, includes/views/view-migrate-tab-content.php:24
 msgid "The content scan stopped before completion. Previously saved results are safe; use the scan button to retry."
 msgstr ""
 
-#: includes/class-init.php:843, includes/views/view-migrate-tab-content.php:31
+#: includes/class-init.php:844, includes/views/view-migrate-tab-content.php:31
 msgid "The status refresh stopped before completion. Previously saved results are safe; use Refresh Status to retry."
 msgstr ""
 
-#: includes/class-init.php:883
+#: includes/class-init.php:884
 msgid "Invalid status update."
 msgstr ""
 
-#: includes/class-init.php:894, includes/objects/class-migratable.php:335, includes/views/view-migrate-tab-log.php:13
+#: includes/class-init.php:895, includes/objects/class-migratable.php:335, includes/views/view-migrate-tab-log.php:13
 msgid "Not migrated"
 msgstr ""
 
-#: includes/class-init.php:895
+#: includes/class-init.php:896
 msgid "Queued"
 msgstr ""
 
-#: includes/class-init.php:896
+#: includes/class-init.php:897
 msgid "Started"
 msgstr ""
 
-#: includes/class-init.php:897, includes/views/view-migrate-tab-log.php:16
+#: includes/class-init.php:898, includes/views/view-migrate-tab-log.php:16
 msgid "Completed"
 msgstr ""
 
-#: includes/class-init.php:898, includes/views/view-migrate-tab-log.php:17
+#: includes/class-init.php:899, includes/views/view-migrate-tab-log.php:17
 msgid "Nothing to migrate"
 msgstr ""
 
-#: includes/class-init.php:899, includes/migrators/class-gallery-migrator.php:291, includes/views/view-migrate-tab-log.php:18, includes/views/view-migrate-tab-log.php:161, includes/views/view-migrate.php:110
+#: includes/class-init.php:900, includes/migrators/class-gallery-migrator.php:298, includes/views/view-migrate-tab-log.php:18, includes/views/view-migrate-tab-log.php:161, includes/views/view-migrate.php:110
 msgid "Error"
 msgstr ""
 
-#: includes/class-init.php:927
+#: includes/class-init.php:928
 msgid "Invalid object."
 msgstr ""
 
@@ -761,7 +765,7 @@ msgid_plural "Total albums: %d"
 msgstr[0] ""
 msgstr[1] ""
 
-#: includes/migrators/class-album-migrator.php:263, includes/migrators/class-gallery-migrator.php:347
+#: includes/migrators/class-album-migrator.php:263, includes/migrators/class-gallery-migrator.php:356
 msgid "Preflight:"
 msgstr ""
 
@@ -774,11 +778,11 @@ msgstr ""
 msgid "Start Album Migration"
 msgstr ""
 
-#: includes/migrators/class-album-migrator.php:258, includes/migrators/class-gallery-migrator.php:342
+#: includes/migrators/class-album-migrator.php:258, includes/migrators/class-gallery-migrator.php:351
 msgid "Resume Migration"
 msgstr ""
 
-#: includes/migrators/class-album-migrator.php:260, includes/migrators/class-gallery-migrator.php:344
+#: includes/migrators/class-album-migrator.php:260, includes/migrators/class-gallery-migrator.php:353
 msgid "Stop Migration"
 msgstr ""
 
@@ -1012,46 +1016,46 @@ msgid "Migrate"
 msgstr ""
 
 #. translators: %d: image error count.
-#: includes/migrators/class-gallery-migrator.php:280
+#: includes/migrators/class-gallery-migrator.php:287
 msgid "%d error"
 msgid_plural "%d errors"
 msgstr[0] ""
 msgstr[1] ""
 
 #. translators: %s: localized error count.
-#: includes/migrators/class-gallery-migrator.php:284
+#: includes/migrators/class-gallery-migrator.php:291
 msgid "Errors: %s"
 msgstr ""
 
-#: includes/migrators/class-gallery-migrator.php:286
+#: includes/migrators/class-gallery-migrator.php:293
 msgid "View error details"
 msgstr ""
 
-#: includes/migrators/class-gallery-migrator.php:290
+#: includes/migrators/class-gallery-migrator.php:297
 msgid "Source URL"
 msgstr ""
 
-#: includes/migrators/class-gallery-migrator.php:301
+#: includes/migrators/class-gallery-migrator.php:308
 msgid "Unknown"
 msgstr ""
 
-#: includes/migrators/class-gallery-migrator.php:311
+#: includes/migrators/class-gallery-migrator.php:320
 msgid "Retry Migration"
 msgstr ""
 
 #. translators: %d: gallery count.
-#: includes/migrators/class-gallery-migrator.php:323
+#: includes/migrators/class-gallery-migrator.php:332
 msgid "Total galleries: %d"
 msgid_plural "Total galleries: %d"
 msgstr[0] ""
 msgstr[1] ""
 
 #. translators: 1: selected gallery count, 2: selected image count.
-#: includes/migrators/class-gallery-migrator.php:351
+#: includes/migrators/class-gallery-migrator.php:360
 msgid "%1$s galleries selected; %2$s images will be migrated."
 msgstr ""
 
-#: includes/migrators/class-gallery-migrator.php:358
+#: includes/migrators/class-gallery-migrator.php:367
 msgid "Start Gallery Migration"
 msgstr ""
 
@@ -1059,7 +1063,7 @@ msgstr ""
 msgid "No galleries found!"
 msgstr ""
 
-#: includes/migrators/class-gallery-migrator.php:364
+#: includes/migrators/class-gallery-migrator.php:373
 msgid "Refresh Galleries"
 msgstr ""
 
@@ -1218,48 +1222,52 @@ msgstr ""
 msgid "Syncing image tags..."
 msgstr ""
 
-#: includes/views/view-migrate-tab-image-tags.php:90, includes/views/view-migrate-tab-image-tags.php:132
+#: includes/views/view-migrate-tab-image-tags.php:15
+msgid "Some image tags could not be synced. Review the results below before trying again."
+msgstr ""
+
+#: includes/views/view-migrate-tab-image-tags.php:92, includes/views/view-migrate-tab-image-tags.php:134
 msgid "Resume Image Tags"
 msgstr ""
 
-#: includes/views/view-migrate-tab-image-tags.php:106
+#: includes/views/view-migrate-tab-image-tags.php:108
 msgid "Image Tags migration"
 msgstr ""
 
-#: includes/views/view-migrate-tab-image-tags.php:112, includes/views/view-migrate.php:412
+#: includes/views/view-migrate-tab-image-tags.php:114, includes/views/view-migrate.php:412
 msgid "Image Tags"
 msgstr ""
 
-#: includes/views/view-migrate-tab-image-tags.php:113
+#: includes/views/view-migrate-tab-image-tags.php:115
 msgid "Sync NextGEN image tags onto images that have already been imported into the Media Library."
 msgstr ""
 
-#: includes/views/view-migrate-tab-image-tags.php:132
+#: includes/views/view-migrate-tab-image-tags.php:134
 msgid "Sync Image Tags"
 msgstr ""
 
-#: includes/views/view-migrate-tab-image-tags.php:136
+#: includes/views/view-migrate-tab-image-tags.php:138
 msgid "Ready to sync image tags."
 msgstr ""
 
-#: includes/views/view-migrate-tab-image-tags.php:136
+#: includes/views/view-migrate-tab-image-tags.php:138
 msgid "Image tag sync in progress."
 msgstr ""
 
 #. translators: 1: processed count, 2: total count, 3: updated count, 4: skipped count, 5: unmatched count, 6: error count.
-#: includes/views/view-migrate-tab-image-tags.php:142
+#: includes/views/view-migrate-tab-image-tags.php:144
 msgid "%1$s of %2$s processed. Updated: %3$s. Skipped: %4$s. Unmatched: %5$s. Errors: %6$s."
 msgstr ""
 
-#: includes/views/view-migrate-tab-image-tags.php:122
+#: includes/views/view-migrate-tab-image-tags.php:124
 msgid "FooGallery Migrate found tagged NextGEN images. Migrating those tags into FooGallery media tags for tag-based dynamic galleries requires FooGallery PRO Expert."
 msgstr ""
 
-#: includes/views/view-migrate-tab-image-tags.php:125
+#: includes/views/view-migrate-tab-image-tags.php:127
 msgid "Start PRO Expert trial"
 msgstr ""
 
-#: includes/views/view-migrate-tab-image-tags.php:116
+#: includes/views/view-migrate-tab-image-tags.php:118
 msgid "No NextGEN image tags have been detected yet."
 msgstr ""
 

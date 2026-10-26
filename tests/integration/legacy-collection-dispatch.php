@@ -218,7 +218,7 @@ try {
 	$turn_backend = new LegacyTableBackend( $turn_fault, $blog );
 	$turn = $turn_backend->migration_turn_context( 'galleries' );
 	$check( $turn['found'] && 1 === $turn['root']['key'] && 'queued' === $turn['root']['value']['migration_status'] &&
-		$turn['counts'] === array( 'queued' => 121, 'completed' => 1, 'errors' => 1 ), 'first queued root follows preceding completed error in persisted order' );
+		$turn['counts'] === array( 'queued' => 121, 'completed' => 0, 'errors' => 1 ), 'first queued root follows preceding completed error in persisted order' );
 	$turn_value = $turn['root']['value']; $turn_value['migration_status'] = 'completed'; $turn_value['migrated'] = true;
 	$check( $backend->mutate_scalars( array( 'galleries-state' => MigratorBase::queue_summary( 121, 1, 1 ) ) ), 'interleaved companion creation' );
 	$before_absent_race = $physical();

@@ -61,7 +61,7 @@ class EscapingProbeEngine {
 	public function get_migrated_revision() { return 0; }
 }
 
-function render_escaping_probe( $kind, $table, $text, $change = false, $url = null ) {
+function render_escaping_probe( $kind, $table, $text, $change = false, $url = null, $compact_error = false ) {
 	$plugin = new EscapingProbePlugin( $text );
 	if ( 'content' === $kind ) {
 		$items = array( $text => array( 'post_id' => 71, 'post_title' => $text, 'post_type' => $text,
@@ -75,6 +75,10 @@ function render_escaping_probe( $kind, $table, $text, $change = false, $url = nu
 		$gallery = new Gallery( $plugin ); $gallery->ID = $text; $gallery->title = $text;
 		$gallery->children = array( $image ); $gallery->migration_status = 'error';
 		$gallery->error = new \WP_Error( 'fixture_error', $text );
+		if ( $compact_error ) {
+			$gallery->children = array(); $gallery->children_count = 3;
+			$gallery->children_errors = array( $text ); $gallery->migrated = true;
+		}
 		$object = $gallery;
 		if ( 'albums' === $kind ) { $object = new Album( $plugin ); $object->ID = $text; $object->title = $text; $object->children = array( $gallery ); }
 		$items = array( $object ); $bucket = $kind;

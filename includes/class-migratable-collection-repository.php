@@ -90,7 +90,7 @@ class MigratableCollectionRepository extends ScalarStateRepository {
 			$value['migration_status'] = $compact['migration_status'];
 			if ( $set_title ) { $value['migrated_title'] = $compact['migrated_title']; }
 			return array( 'value' => $value, 'selected' => (bool) $object->part_of_migration,
-				'completed' => (bool) $object->migrated,
+				'completed' => (bool) $object->migrated && 'error' !== $object->migration_status,
 				'error' => 'error' === $object->migration_status );
 		}, $summarize );
 	}

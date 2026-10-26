@@ -43,7 +43,7 @@ class CollectionMigrationSelectorTest extends TestCase {
 	public function test_finished_aggregate_includes_empty_selected_roots_without_loading_their_payloads(): void {
 		$db = new TurnSelectorConnection( 'galleries', '09', 'nothing', 18 ); $db->none = true;
 		$this->repository( $db )->migration_turn_context( 'galleries' );
-		$this->assertStringContainsString( "is_selected = 1 AND (is_migrated = 1 OR migration_status = 'nothing') THEN 1", $db->aggregate_sql );
+		$this->assertStringContainsString( "is_selected = 1 AND migration_status <> 'error' AND (is_migrated = 1 OR migration_status = 'nothing') THEN 1", $db->aggregate_sql );
 		$this->assertSame( 0, $db->payload_reads );
 	}
 	public function test_changed_head_or_corrupt_projection_refuses_without_writes(): void {

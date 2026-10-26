@@ -218,7 +218,8 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
                 if ( $object->part_of_migration ) {
                     $queued_count++;
 
-                    if ( $object->migrated || Migratable::PROGRESS_NOTHING === $object->migration_status ) {
+                    if ( Migratable::PROGRESS_ERROR !== $object->migration_status &&
+                        ( $object->migrated || Migratable::PROGRESS_NOTHING === $object->migration_status ) ) {
                         $completed_count++;
                     }
                     if ( $object->migration_status === Migratable::PROGRESS_ERROR ) {
@@ -346,7 +347,8 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\MigratorBase' ) ) {
 		private static function turn_contribution( $object ) {
 			$selected = (bool) $object->part_of_migration;
 			return array( 'queued' => $selected ? 1 : 0,
-				'completed' => $selected && ( $object->migrated || Migratable::PROGRESS_NOTHING === $object->migration_status ) ? 1 : 0,
+				'completed' => $selected && Migratable::PROGRESS_ERROR !== $object->migration_status &&
+					( $object->migrated || Migratable::PROGRESS_NOTHING === $object->migration_status ) ? 1 : 0,
 				'errors' => $selected && Migratable::PROGRESS_ERROR === $object->migration_status ? 1 : 0 );
 		}
     }

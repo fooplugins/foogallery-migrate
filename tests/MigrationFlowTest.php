@@ -483,6 +483,7 @@ class MigrationFlowTest extends TestCase {
 		$this->assertSame( Migratable::PROGRESS_ERROR, $errored[0]->migration_status );
 		$this->assertCount( 1, $errored[0]->get_children_errors() );
 		$this->assertSame( 'Forced image failure.', $errored[0]->get_children_errors()[0] );
+		$this->assertSame( array( 'queued' => 1, 'completed' => 0, 'progress' => 100 ), $migrator->get_state() );
 
 		$this->assertTrue( $engine->retry_gallery_migration( $uid ) );
 
@@ -490,6 +491,28 @@ class MigrationFlowTest extends TestCase {
 		$this->assertTrue( $retried[0]->migrated );
 		$this->assertSame( Migratable::PROGRESS_COMPLETED, $retried[0]->migration_status );
 		$this->assertCount( 0, $retried[0]->get_children_errors() );
+	}
+
+	public function test_failed_gallery_counts_once_and_does_not_finish_before_the_next_selected_gallery(): void {
+		$plugin = new FakeSourcePlugin();
+		$bad = $this->create_image( 'https://example.test/mixed-bad.jpg' );
+		$bad->migrated = true; $bad->migration_status = Migratable::PROGRESS_ERROR;
+		$bad->error = new \WP_Error( 'forced', 'Missing source.' );
+		$plugin->galleries = array(
+			$this->create_gallery( $plugin, 41, 'Failed first', array( $bad ) ),
+			$this->create_gallery( $plugin, 42, 'Successful second', array( $this->create_image( 'https://example.test/mixed-good.jpg' ) ) ),
+		);
+		$GLOBALS['foogallery_migrate_test_plugins'] = array( $plugin );
+		$engine = $GLOBALS['foogallery_migrate_engine_instance']; $engine->run_detection();
+		$migrator = $engine->get_gallery_migrator(); $selection = array();
+		foreach ( $migrator->get_objects_to_migrate( true ) as $gallery ) {
+			$selection[$gallery->unique_identifier()] = array( 'title' => $gallery->title );
+		}
+		$migrator->queue_objects_for_migration( $selection ); $migrator->migrate();
+		$this->assertSame( array( 'queued' => 2, 'completed' => 0, 'progress' => 50.0 ), $migrator->get_state() );
+		$migrator->migrate();
+		$this->assertSame( array( 'queued' => 2, 'completed' => 1, 'progress' => 100 ), $migrator->get_state() );
+		$this->assertSame( Migratable::PROGRESS_COMPLETED, $migrator->get_objects_to_migrate()[1]->migration_status );
 	}
 
 	public function test_plugin_factories_preserve_runtime_contract(): void {

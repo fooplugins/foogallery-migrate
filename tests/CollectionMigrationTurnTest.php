@@ -9,6 +9,14 @@ use PHPUnit\Framework\TestCase;
 
 /** The table turn never asks for a whole collection and preserves the legacy batch order. */
 class CollectionMigrationTurnTest extends TestCase {
+	public function test_failed_table_root_counts_once_without_finishing_the_remaining_queue(): void {
+		$events = array(); $object = new FailedTurnObject( $events ); $object->part_of_migration = true;
+		$repository = new TurnCollection( $events, $object, array( 'queued' => 2, 'completed' => 0, 'errors' => 0 ) );
+		$this->assertTrue( ( new TurnMigrator( new TurnEngine( $events, $repository ), 'galleries' ) )->migrate() );
+		$this->assertTrue( $object->migrated );
+		$this->assertSame( array( 'queued' => 2, 'completed' => 0, 'progress' => 50.0 ), $repository->summary );
+		$this->assertSame( 0, $repository->whole_reads );
+	}
 	public function test_affected_turn_flushes_history_before_one_root_and_summary_checkpoint(): void {
 		$events = array(); $object = new TurnObject( $events ); $object->part_of_migration = true;
 		$repository = new TurnCollection( $events, $object, array( 'queued' => 121, 'completed' => 0, 'errors' => 1 ) );
@@ -113,6 +121,9 @@ class TurnEngine {
 }
 class EmptyTurnObject extends TurnObject {
 	public function migrate() { $this->migration_status = 'nothing'; }
+}
+class FailedTurnObject extends TurnObject {
+	public function migrate() { $this->migrated = true; $this->migration_status = 'error'; }
 }
 class TurnCollection {
 	public $summary = null;

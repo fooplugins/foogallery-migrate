@@ -98,7 +98,9 @@ Uninstall removes plugin-owned internal storage, including retained history and 
 
 == Changelog ==
 
-= 1.16.1 =
+= 1.16.3 =
+* Fix: Failed galleries count once in queue progress, so they cannot finish a multi-gallery migration early. Saved error details and Retry Migration remain available after reloading.
+* Fix: Gallery and album progress dialogs show failed items instead of a successful 100% result. Image tag sync also reports completed runs with errors.
 * Reject missing or non-string posted cleanup nonces before processing them; document existing request guards and cover nonce/capability rejection and title/settings sanitization with regression tests.
 * Reviewed buffered migration forms, storage diagnostics and SQL preparation boundaries, documented clear scanner false positives, and added regression coverage for hostile source values and diagnostic messages.
 * Bound table identifiers with WordPress 6.2 identifier placeholders in storage administration, authority checks, snapshots and WP Photo Album Plus queries, preserving the existing filters and transaction safeguards.

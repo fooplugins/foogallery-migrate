@@ -10,6 +10,18 @@ require_once __DIR__ . '/support/EscapingRenderFixtures.php';
  * @preserveGlobalState disabled
  */
 class OutputBoundaryTest extends TestCase {
+	/** @dataProvider compact_gallery_modes */
+	public function test_compact_failed_gallery_keeps_escaped_error_details_and_retry_without_loading_images( $table ): void {
+		$message = '<script id="cached-error">failure</script> & unavailable image';
+		$html = render_escaping_probe( 'galleries', $table, $message, false, null, true );
+		$this->assertStringContainsString( esc_html( $message ), $html );
+		$this->assertStringNotContainsString( '<script id="cached-error">', $html );
+		$dom = new \DOMDocument(); @$dom->loadHTML( $html ); $xpath = new \DOMXPath( $dom );
+		$this->assertSame( 1, $xpath->query( '//details[contains(@class,"foogallery-migrate-error-details")]' )->length );
+		$this->assertSame( 1, $xpath->query( '//button[normalize-space(.)="Retry Migration"]' )->length );
+		$this->assertSame( 0, $xpath->query( '//button[normalize-space(.)="Migrate"]' )->length );
+	}
+	public static function compact_gallery_modes(): array { return array( array( false ), array( true ) ); }
 	/** @dataProvider render_cases */
 	public function test_source_values_are_text_and_controls_survive_buffered_rendering( $kind, $table ): void {
 		$text = '\"><img id="fgm-probe" src=x onerror="alert(1)"><script id="fgm-script">alert(1)</script> & 雪';

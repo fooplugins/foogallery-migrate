@@ -9,6 +9,18 @@ use PHPUnit\Framework\TestCase;
 
 /** Queue decisions are shared with the option loop; table persistence receives compact patches. */
 class CollectionQueueTransitionTest extends TestCase {
+	public function test_saved_failed_root_is_an_error_without_also_counting_as_successful(): void {
+		$raw = array( 'object_type' => 'gallery', 'plugin_name' => 'Fixture', 'ID' => 12,
+			'migration_status' => 'error', 'migrated' => true, 'part_of_migration' => true, 'migrated_id' => 90 );
+		$table = new MigratableCollectionRepository( new QueueTransitionBackend( array( 'key' => '09', 'value' => $raw ), true ), new QueueTransitionSettings() );
+		$result = $table->queue_selected( 'galleries', array( 'gallery_Fixture_12' => array( 'title' => 'Unneeded' ) ),
+			array( 'FooPlugins\\FooGalleryMigrate\\Migrators\\MigratorBase', 'queue_transition' ),
+			array( 'FooPlugins\\FooGalleryMigrate\\Migrators\\MigratorBase', 'queue_summary' ) );
+		$this->assertTrue( $result['selected'] );
+		$this->assertFalse( $result['completed'] );
+		$this->assertTrue( $result['error'] );
+		$this->assertSame( 'error', $result['value']['migration_status'] );
+	}
 	public function test_shared_summary_uses_selected_status_error_instead_of_error_projection(): void {
 		$this->assertSame( array( 'queued' => 0, 'completed' => 0, 'progress' => 0 ), MigratorBase::queue_summary( 0, 0, 0 ) );
 		$this->assertSame( array( 'queued' => 121, 'completed' => 1, 'progress' => 200 / 121 ), MigratorBase::queue_summary( 121, 1, 1 ) );
