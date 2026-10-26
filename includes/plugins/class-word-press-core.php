@@ -7,6 +7,10 @@
 
 namespace FooPlugins\FooGalleryMigrate\Plugins;
 
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
 use FooPlugins\FooGalleryMigrate\Objects\Image;
 use FooPlugins\FooGalleryMigrate\Objects\Plugin;
 

@@ -117,7 +117,7 @@ $paginated_objects = $scoped_history ? null : array_slice( $filtered_objects, $p
 	<?php esc_html_e( 'Images : ', 'foogallery-migrate' ); ?>
 	<?php echo intval( $summary['image']['count'] ); ?>
 	<?php if ( $summary['image']['errors'] > 0 ) { ?>
-		<span class="foogallery-migrate-progress-error"><?php printf( esc_html__( ' (%s errors)', 'foogallery-migrate' ), intval( $summary['image']['errors'] ) ); ?></span>
+		<span class="foogallery-migrate-progress-error"><?php /* translators: %s: image error count. */ printf( esc_html__( ' (%s errors)', 'foogallery-migrate' ), intval( $summary['image']['errors'] ) ); ?></span>
 	<?php } ?>
 </p>
 <?php } ?>

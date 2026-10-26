@@ -31,7 +31,7 @@ $show_image_tag_sync = $has_migratable_image_tags || $image_tag_sync_status['tot
             var progress = parseInt(status.progress, 10);
             progress = isNaN(progress) ? 0 : Math.max(0, Math.min(100, progress));
             dialog.update(progress, status.complete ? imageTagSyncCompleteMessage : imageTagSyncRunningMessage,
-                <?php echo wp_json_encode( __( '%1$s of %2$s images processed', 'foogallery-migrate' ) ); ?>.replace('%1$s', processed).replace('%2$s', total));
+                <?php /* translators: 1: processed image count, 2: total image count. */ echo wp_json_encode( __( '%1$s of %2$s images processed', 'foogallery-migrate' ) ); ?>.replace('%1$s', processed).replace('%2$s', total));
 
             $imageTagSync.find('[data-role="tag-sync-message"]').text(status.complete ? imageTagSyncCompleteMessage : imageTagSyncRunningMessage);
             $imageTagSync.find('[data-role="tag-sync-total"]').text(total);
@@ -138,6 +138,7 @@ $show_image_tag_sync = $has_migratable_image_tags || $image_tag_sync_status['tot
             <p>
                 <?php
                 printf(
+                    /* translators: 1: processed count, 2: total count, 3: updated count, 4: skipped count, 5: unmatched count, 6: error count. */
                     esc_html__( '%1$s of %2$s processed. Updated: %3$s. Skipped: %4$s. Unmatched: %5$s. Errors: %6$s.', 'foogallery-migrate' ),
                     '<span data-role="tag-sync-processed">' . esc_html( number_format_i18n( $image_tag_sync_status['processed'] ) ) . '</span>',
                     '<span data-role="tag-sync-total">' . esc_html( number_format_i18n( $image_tag_sync_status['total'] ) ) . '</span>',

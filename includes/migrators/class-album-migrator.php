@@ -94,10 +94,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                                 <span><?php esc_html_e( 'Migration Data', 'foogallery-migrate' ); ?></span>
                             </th>
                             <th scope="col" class="manage-column">
-                                <span><?php printf( esc_html__( '%s Album Name', 'foogallery-migrate' ), esc_html( foogallery_plugin_name() ) ); ?></span>
+                                <span><?php /* translators: %s: destination plugin name. */ printf( esc_html__( '%s Album Name', 'foogallery-migrate' ), esc_html( foogallery_plugin_name() ) ); ?></span>
                             </th>
                             <th scope="col" class="manage-column">
-                                <span><?php esc_html_e( 'Migration Progress', 'foogallery' ); ?></span>
+                                <span><?php esc_html_e( 'Migration Progress', 'foogallery-migrate' ); ?></span>
                             </th>
                         </tr>
                     </thead>
@@ -225,7 +225,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                     </tbody>
                 </table>
                 <p class="foogallery-migrate-table-total">
-                    <?php echo esc_html( sprintf( _n( 'Total albums: %d', 'Total albums: %d', $albums_count, 'foogallery-migrate' ), $albums_count ) ); ?>
+                    <?php /* translators: %d: album count. */ echo esc_html( sprintf( _n( 'Total albums: %d', 'Total albums: %d', $albums_count, 'foogallery-migrate' ), $albums_count ) ); ?>
                 </p>
                 <div class="tablenav bottom">
                     <div class="tablenav-pages">
@@ -251,6 +251,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\AlbumMigrator' ) ) 
                         <strong><?php esc_html_e( 'Preflight:', 'foogallery-migrate' ); ?></strong>
                         <?php
                         printf(
+                            /* translators: 1: selected album count, 2: gallery count, 3: image count. */
                             esc_html__( '%1$s albums selected; %2$s galleries and %3$s images will be migrated.', 'foogallery-migrate' ),
                             '<span data-role="album-count">' . esc_html( number_format_i18n( $preflight_album_count ) ) . '</span>',
                             '<span data-role="gallery-count">' . esc_html( number_format_i18n( $preflight_gallery_count ) ) . '</span>',

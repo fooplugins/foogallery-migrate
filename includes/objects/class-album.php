@@ -35,7 +35,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Album' ) ) {
 
         function friendly_migration_message () {
             if ( self::PROGRESS_STARTED === $this->migration_status ) {
-                return sprintf( __('Migrated %d of %d %s (%d of %d images) ', 'foogallery-migrate'),
+                /* translators: 1: migrated galleries, 2: total galleries, 3: child type, 4: migrated images, 5: total images. */
+                return sprintf( __( 'Migrated %1$d of %2$d %3$s (%4$d of %5$d images) ', 'foogallery-migrate' ),
                     $this->migrated_child_count, $this->get_children_count(), $this->children_name(), $this->get_total_migrated_images(), $this->get_total_images() );
             }
             return parent::friendly_migration_message();

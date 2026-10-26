@@ -99,6 +99,8 @@ Uninstall removes plugin-owned internal storage, including retained history and 
 == Changelog ==
 
 = 1.16.1 =
+* Hardened direct PHP-file access and escaped storage error messages; corrected translation domains, placeholders and extractable preflight messages.
+* Sorted production ZIP entries and normalized archive timestamps for consistent packaging without changing migration or storage behavior.
 * Fixed third-party gallery blocks incorrectly failing with "changed after detection" by recording exact block positions and original markup, including repeated and nested blocks. Use Rescan Content once after updating to refresh older block findings.
 * Fixed the content migration dialog showing 100% completion after a failed replacement. Errors and partial results now appear inside the dialog without a success percentage.
 

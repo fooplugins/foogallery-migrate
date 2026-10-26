@@ -39,25 +39,25 @@ class StoragePreflight {
 		$memory = null === $this->incoming_memory ? new StorageMemoryBaseline() : $this->incoming_memory;
 		$this->incoming_memory = null; $memory->sample();
 		if ( ! current_user_can( 'manage_options' ) ) {
-			return self::error( 'forbidden', 'You are not authorized to inspect migration storage.' );
+			return self::error( 'forbidden', __( 'You are not authorized to inspect migration storage.', 'foogallery-migrate' ) );
 		}
 		$blog_id = get_current_blog_id();
 		if ( ! is_int( $blog_id ) || $blog_id < 1 || ! is_array( $request ) || 5 !== count( $request ) ) {
-			return self::error( 'invalid_request', 'Invalid migration storage request.' );
+			return self::error( 'invalid_request', __( 'Invalid migration storage request.', 'foogallery-migrate' ) );
 		}
 		foreach ( array( 'blog_id', 'scope', 'target', 'confirmation', 'nonce' ) as $key ) {
 			if ( ! array_key_exists( $key, $request ) ) {
-				return self::error( 'invalid_request', 'Invalid migration storage request.' );
+				return self::error( 'invalid_request', __( 'Invalid migration storage request.', 'foogallery-migrate' ) );
 			}
 		}
 		if ( ( $blog_id !== $request['blog_id'] && (string) $blog_id !== $request['blog_id'] ) ||
 			'site' !== $request['scope'] || 'table' !== $request['target'] ||
 			'switch-to-table' !== $request['confirmation'] || ! is_string( $request['nonce'] ) || '' === $request['nonce'] ) {
-			return self::error( 'invalid_request', 'Invalid migration storage request.' );
+			return self::error( 'invalid_request', __( 'Invalid migration storage request.', 'foogallery-migrate' ) );
 		}
 		$nonce = wp_verify_nonce( $request['nonce'], 'foogallery_migrate_storage_option_import_' . $blog_id );
 		if ( 1 !== $nonce && 2 !== $nonce ) {
-			return self::error( 'invalid_nonce', 'The migration storage request has expired or is invalid.' );
+			return self::error( 'invalid_nonce', __( 'The migration storage request has expired or is invalid.', 'foogallery-migrate' ) );
 		}
 		$site = StorageAuthority::table_mode_error();
 		if ( is_wp_error( $site ) ) { return $site; }
@@ -85,16 +85,16 @@ class StoragePreflight {
 			! is_string( $db->prefix ) || ! preg_match( '/^[A-Za-z0-9_]+$/D', $db->prefix ) ||
 			$db->options !== $db->prefix . 'options' ||
 			! is_callable( array( $db, 'prepare' ) ) || ! is_callable( array( $db, 'get_var' ) ) ) {
-			return self::error( 'size_unavailable', 'Migration storage size could not be safely inspected.' );
+			return self::error( 'size_unavailable', __( 'Migration storage size could not be safely inspected.', 'foogallery-migrate' ) );
 		}
 		// Only this fixed plugin option in WordPress's current-blog options table.
 		$bytes = $db->get_var( $db->prepare( 'SELECT LENGTH(option_value) AS option_bytes FROM `' . $db->options . '` WHERE option_name = %s LIMIT 1', FOOGALLERY_MIGRATE_OPTION_DATA ) );
 		if ( ! empty( $db->last_error ) ) {
-			return self::error( 'size_unavailable', 'Migration storage size could not be safely inspected.' );
+			return self::error( 'size_unavailable', __( 'Migration storage size could not be safely inspected.', 'foogallery-migrate' ) );
 		}
 		if ( null === $bytes ) { return 0; }
 		$bytes = self::nonnegative_integer( $bytes );
-		return false === $bytes ? self::error( 'size_unavailable', 'Migration storage size could not be safely inspected.' ) : $bytes;
+		return false === $bytes ? self::error( 'size_unavailable', __( 'Migration storage size could not be safely inspected.', 'foogallery-migrate' ) ) : $bytes;
 	}
 
 	/**
@@ -116,7 +116,7 @@ class StoragePreflight {
 		}
 		$limit = self::memory_bytes( $memory_limit );
 		if ( false === $limit || ! is_int( $raw_bytes ) || $raw_bytes < 0 || ! is_int( $memory_used ) || $memory_used < 0 ) {
-			return self::error( 'memory_unknown', 'The effective migration storage decode budget could not be determined.' );
+			return self::error( 'memory_unknown', __( 'The effective migration storage decode budget could not be determined.', 'foogallery-migrate' ) );
 		}
 		$ceiling = -1 === $limit ? PHP_INT_MAX : $limit;
 		if ( $raw_bytes > $policy['max_raw_bytes'] ) {
@@ -163,14 +163,14 @@ class StoragePreflight {
 	}
 
 	private static function policy_error() {
-		return self::error( 'decode_policy_required', 'A benchmarked migration storage decode policy is required. No conversion was started.' );
+		return self::error( 'decode_policy_required', __( 'A benchmarked migration storage decode policy is required. No conversion was started.', 'foogallery-migrate' ) );
 	}
 
 	private static function refused_error() {
-		return self::error( 'decode_refused', 'Migration storage is too large for the available conversion budget. Retain the database; use an administrator-assisted, higher-memory conversion path. No state was changed.' );
+		return self::error( 'decode_refused', __( 'Migration storage is too large for the available conversion budget. Retain the database; use an administrator-assisted, higher-memory conversion path. No state was changed.', 'foogallery-migrate' ) );
 	}
 
 	private static function error( $suffix, $message ) {
-		return new \WP_Error( 'foogallery_migrate_storage_' . $suffix, __( $message, 'foogallery-migrate' ) );
+		return new \WP_Error( 'foogallery_migrate_storage_' . $suffix, $message );
 	}
 }

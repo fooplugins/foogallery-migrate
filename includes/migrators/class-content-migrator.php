@@ -1603,6 +1603,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 
 				if ( ! $this->is_content_item_replaceable( $item ) ) {
 					$errors[] = sprintf(
+						/* translators: 1: object type, 2: source ID, 3: source plugin, 4: post title. */
 						__( '%1$s %2$s from %3$s in post "%4$s" has not been migrated yet.', 'foogallery-migrate' ),
 						$this->get_content_item_object_type_label( $item ),
 						$item['gallery_id'],
@@ -1617,6 +1618,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 					$post = get_post( $post_id );
 					if ( ! $post || 'publish' !== $post->post_status || ! in_array( $post->post_type, array( 'post', 'page' ), true ) ) {
 						$errors[] = sprintf(
+							/* translators: %d: post or page ID. */
 							__( 'Published post or page %d not found.', 'foogallery-migrate' ),
 							$post_id
 						);
@@ -1719,7 +1721,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 
 				if ( is_wp_error( $result ) ) {
 					$errors[] = sprintf(
-						__( 'Error updating post "%s": %s', 'foogallery-migrate' ),
+						/* translators: 1: post title, 2: update error message. */
+						__( 'Error updating post "%1$s": %2$s', 'foogallery-migrate' ),
 						$post_data['post']->post_title,
 						$result->get_error_message()
 					);
@@ -2070,7 +2073,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 			if ( $scan_paused ) {
 				echo '<div class="notice notice-warning inline"><p>';
 				printf(
-					// translators: %d is the number of posts and pages already scanned.
+					/* translators: %d: scanned post/page count. */
 					esc_html__( 'Content scan paused after %d posts/pages. Use Resume Scan to continue from the saved position.', 'foogallery-migrate' ),
 					absint( $progress['scanned'] )
 				);
@@ -2091,6 +2094,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator' ) 
 					$content_items_count = null === $repository ? count( $content_items ) : $state['total'];
 					printf(
 						'<p><strong>%s</strong></p>',
+						/* translators: %d: detected gallery occurrence count. */
 						esc_html( sprintf( _n( '%d gallery occurrence found.', '%d gallery occurrences found.', $content_items_count, 'foogallery-migrate' ), $content_items_count ) )
 					);
 					$show_pagination = $page_size > 0;

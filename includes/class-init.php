@@ -84,7 +84,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
 
                 ?>
                 <div class="error">
-                <h4><?php esc_html_e('FooGallery Migrate Error!', 'foogallery-custom-branding'); ?></h4>
+                <h4><?php esc_html_e('FooGallery Migrate Error!', 'foogallery-migrate'); ?></h4>
                 <p><?php echo wp_kses_post( $message ); ?></p>
                 </div><?php
             }
@@ -97,7 +97,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Init' ) ) {
          */
         function add_menu() {
             foogallery_add_submenu_page(
-                __( 'Migrate!', 'foogallery' ),
+                __( 'Migrate!', 'foogallery-migrate' ),
                 'manage_options',
                 'foogallery-migrate',
                 array( $this, 'render_view' )

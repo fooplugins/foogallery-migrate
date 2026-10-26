@@ -119,7 +119,7 @@ class StorageAdmin {
 
 	/** Informational metadata only: never hydrate the legacy state or run DDL. */
 	public static function status( $include_schema = true ) {
-		if ( ! current_user_can( 'manage_options' ) ) { wp_die( __( 'Storage access denied.', 'foogallery-migrate' ) ); }
+		if ( ! current_user_can( 'manage_options' ) ) { wp_die( esc_html__( 'Storage access denied.', 'foogallery-migrate' ) ); }
 		global $wpdb;
 		$blog = get_current_blog_id();
 		$s = array( 'backend' => 'unavailable', 'phase' => 'unavailable', 'target' => 'option', 'retained' => false, 'discardable' => false, 'option_bytes' => null, 'records' => null, 'schema' => 'not provisioned', 'problem' => '', 'calibrated' => false );
@@ -212,7 +212,7 @@ class StorageAdmin {
 	}
 
 	public static function render( $status = null ) {
-		if ( ! current_user_can( 'manage_options' ) ) { wp_die( __( 'Storage access denied.', 'foogallery-migrate' ) ); }
+		if ( ! current_user_can( 'manage_options' ) ) { wp_die( esc_html__( 'Storage access denied.', 'foogallery-migrate' ) ); }
 		$s = is_array( $status ) ? $status : self::status();
 		$blog = get_current_blog_id();
 		$pending = is_multisite() ? null : StorageCleanup::pending_scope();
@@ -264,7 +264,7 @@ class StorageAdmin {
 
 	/** This screen deliberately needs no engine, history or source-object hydration. */
 	public static function render_troubleshooting( $status = null ) {
-		if ( ! current_user_can( 'manage_options' ) ) { wp_die( __( 'Storage access denied.', 'foogallery-migrate' ) ); }
+		if ( ! current_user_can( 'manage_options' ) ) { wp_die( esc_html__( 'Storage access denied.', 'foogallery-migrate' ) ); }
 		$s = is_array( $status ) ? $status : self::status();
 		$blog = get_current_blog_id();
 		$pending = is_multisite() ? null : StorageCleanup::pending_scope();

@@ -107,10 +107,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                                 <span><?php esc_html_e( 'Migration Data', 'foogallery-migrate' ); ?></span>
                             </th>
                             <th scope="col" class="manage-column">
-                                <span><?php printf( esc_html__( '%s Name', 'foogallery-migrate' ), esc_html( foogallery_plugin_name() ) ); ?></span>
+                                <span><?php /* translators: %s: destination plugin name. */ printf( esc_html__( '%s Name', 'foogallery-migrate' ), esc_html( foogallery_plugin_name() ) ); ?></span>
                             </th>
                             <th scope="col" class="manage-column">
-                                <span><?php esc_html_e( 'Migration Progress', 'foogallery' ); ?></span>
+                                <span><?php esc_html_e( 'Migration Progress', 'foogallery-migrate' ); ?></span>
                             </th>
                         </tr>
                     </thead>
@@ -264,11 +264,12 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
 									}
 
 									$error_count = count( $error_rows );
+									/* translators: %d: image error count. */
 									$error_label = sprintf( _n( '%d error', '%d errors', $error_count, 'foogallery-migrate' ), $error_count );
 									?>
 									<?php if ( $error_count > 0 ) { ?>
 										<br />
-										<?php echo esc_html( sprintf( __( 'Errors: %s', 'foogallery-migrate' ), $error_label ) ); ?>
+										<?php /* translators: %s: localized error count. */ echo esc_html( sprintf( __( 'Errors: %s', 'foogallery-migrate' ), $error_label ) ); ?>
 										<details class="foogallery-migrate-error-details">
 											<summary><?php esc_html_e( 'View error details', 'foogallery-migrate' ); ?></summary>
 											<table class="widefat striped">
@@ -307,7 +308,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                     </tbody>
                 </table>
                 <p class="foogallery-migrate-table-total">
-                    <?php echo esc_html( sprintf( _n( 'Total galleries: %d', 'Total galleries: %d', $gallery_count, 'foogallery-migrate' ), $gallery_count ) ); ?>
+                    <?php /* translators: %d: gallery count. */ echo esc_html( sprintf( _n( 'Total galleries: %d', 'Total galleries: %d', $gallery_count, 'foogallery-migrate' ), $gallery_count ) ); ?>
                 </p>
                 <div class="tablenav bottom">
                     <div class="tablenav-pages">
@@ -334,6 +335,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Migrators\GalleryMigrator' ) 
                         <strong><?php esc_html_e( 'Preflight:', 'foogallery-migrate' ); ?></strong>
                         <?php
                         printf(
+                            /* translators: 1: selected gallery count, 2: selected image count. */
                             esc_html__( '%1$s galleries selected; %2$s images will be migrated.', 'foogallery-migrate' ),
                             '<span data-role="gallery-count">' . esc_html( number_format_i18n( $preflight_gallery_count ) ) . '</span>',
                             '<span data-role="image-count">' . esc_html( number_format_i18n( $preflight_image_count ) ) . '</span>'

@@ -337,20 +337,23 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
                     return __( 'Queued for migration', 'foogallery-migrate' );
                 case self::PROGRESS_STARTED:
                     if ( $this->has_children() ) {
-                        return sprintf(__('Migrated %d of %d %s', 'foogallery-migrate'),
+                        /* translators: 1: migrated items, 2: total items, 3: child type. */
+                        return sprintf( __( 'Migrated %1$d of %2$d %3$s', 'foogallery-migrate' ),
                             $this->migrated_child_count, $this->get_children_count(), $this->children_name());
                     } else {
                         return __('Migrating...', 'foogallery-migrate');
                     }
                 case self::PROGRESS_COMPLETED:
                     if ( $this->has_children() ) {
-                        return sprintf(__('Done! %d %s migrated', 'foogallery-migrate'), $this->migrated_child_count, $this->children_name());
+                        /* translators: 1: migrated items, 2: child type. */
+                        return sprintf( __( 'Done! %1$d %2$s migrated', 'foogallery-migrate' ), $this->migrated_child_count, $this->children_name());
                     } else {
                         return __('Done!', 'foogallery-migrate');
                     }
                 case self::PROGRESS_NOTHING:
                     if ( $this->has_children() ) {
-                        return sprintf(__('No %s to migrate!', 'foogallery-migrate'), $this->children_name());
+                        /* translators: %s: child type. */
+                        return sprintf( __( 'No %s to migrate!', 'foogallery-migrate' ), $this->children_name());
                     } else {
                         return __('Nothing to migrate!', 'foogallery-migrate');
                     }

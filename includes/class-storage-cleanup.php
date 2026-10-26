@@ -33,11 +33,11 @@ class StorageCleanup {
 	public static function uninstall() {
 		if ( ! defined( 'WP_UNINSTALL_PLUGIN' ) || is_multisite() ) { return self::error( 'invalid_request' ); }
 		try { $result = ( new self() )->run( 'remove_all' ); }
-		catch ( \Exception $error ) { wp_die( __( 'FooGallery Migrate cleanup could not establish its single-site ownership. Plugin files were retained.', 'foogallery-migrate' ) ); return self::error( 'recovery_required' ); }
-		catch ( \Throwable $error ) { wp_die( __( 'FooGallery Migrate cleanup could not establish its single-site ownership. Plugin files were retained.', 'foogallery-migrate' ) ); return self::error( 'recovery_required' ); }
+		catch ( \Exception $error ) { wp_die( esc_html__( 'FooGallery Migrate cleanup could not establish its single-site ownership. Plugin files were retained.', 'foogallery-migrate' ) ); return self::error( 'recovery_required' ); }
+		catch ( \Throwable $error ) { wp_die( esc_html__( 'FooGallery Migrate cleanup could not establish its single-site ownership. Plugin files were retained.', 'foogallery-migrate' ) ); return self::error( 'recovery_required' ); }
 		// WordPress proceeds to remove plugin files when uninstall.php returns.
 		// A bounded cleanup yield or any refusal must therefore abort deletion.
-		if ( empty( $result['complete'] ) ) { wp_die( __( 'FooGallery Migrate internal cleanup is incomplete. Plugin files were retained; resolve the reported storage ownership or retry uninstall.', 'foogallery-migrate' ) ); }
+		if ( empty( $result['complete'] ) ) { wp_die( esc_html__( 'FooGallery Migrate internal cleanup is incomplete. Plugin files were retained; resolve the reported storage ownership or retry uninstall.', 'foogallery-migrate' ) ); }
 		return $result;
 	}
 

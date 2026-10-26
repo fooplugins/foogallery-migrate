@@ -863,6 +863,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\MigratorSettings' ) ) {
 
 				$title = isset( $post->post_title ) ? trim( (string) $post->post_title ) : '';
 				if ( '' === $title ) {
+					/* translators: %d: source post ID. */
 					$title = sprintf( __( '(no title) #%d', 'foogallery-migrate' ), absint( $post->ID ) );
 				}
 
