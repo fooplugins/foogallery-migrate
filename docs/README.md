@@ -2,7 +2,7 @@
 
 These documents describe the storage-only architecture, PR #15 implementation status and remaining work. The WordPress.org plugin listing and release history remain in [`readme.txt`](../readme.txt).
 
-Latest release validation: [1.16.4 upgrade, browser and WordPress 6.2 results](release-testing/1.16.4-final-validation.md). The requested gates passed; existing Plugin Check findings and release boundaries are recorded there. Nothing has been pushed or publicly released.
+Latest release validation: [1.16.4 upgrade, browser and WordPress 6.2 results](release-testing/1.16.4-final-validation.md). The requested gates passed; existing Plugin Check findings are recorded there. The subsequent [1.16.4 SVN tag staging record](release-testing/1.16.4-svn-tag.md) covers the authorized Git push and version-tag upload, with SVN trunk unchanged.
 
 ## Design documents
 
