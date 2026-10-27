@@ -99,6 +99,7 @@ Uninstall removes plugin-owned internal storage, including retained history and 
 == Changelog ==
 
 = 1.16.4 =
+* Reset migration progress also clears expired migration writer markers, while retaining live or unverified markers.
 * Fixed the Plugins tab failing after clearing table-backed migration history or resetting storage. Empty storage can be read and detected again; orphaned records are still rejected.
 
 = 1.16.3 =

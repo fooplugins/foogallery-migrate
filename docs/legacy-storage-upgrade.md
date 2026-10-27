@@ -704,9 +704,9 @@ Use a small, non-autoloaded `foogallery_migrate_storage_control` option outside 
 - Start/update timestamps and last verified health result.
 - Stale retained backend copies available for removal.
 
-The per-site maintenance gate is a separate exact option acquired atomically with `add_option()`, with a random ownership token and expiry recorded for diagnostics. Expiry does not authorize takeover; uncertain ownership requires assisted recovery. Each active storage writer uses a separate short-lived marker option. A writer checks the maintenance gate, acquires its marker, and checks the gate again; maintenance acquires the gate first and then waits for pre-existing writer markers to finish. This closes the check-then-start race without adding engine worker leases.
+The per-site maintenance gate is a separate exact option acquired atomically with an insert-only SQL claim, with a random ownership token and expiry recorded for diagnostics. Expiry does not authorize takeover; uncertain ownership requires assisted recovery. Each active storage writer uses a separate short-lived marker option. A writer checks the maintenance gate, acquires its marker, and checks the gate again; maintenance acquires the gate first and then waits for pre-existing writer markers to finish. This closes the check-then-start race without adding engine worker leases.
 
-Writer acquisition is request-scoped and re-entrant so nested legacy calls share one marker rather than creating an unbounded marker chain. Only the owner token may renew or release a gate/marker; expiry is recovery evidence, not permission to delete either an expired or unexpired writer without proving it can no longer run.
+Writer acquisition is request-scoped and re-entrant so nested legacy calls share one marker rather than creating an unbounded marker chain. Normal operations require the owner token to renew or release a gate/marker and do not reclaim expired ownership. The explicit administrator Reset action is the limited exception for well-formed expired writer admissions; see “Explicit reset recovery for expired writer admissions” below. Maintenance, conversion and schema claims still require assisted recovery.
 
 `foogallery_migrate_storage_authority` is a second, non-autoloaded safety sentinel, not a second authority source. Before a table-authority flip, write its site ID, switch ID, and next authority epoch; require it to match the valid control option for every table-mode read. It remains while table mode is authoritative and is removed only after a verified reverse flip makes option mode authoritative. This gives empty table-mode state durable evidence even when no state-head row exists.
 
@@ -761,11 +761,11 @@ The retained pre-switch backup is stale and must never be used for reverse switc
 - Source and destination state are never merged.
 - Immediately before a flip, recheck the source raw digest/revision captured behind the maintenance gate. A mismatch aborts the switch.
 - After a successful flip, a destination health failure blocks migration and offers an explicit recovery path; it never silently reads the stale source.
-- Cleanup removes incomplete generations only after proving they are not authoritative; gate/writer removal also requires proof that the old worker cannot resume. Age alone is never sufficient.
+- Cleanup removes incomplete generations only after proving they are not authoritative. Normal maintenance never removes another writer by age. Explicit Reset may recover validated expired writer admissions using the liveness, quiescence and exact-value checks documented below; all other uncertain ownership still requires assisted recovery.
 
 **Assisted hard-crash recovery:** preserve state/markers; an authorized operator prevents old web/CLI workers from continuing or restarting, establishes quiescence, inspects the authority/control/sentinel and source/staging health, then explicitly resumes or discards verified work through the maintenance service. Record what was verified and the next safe action. If quiescence or authority cannot be established, remain blocked with actionable instructions. No automatic takeover or new worker-fencing platform is required. Test this procedure independently from ordinary handled-failure resume.
 
-Operator checklist (not an automatic unlock command):
+For well-formed expired writer admissions, use the explicit Reset behavior documented below after stopping migrations. The following operator checklist remains for ambiguous writers and maintenance/conversion/schema ownership (not an automatic unlock command):
 
 1. **Identify and freeze the exact site.** Record its canonical path, database, table prefix, plugin revision and current operation. Stop new requests at the serving layer and disable relevant cron, queue, CLI and supervisor restart entry points. A WordPress maintenance page alone does not drain existing workers. Keep the entry points frozen throughout intervention and verification.
 2. **Drain every possible writer and output operation.** Inventory the relevant web/CLI workers, descendants and database sessions/transactions. Establish that each has finished or been terminated and cannot resume or restart; include attachment/file writes and other external output, not only SQL. An expired marker, missing PID, closed browser or absence of one database session is insufficient. If the environment cannot establish this, stop and retain the block.
@@ -1058,3 +1058,44 @@ M1 alone does not satisfy these criteria. Multisite table support and advanced a
 A proposed change belongs in this project only if it changes where or how current state is encoded, queried, copied, validated, recommended, or removed while preserving current migration behavior.
 
 Reject it from this project if it introduces a new source vocabulary, identity, execution state, worker, destination operation, journal, rollback rule, or migration result. Those concerns remain separate even when a future engine can reuse the storage lifecycle and cleanup conventions established here.
+
+
+### Explicit reset recovery for expired writer admissions (27 October 2026)
+
+The existing **Reset migration progress** action now includes recovery of valid,
+expired writer markers. This is an explicit administrator operation, guarded by
+the existing capability, site scope, confirmation and nonce; reading Settings or
+Troubleshooting and normal storage switching never reclaim writer markers.
+Stop running migrations before resetting.
+
+Reset acquires the maintenance gate, checks the schema-upgrade guard and reads at
+most 101 bounded marker rows. It refuses a set larger than 100, malformed or
+oversized values, unsupported versions, foreign sites, token/name mismatches,
+unexpired admissions, its own request's writer and unavailable SQL/liveness
+checks. It classifies the whole set and checks engine quiescence twice before
+removing anything. Exact-name/byte comparisons reject markers renewed or replaced
+after inspection. Normal cleanup then runs its existing quiescence/authority
+checks, resets history and retains preferences, storage mode and migrated output.
+
+New writer requests also hold a marker-specific MySQL/MariaDB advisory lock on
+their pinned connection. An expired marker with a held lock still blocks Reset.
+Reset obtains each free lock without waiting, removes only that exact expired
+marker, releases the lock and invalidates option caches. Normal writer assertions
+verify connection-lock ownership; a disconnected/replaced owner cannot renew or
+resume through the storage gate. The database releases the liveness lock when
+its connection ends, even if PHP cleanup did not delete the marker.
+
+Earlier unreleased builds did not hold these liveness locks. Their well-formed
+expired markers are eligible for the explicit reset too; their original process
+cannot be identified from the old record. This is a deliberate change from the
+previous operator-only expired-writer policy. It does not make expiry a proof
+that an older PHP process has ended: administrators must stop old migration
+requests before resetting or updating the plugin. Malformed ownership and stale
+maintenance, conversion, cleanup or schema claims are not force-deleted.
+
+Regression coverage includes exact removal of three old-format expired markers,
+live/ambiguous/foreign claims, changed values, SQL failures, authorization,
+bounded enumeration, lost writer ownership, and live expired connection locks.
+The native `tests/integration/storage-reset-writers.php` fixture uses two actual
+connections and isolated tables, including disconnect/retry and preference
+preservation. It does not reset the site's real migration data.

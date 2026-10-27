@@ -194,7 +194,7 @@ class StorageAdmin {
 			'recover' => __( 'Continue storage change', 'foogallery-migrate' ),
 			'discard' => __( 'Cancel storage change', 'foogallery-migrate' ) );
 		$confirmations = array(
-			'clear' => __( 'Reset migration progress and history? Galleries and media will be kept. Migrating again may create duplicates.', 'foogallery-migrate' ),
+			'clear' => __( 'Reset migration progress and history? Stop any running migrations first. Galleries and media will be kept. Migrating again may create duplicates.', 'foogallery-migrate' ),
 			'remove_all' => __( 'Remove all migration data, plugin settings and storage tables? Galleries and media will be kept. Migrating again may create duplicates.', 'foogallery-migrate' ),
 			'discard' => __( 'Cancel this unfinished storage change? Current storage and migration data will be kept.', 'foogallery-migrate' ),
 		);

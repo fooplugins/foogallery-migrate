@@ -162,7 +162,7 @@ class AuthorityTestWpdb extends MaintenanceTestWpdb {
 	}
 
 	public function get_var( $query ) {
-		if ( false !== strpos( $query, "CONCAT('v:'" ) || false !== strpos( $query, 'option_name LIKE' ) ) { return parent::get_var( $query ); }
+		if ( 'SELECT DATABASE()' === $query || false !== strpos( $query, '_LOCK(' ) || false !== strpos( $query, "CONCAT('v:'" ) || false !== strpos( $query, 'option_name LIKE' ) ) { return parent::get_var( $query ); }
 		$this->reads[] = $query;
 		$this->last_error = $this->fail_probe ? 'probe failed' : '';
 		if ( false !== strpos( $query, 'WHERE option_name IN' ) ) {

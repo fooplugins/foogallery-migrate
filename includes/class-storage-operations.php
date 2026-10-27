@@ -1,7 +1,8 @@
 <?php
 /**
  * Explicit current-site administrator storage receiver. No UI, implicit DDL,
- * activation conversion, request policy, purge or expired-owner recovery.
+ * activation conversion or request policy. Only the explicit Reset action
+ * delegates expired-writer recovery to StorageCleanup.
  *
  * @package FooPlugins\FooGalleryMigrate
  */

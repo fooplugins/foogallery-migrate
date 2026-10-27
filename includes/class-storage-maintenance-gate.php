@@ -22,6 +22,8 @@ class StorageMaintenanceGate {
 	private $table;
 	private $writer_name;
 	private $writer_raw;
+	private $writer_lock;
+	private $database;
 	private $writer_depth = 0;
 	private $writer_admitted = false;
 	private $maintenance_raw;
@@ -69,7 +71,11 @@ class StorageMaintenanceGate {
 			$record = $this->record();
 			$name = self::WRITER_PREFIX . $record['token'];
 			$raw = wp_json_encode( $record );
-			if ( ! is_string( $raw ) || ! $this->insert( $name, $raw ) ) { return self::busy(); }
+			if ( ! is_string( $raw ) ) { return self::unhealthy(); }
+			$lock = $this->writer_lock_name( $name );
+			if ( ! $this->lock_query( 'GET_LOCK', $lock ) ) { return self::busy(); }
+			if ( ! $this->insert( $name, $raw ) ) { $this->release_writer_lock( $lock ); return self::busy(); }
+			$this->writer_lock = $lock;
 			// Retain ownership on verification failure: never blindly delete evidence.
 			$this->writer_name = $name;
 			$this->writer_raw = $raw;
@@ -104,6 +110,8 @@ class StorageMaintenanceGate {
 				return true;
 			}
 			$this->remove_owned( $this->writer_name, $this->writer_raw );
+			$this->release_writer_lock( $this->writer_lock );
+			$this->writer_lock = null;
 			$this->writer_depth = 0;
 			$this->writer_admitted = false;
 			$this->writer_name = null;
@@ -171,6 +179,53 @@ class StorageMaintenanceGate {
 			$this->owned_live( StorageAuthority::MAINTENANCE_OPTION, $this->maintenance_raw );
 			return $this->writers_present() ? self::busy() : true;
 		} catch ( \Exception $error ) { return self::unhealthy(); }
+	}
+
+	/** Explicit reset only: retire expired admissions after liveness checks.
+	 * The maintenance claim blocks new admissions. Expired requests cannot renew
+	 * or pass assert_writer(); exact-byte deletion also rejects changed owners.
+	 * Conversion/provisioning continue to use maintenance_ready() without repair.
+	 */
+	public function reset_expired_writers( $engine_verdict, &$removed = null ) {
+		$removed = array();
+		try {
+			$this->context();
+			if ( ! is_callable( $engine_verdict ) || null === $this->maintenance_raw ) { return self::busy(); }
+			$this->owned_live( StorageAuthority::MAINTENANCE_OPTION, $this->maintenance_raw );
+			$db = $this->connection();
+			$rows = $db->get_results( $db->prepare(
+				"SELECT option_name, CASE WHEN OCTET_LENGTH(option_value) <= 512 THEN option_value ELSE '' END AS marker_value FROM %i WHERE option_name LIKE %s ORDER BY option_name LIMIT 101",
+				array( $this->table, $db->esc_like( self::WRITER_PREFIX ) . '%' )
+			), ARRAY_A );
+			if ( ! is_array( $rows ) || ! empty( $db->last_error ) || count( $rows ) > 100 ) { return self::unhealthy(); }
+			// Classify the complete bounded set before deleting any marker.
+			foreach ( $rows as $row ) {
+				if ( ! isset( $row['option_name'], $row['marker_value'] ) || ! is_string( $row['marker_value'] ) ) { return self::unhealthy(); }
+				$r = json_decode( $row['marker_value'], true );
+				if ( ! is_array( $r ) || array_keys( $r ) !== array( 'version', 'blog_id', 'token', 'expires' ) ||
+					1 !== $r['version'] || $this->blog_id !== $r['blog_id'] || ! is_string( $r['token'] ) ||
+					! preg_match( '/^[A-Za-z0-9]{32}$/D', $r['token'] ) || $row['option_name'] !== self::WRITER_PREFIX . $r['token'] ||
+					! is_int( $r['expires'] ) || $r['expires'] < 1 || wp_json_encode( $r ) !== $row['marker_value'] ) { return self::unhealthy(); }
+				if ( $r['expires'] > time() || $row['option_name'] === $this->writer_name ||
+					! $this->lock_query( 'IS_FREE_LOCK', $this->writer_lock_name( $row['option_name'] ) ) ) { return self::busy(); }
+			}
+			// Recheck the engine and the owned gate before touching the saved set.
+			for ( $check = 0; $check < 2; $check++ ) {
+				if ( true !== call_user_func( $engine_verdict ) ) { return self::busy(); }
+				$this->context(); $this->owned_live( StorageAuthority::MAINTENANCE_OPTION, $this->maintenance_raw );
+			}
+			foreach ( $rows as $row ) {
+				$this->owned_live( StorageAuthority::MAINTENANCE_OPTION, $this->maintenance_raw );
+				$lock = $this->writer_lock_name( $row['option_name'] );
+				if ( ! $this->lock_query( 'GET_LOCK', $lock ) ) { return self::busy(); }
+				try { $this->remove_owned( $row['option_name'], $row['marker_value'] ); $removed[] = $row['option_name']; }
+				catch ( \Exception $error ) { $this->release_writer_lock( $lock ); throw $error; }
+				catch ( \Throwable $error ) { $this->release_writer_lock( $lock ); throw $error; }
+				$this->release_writer_lock( $lock );
+			}
+			return $removed;
+		} catch ( \Exception $error ) { return self::unhealthy(); }
+		catch ( \Throwable $error ) { return self::unhealthy(); }
 	}
 
 	public function renew_maintenance() {
@@ -262,7 +317,34 @@ class StorageMaintenanceGate {
 		return null !== $found;
 	}
 
+	/** Locks are per marker and released by the server when its connection dies. */
+	private function writer_lock_name( $name ) {
+		$db = $this->connection();
+		if ( null === $this->database ) {
+			$database = $db->get_var( 'SELECT DATABASE()' );
+			if ( ! empty( $db->last_error ) || ! is_string( $database ) || '' === $database ) { throw new \RuntimeException( 'Storage database identity unavailable.' ); }
+			$this->database = $database;
+		}
+		return 'foogm-write-' . substr( hash( 'sha256', $this->database . ':' . $this->table . ':' . $name ), 0, 48 );
+	}
+	private function lock_query( $operation, $name ) {
+		$db = $this->connection();
+		if ( 'GET_LOCK' === $operation ) { $sql = $db->prepare( 'SELECT GET_LOCK(%s, 0)', array( $name ) ); }
+		elseif ( 'IS_FREE_LOCK' === $operation ) { $sql = $db->prepare( 'SELECT IS_FREE_LOCK(%s)', array( $name ) ); }
+		else { $sql = $db->prepare( 'SELECT IS_USED_LOCK(%s) = CONNECTION_ID()', array( $name ) ); }
+		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- Each branch above prepares a fixed lock query with the bounded, internally generated lock name.
+		$result = $db->get_var( $sql );
+		if ( ! empty( $db->last_error ) || null === $result ) { throw new \RuntimeException( 'Storage writer liveness unavailable.' ); }
+		return '1' === (string) $result;
+	}
+	private function release_writer_lock( $name ) {
+		$db = $this->connection();
+		$result = $db->get_var( $db->prepare( 'SELECT RELEASE_LOCK(%s)', array( $name ) ) );
+		if ( ! empty( $db->last_error ) || '1' !== (string) $result ) { throw new \RuntimeException( 'Storage writer liveness release failed.' ); }
+	}
+
 	private function owned_live( $name, $raw ) {
+		if ( $name === $this->writer_name && null !== $this->writer_lock && ! $this->lock_query( 'IS_USED_LOCK', $this->writer_lock ) ) { throw new \RuntimeException( 'Storage writer connection ownership lost.' ); }
 		if ( ! is_string( $raw ) || $this->read( $name ) !== $raw ) { throw new \RuntimeException( 'Storage ownership lost.' ); }
 		$record = json_decode( $raw, true );
 		if ( ! is_array( $record ) || ! isset( $record['expires'] ) || $record['expires'] <= time() ) {

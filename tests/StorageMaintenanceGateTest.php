@@ -240,6 +240,7 @@ class StorageMaintenanceGateTest extends TestCase {
 }
 
 class MaintenanceTestWpdb extends \FooPlugins\FooGalleryMigrate\LegacyTransactionConnection {
+	public $locks = array();
 	public $current = true;
 	public function __construct() {}
 	public function is_current() { return $this->current; }
@@ -264,6 +265,14 @@ class MaintenanceTestWpdb extends \FooPlugins\FooGalleryMigrate\LegacyTransactio
 	public function get_var( $query ) {
 		$this->queries[] = $query;
 		$this->last_error = $this->fail_read ? 'private read error' : '';
+		if ( $this->fail_read ) { return null; }
+		if ( 'SELECT DATABASE()' === $query ) { return 'test_database'; }
+		if ( preg_match( "/^SELECT (GET_LOCK|RELEASE_LOCK|IS_FREE_LOCK|IS_USED_LOCK)\\('([^']+)'/", $query, $lock ) ) {
+			if ( ! isset( $this->locks ) ) { $this->locks = array(); }
+			if ( 'GET_LOCK' === $lock[1] ) { $this->locks[$lock[2]] = true; return '1'; }
+			if ( 'RELEASE_LOCK' === $lock[1] ) { $held = isset( $this->locks[$lock[2]] ); unset( $this->locks[$lock[2]] ); return $held ? '1' : null; }
+			return ( 'IS_FREE_LOCK' === $lock[1] ? ! isset( $this->locks[$lock[2]] ) : isset( $this->locks[$lock[2]] ) ) ? '1' : '0';
+		}
 		$value = null;
 		if ( false !== strpos( $query, 'option_name IN' ) ) {
 			preg_match_all( "/'([^']+)'/", $query, $names );

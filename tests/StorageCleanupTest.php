@@ -158,6 +158,7 @@ class StorageCleanupTest extends TestCase {
 /** SQL-shape fake for fixed-manifest cleanup only; no production fixture is touched. */
 class CleanupTestWpdb extends \FooPlugins\FooGalleryMigrate\LegacyTransactionConnection {
 	public $prefix = 'wp_'; public $base_prefix = 'wp_'; public $options = 'wp_options'; public $last_error = '';
+	public $locks = array();
 	public $users = array(); public $tables = array(); public $output = array();
 	public $writes = 0; public $deletes = 0; public $fail_drop_once = null;
 	public function __construct() {}
@@ -165,8 +166,8 @@ class CleanupTestWpdb extends \FooPlugins\FooGalleryMigrate\LegacyTransactionCon
 	public function esc_like( $value ) { return addcslashes( $value, '_%\\' ); }
 	public function prepare( $sql, ...$values ) {
 		if ( 1 === count( $values ) && is_array( $values[0] ) ) { $values = $values[0]; }
-		foreach ( $values as $value ) { $sql = preg_replace_callback( '/%[sd]/', function ( $match ) use ( $value ) {
-			return '%d' === $match[0] ? (string) (int) $value : "'" . str_replace( "'", "''", $value ) . "'";
+		foreach ( $values as $value ) { $sql = preg_replace_callback( '/%[sdi]/', function ( $match ) use ( $value ) {
+			return '%i' === $match[0] ? '`' . $value . '`' : ( '%d' === $match[0] ? (string) (int) $value : "'" . str_replace( "'", "''", $value ) . "'" );
 		}, $sql, 1 ); }
 		return $sql;
 	}
@@ -174,6 +175,13 @@ class CleanupTestWpdb extends \FooPlugins\FooGalleryMigrate\LegacyTransactionCon
 	private function option( $sql ) { preg_match( "/option_name\\s*=\\s*'([^']+)'/", $sql, $m ); return isset( $m[1] ) ? $m[1] : null; }
 	public function get_var( $sql ) {
 		$this->last_error = '';
+		if ( 'SELECT DATABASE()' === $sql ) { return 'test_database'; }
+		if ( preg_match( "/^SELECT (GET_LOCK|RELEASE_LOCK|IS_FREE_LOCK|IS_USED_LOCK)\\('([^']+)'/", $sql, $lock ) ) {
+			if ( ! isset( $this->locks ) ) { $this->locks = array(); }
+			if ( 'GET_LOCK' === $lock[1] ) { $this->locks[$lock[2]] = true; return '1'; }
+			if ( 'RELEASE_LOCK' === $lock[1] ) { $held = isset( $this->locks[$lock[2]] ); unset( $this->locks[$lock[2]] ); return $held ? '1' : null; }
+			return ( 'IS_FREE_LOCK' === $lock[1] ? ! isset( $this->locks[$lock[2]] ) : isset( $this->locks[$lock[2]] ) ) ? '1' : '0';
+		}
 		if ( 0 === strpos( $sql, 'SHOW TABLES LIKE' ) ) {
 			$name = str_replace( array( '\\_', '\\%' ), array( '_', '%' ), $this->quoted( $sql )[0] );
 			return isset( $this->tables[$name] ) ? $name : null;
@@ -205,6 +213,14 @@ class CleanupTestWpdb extends \FooPlugins\FooGalleryMigrate\LegacyTransactionCon
 	}
 	public function get_results( $sql, $format = null ) {
 		$this->last_error = '';
+		if ( false !== strpos( $sql, 'AS marker_value' ) ) {
+			$rows = array();
+			foreach ( $GLOBALS['foogallery_migrate_test_options'] as $name => $raw ) {
+				if ( 0 === strpos( $name, StorageMaintenanceGate::WRITER_PREFIX ) ) { $rows[] = array( 'option_name' => $name, 'marker_value' => strlen( $raw ) <= 512 ? $raw : '' ); }
+			}
+			usort( $rows, function ( $a, $b ) { return strcmp( $a['option_name'], $b['option_name'] ); } );
+			return array_slice( $rows, 0, 101 );
+		}
 		if ( false !== strpos( $sql, 'FROM `wp_users`' ) ) {
 			preg_match( '/ID > ([0-9]+)/', $sql, $m ); $cursor = (int) $m[1]; $rows = array();
 			foreach ( $this->users as $id ) { if ( $id > $cursor && count( $rows ) < 100 ) { $rows[] = array( 'ID' => (string) $id ); } }

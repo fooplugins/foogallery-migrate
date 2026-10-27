@@ -95,8 +95,13 @@ class StorageCleanup {
 		$owned = false;
 		try {
 			$this->required( $this->gate->acquire_maintenance(), 'maintenance' ); $owned = true;
-			$this->required( $this->gate->maintenance_ready( array( __CLASS__, 'quiescent' ) ), 'worker drain' );
 			if ( $this->present( LegacyStorageSchema::LOCK_OPTION ) ) { throw new \RuntimeException( 'Ambiguous schema-upgrade owner.' ); }
+			if ( 'clear' === $action ) {
+				$removed = array(); $writers = $this->gate->reset_expired_writers( array( __CLASS__, 'quiescent' ), $removed );
+				$this->receipt['removed'] = array_merge( $this->receipt['removed'], $removed );
+				$this->required( is_array( $writers ), 'expired writer recovery' );
+			}
+			$this->required( $this->gate->maintenance_ready( array( __CLASS__, 'quiescent' ) ), 'worker drain' );
 			if ( 'clear' === $action ) { $this->clear_authority(); }
 			$this->claim( $action );
 			if ( ! $this->content_transients() ) {

@@ -8,7 +8,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Language-Team: FooPlugins <info@fooplugins.com>\n"
 "Last-Translator: Brad Vincent <brad@fooplugins.com>\n"
-"POT-Creation-Date: 2026-10-27 07:40+0000\n"
+"POT-Creation-Date: 2026-10-27 09:34+0000\n"
 "Report-Msgid-Bugs-To: https://fooplugins.com\n"
 "X-Poedit-Basepath: ..\n"
 "X-Poedit-KeywordsList: __;_e;_ex:1,2c;_n:1,2;_n_noop:1,2;_nx:1,2,4c;_nx_noop:1,2,3c;_x:1,2c;esc_attr__;esc_attr_e;esc_attr_x:1,2c;esc_html__;esc_html_e;esc_html_x:1,2c\n"
@@ -360,7 +360,7 @@ msgid "Cancel storage change"
 msgstr ""
 
 #: includes/class-storage-admin.php:197
-msgid "Reset migration progress and history? Galleries and media will be kept. Migrating again may create duplicates."
+msgid "Reset migration progress and history? Stop any running migrations first. Galleries and media will be kept. Migrating again may create duplicates."
 msgstr ""
 
 #: includes/class-storage-admin.php:198
@@ -639,7 +639,7 @@ msgstr ""
 msgid "FooGallery Migrate internal cleanup is incomplete. Plugin files were retained; resolve the reported storage ownership or retry uninstall."
 msgstr ""
 
-#: includes/class-storage-cleanup.php:388
+#: includes/class-storage-cleanup.php:393
 msgid "Migration storage cleanup refused. Retain current storage and ownership evidence."
 msgstr ""
 
@@ -655,23 +655,23 @@ msgstr ""
 msgid "Migration storage conversion was refused. Retain the recorded authority and all storage evidence; no fallback or expired-owner takeover was attempted."
 msgstr ""
 
-#: includes/class-storage-maintenance-gate.php:313
+#: includes/class-storage-maintenance-gate.php:395
 msgid "Migration storage is busy or requires recovery. No new storage operation was admitted."
 msgstr ""
 
-#: includes/class-storage-maintenance-gate.php:317
+#: includes/class-storage-maintenance-gate.php:399
 msgid "Migration storage ownership could not be verified. Retain storage markers and retry or request recovery."
 msgstr ""
 
-#: includes/class-storage-operations.php:86
+#: includes/class-storage-operations.php:87
 msgid "You are not authorized to manage migration storage."
 msgstr ""
 
-#: includes/class-storage-operations.php:117
+#: includes/class-storage-operations.php:118
 msgid "Finite migration storage admission refused. Retain authority and all storage evidence."
 msgstr ""
 
-#: includes/class-storage-operations.php:121, includes/class-storage-preflight.php:46, includes/class-storage-preflight.php:50, includes/class-storage-preflight.php:56, includes/views/view-migrate-tab-sources.php:17, includes/views/view-migrate.php:359
+#: includes/class-storage-operations.php:122, includes/class-storage-preflight.php:46, includes/class-storage-preflight.php:50, includes/class-storage-preflight.php:56, includes/views/view-migrate-tab-sources.php:17, includes/views/view-migrate.php:359
 msgid "Invalid migration storage request."
 msgstr ""
 
