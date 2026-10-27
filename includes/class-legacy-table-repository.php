@@ -1100,7 +1100,12 @@ class LegacyTableRepository {
 		try {
 			if ( false === $this->reader->head( $key ) ) {
 				$rows = $this->read( $this->db->prepare( 'SELECT id FROM `' . $this->state . '` WHERE blog_id = %d LIMIT 1', array( $this->blog ) ) );
-				if ( ! count( $rows ) ) { $this->fail( 'Missing site state scope; no option fallback.' ); }
+				if ( ! count( $rows ) ) {
+					// A confirmed reset (or an empty conversion) leaves no heads.
+					// It is an absent collection only when no site records remain.
+					$records = $this->read( $this->db->prepare( 'SELECT id FROM %i WHERE blog_id = %d LIMIT 1', array( $this->table, $this->blog ) ) );
+					if ( count( $records ) ) { $this->fail( 'Orphan table records; no empty collection fallback.' ); }
+				}
 				if ( false !== $this->reader->head( $key ) ) { $this->fail( 'Missing collection changed.' ); } return $this->finish_history_read( array( 'found' => false, 'value' => null ) );
 			}
 			$entry = $this->metadata_many( array( $key ) )[0];

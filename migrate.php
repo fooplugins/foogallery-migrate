@@ -2,7 +2,7 @@
 /*
 Plugin Name: FooGallery Migrate
 Description: Migrate to FooGallery from Envira, NextGen, Modula and other gallery plugins.
-Version:     1.16.3
+Version:     1.16.4
 Requires at least: 6.2
 Author:      FooPlugins
 Author URI:  https://fooplugins.com/
@@ -23,7 +23,7 @@ if ( ! defined( 'FOOGM_SLUG' ) ) {
     define( 'FOOGM_PATH', plugin_dir_path( __FILE__ ) );
     define( 'FOOGM_URL', plugin_dir_url( __FILE__ ) );
     define( 'FOOGM_FILE', __FILE__ );
-    define( 'FOOGM_VERSION', '1.16.3' );
+    define( 'FOOGM_VERSION', '1.16.4' );
     define( 'FOOGM_MIN_PHP', '5.4.0' ); // Minimum of PHP 5.4 required for autoloading, namespaces, etc.
     define( 'FOOGM_MIN_WP', '6.2' );  // WordPress 6.2 adds identifier placeholders in wpdb::prepare().
 }

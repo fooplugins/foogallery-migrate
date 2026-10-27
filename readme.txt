@@ -98,6 +98,9 @@ Uninstall removes plugin-owned internal storage, including retained history and 
 
 == Changelog ==
 
+= 1.16.4 =
+* Fixed the Plugins tab failing after clearing table-backed migration history or resetting storage. Empty storage can be read and detected again; orphaned records are still rejected.
+
 = 1.16.3 =
 * Fix: Failed galleries count once in queue progress, so they cannot finish a multi-gallery migration early. Saved error details and Retry Migration remain available after reloading.
 * Fix: Gallery and album progress dialogs show failed items instead of a successful 100% result. Image tag sync also reports completed runs with errors.
