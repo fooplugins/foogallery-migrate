@@ -2,6 +2,8 @@
 
 These documents describe the storage-only architecture, PR #15 implementation status and remaining work. The WordPress.org plugin listing and release history remain in [`readme.txt`](../readme.txt).
 
+Latest release validation: [1.16.4 upgrade, browser and WordPress 6.2 results](release-testing/1.16.4-final-validation.md). The requested gates passed; existing Plugin Check findings and release boundaries are recorded there. Nothing has been pushed or publicly released.
+
 ## Design documents
 
 - [Legacy storage upgrade for large sites](legacy-storage-upgrade.md) — the five approved simplification cuts, single-site first-release requirements, and a revision-pinned inventory of PR #15. Deferred design is clearly labelled.
