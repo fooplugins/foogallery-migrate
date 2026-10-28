@@ -1,0 +1,308 @@
+<?php
+namespace FooPlugins\FooGalleryMigrate;
+if ( ! defined( 'ABSPATH' ) ) { exit; }
+
+/** Whole-option collections. Partial updates retain raw unrelated records/fields. */
+class MigratableCollectionRepository extends ScalarStateRepository {
+	private function bucket( $bucket ) {
+		if ( ! in_array( $bucket, array( MigratorSettings::KEY_GALLERIES, MigratorSettings::KEY_ALBUMS ), true ) ) {
+			throw new \RuntimeException( 'Invalid migratable collection.' );
+		}
+		return $bucket;
+	}
+	private function validate_collection( $collection ) {
+		if ( ! is_array( $collection ) || ( array_key_exists( MigratorSettings::COMPACT_MARKER, $collection ) &&
+			( MigratorSettings::COMPACT_VERSION !== $collection[MigratorSettings::COMPACT_MARKER] || ! isset( $collection['items'], $collection['type'] ) ||
+			! is_array( $collection['items'] ) || 'migratable' !== $collection['type'] ) ) ) {
+			throw new \RuntimeException( 'Unsupported collection. No fallback.' );
+		}
+	}
+	/** Table form metadata only; option callers keep their original snapshot path. */
+	public function view_context( $bucket ) {
+		$bucket = $this->bucket( $bucket );
+		if ( ! $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table collection view required.' ); }
+		return $this->backend->collection_view_context( $bucket );
+	}
+	/** Exact migrated Core gallery targets without hydrating unrelated roots. */
+	public function migrated_core_gallery_targets( $source_ids ) {
+		if ( ! $this->backend instanceof LegacyTableBackend || ! is_array( $source_ids ) ) { throw new \RuntimeException( 'Table Core gallery lookup required.' ); }
+		$context = $this->view_context( MigratorSettings::KEY_GALLERIES );
+		if ( ! $context['found'] ) { throw new \RuntimeException( 'Core gallery collection changed before lookup.' ); }
+		$targets = array();
+		foreach ( array_chunk( $source_ids, 100 ) as $ids ) {
+			$identities = array();
+			foreach ( $ids as $id ) {
+				if ( ! is_string( $id ) && ! is_int( $id ) ) { throw new \RuntimeException( 'Invalid Core gallery source ID.' ); }
+				$identities[] = array( 'type' => 'gallery', 'plugin' => 'WordPress Core', 'id' => (string) $id );
+			}
+			$rows = $this->backend->source_identities( MigratorSettings::KEY_GALLERIES, $identities );
+			if ( ! is_array( $rows ) || count( $rows ) !== count( $identities ) ) { throw new \RuntimeException( 'Core gallery lookup changed.' ); }
+			foreach ( $rows as $index => $row ) {
+				$identity = $identities[$index];
+				if ( ! is_array( $row ) || ! isset( $row['found'] ) || ! $row['found'] || ! isset( $row['value'] ) || ! is_array( $row['value'] ) ||
+					! isset( $row['value']['object_type'], $row['value']['plugin_name'], $row['value']['ID'], $row['value']['migrated_id'] ) ||
+					'gallery' !== $row['value']['object_type'] || 'WordPress Core' !== $row['value']['plugin_name'] ||
+					! is_scalar( $row['value']['ID'] ) || (string) $row['value']['ID'] !== $identity['id'] ||
+					empty( $row['value']['migrated'] ) || ! is_numeric( $row['value']['migrated_id'] ) || (int) $row['value']['migrated_id'] < 1 ) {
+					throw new \RuntimeException( 'Core gallery lookup did not verify migration.' );
+				}
+				$targets[$identity['id']] = (int) $row['value']['migrated_id'];
+			}
+			if ( $this->view_context( MigratorSettings::KEY_GALLERIES ) !== $context ) { throw new \RuntimeException( 'Core gallery collection changed during lookup.' ); }
+		}
+		return $targets;
+	}
+	private function hydrate_view_record( $bucket, $row ) {
+		if ( ! is_array( $row ) || array_keys( $row ) !== array( 'key', 'value' ) ) { throw new \RuntimeException( 'Invalid collection view row.' ); }
+		$payload = array( MigratorSettings::COMPACT_MARKER => MigratorSettings::COMPACT_VERSION,
+			'type' => 'migratable', 'items' => array( $row['key'] => $row['value'] ) );
+		$objects = $this->decode( $bucket, $payload );
+		if ( ! is_array( $objects ) || count( $objects ) !== 1 || ! array_key_exists( $row['key'], $objects ) ) { throw new \RuntimeException( 'Collection view hydration changed key.' ); }
+		return array( 'key' => $row['key'], 'value' => $objects[$row['key']] );
+	}
+	public function view_page( $bucket, $offset, $limit ) {
+		$bucket = $this->bucket( $bucket );
+		if ( ! $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table collection view required.' ); }
+		$page = $this->backend->collection_view_page( $bucket, $offset, $limit ); $rows = array();
+		foreach ( $page['rows'] as $row ) { $rows[] = $this->hydrate_view_record( $bucket, $row ); }
+		return array( 'rows' => $rows, 'head' => $page['head'] );
+	}
+	/** Table-only atomic queue/cancel; the option path keeps its original loop. */
+	public function queue_selected( $bucket, $selection, $transition, $summarize ) {
+		$bucket = $this->bucket( $bucket );
+		if ( ! $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table collection queue required.' ); }
+		if ( ! is_callable( $transition ) || ! is_callable( $summarize ) ) { throw new \RuntimeException( 'Queue transition and summary required.' ); }
+		$repository = $this;
+		return $this->backend->queue_collection( $bucket, $selection, function ( $row, $matched, $entry ) use ( $repository, $bucket, $transition ) {
+			$hydrated = $repository->hydrate_view_record( $bucket, $row );
+			$object = $hydrated['value'];
+			if ( ! is_object( $object ) || ! method_exists( $object, 'unique_identifier' ) ) { throw new \RuntimeException( 'Collection root could not hydrate.' ); }
+			if ( $matched && ! $object->migrated && 0 === $object->migrated_id &&
+				( ! is_array( $entry ) || ! array_key_exists( 'title', $entry ) ||
+				( ! is_scalar( $entry['title'] ) && null !== $entry['title'] ) ) ) { throw new \RuntimeException( 'Selected title is invalid.' ); }
+			$set_title = $matched && ! $object->migrated && 0 === $object->migrated_id;
+			call_user_func( $transition, $object, $matched, $entry );
+			$compact = $repository->settings->compact_migrated_object( $object );
+			if ( ! is_array( $row['value'] ) ) { throw new \RuntimeException( 'Invalid collection root.' ); }
+			if ( ! is_array( $compact ) || ! array_key_exists( 'part_of_migration', $compact ) || ! array_key_exists( 'migration_status', $compact ) ) { throw new \RuntimeException( 'Invalid compact queue root.' ); }
+			$value = $row['value'];
+			$value['part_of_migration'] = $compact['part_of_migration'];
+			$value['migration_status'] = $compact['migration_status'];
+			if ( $set_title ) { $value['migrated_title'] = $compact['migrated_title']; }
+			return array( 'value' => $value, 'selected' => (bool) $object->part_of_migration,
+				'completed' => (bool) $object->migrated && 'error' !== $object->migration_status,
+				'error' => 'error' === $object->migration_status );
+		}, $summarize );
+	}
+	/** One exact UID, with its raw root and pinned storage budget retained for a later save. */
+	public function targeted_context( $bucket, $uid ) {
+		$bucket = $this->bucket( $bucket );
+		if ( ! $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table collection target required.' ); }
+		$context = $this->backend->targeted_collection_context( $bucket, $uid );
+		if ( ! $context['found'] ) { return $context; }
+		$hydrated = $this->hydrate_view_record( $bucket, $context['root'] );
+		if ( ! is_object( $hydrated['value'] ) || ! method_exists( $hydrated['value'], 'unique_identifier' ) ||
+			$hydrated['value']->unique_identifier() !== $uid ) { throw new \RuntimeException( 'Targeted collection root could not hydrate.' ); }
+		$context['object'] = $hydrated['value'];
+		return $context;
+	}
+	/** Table error-check roots in persisted order; no unrelated tree for a UID check. */
+	public function checked_context( $bucket, $uid ) {
+		$bucket = $this->bucket( $bucket );
+		if ( MigratorSettings::KEY_GALLERIES !== $bucket || ! $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table gallery check required.' ); }
+		$context = $this->backend->checked_collection_context( $bucket, $uid );
+		if ( ! $context['found'] ) { return $context; }
+		$objects = array();
+		foreach ( $context['roots'] as $row ) {
+			$hydrated = $this->hydrate_view_record( $bucket, $row );
+			if ( ! is_object( $hydrated['value'] ) || ! method_exists( $hydrated['value'], 'unique_identifier' ) ||
+				( '' !== $uid && $hydrated['value']->unique_identifier() !== $uid ) ) { throw new \RuntimeException( 'Checked gallery root could not hydrate.' ); }
+			$objects[] = $hydrated['value'];
+		}
+		$context['objects'] = $objects; $context['patches'] = array();
+		$context['pending_rows'] = 0; $context['pending_bytes'] = 0; $context['processed'] = 0;
+		return $context;
+	}
+	/** Release each expanded source tree after its compact patch is admitted. */
+	public function append_checked( $bucket, $context, $index, $object ) {
+		$bucket = $this->bucket( $bucket );
+		if ( MigratorSettings::KEY_GALLERIES !== $bucket || ! $this->backend instanceof LegacyTableBackend ||
+			! is_array( $context ) || ! isset( $context['roots'], $context['objects'], $context['patches'], $context['pending_rows'], $context['pending_bytes'], $context['processed'] ) ||
+			! is_int( $index ) || ! isset( $context['objects'][$index], $context['roots'][$index] ) || ! is_object( $object ) ) {
+			throw new \RuntimeException( 'Invalid checked gallery append.' );
+		}
+		$original = $context['roots'][$index];
+		$compact = $this->encode( $bucket, array( $object ) );
+		if ( ! isset( $compact['items'][0] ) || ! is_array( $compact['items'][0] ) ) { throw new \RuntimeException( 'Invalid checked gallery encoding.' ); }
+		$value = $this->merge_turn_record( $original['value'], $compact['items'][0] );
+		if ( $value !== $original['value'] ) {
+			$stats = ( new LegacyRecordCodec() )->flatten_tree( $bucket, $original['key'], $value, 0, function () {} );
+			if ( $stats['record_count'] > 10000 - $context['pending_rows'] || $stats['encoded_bytes'] > 16777216 - $context['pending_bytes'] ) {
+				throw new \RuntimeException( 'Checked gallery affected roots exceed the shared storage budget.' );
+			}
+			$context['pending_rows'] += $stats['record_count']; $context['pending_bytes'] += $stats['encoded_bytes'];
+			$context['patches'][] = array( 'key' => $original['key'], 'value' => $value );
+		}
+		// A failed gallery is also retained by the pending history batch. Its
+		// compact record stores child errors, not the complete checked children.
+		// Preserve that exact fallback before releasing this table-only cache.
+		if ( method_exists( $object, 'get_children_errors' ) && isset( $object->children ) && is_array( $object->children ) ) {
+			$object->children_errors = $object->get_children_errors();
+			$object->children = array();
+		}
+		unset( $context['objects'][$index] ); ++$context['processed']; return $context;
+	}
+	/** Validate the complete affected patch before publishing logical history. */
+	public function prepare_checked( $bucket, $context ) {
+		$bucket = $this->bucket( $bucket );
+		if ( MigratorSettings::KEY_GALLERIES !== $bucket || ! $this->backend instanceof LegacyTableBackend ||
+			! is_array( $context ) || ! isset( $context['roots'], $context['objects'], $context['patches'], $context['processed'] ) ||
+			count( $context['objects'] ) || $context['processed'] !== count( $context['roots'] ) ) { throw new \RuntimeException( 'Incomplete checked gallery preparation.' ); }
+		$context['budget']['seconds'] = $this->backend->prepare_checked_collection( $bucket, $context, $context['patches'] );
+		return $context;
+	}
+	public function checkpoint_checked( $bucket, $context ) {
+		$bucket = $this->bucket( $bucket );
+		if ( MigratorSettings::KEY_GALLERIES !== $bucket || ! $this->backend instanceof LegacyTableBackend ||
+			! is_array( $context ) || ! isset( $context['patches'] ) ) { throw new \RuntimeException( 'Invalid checked gallery checkpoint.' ); }
+		return $this->backend->checkpoint_checked_collection( $bucket, $context, $context['patches'] );
+	}
+	/** Save only the affected root; retry/error callers own their legacy history and queue decisions. */
+	public function checkpoint_targeted( $bucket, $context ) {
+		$bucket = $this->bucket( $bucket );
+		if ( ! $this->backend instanceof LegacyTableBackend || ! is_array( $context ) || ! isset( $context['root'], $context['object'] ) ||
+			! is_object( $context['object'] ) || ! is_array( $context['root']['value'] ) ) { throw new \RuntimeException( 'Invalid targeted collection root.' ); }
+		$compact = $this->encode( $bucket, array( $context['object'] ) );
+		if ( ! isset( $compact['items'][0] ) || ! is_array( $compact['items'][0] ) ) { throw new \RuntimeException( 'Invalid targeted collection encoding.' ); }
+		$value = $this->merge_turn_record( $context['root']['value'], $compact['items'][0] );
+		return $this->backend->checkpoint_targeted_collection( $bucket, $context, $value );
+	}
+	/** Table-only first runnable root; no unrelated roots are hydrated. */
+	public function migration_turn_context( $bucket ) {
+		$bucket = $this->bucket( $bucket );
+		if ( ! $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table collection turn required.' ); }
+		$context = $this->backend->migration_turn_context( $bucket );
+		if ( ! $context['found'] ) { return $context; }
+		if ( null !== $context['root'] ) {
+			$hydrated = $this->hydrate_view_record( $bucket, $context['root'] );
+			if ( ! is_object( $hydrated['value'] ) || ! method_exists( $hydrated['value'], 'migrate' ) ) { throw new \RuntimeException( 'Runnable collection root could not hydrate.' ); }
+			$context['object'] = $hydrated['value'];
+		}
+		return $context;
+	}
+	/** Compact only the affected root; retain opaque fields and child keys. */
+	public function checkpoint_migration_turn( $bucket, $context, $summary ) {
+		$bucket = $this->bucket( $bucket );
+		if ( ! $this->backend instanceof LegacyTableBackend || ! is_array( $context ) || ! array_key_exists( 'root', $context ) ) { throw new \RuntimeException( 'Invalid collection checkpoint.' ); }
+		$value = null;
+		if ( null !== $context['root'] ) {
+			if ( ! isset( $context['object'] ) || ! is_object( $context['object'] ) || ! is_array( $context['root']['value'] ) ) { throw new \RuntimeException( 'Invalid migrated collection root.' ); }
+			$compact = $this->encode( $bucket, array( $context['object'] ) );
+			if ( ! isset( $compact['items'][0] ) || ! is_array( $compact['items'][0] ) ) { throw new \RuntimeException( 'Invalid migrated collection root.' ); }
+			$value = $this->merge_turn_record( $context['root']['value'], $compact['items'][0] );
+		}
+		return $this->backend->checkpoint_migration_turn( $bucket, $context, $value, $summary );
+	}
+	/** Compaction owns known runtime fields; keep opaque legacy fields and child keys. */
+	private function merge_turn_record( $original, $compact ) {
+		// The runtime compact codec intentionally omits cleared error/settings and
+		// gallery child caches. Do not resurrect those known fields from old rows.
+		foreach ( array( 'error', 'settings', 'children' ) as $field ) {
+			if ( ! array_key_exists( $field, $compact ) ) { unset( $original[$field] ); }
+		}
+		foreach ( $compact as $field => $value ) {
+			if ( 'children' === $field && isset( $original[$field] ) && is_array( $original[$field] ) && is_array( $value ) ) {
+				$children = array();
+				foreach ( $value as $key => $child ) {
+					$children[$key] = isset( $original[$field][$key] ) && is_array( $original[$field][$key] ) && is_array( $child )
+						? $this->merge_turn_record( $original[$field][$key], $child ) : $child;
+				}
+				$original[$field] = $children;
+			} else { $original[$field] = $value; }
+		}
+		return $original;
+	}
+	public function first_started( $bucket ) {
+		$bucket = $this->bucket( $bucket );
+		if ( ! $this->backend instanceof LegacyTableBackend ) { throw new \RuntimeException( 'Table collection view required.' ); }
+		$page = $this->backend->filtered_page( $bucket, 1, array( 'migration_status' => 'started' ) );
+		if ( ! count( $page['rows'] ) ) { return array( 'found' => false, 'head' => null ); }
+		$row = $this->hydrate_view_record( $bucket, $page['rows'][0] );
+		if ( ! is_object( $row['value'] ) || $row['value']->migration_status !== 'started' ) { throw new \RuntimeException( 'Started collection projection changed.' ); }
+		return array( 'found' => true, 'head' => $page['revision'], 'value' => $row['value'] );
+	}
+	public function read_snapshot( $bucket ) {
+		$bucket = $this->bucket( $bucket );
+		if ( $this->backend instanceof LegacyTableBackend ) {
+			$raw = $this->backend->collection_snapshot( $bucket ); $this->validate_collection( $raw );
+			return $this->decode( $bucket, $raw );
+		}
+		$raw = $this->backend->read( $bucket );
+		if ( ! $raw['found'] ) { return array(); }
+		$this->validate_collection( $raw['value'] );
+		return $this->decode( $bucket, $raw['value'] );
+	}
+	public function replace_snapshot( $bucket, $objects ) {
+		if ( ! is_array( $objects ) ) { return false; }
+		if ( $this->backend instanceof LegacyTableBackend ) {
+			$bucket = $this->bucket( $bucket );
+			return $this->backend->replace_collection( $bucket, $this->encode( $bucket, $objects ) );
+		}
+		return $this->write_values( array( $this->bucket( $bucket ) => $objects ) );
+	}
+	/** Forced source discovery discards old roots under one pinned table-head CAS. */
+	public function replace_discovered( $bucket, $objects, $context ) {
+		if ( ! is_array( $objects ) || ! $this->backend instanceof LegacyTableBackend || ! is_array( $context ) ||
+			array_keys( $context ) !== array( 'found', 'total', 'head' ) || ! is_bool( $context['found'] ) ||
+			( $context['found'] && ! is_array( $context['head'] ) ) || ( ! $context['found'] && false !== $context['head'] ) ) {
+			throw new \RuntimeException( 'Invalid pinned discovery context.' );
+		}
+		$bucket = $this->bucket( $bucket );
+		return $this->backend->replace_discovered_collection( $bucket, $this->encode( $bucket, $objects ), $context['head'] );
+	}
+	public function update_with_state( $bucket, $objects, $state ) {
+		if ( ! is_array( $objects ) ) { return false; }
+		$bucket = $this->bucket( $bucket );
+		if ( $this->backend instanceof LegacyTableBackend ) {
+			return $this->backend->replace_collection( $bucket, $this->encode( $bucket, $objects ), array( $bucket . '-state' => $this->encode( $bucket . '-state', $state ) ) );
+		}
+		return $this->write_values( array( $bucket => $objects, $bucket . '-state' => $state ) );
+	}
+	/** Locator: exact root PHP key and exact child keys along children[]. */
+	public function update_record( $bucket, $locator, $object ) {
+		$bucket = $this->bucket( $bucket );
+		if ( ! is_array( $locator ) || ! array_key_exists( 'root', $locator ) || ! isset( $locator['path'] ) || ! is_array( $locator['path'] ) ) { return false; }
+		self::exact_keys( array( $locator['root'] ) );
+		foreach ( $locator['path'] as $key ) { self::exact_keys( array( $key ) ); }
+		if ( $this->backend instanceof LegacyTableBackend ) {
+			$encoded = $this->encode( $bucket, array( $object ) );
+			return $this->backend->update_collection_record( $bucket, $locator, $encoded['items'][0] );
+		}
+		return $this->backend->mutate( function ( $data ) use ( $bucket, $locator, $object ) {
+			if ( ! isset( $data[$bucket] ) || ! is_array( $data[$bucket] ) ) { return false; }
+			$this->validate_collection( $data[$bucket] );
+			$compact = array_key_exists( MigratorSettings::COMPACT_MARKER, $data[$bucket] );
+			$items = $compact ? ( isset( $data[$bucket]['items'] ) ? $data[$bucket]['items'] : null ) : $data[$bucket];
+			if ( ! is_array( $items ) || ! array_key_exists( $locator['root'], $items ) ) { return false; }
+			$replacement = $object;
+			if ( $compact ) {
+				$encoded = $this->encode( $bucket, array( $object ) );
+				$replacement = $encoded['items'][0];
+			}
+			$ok = true;
+			$items[$locator['root']] = $this->replace_child( $items[$locator['root']], $locator['path'], $replacement, $ok );
+			if ( ! $ok ) { return false; }
+			if ( $compact ) { $data[$bucket]['items'] = $items; } else { $data[$bucket] = $items; }
+			return $data;
+		} );
+	}
+	private function replace_child( $node, $path, $replacement, &$ok ) {
+		if ( ! count( $path ) ) { return $replacement; }
+		$key = array_shift( $path );
+		$children = is_object( $node ) ? ( isset( $node->children ) ? $node->children : null ) : ( is_array( $node ) && isset( $node['children'] ) ? $node['children'] : null );
+		if ( ! is_array( $children ) || ! array_key_exists( $key, $children ) ) { $ok = false; return $node; }
+		$children[$key] = $this->replace_child( $children[$key], $path, $replacement, $ok );
+		if ( is_object( $node ) ) { $node = clone $node; $node->children = $children; } else { $node['children'] = $children; }
+		return $node;
+	}
+}

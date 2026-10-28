@@ -2,7 +2,43 @@
 if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
-    $migrator = foogallery_migrate_migrator_instance();    
+    $clear_submit = isset( $_POST['clear_migration_history'] ) && empty( $foogallery_migrate_clear_handled );
+    $detection_submit = empty( $foogallery_migrate_clear_handled ) && ( $clear_submit || array_key_exists( 'foogallery_migrate_detect', $_POST ) );
+    if ( $detection_submit ) {
+        if ( ! current_user_can( 'manage_options' ) ) { wp_die( esc_html__( 'Unauthorized.', 'foogallery-migrate' ) ); }
+        if ( $clear_submit ) {
+            if ( is_multisite() ) {
+                // Multisite retains the established option-only clear path.
+                check_admin_referer( 'foogallery_migrate_detect', 'foogallery_migrate_detect' );
+                $storage_error = \FooPlugins\FooGalleryMigrate\StorageAuthority::admit_option_writer();
+                if ( is_wp_error( $storage_error ) ) { wp_die( esc_html( $storage_error->get_error_message() ) ); }
+            } else {
+                if ( ! isset( $_POST['foogallery_migrate_clear_nonce'] ) || ! is_string( $_POST['foogallery_migrate_clear_nonce'] ) ) {
+                    wp_die( esc_html__( 'Invalid migration storage request.', 'foogallery-migrate' ), '', array( 'response' => 400 ) );
+                }
+                check_admin_referer( 'foogallery_migrate_storage_clear_' . get_current_blog_id(), 'foogallery_migrate_clear_nonce' );
+                $clear_result = ( new \FooPlugins\FooGalleryMigrate\StorageOperations() )->dispatch( 'clear', array(
+                    'blog_id' => get_current_blog_id(), 'scope' => 'site', 'target' => 'state',
+                    'confirmation' => 'clear-current-state',
+                    // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- Require a posted string above; the opaque nonce is verified here and again by cleanup dispatch, not sanitized into a different token.
+                    'nonce' => wp_unslash( $_POST['foogallery_migrate_clear_nonce'] ) ) );
+                if ( is_wp_error( $clear_result ) ) { wp_die( esc_html( $clear_result->get_error_message() ) ); }
+            }
+        } else {
+            check_admin_referer( 'foogallery_migrate_detect', 'foogallery_migrate_detect' );
+            $storage_error = \FooPlugins\FooGalleryMigrate\StorageAuthority::admit_option_writer();
+            if ( is_wp_error( $storage_error ) ) { wp_die( esc_html( $storage_error->get_error_message() ) ); }
+        }
+    }
+    if ( 'clear' === \FooPlugins\FooGalleryMigrate\StorageCleanup::pending_scope() ) { ?>
+        <div class="notice notice-warning inline"><p><?php esc_html_e( 'Migration-state cleanup is incomplete. Migrations remain blocked; rerun this confirmed cleanup or inspect its reported failures.', 'foogallery-migrate' ); ?></p></div>
+        <form method="POST" id="foogallery_migrate_source_form">
+            <?php wp_nonce_field( 'foogallery_migrate_storage_clear_' . get_current_blog_id(), 'foogallery_migrate_clear_nonce', false ); ?>
+            <input type="submit" class="button clear_migration_history" name="clear_migration_history" value="<?php esc_attr_e( 'Continue Clear Migration History', 'foogallery-migrate' ); ?>">
+        </form>
+        <?php return;
+    }
+    $migrator = foogallery_migrate_migrator_instance();
 ?>
 <script>
     jQuery(function ($) {
@@ -20,24 +56,23 @@ if ( ! defined( 'ABSPATH' ) ) {
     </script>
 <?php
     //Check if the detect button has been pressed.   
-    if ( array_key_exists( 'foogallery_migrate_detect', $_POST ) ) {
+    if ( $detection_submit ) {
         if ( ! current_user_can( 'manage_options' ) ) {
             wp_die( esc_html__( 'Unauthorized.', 'foogallery-migrate' ) );
         }
-        if ( isset( $_POST['clear_migration_history'] ) ) {
-            if ( check_admin_referer( 'foogallery_migrate_detect', 'foogallery_migrate_detect' ) ) {
-                $migrator->clear_migrator_setting();
-            }
-        } else if ( isset( $_POST['check_migration_errors'] ) ) {
-            if ( check_admin_referer( 'foogallery_migrate_detect', 'foogallery_migrate_detect' ) ) {
-                $migrator->check_for_migration_errors();
-				$migrator->get_gallery_migrator()->get_objects_to_migrate(true);
-            }
-        } else {
-            if ( check_admin_referer( 'foogallery_migrate_detect', 'foogallery_migrate_detect' ) ) {
+        if ( ! $clear_submit && check_admin_referer( 'foogallery_migrate_detect', 'foogallery_migrate_detect' ) ) {
+            if ( isset( $_POST['check_migration_errors'] ) ) {
+                $migration_error_check_result = $migrator->check_for_migration_errors();
+                if ( is_wp_error( $migration_error_check_result ) ) {
+                    echo '<div class="notice notice-error inline"><p>' . esc_html( $migration_error_check_result->get_error_message() ) . '</p></div>';
+                } else {
+					$migrator->get_gallery_migrator()->get_objects_to_migrate(true);
+                }
+            } else {
                 $migrator->run_detection();
             }
         }
+        if ( $clear_submit && is_multisite() ) { $migrator->clear_migrator_setting(); }
     }
 
     if ( !$migrator->has_detected_plugins() ) { ?>
@@ -145,6 +180,7 @@ if ( '' !== $wordpress_gallery_detected && '0' === $wordpress_scan_complete ) {
 </ul>
 <form method="POST" id="foogallery_migrate_source_form">
     <?php wp_nonce_field( 'foogallery_migrate_detect', 'foogallery_migrate_detect', false ); ?>
+	<?php wp_nonce_field( 'foogallery_migrate_storage_clear_' . get_current_blog_id(), 'foogallery_migrate_clear_nonce', false ); ?>
     <input type="submit" class="button" value="<?php esc_attr_e( 'Run Detection Again', 'foogallery-migrate' ); ?>">
 	<?php if ( $migrator->has_migrated_objects() ) { ?>
 		<input type="submit" class="button clear_migration_history" name="clear_migration_history" value="<?php esc_attr_e( 'Clear Migration History', 'foogallery-migrate' ); ?>">

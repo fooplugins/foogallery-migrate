@@ -2,13 +2,21 @@
 if ( ! defined( 'ABSPATH' ) ) {
     exit;
 }
+$storage_status = isset( $foogallery_migrate_storage_status ) && is_array( $foogallery_migrate_storage_status ) ?
+	$foogallery_migrate_storage_status : \FooPlugins\FooGalleryMigrate\StorageAdmin::status();
+\FooPlugins\FooGalleryMigrate\StorageAdmin::render( $storage_status );
+if ( ! \FooPlugins\FooGalleryMigrate\StorageAdmin::settings_available( $storage_status ) ) {
+	echo '<p>' . esc_html__( 'Migration preferences are unavailable until storage recovery or cleanup is complete. Open Troubleshooting to continue; existing preferences have not been changed.', 'foogallery-migrate' ) . '</p>';
+	return;
+}
 $migrator = foogallery_migrate_migrator_instance();
 $settings = $migrator->get_settings();
 $gallery_templates = $migrator->get_available_gallery_templates();
 $gallery_settings_sources = $migrator->get_available_gallery_settings_sources();
 $album_settings_sources = $migrator->get_available_album_settings_sources();
 ?>
-<?php if ( array_key_exists( 'settings-updated', $_GET ) ) { ?>
+<?php // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Display-only redirect flag; settings are saved by Init::save_settings after capability and nonce verification.
+if ( array_key_exists( 'settings-updated', $_GET ) ) { ?>
 	<div class="notice notice-success inline">
 		<p><?php esc_html_e( 'Settings saved.', 'foogallery-migrate' ); ?></p>
 	</div>

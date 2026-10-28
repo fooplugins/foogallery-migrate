@@ -22,6 +22,43 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
      */
     abstract class Migratable extends \stdClass {
 
+        // Request-global and conservative across object/engine instances. Never
+        // persisted; this can refuse local drain, not prove another writer dead.
+        private static $storage_output_depth = 0;
+
+        public static function storage_is_quiescent() {
+            return 0 === self::$storage_output_depth;
+        }
+
+        /** Internal synchronous object boundary, not a public callback API. */
+        protected function storage_output_operation( $method, $arguments = array() ) {
+            $engine = foogallery_migrate_migrator_instance();
+            $engine->assert_storage_writer();
+            self::$storage_output_depth++;
+            try {
+                $result = call_user_func_array( array( $this, $method ), $arguments );
+                $engine->assert_storage_writer();
+            } catch ( \Exception $error ) {
+                self::$storage_output_depth--;
+                throw $error;
+            } catch ( \Throwable $error ) {
+                self::$storage_output_depth--;
+                throw $error;
+            }
+            self::$storage_output_depth--;
+            return $result;
+        }
+
+        /** Check both sides of every individual metadata output/hook. */
+        protected function update_migrated_meta( $key, $value ) {
+            $engine = foogallery_migrate_migrator_instance();
+            $engine->assert_storage_writer();
+            $result = update_post_meta( $this->migrated_id, $key, $value );
+            $engine->assert_storage_writer();
+            return $result;
+        }
+
+        const META_SOURCE_KEY = '_foogallery_migrate_source_key';
         const PROGRESS_NOT_STARTED = 'not_started';
         const PROGRESS_QUEUED = 'queued';
         const PROGRESS_STARTED = 'started';
@@ -91,6 +128,11 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
             return 1;
         }
 
+        /** An empty source finishes this run without a migrated destination. */
+        function is_migration_finished() {
+            return $this->migrated || ( isset( $this->migration_status ) && self::PROGRESS_NOTHING === $this->migration_status );
+        }
+
         /**
          * Migrates the next child. Returns true if successful.
          *
@@ -99,14 +141,16 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
         function migrate_next_child() {
             if ( !$this->has_children() ) { return; }
             $this->ensure_children_loaded();
+            foogallery_migrate_migrator_instance()->apply_migrated_children( $this );
             if ( $this->migrated_child_count < $this->get_children_count() && $this->migrated_id > 0 ) {
                 $children_attempted = 0;
                 $children_per_turn = max( 1, absint( $this->get_children_per_turn() ) );
 
                 foreach ( $this->get_children() as $child ) {
-                    if ( !$child->migrated ) {
+                    if ( !$child->is_migration_finished() ) {
                         $child->migrate();
-                        if ( $child->migrated ) {
+                        foogallery_migrate_migrator_instance()->assert_storage_writer();
+                        if ( $child->is_migration_finished() ) {
                             $this->migrated_child_count++;
                         }
                         $children_attempted++;
@@ -155,7 +199,9 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
                 return;
             }
 
-            if ( isset( $this->children_count ) && absint( $this->children_count ) < 1 ) {
+            // A previous empty result may have come from missing child caches.
+            // Recheck the source when retrying it, without rediscovering on views.
+            if ( isset( $this->children_count ) && absint( $this->children_count ) < 1 && self::PROGRESS_NOTHING !== $this->migration_status ) {
                 return;
             }
 
@@ -183,8 +229,16 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
          * @return void
          */
         function migrate() {
-            $migrated_object = foogallery_migrate_migrator_instance()->get_migrated_object( $this->unique_identifier() );
-            if ( false !== $migrated_object ) {
+            $this->storage_output_operation( 'migrate_admitted' );
+        }
+
+        private function migrate_admitted() {
+            foogallery_migrate_migrator_instance()->assert_storage_writer();
+            $migrated_object = false;
+            if ( empty( $this->migration_store_checked ) ) {
+                $migrated_object = foogallery_migrate_migrator_instance()->get_migrated_object( $this->unique_identifier() );
+            }
+            if ( false !== $migrated_object && ! empty( $migrated_object->migrated ) ) {
 				$this->migration_status = self::PROGRESS_COMPLETED;
 				$this->migrated = true;
                 $this->migrated_id = $migrated_object->migrated_id;
@@ -192,6 +246,15 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
 				if ( $this->has_children() ) {
 					$this->migrated_child_count = $migrated_object->migrated_child_count;
 				}
+                // A reused image may belong to a different gallery's history.
+                // Persist its current parent so the next turn can restore it.
+                if ( ! $this->has_children() && ! empty( $this->migration_parent_key ) ) {
+                    if ( $migrated_object->has_error() ) {
+                        $this->error = $migrated_object->get_error();
+                        $this->migration_status = self::PROGRESS_ERROR;
+                    }
+                    foogallery_migrate_migrator_instance()->add_migrated_object( $this );
+                }
             }
 
             if ( !$this->migrated ) {
@@ -201,17 +264,20 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
 
                 if ( $this->has_children() && $this->get_children_count() === 0 ) {
                     $this->migration_status = self::PROGRESS_NOTHING;
+                    $this->progress = 100;
                 } else {
                     $this->migration_status = self::PROGRESS_STARTED;
 
                     // First, make sure the object is migrated.
                     if ( $this->migrated_id === 0 ) {
                         $this->create_new_migrated_object();
+                        foogallery_migrate_migrator_instance()->assert_storage_writer();
                     }
 
                     // Then migrate the children.
                     if ( $this->has_children() ) {
                         $this->migrate_next_child();
+                        foogallery_migrate_migrator_instance()->assert_storage_writer();
                     }
 
                     // Always calculate the new progress, after an attempted migration.
@@ -223,7 +289,8 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
                             $has_error = true;
                         }
                         if ( ! $has_error && $this->has_children() ) {
-                            $has_error = ! empty( $this->get_children_errors() );
+                            $children_errors = $this->get_children_errors();
+                            $has_error = ! empty( $children_errors );
                         }
 
                         $this->migrated = true;
@@ -240,7 +307,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
          * @return int
          */
         function calculate_progress() {
-            if ( $this->migrated || $this->get_children_count() === 0 ) {
+            if ( $this->is_migration_finished() || $this->get_children_count() === 0 ) {
                 // Nothing to migrate.
                 $this->progress = 100;
             } else {
@@ -248,7 +315,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
                 if ( $this->has_children() && $this->get_children_count() > 0 ) {
                     $this->migrated_child_count = 0;
                     foreach ( $this->get_children() as $child ) {
-                        if ( $child->migrated ) {
+                        if ( $child->is_migration_finished() ) {
                             $this->migrated_child_count++;
                         }
                     }
@@ -270,20 +337,23 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
                     return __( 'Queued for migration', 'foogallery-migrate' );
                 case self::PROGRESS_STARTED:
                     if ( $this->has_children() ) {
-                        return sprintf(__('Migrated %d of %d %s', 'foogallery-migrate'),
+                        /* translators: 1: migrated items, 2: total items, 3: child type. */
+                        return sprintf( __( 'Migrated %1$d of %2$d %3$s', 'foogallery-migrate' ),
                             $this->migrated_child_count, $this->get_children_count(), $this->children_name());
                     } else {
                         return __('Migrating...', 'foogallery-migrate');
                     }
                 case self::PROGRESS_COMPLETED:
                     if ( $this->has_children() ) {
-                        return sprintf(__('Done! %d %s migrated', 'foogallery-migrate'), $this->migrated_child_count, $this->children_name());
+                        /* translators: 1: migrated items, 2: child type. */
+                        return sprintf( __( 'Done! %1$d %2$s migrated', 'foogallery-migrate' ), $this->migrated_child_count, $this->children_name());
                     } else {
                         return __('Done!', 'foogallery-migrate');
                     }
                 case self::PROGRESS_NOTHING:
                     if ( $this->has_children() ) {
-                        return sprintf(__('No %s to migrate!', 'foogallery-migrate'), $this->children_name());
+                        /* translators: %s: child type. */
+                        return sprintf( __( 'No %s to migrate!', 'foogallery-migrate' ), $this->children_name());
                     } else {
                         return __('Nothing to migrate!', 'foogallery-migrate');
                     }
@@ -311,12 +381,17 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Objects\Migratable' ) ) {
 
 		function get_children_errors() {
 			$errors = array();
+			$children = $this->get_children();
+
+			if ( empty( $children ) && isset( $this->children_errors ) && is_array( $this->children_errors ) ) {
+				return $this->children_errors;
+			}
 
 			if ( !$this->has_children() ) {
 				return $errors;
 			}
 
-			foreach ( $this->get_children() as $child ) {
+			foreach ( $children as $child ) {
                 if ( $child->has_error() ) {
                     $errors[] = $child->get_error_message();
                 }

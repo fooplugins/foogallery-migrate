@@ -36,17 +36,153 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          */
         protected $settings;
 
+        /** @var OptionMigratedStore|MigratedHistoryRepository */
+        protected $migrated_store;
+
+        /** @var array Records queued for one request-level upsert. */
+        protected $pending_migrated_objects = array();
+		/** Table batches retain one compact-request byte ledger while objects arrive. */
+		private $pending_migrated_entry_bytes = array();
+		private $pending_migrated_request_bytes = 0;
+
+        /** @var bool */
+        protected $migrated_batch_active = false;
+
+        /** @var array Request-local compact records keyed by migrated object identifier. */
+        protected $migrated_object_records = array();
+
+        /** True only for the production options factory, not inert injected seams. */
+        private $storage_guarded = false;
+        private $storage_gate;
+        private $storage_control;
+        private $production_backend;
+        /** Request-local source/output calls not yet returned to their caller. */
+        private $storage_operation_depth = 0;
+
+        /**
+         * @param OptionMigratedStore|MigratedHistoryRepository|null $migrated_store Optional injected store.
+         */
+        public function __construct( $migrated_store = null ) {
+            if ( $migrated_store instanceof OptionMigratedStore || $migrated_store instanceof MigratedHistoryRepository ) {
+                $this->migrated_store = $migrated_store;
+                if ( $migrated_store instanceof MigratedHistoryRepository ) { $this->settings = new MigratorSettings( $migrated_store->state_backend() ); }
+                return;
+            }
+            $this->storage_gate = StorageMaintenanceGate::current();
+            $error = StorageAuthority::runtime_record( $this->storage_gate );
+            if ( is_wp_error( $error ) ) {
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- StorageAuthority diagnostic remains exception data, not HTML; the page factory escapes fatal output and AJAX consumers render messages as text.
+                throw new \RuntimeException( $error->get_error_message() );
+            }
+            $this->storage_guarded = true;
+            $this->storage_control = $error;
+        }
+
+        /** Defensive admission before state, source callbacks or output changes. */
+        public function assert_storage_writer() {
+            if ( ! $this->storage_guarded ) { return true; }
+            $error = StorageAuthority::admit_option_writer( $this->storage_gate );
+            if ( is_wp_error( $error ) ) {
+                // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Admission errors are plain diagnostic data. Do not pre-escape exceptions: HTML boundaries escape them, and JSON/CLI consumers require the original message.
+                throw new \RuntimeException( $error->get_error_message() );
+            }
+            $this->assert_storage_context();
+            return true;
+        }
+
+        public function assert_storage_context() {
+            if ( ! $this->storage_guarded ) { return true; }
+            $current = StorageAuthority::runtime_record( $this->storage_gate );
+            if ( is_wp_error( $current ) || $current !== $this->storage_control || $this->storage_gate !== StorageMaintenanceGate::current() ) {
+                throw new \RuntimeException( 'Migration storage authority/context changed; discard the cached engine and use recovery without fallback.' );
+            }
+            return true;
+        }
+
+        private function production_backend() {
+            $this->assert_storage_context();
+            if ( ! isset( $this->production_backend ) ) {
+                $admission = $this->storage_guarded ? array( $this, 'assert_storage_writer' ) : null;
+                if ( is_array( $this->storage_control ) && 'table' === $this->storage_control['backend'] ) {
+                    // Share the marker's failure latch as well as its mysqli
+                    // handle. Uncertain repository COMMIT/readback must not
+                    // leave a separately healthy gate able to release a writer.
+                    $connection = $this->storage_gate->connection();
+                    ( new LegacyStorageSchema( $connection ) )->verify();
+                    $this->production_backend = new LegacyTableBackend( $connection, get_current_blog_id(), 10000, 16777216, 10, $admission, array( $this, 'assert_storage_context' ) );
+                } else { $this->production_backend = new LegacyOptionBackend( $admission ); }
+            }
+            return $this->production_backend;
+        }
+
+        /** The current engine is synchronous; pending request-local work is not drained. */
+        public function storage_is_quiescent() {
+            try {
+                return $this->storage_guarded && $this->storage_gate === StorageMaintenanceGate::current() &&
+                    $this->storage_gate->connection()->is_current() &&
+                    0 === $this->storage_operation_depth &&
+                    Objects\Migratable::storage_is_quiescent() &&
+                    Migrators\MigratorBase::storage_is_quiescent() &&
+                    ! $this->migrated_batch_active && empty( $this->pending_migrated_objects );
+            } catch ( \Exception $error ) { return false; }
+            catch ( \Throwable $error ) { return false; }
+        }
+
+        /** Trusted synchronous-engine verdict for authenticated maintenance.
+         * Across requests the writer markers, not cached engine state, prove
+         * drain. Opaque/injected engines cannot supply an affirmative verdict.
+         */
+        public static function storage_maintenance_is_quiescent() {
+            global $foogallery_migrate_engine_instance;
+            return ! isset( $foogallery_migrate_engine_instance ) ||
+                ( $foogallery_migrate_engine_instance instanceof self && $foogallery_migrate_engine_instance->storage_is_quiescent() );
+        }
+
+        /** Internal synchronous boundary; not a callback or fault-injection API.
+         * Nested operations share the writer but cannot drain the outer call.
+         * No finally: retain the declared PHP 5.4 syntax floor.
+         */
+        private function storage_operation( $method, $arguments = array() ) {
+            $this->assert_storage_writer();
+            $this->storage_operation_depth++;
+            try {
+                $result = call_user_func_array( array( $this, $method ), $arguments );
+                $this->assert_storage_writer();
+            } catch ( \Exception $error ) {
+                $this->storage_operation_depth--;
+                throw $error;
+            } catch ( \Throwable $error ) {
+                $this->storage_operation_depth--;
+                throw $error;
+            }
+            $this->storage_operation_depth--;
+            return $result;
+        }
+
         /**
          * Returns the migrator settings handler.
          *
          * @return MigratorSettings
          */
         protected function settings() {
+            $this->assert_storage_context();
             if ( ! isset( $this->settings ) ) {
-                $this->settings = new MigratorSettings();
+                $admission = $this->storage_guarded ? array( $this, 'assert_storage_writer' ) : null;
+                $this->settings = new MigratorSettings( $this->production_backend(), $admission );
             }
 
             return $this->settings;
+        }
+
+        /** @return OptionMigratedStore|MigratedHistoryRepository */
+        protected function migrated_store() {
+            $this->assert_storage_context();
+            if ( ! isset( $this->migrated_store ) ) {
+                $admission = $this->storage_guarded ? array( $this, 'assert_storage_writer' ) : null;
+                $this->migrated_store = new MigratedHistoryRepository( $this->production_backend(), $this->settings() );
+            }
+
+            return $this->migrated_store;
         }
 
         /**
@@ -66,6 +202,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return bool Whether the setting was persisted.
          */
         public function set_migrator_setting( $name, $value ) {
+            return $this->storage_operation( 'set_migrator_setting_admitted', array( $name, $value ) );
+        }
+
+        private function set_migrator_setting_admitted( $name, $value ) {
             return $this->settings()->set_migrator_setting( $name, $value );
         }
 
@@ -85,6 +225,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return void
          */
         public function save_settings( $settings ) {
+            $this->storage_operation( 'save_settings_admitted', array( $settings ) );
+        }
+
+        private function save_settings_admitted( $settings ) {
             $this->settings()->save_settings( $settings );
         }
 
@@ -175,7 +319,32 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return void
          */
         public function clear_migrator_setting() {
-            $this->settings()->clear_migrator_setting();
+            if ( $this->storage_guarded && ! is_multisite() ) {
+                $blog = get_current_blog_id();
+                $result = ( new StorageOperations() )->dispatch( 'clear', array(
+                    'blog_id' => $blog, 'scope' => 'site', 'target' => 'state',
+                    'confirmation' => 'clear-current-state',
+                    'nonce' => wp_create_nonce( 'foogallery_migrate_storage_clear_' . $blog )
+                ) );
+                if ( is_wp_error( $result ) ) {
+                    // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped -- Cleanup dispatch returns a fixed diagnostic WP_Error; throwing does not emit HTML. Display boundaries escape messages rather than double-escaping exception data.
+                    throw new \RuntimeException( $result->get_error_message() );
+                }
+                return ! empty( $result['complete'] );
+            }
+            return $this->storage_operation( 'clear_migrator_setting_admitted' );
+        }
+
+        private function clear_migrator_setting_admitted() {
+            $this->assert_storage_writer();
+			if ( ! $this->settings()->can_clear_migrator_state() ) { throw new \RuntimeException( 'Whole table-state reset is not admitted. No partial history clear or option fallback.' ); }
+			if ( ! $this->migrated_store()->clear() ) {
+				return false;
+			}
+
+			$cleared = $this->settings()->clear_migrator_setting();
+			if ( $cleared ) { StorageDiscoverySummary::invalidate(); }
+			return $cleared;
         }
 
         /**
@@ -193,10 +362,17 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array<Plugin>
          */
         public function run_detection() {
+            return $this->storage_operation( 'run_detection_admitted' );
+        }
+
+        private function run_detection_admitted() {
+            StorageDiscoverySummary::invalidate();
             $plugins = foogallery_migrate_get_available_plugins();
 
             foreach ( $plugins as $plugin ) {
+                $this->assert_storage_writer();
                 $plugin->is_detected = $plugin->detect();
+                $this->assert_storage_writer();
             }
             $this->set_migrator_setting( self::KEY_PLUGINS, $plugins );
 
@@ -314,6 +490,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array
          */
         public function get_image_tag_sync_status() {
+            if ( $this->uses_scoped_history() ) {
+                $entry = $this->image_tag_queue_repository()->summary();
+                return $this->format_image_tag_sync_state( $entry['found'] ? $entry['summary'] : $this->get_default_image_tag_sync_state() );
+            }
             return $this->format_image_tag_sync_state(
                 $this->get_migrator_setting(
                     self::KEY_IMAGE_TAG_SYNC,
@@ -328,6 +508,10 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array|\WP_Error
          */
         public function start_image_tag_sync() {
+            return $this->storage_operation( 'start_image_tag_sync_admitted' );
+        }
+
+        private function start_image_tag_sync_admitted() {
             if ( ! $this->can_assign_image_tag_terms() ) {
                 return new \WP_Error(
                     'foogallery_migrate_image_tags_unavailable',
@@ -335,7 +519,8 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 );
             }
 
-            $this->set_migrator_setting( self::KEY_IMAGE_TAG_SYNC, $this->build_image_tag_sync_state() );
+            if ( $this->uses_scoped_history() ) { $this->build_image_tag_sync_table(); }
+            else { $this->set_migrator_setting( self::KEY_IMAGE_TAG_SYNC, $this->build_image_tag_sync_state() ); }
 
             return $this->continue_image_tag_sync();
         }
@@ -346,12 +531,18 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array|\WP_Error
          */
         public function continue_image_tag_sync() {
+            return $this->storage_operation( 'continue_image_tag_sync_admitted' );
+        }
+
+        private function continue_image_tag_sync_admitted() {
             if ( ! $this->can_assign_image_tag_terms() ) {
                 return new \WP_Error(
                     'foogallery_migrate_image_tags_unavailable',
                     __( 'FooGallery media tags are not available.', 'foogallery-migrate' )
                 );
             }
+
+            if ( $this->uses_scoped_history() ) { return $this->continue_image_tag_sync_table(); }
 
             $state = $this->get_migrator_setting( self::KEY_IMAGE_TAG_SYNC, false );
             if ( false === $state || ! is_array( $state ) ) {
@@ -380,7 +571,9 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                     continue;
                 }
 
+                $this->assert_storage_writer();
                 $result = wp_set_object_terms( $attachment_id, $tags, FOOGALLERY_ATTACHMENT_TAXONOMY_TAG, true );
+                $this->assert_storage_writer();
                 if ( is_wp_error( $result ) ) {
                     $this->add_image_tag_sync_error( $state, $item, $result->get_error_message() );
                     continue;
@@ -399,6 +592,57 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
             return $this->format_image_tag_sync_state( $state );
         }
 
+        private function image_tag_queue_repository() {
+            return new ImageTagQueueRepository( $this->production_backend(), $this->settings() );
+        }
+
+        /** Existing term/output decisions; only queue reads/checkpoints are paged. */
+        private function continue_image_tag_sync_table() {
+            $queue = $this->image_tag_queue_repository(); $entry = $queue->summary();
+            if ( ! $entry['found'] ) {
+                return new \WP_Error( 'foogallery_migrate_image_tags_not_queued', __( 'No image tag sync is queued.', 'foogallery-migrate' ) );
+            }
+            $state = $entry['summary'];
+            $total = isset( $state['total'] ) ? absint( $state['total'] ) : $entry['total'];
+            $processed = isset( $state['processed'] ) ? absint( $state['processed'] ) : 0;
+            // Legacy continuation treats an already-past-total saved cursor as
+            // complete; it does not rewind the queue or replay term output.
+            $remaining = $processed >= $total ? 0 : min( $total - $processed, max( 1, $this->get_images_per_turn() ) );
+            $cursor = $processed;
+            while ( $remaining > 0 ) {
+                $limit = min( 100, $remaining ); $batch = $queue->nextBatch( $limit, $cursor );
+                if ( ! is_array( $batch ) || ! isset( $batch['rows'], $batch['revision'] ) ||
+                    $batch['revision'] !== $entry['revision'] || count( $batch['rows'] ) !== $limit ) {
+                    throw new \RuntimeException( 'Image-tag queue changed during the turn.' );
+                }
+                foreach ( $batch['rows'] as $row ) {
+                    if ( ! is_array( $row ) || ! isset( $row['key'] ) || $row['key'] !== $processed ) {
+                        throw new \RuntimeException( 'Image-tag queue order changed during the turn.' );
+                    }
+                    $item = $row['value']; ++$processed; --$remaining;
+                    $attachment_id = isset( $item['attachment_id'] ) ? absint( $item['attachment_id'] ) : 0;
+                    $tags = isset( $item['tags'] ) ? $this->normalize_image_tag_terms( $item['tags'] ) : array();
+                    if ( $attachment_id < 1 || empty( $tags ) ) {
+                        $state['skipped'] = isset( $state['skipped'] ) ? absint( $state['skipped'] ) + 1 : 1;
+                        continue;
+                    }
+                    $this->assert_storage_writer();
+                    $result = wp_set_object_terms( $attachment_id, $tags, FOOGALLERY_ATTACHMENT_TAXONOMY_TAG, true );
+                    $this->assert_storage_writer();
+                    if ( is_wp_error( $result ) ) { $this->add_image_tag_sync_error( $state, $item, $result->get_error_message() ); continue; }
+                    $state['updated'] = isset( $state['updated'] ) ? absint( $state['updated'] ) + 1 : 1;
+                }
+                $cursor = $batch['cursor'];
+                if ( $remaining > 0 && null === $cursor ) { throw new \RuntimeException( 'Image-tag queue ended before the requested turn.' ); }
+            }
+            $state['processed'] = $processed; $state['total'] = $total;
+            $state['complete'] = $processed >= $total;
+            $state['progress'] = $total > 0 ? min( 100, (int) floor( $processed / $total * 100 ) ) : 100;
+            $this->assert_storage_writer();
+            if ( ! $queue->applyBatchPatch( array(), $state, $entry['revision'] ) ) { throw new \RuntimeException( 'Image-tag queue checkpoint failed.' ); }
+            return $this->format_image_tag_sync_state( $state );
+        }
+
         /**
          * Returns true when FooGallery media tag terms can be assigned.
          *
@@ -409,6 +653,140 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 function_exists( 'taxonomy_exists' ) &&
                 taxonomy_exists( FOOGALLERY_ATTACHMENT_TAXONOMY_TAG ) &&
                 function_exists( 'wp_set_object_terms' );
+        }
+
+        /** Build only table mode here; the option builder below is unchanged. */
+        private function build_image_tag_sync_table() {
+            $history = $this->migrated_store(); $queue = $this->image_tag_queue_repository();
+            $pin = $history->tag_build_identity(); $unmatched = 0; $total = 0;
+            if ( ! $queue->beginReplacement() ) { throw new \RuntimeException( 'Image-tag queue replacement could not begin.' ); }
+            try {
+                $cursor = null;
+                do {
+                    $this->assert_storage_writer();
+                    $page = $history->page_log( 'image', '', 100, $cursor );
+                    if ( $page['revision'] !== $pin['logical_revision'] || $history->tag_build_identity() !== $pin ) {
+                        throw new \RuntimeException( 'Migrated history changed during image-tag queue construction.' );
+                    }
+                    $items = array();
+                    foreach ( $page['rows'] as $row ) {
+                        $object = $row['value'];
+                        if ( ! is_object( $object ) || ! method_exists( $object, 'type' ) || 'image' !== $object->type() ) { continue; }
+                        $attachment_id = isset( $object->migrated_id ) ? absint( $object->migrated_id ) : 0;
+                        if ( $attachment_id < 1 ) { continue; }
+                        $tags = $this->get_migrated_object_image_tags( $object );
+                        if ( empty( $tags ) ) { continue; }
+                        $items[] = array( 'attachment_id' => $attachment_id,
+                            'plugin_name' => $this->get_migrated_object_plugin_name( $object ),
+                            'source_image_id' => isset( $object->ID ) ? absint( $object->ID ) : 0,
+                            'source_url' => isset( $object->source_url ) && is_scalar( $object->source_url ) ? (string) $object->source_url : '',
+                            'tags' => $tags, 'source' => 'state' );
+                    }
+                    $this->assert_storage_writer();
+                    if ( $history->tag_build_identity() !== $pin ) { throw new \RuntimeException( 'History changed during image-tag source callbacks.' ); }
+                    $this->append_image_tag_build_page( $queue, $items, $total );
+                    $cursor = $page['cursor'];
+                    if ( null !== $cursor && ! count( $page['rows'] ) ) { throw new \RuntimeException( 'Empty nonterminal image history page.' ); }
+                } while ( null !== $cursor );
+
+                foreach ( $this->get_plugins() as $plugin ) {
+                    if ( ! is_object( $plugin ) || empty( $plugin->is_detected ) || ! method_exists( $plugin, 'find_image_tag_sync_items' ) ) { continue; }
+                    $this->assert_storage_writer(); $fallback_items = $plugin->find_image_tag_sync_items(); $this->assert_storage_writer();
+                    if ( $history->tag_build_identity() !== $pin ) { throw new \RuntimeException( 'History changed during image-tag adapter scan.' ); }
+                    if ( ! is_array( $fallback_items ) ) { continue; }
+                    $page = array();
+                    foreach ( $fallback_items as $item ) {
+                        $page[] = $item;
+                        if ( count( $page ) === 100 ) { $unmatched += $this->append_image_tag_fallback_page( $history, $queue, $page, $pin, $total ); $page = array(); }
+                    }
+                    if ( count( $page ) ) { $unmatched += $this->append_image_tag_fallback_page( $history, $queue, $page, $pin, $total ); }
+                    unset( $fallback_items );
+                }
+                if ( $history->tag_build_identity() !== $pin ) { throw new \RuntimeException( 'History changed before image-tag queue publication.' ); }
+                // Staged rows are engine-computed and were read back page by page;
+                // the physical finalizer supplies their exact count atomically.
+                $summary = array( 'total' => $total, 'processed' => 0, 'updated' => 0, 'skipped' => 0, 'unmatched' => $unmatched,
+                    'error_count' => 0, 'errors' => array(), 'complete' => 0 === $total, 'progress' => 0 === $total ? 100 : 0 );
+                $this->assert_storage_writer();
+                if ( ! $queue->finalizeReplacement( $summary ) ) { throw new \RuntimeException( 'Image-tag queue publication failed.' ); }
+            } catch ( \Exception $error ) { $queue->abortReplacement(); throw $error; }
+            catch ( \Throwable $error ) { $queue->abortReplacement(); throw $error; }
+        }
+
+        /** Merge only current-page attachment IDs, retaining the first item's metadata. */
+        private function append_image_tag_build_page( $queue, $candidates, &$total ) {
+            if ( ! count( $candidates ) ) { return; }
+            $keys = array(); $positions = array();
+            foreach ( $candidates as $item ) {
+                $id = $item['attachment_id']; if ( ! isset( $positions[$id] ) ) { $positions[$id] = count( $keys ); $keys[] = $id; }
+            }
+            $existing = $queue->getManyBuildRowsByKeys( $keys );
+            if ( ! is_array( $existing ) || count( $existing ) !== count( $keys ) ) { throw new \RuntimeException( 'Staged image-tag lookup failed.' ); }
+            $items = array(); $seen = array(); $new = 0;
+            foreach ( $existing as $index => $row ) {
+                if ( ! is_array( $row ) || $row['key'] !== $keys[$index] ) { throw new \RuntimeException( 'Staged image-tag identity changed.' ); }
+                if ( $row['found'] ) {
+                    if ( ! is_array( $row['value'] ) || ! isset( $row['value']['attachment_id'] ) || $row['value']['attachment_id'] !== $row['key'] ) { throw new \RuntimeException( 'Staged image-tag row changed.' ); }
+                    $seen[(string) $row['key']] = count( $items ); $items[] = $row['value'];
+                } else { ++$new; }
+            }
+            foreach ( $candidates as $item ) { $this->add_image_tag_sync_item( $items, $seen, $item ); }
+            if ( count( $items ) > 100 || ! $queue->applyEngineComputedBuildPage( $items ) ) { throw new \RuntimeException( 'Bounded image-tag build page failed.' ); }
+            $total += $new;
+        }
+
+        /** Adapter output is existing source-owned memory; only its current page is resolved. */
+        private function append_image_tag_fallback_page( $history, $queue, $fallback_items, $pin, &$total ) {
+            $numeric = array(); $numeric_keys = array(); $source_id_map = array(); $source_url_map = array();
+            $eligible = array();
+            foreach ( $fallback_items as $item ) {
+                if ( ! is_array( $item ) ) { continue; }
+                $tags = isset( $item['tags'] ) ? $this->normalize_image_tag_terms( $item['tags'] ) : array();
+                if ( empty( $tags ) ) { continue; }
+                $item['tags'] = $tags; $eligible[] = $item;
+            }
+            foreach ( $eligible as $item ) {
+                if ( isset( $item['attachment_id'] ) && absint( $item['attachment_id'] ) > 0 ) { continue; }
+                $plugin = isset( $item['plugin_name'] ) && is_scalar( $item['plugin_name'] ) ? (string) $item['plugin_name'] : '';
+                $id = isset( $item['source_image_id'] ) ? absint( $item['source_image_id'] ) : 0;
+                if ( '' === $plugin || $id < 1 ) { continue; }
+                $key = serialize( array( $plugin, $id ) );
+                if ( ! isset( $numeric_keys[$key] ) ) { $numeric_keys[$key] = true; $numeric[] = array( 'type' => 'image', 'plugin' => $plugin, 'id' => $id ); }
+            }
+            if ( count( $numeric ) ) {
+                $targets = $history->tag_numeric_targets( $numeric, $pin );
+                if ( ! is_array( $targets ) || count( $targets ) !== count( $numeric ) ) { throw new \RuntimeException( 'Incomplete image source lookup.' ); }
+                foreach ( $numeric as $index => $identity ) {
+                    if ( $targets[$index] > 0 ) { $source_id_map[$identity['plugin']][$identity['id']] = $targets[$index]; }
+                }
+            }
+            $urls = array(); $url_seen = array();
+            foreach ( $eligible as $item ) {
+                if ( isset( $item['attachment_id'] ) && absint( $item['attachment_id'] ) > 0 ) { continue; }
+                $plugin = isset( $item['plugin_name'] ) && is_scalar( $item['plugin_name'] ) ? (string) $item['plugin_name'] : '';
+                $id = isset( $item['source_image_id'] ) ? absint( $item['source_image_id'] ) : 0;
+                if ( '' !== $plugin && $id > 0 && isset( $source_id_map[$plugin][$id] ) ) { continue; }
+                $url = isset( $item['source_url'] ) && is_scalar( $item['source_url'] ) ? (string) $item['source_url'] : '';
+                $key = base64_encode( $url );
+                if ( '' !== $url && ! isset( $url_seen[$key] ) ) { $url_seen[$key] = true; $urls[] = $url; }
+            }
+            if ( count( $urls ) ) {
+                $targets = $history->tag_source_urls( $urls, $pin );
+                if ( ! is_array( $targets ) || count( $targets ) !== count( $urls ) ) { throw new \RuntimeException( 'Incomplete image URL lookup.' ); }
+                foreach ( $urls as $index => $url ) { if ( $targets[$index] > 0 ) { $source_url_map[$url] = $targets[$index]; } }
+            }
+            $items = array(); $unmatched = 0;
+            foreach ( $eligible as $item ) {
+                $tags = $item['tags'];
+                $attachment_id = $this->resolve_image_tag_sync_attachment_id( $item, $source_url_map, $source_id_map );
+                if ( $attachment_id < 1 ) { ++$unmatched; continue; }
+                $item['attachment_id'] = $attachment_id; $item['tags'] = $tags;
+                $item['source'] = isset( $item['source'] ) ? $item['source'] : 'fallback'; $items[] = $item;
+            }
+            $this->assert_storage_writer();
+            if ( $history->tag_build_identity() !== $pin ) { throw new \RuntimeException( 'History changed during image-tag fallback callbacks.' ); }
+            $this->append_image_tag_build_page( $queue, $items, $total );
+            return $unmatched;
         }
 
         /**
@@ -774,17 +1152,141 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
         }
 
         /**
+         * Returns true when a migrated object differs from its request-local record.
+         *
+         * @param Migratable $object Migrated object candidate.
+         * @return bool
+         */
+        private function migrated_object_has_changed( $object ) {
+            $key = (string) $object->unique_identifier();
+            if ( ! array_key_exists( $key, $this->migrated_object_records ) ) {
+                return true;
+            }
+
+            return $this->migrated_object_records[ $key ] !== $this->settings()->compact_migrated_object( $object );
+        }
+
+        /**
+         * Cache one migrated object record without querying the full store.
+         *
+         * @param Migratable $object Migrated object.
+         * @return void
+         */
+        private function remember_migrated_object( $object ) {
+            if ( is_object( $object ) && method_exists( $object, 'unique_identifier' ) ) {
+                $this->migrated_object_records[ (string) $object->unique_identifier() ] = $this->settings()->compact_migrated_object( $object );
+            }
+        }
+
+        /**
+         * Advance the scalar migrated-object revision without restoring the legacy map.
+         *
+         * @return bool Whether the revision was persisted.
+         */
+        private function increment_migrated_revision() {
+            if ( $this->migrated_store()->manages_revision() ) {
+                return true;
+            }
+            return $this->set_migrator_setting( self::KEY_MIGRATED_REVISION, $this->get_migrated_revision() + 1 );
+        }
+
+        /**
          * Store a migrated object, so that it does not get migrated twice.
          *
          * @param $object Migratable
          * @return void
          */
         public function add_migrated_object( $object ) {
-            $objects = $this->get_migrated_objects();
-            if ( !array_key_exists( $object->unique_identifier(), $objects ) ) {
-                $objects[$object->unique_identifier()] = $object;
-                $this->set_migrator_setting(self::KEY_MIGRATED, $objects);
+            return $this->storage_operation( 'add_migrated_object_admitted', array( $object ) );
+        }
+
+        private function add_migrated_object_admitted( $object ) {
+            $this->assert_storage_writer();
+            if ( ! is_object( $object ) || ! method_exists( $object, 'unique_identifier' ) ) {
+                return false;
             }
+
+            $key = (string) $object->unique_identifier();
+            $record = array(
+                'object'     => $object,
+                'parent_key' => isset( $object->migration_parent_key ) ? $object->migration_parent_key : null,
+            );
+
+            if ( $this->migrated_batch_active ) {
+				$store = $this->migrated_store();
+				if ( $store instanceof MigratedHistoryRepository && $store->state_backend() instanceof LegacyTableBackend ) {
+					$entry = array( 'key' => array_keys( array( $key => true ) )[0],
+						'value' => $this->settings()->compact_migrated_object( $object ),
+						'parent' => ! empty( $record['parent_key'] ) ? (string) $record['parent_key'] : null,
+						'fallback_parent' => ! empty( $object->migration_parent_key ) ? (string) $object->migration_parent_key : null );
+					$bytes = strlen( ( new LegacyStateCodec() )->encode( $entry ) );
+					$old_bytes = isset( $this->pending_migrated_entry_bytes[$key] ) ? $this->pending_migrated_entry_bytes[$key] : 0;
+					if ( ( ! isset( $this->pending_migrated_objects[$key] ) && count( $this->pending_migrated_objects ) >= 10000 ) ||
+						$bytes > 16777216 - ( $this->pending_migrated_request_bytes - $old_bytes ) ) {
+						throw new \RuntimeException( 'Pending table history exceeds the bounded operation size.' );
+					}
+					$this->pending_migrated_request_bytes += $bytes - $old_bytes;
+					$this->pending_migrated_entry_bytes[$key] = $bytes;
+				}
+                $this->pending_migrated_objects[ $key ] = $record;
+                return true;
+            }
+
+            $changed = $this->migrated_object_has_changed( $object );
+            if ( $changed && ! $this->increment_migrated_revision() ) {
+                return false;
+            }
+
+            if ( false === $this->migrated_store()->upsert_batch( array( $record ) ) ) {
+                return false;
+            }
+
+            $this->remember_migrated_object( $object );
+            return true;
+        }
+
+        /** @return void */
+        public function begin_migrated_object_batch() {
+            $this->assert_storage_writer();
+            $this->pending_migrated_objects = array();
+			$this->pending_migrated_entry_bytes = array(); $this->pending_migrated_request_bytes = 0;
+            $this->migrated_batch_active = true;
+        }
+
+        /** @return bool */
+        public function flush_migrated_object_batch() {
+            return $this->storage_operation( 'flush_migrated_object_batch_admitted' );
+        }
+
+        private function flush_migrated_object_batch_admitted() {
+            $this->assert_storage_writer();
+            $records = array_values( $this->pending_migrated_objects );
+			$changed = false;
+			foreach ( $records as $record ) {
+				if ( isset( $record['object'] ) && $this->migrated_object_has_changed( $record['object'] ) ) {
+					$changed = true;
+					break;
+				}
+			}
+
+			if ( $changed && ! $this->increment_migrated_revision() ) {
+				return false;
+			}
+
+			if ( ! empty( $records ) && false === $this->migrated_store()->upsert_batch( $records ) ) {
+				return false;
+			}
+
+			foreach ( $records as $record ) {
+				if ( isset( $record['object'] ) ) {
+					$this->remember_migrated_object( $record['object'] );
+				}
+			}
+
+			$this->pending_migrated_objects = array();
+			$this->pending_migrated_entry_bytes = array(); $this->pending_migrated_request_bytes = 0;
+			$this->migrated_batch_active = false;
+			return true;
         }
 
         /**
@@ -794,7 +1296,11 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return bool
          */
         public function has_object_been_migrated( $unique_identifier ) {
-            return array_key_exists( $unique_identifier, $this->get_migrated_objects() );
+            if ( isset( $this->pending_migrated_objects[ $unique_identifier ] ) ) {
+                return true;
+            }
+
+            return $this->migrated_store()->has( $unique_identifier );
         }
 
         /**
@@ -803,11 +1309,22 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array<Migratable>
          */
         public function get_migrated_objects() {
-            $objects = $this->get_migrator_setting( self::KEY_MIGRATED );
-            if ( $objects === false ) {
-                $objects = array();
+            $objects = $this->migrated_store()->get_all();
+            foreach ( $objects as $object ) {
+                $this->remember_migrated_object( $object );
             }
+
             return $objects;
+        }
+
+        /** Inform existing content callers about explicit injection, never select authority. */
+        public function content_scan_repository() { return $this->settings()->content_scan_repository(); }
+		public function table_collection_repository() { return $this->settings()->table_collection_repository(); }
+
+        public function uses_scoped_history() {
+            $store = $this->migrated_store();
+            return $store instanceof MigratedHistoryRepository
+                && $store->state_backend() instanceof LegacyTableBackend;
         }
 
         /**
@@ -819,6 +1336,9 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return int
          */
         public function get_migrated_revision() {
+            if ( $this->migrated_store()->manages_revision() ) {
+                return $this->migrated_store()->revision();
+            }
             $revision = $this->get_migrator_setting( self::KEY_MIGRATED_REVISION, false );
             if ( false !== $revision ) {
                 return absint( $revision );
@@ -835,19 +1355,35 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return Migratable|\WP_Error
          */
         public function update_migrated_object_status( $unique_identifier, $status ) {
-            $objects = $this->get_migrated_objects();
-            if ( ! array_key_exists( $unique_identifier, $objects ) ) {
+            return $this->storage_operation( 'update_migrated_object_status_admitted', array( $unique_identifier, $status ) );
+        }
+
+        private function update_migrated_object_status_admitted( $unique_identifier, $status ) {
+            $this->assert_storage_writer();
+            $object = $this->get_migrated_object( $unique_identifier );
+            if ( false === $object ) {
                 return new \WP_Error( 'foogallery_migrate_missing_object', __( 'Migrated object not found.', 'foogallery-migrate' ) );
             }
 
-            $object = $objects[ $unique_identifier ];
             if ( ! is_object( $object ) ) {
                 return new \WP_Error( 'foogallery_migrate_invalid_object', __( 'Invalid migrated object.', 'foogallery-migrate' ) );
             }
 
-            $object->migration_status = $status;
-            $objects[ $unique_identifier ] = $object;
-            $this->set_migrator_setting( self::KEY_MIGRATED, $objects );
+            // Patch the exact stored key, not a re-derived identifier or a narrowed
+            // hydrated record. Preserve unknown raw fields and wrapper metadata.
+            if ( ! $this->migrated_batch_active && $this->migrated_store()->manages_revision() ) {
+                $saved = $this->migrated_store()->set_status( $unique_identifier, $status );
+                if ( $saved ) {
+                    $object->migration_status = $status;
+                    $this->remember_migrated_object( $object );
+                }
+            } else {
+                $object->migration_status = $status;
+                $saved = $this->add_migrated_object( $object );
+            }
+            if ( false === $saved ) {
+                return new \WP_Error( 'foogallery_migrate_store_write_failed', __( 'Migrated object could not be updated.', 'foogallery-migrate' ) );
+            }
 
             return $object;
         }
@@ -859,14 +1395,24 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return bool|\WP_Error
          */
         public function delete_migrated_object( $unique_identifier ) {
-            $objects = $this->get_migrated_objects();
-            if ( ! array_key_exists( $unique_identifier, $objects ) ) {
+            return $this->storage_operation( 'delete_migrated_object_admitted', array( $unique_identifier ) );
+        }
+
+        private function delete_migrated_object_admitted( $unique_identifier ) {
+            $this->assert_storage_writer();
+            if ( ! $this->has_object_been_migrated( $unique_identifier ) ) {
                 return new \WP_Error( 'foogallery_migrate_missing_object', __( 'Migrated object not found.', 'foogallery-migrate' ) );
             }
 
-            unset( $objects[ $unique_identifier ] );
-            $this->set_migrator_setting( self::KEY_MIGRATED, $objects );
+            if ( ! $this->increment_migrated_revision() ) {
+                return false;
+            }
 
+            if ( ! $this->migrated_store()->delete( $unique_identifier ) ) {
+                return false;
+            }
+
+            unset( $this->migrated_object_records[ $unique_identifier ] );
             return true;
         }
 
@@ -876,10 +1422,16 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return Migratable|bool
          */
         public function get_migrated_object( $unique_identifier ) {
-            if ( $this->has_object_been_migrated( $unique_identifier ) ) {
-                return $this->get_migrated_objects()[$unique_identifier];
+            if ( isset( $this->pending_migrated_objects[ $unique_identifier ] ) ) {
+                return $this->pending_migrated_objects[ $unique_identifier ]['object'];
             }
-            return false;
+
+            $object = $this->migrated_store()->get( $unique_identifier );
+            if ( false !== $object ) {
+                $this->remember_migrated_object( $object );
+            }
+
+            return $object;
         }
 
         /**
@@ -888,7 +1440,11 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return bool
          */
         public function has_migrated_objects() {
-            return $this->settings()->has_migrator_setting_items( self::KEY_MIGRATED );
+            $store = $this->migrated_store();
+            // The explicitly injected common repository owns presence, including
+            // empty table history. Never reinterpret it using stale options.
+            return $store instanceof MigratedHistoryRepository ? $store->count() > 0
+                : $store->count() > 0 || $this->settings()->has_migrator_setting_items( self::KEY_MIGRATED );
         }
 
         /**
@@ -897,22 +1453,93 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array
          */
         public function get_migrated_objects_summary() {
-			$summary = array();
-			
-            foreach( $this->get_migrated_objects() as $object ) {
-                if ( !array_key_exists( $object->type(), $summary ) ) {
-                    $summary[$object->type()] = array(
-						'count' => 0,
-						'errors' => 0,
-					);
-                }
+            return $this->migrated_store()->summary();
+        }
 
-                $summary[$object->type()]['count']++;
-				if ( Migratable::PROGRESS_ERROR === $object->migration_status  ) {
-					$summary[$object->type()]['errors']++;
-				}
+        /** Read-only log metadata; table pages must never populate the engine's object cache. */
+        public function get_migrated_log_summary() {
+            return $this->migrated_store()->log_summary();
+        }
+
+        /** One bounded log page in persisted order, with the repository's revision-bound cursor. */
+        public function get_migrated_log_page( $type = '', $status = '', $limit = 100, $cursor = null ) {
+            return $this->migrated_store()->page_log( $type, $status, $limit, $cursor );
+        }
+
+        /**
+         * Overlays one parent's request-local children from bounded storage reads.
+         *
+         * @param object $parent Parent migratable object.
+         * @return void
+         */
+        public function apply_migrated_children( $parent ) {
+            if ( ! is_object( $parent ) || ! method_exists( $parent, 'unique_identifier' ) || ! method_exists( $parent, 'get_children' ) ) {
+                return;
             }
-            return $summary;
+
+            $parent_key = (string) $parent->unique_identifier();
+            $stored = array();
+            $children = $parent->get_children();
+            $store = $this->migrated_store();
+            $table_backend = $store instanceof MigratedHistoryRepository ? $store->state_backend() : null;
+            if ( $table_backend instanceof LegacyTableBackend ) {
+                // The parent already owns the complete loaded child list. Keep
+                // each table read within one 100-key/byte budget and replace
+                // only those children, releasing each fetched page before the
+                // next one. Pin the same verified history heads across pages;
+                // a supported history write changes this context, so never
+                // publish children assembled from different revisions.
+                $history_context = $table_backend->history_read( 'revision' );
+                $history_context = $history_context['context'];
+                $keys = array(); $positions = array();
+                foreach ( $children as $index => $child ) {
+                    if ( ! is_object( $child ) || ! method_exists( $child, 'unique_identifier' ) ) { continue; }
+                    $key = $child->unique_identifier(); $typed = serialize( $key );
+                    $keys[$typed] = $key; $positions[(string) $key][] = $index;
+                }
+                foreach ( array_chunk( array_values( $keys ), 100 ) as $batch ) {
+                    $migrated_children = $store->get_children_for_parent( $parent_key, $batch );
+                    foreach ( $migrated_children as $object ) {
+                        if ( ! is_object( $object ) || ! method_exists( $object, 'unique_identifier' ) ) { continue; }
+                        $key = (string) $object->unique_identifier();
+                        if ( ! isset( $positions[$key] ) ) { continue; }
+                        $object->migration_store_checked = true;
+                        foreach ( $positions[$key] as $index ) { $children[$index] = $object; }
+                    }
+                    unset( $migrated_children );
+                }
+                $after_context = $table_backend->history_read( 'revision' );
+                if ( $after_context['context'] !== $history_context ) {
+                    throw new \RuntimeException( 'Table history changed during loaded child restoration.' );
+                }
+            } elseif ( $store instanceof MigratedHistoryRepository ) {
+                $keys = array();
+                foreach ( $children as $child ) {
+                    if ( is_object( $child ) && method_exists( $child, 'unique_identifier' ) ) { $key = $child->unique_identifier(); $keys[serialize( $key )] = $key; }
+                }
+                $migrated_children = $store->get_children_for_parent( $parent_key, array_values( $keys ) );
+            } else { $migrated_children = $store->get_by_parent( $parent_key ); }
+            if ( ! ( $table_backend instanceof LegacyTableBackend ) ) {
+                foreach ( $migrated_children as $object ) {
+                    if ( is_object( $object ) && method_exists( $object, 'unique_identifier' ) ) {
+                        $stored[ (string) $object->unique_identifier() ] = $object;
+                    }
+                }
+            }
+
+            foreach ( $children as $index => $child ) {
+                if ( ! is_object( $child ) || ! method_exists( $child, 'unique_identifier' ) ) {
+                    continue;
+                }
+                $child_key = (string) $child->unique_identifier();
+                if ( isset( $stored[ $child_key ] ) ) {
+                    $child = $stored[ $child_key ];
+					$child->migration_store_checked = true;
+                }
+                $child->migration_parent_key = $parent_key;
+                $children[ $index ] = $child;
+            }
+            $parent->children = $children;
         }
 
         /**
@@ -922,8 +1549,29 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return bool|\WP_Error
          */
         public function retry_gallery_migration( $unique_identifier ) {
+            return $this->storage_operation( 'retry_gallery_migration_admitted', array( $unique_identifier ) );
+        }
+
+        /** Absent collection keeps the legacy one-time source discovery; an unknown UID does not rediscover it. */
+        private function targeted_gallery_context( $table, $gallery_migrator, $unique_identifier ) {
+            $target = $table->targeted_context( self::KEY_GALLERIES, $unique_identifier );
+            if ( ! empty( $target['absent'] ) ) {
+                $gallery_migrator->get_objects_to_migrate();
+                $target = $table->targeted_context( self::KEY_GALLERIES, $unique_identifier );
+                if ( ! empty( $target['absent'] ) ) { throw new \RuntimeException( 'Discovered gallery collection was not persisted.' ); }
+            }
+            return $target;
+        }
+
+        private function retry_gallery_migration_admitted( $unique_identifier ) {
+            $this->assert_storage_writer();
             $gallery_migrator = $this->get_gallery_migrator();
-            $galleries = $gallery_migrator->get_objects_to_migrate();
+            $table = $this->table_collection_repository();
+            $target = null;
+            if ( null !== $table ) {
+                $target = $this->targeted_gallery_context( $table, $gallery_migrator, $unique_identifier );
+                $galleries = $target['found'] ? array( $target['object'] ) : array();
+            } else { $galleries = $gallery_migrator->get_objects_to_migrate(); }
             $gallery_index = null;
             $gallery = null;
 
@@ -943,11 +1591,9 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 return new \WP_Error( 'foogallery_migrate_missing_gallery', __( 'Gallery not found.', 'foogallery-migrate' ) );
             }
 
-            $migrated_objects = $this->get_migrated_objects();
-
-            if ( array_key_exists( $unique_identifier, $migrated_objects ) ) {
-                unset( $migrated_objects[ $unique_identifier ] );
-            }
+            $gallery->ensure_children_loaded();
+            $this->apply_migrated_children( $gallery );
+			$reset_records = array();
 
             if ( method_exists( $gallery, 'has_children' ) && $gallery->has_children() ) {
                 $children = $gallery->get_children();
@@ -956,7 +1602,6 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                         continue;
                     }
 
-                    $child_key = $child->unique_identifier();
                     $child_has_error = false;
                     if ( method_exists( $child, 'has_error' ) && $child->has_error() ) {
                         $child_has_error = true;
@@ -969,10 +1614,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                         $child->migration_status = Migratable::PROGRESS_NOT_STARTED;
                         $child->error = false;
                         $child->migrated_id = 0;
-
-                        if ( array_key_exists( $child_key, $migrated_objects ) ) {
-                            unset( $migrated_objects[ $child_key ] );
-                        }
+						$reset_records[] = array( 'object' => $child, 'parent_key' => $unique_identifier );
                     }
 
                     $children[ $index ] = $child;
@@ -988,12 +1630,23 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
             if ( property_exists( $gallery, 'error' ) ) {
                 $gallery->error = false;
             }
+			$reset_records[] = array( 'object' => $gallery, 'parent_key' => null );
+			if ( false === $this->migrated_store()->upsert_batch( $reset_records ) ) {
+				return new \WP_Error( 'foogallery_migrate_store_write_failed', __( 'Migrated gallery state could not be reset.', 'foogallery-migrate' ) );
+			}
 
-            $galleries[ $gallery_index ] = $gallery;
-            $this->set_migrator_setting( self::KEY_GALLERIES, $galleries );
-            $this->set_migrator_setting( self::KEY_MIGRATED, $migrated_objects );
+            if ( null !== $table ) {
+                $target['object'] = $gallery;
+                $saved = $table->checkpoint_targeted( self::KEY_GALLERIES, $target );
+            } else {
+                $galleries[ $gallery_index ] = $gallery;
+                $saved = $this->set_migrator_setting( self::KEY_GALLERIES, $galleries );
+            }
+            if ( ! $saved ) {
+				return new \WP_Error( 'foogallery_migrate_store_write_failed', __( 'Migrated gallery state could not be saved.', 'foogallery-migrate' ) );
+			}
 
-            $gallery_migrator->queue_objects_for_migration(
+            if ( ! $gallery_migrator->queue_objects_for_migration(
                 array(
                     $unique_identifier => array(
                         'id'       => $unique_identifier,
@@ -1002,8 +1655,12 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                         'title'    => isset( $gallery->title ) ? $gallery->title : '',
                     ),
                 )
-            );
-            $gallery_migrator->migrate();
+            ) ) {
+				return new \WP_Error( 'foogallery_migrate_store_write_failed', __( 'Migrated gallery state could not be saved.', 'foogallery-migrate' ) );
+			}
+			if ( false === $gallery_migrator->migrate() ) {
+				return new \WP_Error( 'foogallery_migrate_store_write_failed', __( 'Migrated gallery state could not be saved.', 'foogallery-migrate' ) );
+			}
 
             return true;
         }
@@ -1015,14 +1672,32 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array|\WP_Error
          */
         public function check_for_migration_errors( $unique_identifier = '' ) {
+            return $this->storage_operation( 'check_for_migration_errors_admitted', array( $unique_identifier ) );
+        }
+
+        private function check_for_migration_errors_admitted( $unique_identifier ) {
+            $this->assert_storage_writer();
             $gallery_migrator = $this->get_gallery_migrator();
-            $galleries = $gallery_migrator->get_objects_to_migrate();
-            $migrated_objects = $this->get_migrated_objects();
+            $table = $this->table_collection_repository();
+            $target = null;
+            if ( null !== $table ) {
+                $target = $table->checked_context( self::KEY_GALLERIES, $unique_identifier );
+                if ( ! empty( $target['absent'] ) ) {
+                    $gallery_migrator->get_objects_to_migrate();
+                    $target = $table->checked_context( self::KEY_GALLERIES, $unique_identifier );
+                    if ( ! empty( $target['absent'] ) ) { throw new \RuntimeException( 'Discovered gallery collection was not persisted.' ); }
+                }
+                $galleries = $target['objects'];
+            } else { $galleries = $gallery_migrator->get_objects_to_migrate(); }
             $checked = 0;
             $errors = 0;
             $found_gallery = false;
+			$this->begin_migrated_object_batch();
 
-            foreach ( $galleries as $index => $gallery ) {
+			// Iterate keys, not a copied object array: checked table roots can
+			// expand lazy source children, and each must be released promptly.
+			foreach ( array_keys( $galleries ) as $index ) {
+				$gallery = $galleries[$index];
                 if ( ! is_object( $gallery ) || ! method_exists( $gallery, 'unique_identifier' ) ) {
                     continue;
                 }
@@ -1032,19 +1707,38 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 }
 
                 $found_gallery = true;
-                $result = $this->check_gallery_for_missing_files( $gallery, $migrated_objects );
-                $galleries[ $index ] = $result['gallery'];
-                $migrated_objects = $result['migrated_objects'];
+				$gallery->ensure_children_loaded();
+				$this->apply_migrated_children( $gallery );
+                $result = $this->check_gallery_for_missing_files( $gallery );
+				if ( null !== $table ) {
+					$target = $table->append_checked( self::KEY_GALLERIES, $target, $index, $result['gallery'] );
+					unset( $galleries[$index] );
+				} else { $galleries[ $index ] = $result['gallery']; }
                 $checked += $result['checked'];
                 $errors += $result['errors'];
             }
+			unset( $gallery, $result );
 
             if ( '' !== $unique_identifier && ! $found_gallery ) {
+				$this->flush_migrated_object_batch();
                 return new \WP_Error( 'foogallery_migrate_missing_gallery', __( 'Gallery not found.', 'foogallery-migrate' ) );
             }
 
-            $this->set_migrator_setting( self::KEY_GALLERIES, $galleries );
-            $this->set_migrator_setting( self::KEY_MIGRATED, $migrated_objects );
+			if ( null !== $table ) {
+				// Prove the affected collection patch is admissible and still pinned
+				// before publishing the separate logical history batch.
+				$target = $table->prepare_checked( self::KEY_GALLERIES, $target );
+			}
+
+			if ( ! $this->flush_migrated_object_batch() ) {
+				return new \WP_Error( 'foogallery_migrate_store_write_failed', __( 'Migrated gallery state could not be saved.', 'foogallery-migrate' ) );
+			}
+			if ( null !== $table ) {
+				$saved = $table->checkpoint_checked( self::KEY_GALLERIES, $target );
+			} else { $saved = $this->set_migrator_setting( self::KEY_GALLERIES, $galleries ); }
+			if ( ! $saved ) {
+				return new \WP_Error( 'foogallery_migrate_store_write_failed', __( 'Migrated gallery state could not be saved.', 'foogallery-migrate' ) );
+            }
 
             return array(
                 'checked' => $checked,
@@ -1056,10 +1750,9 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * Checks a gallery's children for missing attachment files and marks errors.
          *
          * @param object $gallery
-         * @param array $migrated_objects
          * @return array
          */
-        private function check_gallery_for_missing_files( $gallery, $migrated_objects ) {
+        private function check_gallery_for_missing_files( $gallery ) {
             $checked = 0;
             $errors = 0;
             $has_child_error = false;
@@ -1069,11 +1762,6 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 foreach ( $children as $index => $child ) {
                     if ( ! is_object( $child ) || ! method_exists( $child, 'unique_identifier' ) ) {
                         continue;
-                    }
-
-                    $child_key = $child->unique_identifier();
-                    if ( isset( $migrated_objects[ $child_key ] ) && is_object( $migrated_objects[ $child_key ] ) ) {
-                        $child = $migrated_objects[ $child_key ];
                     }
 
                     if ( isset( $child->migration_status ) && Migratable::PROGRESS_ERROR === $child->migration_status ) {
@@ -1140,7 +1828,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                     }
 
                     $children[ $index ] = $child;
-                    $migrated_objects[ $child_key ] = $child;
+					$this->add_migrated_object( $child );
                 }
 
                 $gallery->children = $children;
@@ -1153,12 +1841,11 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
                 );
                 $gallery->migration_status = Migratable::PROGRESS_ERROR;
                 $gallery->migrated = true;
-				$migrated_objects[ $gallery->unique_identifier() ] = $gallery;
+				$this->add_migrated_object( $gallery );
             }
 
             return array(
                 'gallery'          => $gallery,
-                'migrated_objects' => $migrated_objects,
                 'checked'          => $checked,
                 'errors'           => $errors,
             );
@@ -1171,6 +1858,7 @@ if ( !class_exists( 'FooPlugins\FooGalleryMigrate\MigratorEngine' ) ) {
          * @return array|\WP_Error
          */
         public function check_gallery_migration_errors( $unique_identifier ) {
+            $this->assert_storage_writer();
             return $this->check_for_migration_errors( $unique_identifier );
         }
 	}

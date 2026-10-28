@@ -48,7 +48,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
 
                 return (bool) $wpdb->get_var(
                     $wpdb->prepare(
-                        "SELECT 1 FROM {$wpdb->posts} WHERE post_type = %s LIMIT 1",
+                        "SELECT 1 AS present FROM {$wpdb->posts} WHERE post_type = %s LIMIT 1",
                         'robo_gallery_table'
                     )
                 );
@@ -94,7 +94,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
                         $gallery = $this->get_gallery( $data );
 
                         //TODO : we should also import youtube galleries in future.
-                        if ( $settings['type'] !== 'youtube' ) {
+                        if ( ! isset( $settings['type'] ) || $settings['type'] !== 'youtube' ) {
                             $galleries[] = $gallery;
                         }                        
                     }
@@ -110,22 +110,46 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
          * @return string
          */
         function get_gallery_template( $gallery ) {
-            if ( isset( $gallery ) && isset( $gallery->settings ) && array_key_exists( 'type', $gallery->settings ) ) {
-                switch ($gallery->settings['type']) {
-                    case 'masonry':
-                    case 'grid':
-                    case 'mosaic':
-                    case 'polaroid':
-                        return 'masonry';
-                    case 'slider':
-                        return 'carousel';
-                    case 'youtube':
-                    default:
-                        return 'default';
+            $source = $this->get_source_settings( $gallery );
+            switch ($source['type']) {
+                case 'masonry':
+                case 'grid':
+                case 'mosaic':
+                case 'polaroid':
+                    return 'masonry';
+                case 'slider':
+                    return 'carousel';
+                case 'youtube':
+                default:
+                    return 'default';
+            }
+        }        
+
+        /** Missing legacy fields must not emit warnings or change source data. */
+        private function get_source_settings( $gallery ) {
+            $source = isset( $gallery->settings ) && is_array( $gallery->settings ) ? $gallery->settings : array();
+            $defaults = array(
+                'type' => '',
+                'rsg_thumb_size_options' => array(),
+                'rsg_width_size' => array(),
+                'rsg_border_options' => array(),
+                'rsg_zoomIcon' => array(),
+                'rsg_showTitle' => array(),
+                'rsg_radius' => 0,
+                'rsg_lightboxTitle' => '',
+                'rsg_align' => 'left',
+                'rsg_polaroidAlign' => 'left',
+                'rsg_horizontalSpaceBetweenBoxes' => 0,
+                'rsg_content' => 0,
+                'rsg_content_source' => 'title',
+            );
+            foreach ( $defaults as $key => $default ) {
+                if ( ! isset( $source[$key] ) || ( is_array( $default ) ? ! is_array( $source[$key] ) : ! is_scalar( $source[$key] ) ) ) {
+                    $source[$key] = $default;
                 }
             }
-            return 'default';
-        }        
+            return $source;
+        }
 
         /**
          * Gets the settings for the gallery.
@@ -135,50 +159,44 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
          * @return array
          */
         function get_gallery_settings( $gallery, $settings ) {
-            $width = 0;
-            $height = 0;
+            $source = $this->get_source_settings( $gallery );
+            $width = get_option( 'thumbnail_size_w' );
+            $height = get_option( 'thumbnail_size_h' );
 
-            if( $gallery->settings['type'] == 'slider' ) {
-                
-                    $width = get_option( 'thumbnail_size_w' );
-                    $height = get_option( 'thumbnail_size_h' );
+            if( $source['type'] != 'slider' ) {
 
-            } else {
+                if( ! empty( $source['rsg_thumb_size_options'] ) ) {
 
-                if( ! empty( $gallery->settings['rsg_thumb_size_options'] ) ) {
+                    $size = $source['rsg_thumb_size_options'];
+                    $width = isset( $size['width'] ) && is_numeric( $size['width'] ) ? $size['width'] : $width;
+                    $height = isset( $size['height'] ) && is_numeric( $size['height'] ) ? $size['height'] : $height;
 
-                    $width = $gallery->settings['rsg_thumb_size_options']['width'];
-                    $height = $gallery->settings['rsg_thumb_size_options']['height'];                
+                } else if( isset( $source['rsg_width_size']['widthType'] ) && $source['rsg_width_size']['widthType'] == 1 ) {
 
-                } else if( $gallery->settings['rsg_width_size']['widthType'] == 1 ) {
-
-                    $width = $gallery->settings['rsg_width_size']['width'];
-                    $height = get_option( 'thumbnail_size_h' ); 
-
-                } else {
-
-                    $width = get_option( 'thumbnail_size_w' ); 
-                    $height = get_option( 'thumbnail_size_h' ); 
+                    $size = $source['rsg_width_size'];
+                    $width = isset( $size['width'] ) && is_numeric( $size['width'] ) ? $size['width'] : $width;
                 }
             }
 
-            $border_radius = $gallery->settings['rsg_radius'];
-            $border_size = $gallery->settings['rsg_border_options']['width'];
-            $cursor = isset( $gallery->settings['rsg_zoomIcon'] ) && isset( $gallery->settings['rsg_zoomIcon']['enabled'] ) && $gallery->settings['rsg_zoomIcon']['enabled'];
-            $hide_title = isset( $gallery->settings['rsg_showTitle'] ) && isset( $gallery->settings['rsg_showTitle']['enabled'] ) && $gallery->settings['rsg_showTitle']['enabled'];
-            $lightbox = $gallery->settings['rsg_lightboxTitle'];
+            $border_radius = $source['rsg_radius'];
+            $border = $source['rsg_border_options'];
+            $border_size = isset( $border['width'] ) && is_numeric( $border['width'] ) ? $border['width'] : 0;
+            $cursor = isset( $source['rsg_zoomIcon']['enabled'] ) && $source['rsg_zoomIcon']['enabled'];
+            $hide_title = isset( $source['rsg_showTitle']['enabled'] ) && $source['rsg_showTitle']['enabled'];
+            $lightbox = $source['rsg_lightboxTitle'];
+            $align = 'left';
 
-            if( $gallery->settings['type'] == 'grid' ) {
+            if( $source['type'] == 'grid' ) {
 
-                $align = $gallery->settings['rsg_align'];
+                $align = $source['rsg_align'];
 
-            } else if( $gallery->settings['type'] == 'masonry' || $gallery->settings['type'] == 'mosaic' || $gallery->settings['type'] == 'polaroid' || $gallery->settings['type'] == 'youtube' ) {
+            } else if( $source['type'] == 'masonry' || $source['type'] == 'mosaic' || $source['type'] == 'polaroid' || $source['type'] == 'youtube' ) {
 
-                $align = $gallery->settings['rsg_polaroidAlign'];
+                $align = $source['rsg_polaroidAlign'];
 
             }
 
-            $gutter = $gallery->settings['rsg_horizontalSpaceBetweenBoxes'];
+            $gutter = $source['rsg_horizontalSpaceBetweenBoxes'];
 
             $gallery_template = $this->get_migration_gallery_template( $gallery );
 
@@ -189,13 +207,13 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
                 );
             }
 
-            if( $gallery->settings['type'] == 'slider' ) {
+            if( $source['type'] == 'slider' ) {
 
-                $content_type = $gallery->settings['rsg_content'];
+                $content_type = $source['rsg_content'];
 
                 if( $content_type == 1 ) {
 
-                    $rsg_content_source = $gallery->settings['rsg_content_source'];                    
+                    $rsg_content_source = $source['rsg_content_source'];
                     
                     switch($rsg_content_source) {
 
@@ -336,8 +354,7 @@ if( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Robo' ) ) {
          */
         private function get_robo_galleries() {
             global $wpdb;
-            $query = "select * from $wpdb->posts WHERE post_type = %s AND post_status = %s";
-            return $wpdb->get_results( $wpdb->prepare( $query, 'robo_gallery_table', 'publish' ) );
+            return $wpdb->get_results( $wpdb->prepare( "select * from $wpdb->posts WHERE post_type = %s AND post_status = %s", 'robo_gallery_table', 'publish' ) );
         }
 
         /**

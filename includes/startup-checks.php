@@ -16,7 +16,8 @@ if ( !function_exists('foogallery_migrate_min_php_admin_notice' ) ) {
         if ( !current_user_can('install_plugins' ) ) { return; }
 
         echo '<div class="notice notice-error">';
-        echo '<p>' . sprintf( esc_html__( '%s could not be initialized because you need to be running at least PHP version %s, and you are running version %s', 'foogallery-migrate' ),
+        /* translators: 1: plugin name, 2: required PHP version, 3: current PHP version. */
+        echo '<p>' . sprintf( esc_html__( '%1$s could not be initialized because you need to be running at least PHP version %2$s, and you are running version %3$s', 'foogallery-migrate' ),
                 '<strong>FooGallery Migrate</strong>', esc_html( FOOGM_MIN_PHP ), esc_html( phpversion() ) );
         echo '</p></div>';
 	}
@@ -32,7 +33,8 @@ if ( !function_exists('foogallery_migrate_min_wp_admin_notice' ) ) {
 
 		global $wp_version;
 		echo '<div class="notice notice-error">';
-		echo '<p>' . sprintf( esc_html__( '%s could not be initialized because you need WordPress to be at least version %s, and you are running version %s', 'foogallery-migrate' ),
+		/* translators: 1: plugin name, 2: required WordPress version, 3: current WordPress version. */
+		echo '<p>' . sprintf( esc_html__( '%1$s could not be initialized because you need WordPress to be at least version %2$s, and you are running version %3$s', 'foogallery-migrate' ),
                 '<strong>FooGallery Migrate</strong>', esc_html( FOOGM_MIN_WP ), esc_html( $wp_version ) );
 		echo '<a href="' . esc_url( admin_url('update-core.php') ) . '">' . esc_html__( 'Update WordPress now.', 'foogallery-migrate' ) . '</a>';
 		echo '</p></div>';

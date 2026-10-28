@@ -99,10 +99,14 @@ const zip = require( 'gulp-zip' ),
 		'**/*',
 		'!package*.json',
 		'!./{node_modules,node_modules/**/*}',
+		'!./{vendor,vendor/**/*}', // Composer dependencies are development-only.
 		'!./{bin,bin/**/*}',
 		'!./{dist,dist/**/*}',
+		'!./{docs,docs/**/*}',
+		'!./{scripts,scripts/**/*}',
 		'!./{src,src/**/*}',
 		'!./{tests,tests/**/*}',
+		'!./{wp-content,wp-content/**/*}', // Local WordPress cache is not a plugin asset.
 		'!fs-config.json',
 		'!composer.json',
 		'!composer.lock',
@@ -121,7 +125,14 @@ const zip = require( 'gulp-zip' ),
  */
 gulp.task( 'zip', function() {
 	return gulp.src( buildInclude, { base: './' } )
-		.pipe( zip( fileName + '.v' + fileVersion + '.zip' ) )
+		// Use path order, not filesystem completion order or locale-dependent sort.
+		.pipe( sort( ( left, right ) => {
+			const first = left.relative.replace( /\\/g, '/' );
+			const second = right.relative.replace( /\\/g, '/' );
+			return first < second ? -1 : ( first > second ? 1 : 0 );
+		} ) )
+		// ZIP metadata must not depend on when a checkout or file was created.
+		.pipe( zip( fileName + '.v' + fileVersion + '.zip', { modifiedTime: new Date( 1980, 0, 1 ) } ) )
 		.pipe( gulp.dest( 'dist/' ) );
 } );
 

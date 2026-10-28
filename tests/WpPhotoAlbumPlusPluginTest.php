@@ -3,7 +3,9 @@
 namespace FooPlugins\FooGalleryMigrate\Tests;
 
 use FooPlugins\FooGalleryMigrate\Init;
+use FooPlugins\FooGalleryMigrate\OptionMigratedStore;
 use FooPlugins\FooGalleryMigrate\MigratorEngine;
+use FooPlugins\FooGalleryMigrate\MigratorSettings;
 use FooPlugins\FooGalleryMigrate\Migrators\ContentMigrator;
 use FooPlugins\FooGalleryMigrate\Objects\Album;
 use FooPlugins\FooGalleryMigrate\Objects\Gallery;
@@ -24,7 +26,7 @@ class WpPhotoAlbumPlusPluginTest extends TestCase {
 		$GLOBALS['foogallery_migrate_test_imported_attachments'] = array();
 		$GLOBALS['foogallery_migrate_test_attachment_url_to_postid'] = array();
 		$_POST = array();
-		$GLOBALS['foogallery_migrate_engine_instance'] = new MigratorEngine();
+		$GLOBALS['foogallery_migrate_engine_instance'] = new MigratorEngine( new OptionMigratedStore( new MigratorSettings() ) );
 		$GLOBALS['wpdb'] = new FakeWpPhotoAlbumPlusWpdb();
 	}
 
@@ -123,7 +125,7 @@ class WpPhotoAlbumPlusPluginTest extends TestCase {
 		file_put_contents( $upload_path . '/601.jpg', file_get_contents( $this->test_upload_dir() . '/wppa/601.jpg' ) );
 
 		$GLOBALS['foogallery_migrate_test_options'] = array( 'wppa_file_system' => 'flat' );
-		$GLOBALS['foogallery_migrate_engine_instance'] = new MigratorEngine();
+		$GLOBALS['foogallery_migrate_engine_instance'] = new MigratorEngine( new OptionMigratedStore( new MigratorSettings() ) );
 		$GLOBALS['wpdb'] = new FakeWpPhotoAlbumPlusWpdb();
 		$GLOBALS['wpdb']->tables = array( 'network_wppa_albums', 'network_wppa_photos' );
 		$GLOBALS['wpdb']->albums = array( $this->album( 60, 'Active', '', 0, 1, 1 ) );
@@ -340,7 +342,8 @@ class WpPhotoAlbumPlusPluginTest extends TestCase {
 			)
 		);
 
-		$migrator = new ContentMigrator( new MigratorEngine(), 'content' );
+		// This parser-only fixture has no native WordPress mysqli transport.
+		$migrator = new ContentMigrator( $GLOBALS['foogallery_migrate_engine_instance'], 'content' );
 		$extract = new \ReflectionMethod( ContentMigrator::class, 'extract_gallery_id_from_block' );
 		$this->assertSame(
 			42,
@@ -563,6 +566,7 @@ class FakeWpPhotoAlbumPlusWpdb {
 		if ( 1 === count( $args ) && is_array( $args[0] ) ) {
 			$args = $args[0];
 		}
+		$query = IdentifierSqlFixture::bind( $query, $args );
 		$this->last_prepare_args = $args;
 		return $query;
 	}

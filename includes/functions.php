@@ -73,6 +73,13 @@ function foogallery_migrate_migrator_instance() {
     global $foogallery_migrate_engine_instance;
 
     if ( !isset( $foogallery_migrate_engine_instance ) ) {
+        $error = \FooPlugins\FooGalleryMigrate\StorageAuthority::runtime_record( \FooPlugins\FooGalleryMigrate\StorageMaintenanceGate::current() );
+        if ( is_wp_error( $error ) ) {
+            if ( defined( 'DOING_AJAX' ) && DOING_AJAX ) {
+                wp_send_json_error( array( 'message' => $error->get_error_message(), 'code' => $error->get_error_code() ), 409 );
+            }
+            wp_die( esc_html( $error->get_error_message() ), esc_html__( 'Migration storage recovery required', 'foogallery-migrate' ), array( 'response' => 409 ) );
+        }
         $foogallery_migrate_engine_instance = new MigratorEngine();
     }
 

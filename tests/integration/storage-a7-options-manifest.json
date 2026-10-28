@@ -1,0 +1,46 @@
+{
+    "format": "a7-options-utf8mb4-20k-v1",
+    "domain": "host-only-preparation",
+    "status": "measurement_only",
+    "contract_decision": "pending",
+    "native_execution_enabled": false,
+    "method_approved": false,
+    "profile_approved": false,
+    "original_gate": "OPEN/BLOCKED; unchanged bytes required; not replaced or waived",
+    "original": {
+        "format": "a7-compact-v1",
+        "raw_bytes": 2998293,
+        "sha256": "6022f4ad5a1e8ef9a39a5b5284dc576c7eb75d02a0d69949a58e3967ca9dd4be",
+        "logical_sha256": "a3d122b4a3219a31ffefd28d1063f753caeb289eefc3597b38582ab1090ff695"
+    },
+    "fixture": {
+        "raw_bytes": 2998293,
+        "sha256": "60392c9d095f334fed1475ccd5cd1e3db5ed1142922627980f5d0bff64072297",
+        "logical_sha256": "0b77be8fa38731750a46d6ba9afb96fd6d656738025b02a193acb44aa180ee6c"
+    },
+    "delta": {
+        "bytes": 208,
+        "string_leaves": 208,
+        "from_hex": "ff",
+        "to_hex": "78",
+        "equivalent_semantics": false
+    },
+    "shape": {
+        "galleries": 1,
+        "immediate_images": 20000,
+        "nested_images": 207,
+        "object_records": 20208,
+        "tokens": 204995,
+        "arrays": 20834,
+        "depth_root_zero": 8,
+        "aigpl_discovery": false,
+        "settings_bucket": false,
+        "top_level_20k": false
+    },
+    "limits": {
+        "worker_seconds": 45,
+        "response_bytes": 262144,
+        "raw_bytes": 8388608,
+        "default_20k_decoder": "refused; unchanged"
+    }
+}

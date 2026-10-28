@@ -1,10 +1,10 @@
 === FooGallery Migrate ===
 Contributors: fooplugins,bradvin,elviiso
 Tags: gallery, image gallery, photo gallery, wordpress gallery plugin, migrate
-Requires at least: 6.0
+Requires at least: 6.2
 Tested up to: 7.1
 Requires PHP: 5.4
-Stable tag: 1.16
+Stable tag: 1.16.4
 License: GPLv2 or later
 License URI: http://www.gnu.org/licenses/gpl-2.0.html
 
@@ -35,6 +35,37 @@ Features:
 * Migrate albums
 * Migrate blocks / shortcodes in post & page content
 * Choose whether built-in WordPress galleries create reusable FooGallery records or become dynamic FooGalleries stored directly in content
+* Optional database-table storage to reduce migration-state memory use on larger single sites
+* Storage recommendations based on saved migration data and detected gallery/image counts
+* Shared progress dialog with image progress within the current gallery, batch stopping, resume and retry
+* Troubleshooting tools to inspect storage, continue interrupted storage changes, reset progress or remove internal migration data
+
+= Migrating Large Galleries and Libraries =
+
+For smaller migrations, FooGallery Migrate stores progress and history in WordPress options. Larger migration histories can use substantial memory when stored this way. On single-site installations, you can choose database-table storage so the plugin can read and update smaller portions of migration state instead of repeatedly loading the complete history.
+
+Open FooGallery > Migrate! > Settings, choose Database tables under Migration Storage, and click Change storage. The plugin copies and verifies existing migration data before switching. Your galleries, albums, media and page content are kept. Storage never switches automatically. Returning to WordPress options is available when the current migration data fits the conversion limits; a large history may need to be reset first.
+
+The plugin recommends tables when saved migration data or discovered gallery/image counts indicate a larger migration. Gallery discovery saves a small count summary for this advice and the Troubleshooting tab, without loading every source image just to display the recommendation. Counts describe source gallery/image entries and can include the same image in multiple galleries. Use Refresh Galleries to update saved counts.
+
+Keep Page Size above zero to display galleries in pages. Images Per Turn controls how many images are processed in each gallery migration request. The shared progress dialog shows image progress within the current gallery; Stop waits for the current batch, and saved progress can be resumed. Failed gallery migrations show an error and offer Retry Migration.
+
+Database-table storage is available on single sites. Multisite continues to use WordPress options. Redis is not required.
+
+= Large-Migration Testing =
+
+Development and QA have exercised these separate workloads:
+
+* A completed migration of one gallery containing 10,000 source images, including moving existing option-backed progress to tables and continuing to completion. Image order, destination gallery contents and source files were verified.
+* A collection of 121 galleries and 121 albums for discovery, pagination, selection, queue/cancel and error-check workflows. This is collection-handling coverage, not a claim that all 121 galleries were migrated in that test.
+* A test-site audit covering 60 migrated galleries and 10,029 image-history entries.
+* Storage conversion and exact readback of 20,208 migration-state records. These are storage records, not 20,208 gallery migrations.
+
+The large-gallery journeys ran with a 256 MB PHP memory limit. Additional testing covered storage switching in both directions where the data fits, interrupted changes and recovery, Stop/resume, missing images and retries, albums, blocks/shortcodes, NextGEN image tags, and compatibility with persistent Redis object caching. Reset, removal and uninstall checks verified that migrated/source content and media were kept.
+
+As of 27 October 2026, the maintained automated suite passes 1,847 tests. The latest reset recovery also passed a native two-connection database test: an expired marker belonging to a connected writer blocks reset; after the writer disconnects, reset clears its marker and history while keeping preferences.
+
+These results come from separate development builds and QA runs. They are tested workloads, not maximum supported sizes or a guarantee for every source plugin and hosting setup. Table storage reduces migration-state memory use; image dimensions, file sizes, metadata and very large individual galleries can still affect memory and request time.
 
 = Test It First =
 
@@ -86,14 +117,60 @@ Update now to get all the latest features, bug fixes and improvements!
 
 == Frequently Asked Questions ==
 
+= How do I reset progress or remove migration storage? =
+
+Open FooGallery > Migrate! > Troubleshooting. Stop running migrations before using the cleanup controls.
+
+* Reset migration progress clears detection, progress and history while keeping preferences and the selected storage mode. It also recovers validated expired writer markers; live or unverified writers still block the action.
+* Remove all migration data removes plugin preferences, progress, history and owned storage tables on a single site.
+* Uninstall removes the plugin's internal data and owned tables as well.
+
+These actions keep source data, migrated FooGallery galleries/albums, media and replaced page/post content. They do not undo a migration. Migrating again after clearing history may create duplicates.
+
+The Troubleshooting tab also shows storage and saved discovery counts, provides information to copy for support, and offers Continue storage change when a supported storage change was interrupted.
+
+= What happens when I deactivate FooGallery Migrate? =
+
+Deactivation retains migrated history, preferences and operational state so that you can reactivate the plugin and resume. It does not delete or roll back migrated FooGallery galleries, albums, media, source-plugin data or replaced post content. Network deactivation also retains each site's state.
+
+Uninstall removes plugin-owned internal storage, including retained history and preferences. It does not undo migrations or delete source or destination content. Back up your database before uninstalling if you need to retain migration state.
+
 = I need to import from another plugin. How can I request that? =
 
 [Contact us](https://fooplugins.com/support/) and we will build an importer to help you migrate to FooGallery.
 
 == Changelog ==
 
+= 1.16.4 =
+* Reset migration progress also clears expired migration writer markers, while retaining live or unverified markers.
+* Fixed the Plugins tab failing after clearing table-backed migration history or resetting storage. Empty storage can be read and detected again; orphaned records are still rejected.
+
+= 1.16.3 =
+* Fix: Failed galleries count once in queue progress, so they cannot finish a multi-gallery migration early. Saved error details and Retry Migration remain available after reloading.
+* Fix: Gallery and album progress dialogs show failed items instead of a successful 100% result. Image tag sync also reports completed runs with errors.
+* Reject missing or non-string posted cleanup nonces before processing them; document existing request guards and cover nonce/capability rejection and title/settings sanitization with regression tests.
+* Reviewed buffered migration forms, storage diagnostics and SQL preparation boundaries, documented clear scanner false positives, and added regression coverage for hostile source values and diagnostic messages.
+* Bound table identifiers with WordPress 6.2 identifier placeholders in storage administration, authority checks, snapshots and WP Photo Album Plus queries, preserving the existing filters and transaction safeguards.
+* Raised the minimum WordPress version to 6.2 and aligned the plugin header, readme and runtime requirement.
+* Renamed the active storage helpers to TableReader and TableSnapshot and corrected outdated integration comments; storage behavior and data formats are unchanged.
+* Prepared Envira and Modula gallery query values and simplified Robo query preparation without changing the generated SQL or gallery results.
+* Removed the unused prototype history store and its lifecycle code; made option history independent and simplified current table names to foogallery_migrate_state and foogallery_migrate_records.
+* Used WordPress URL, randomness, text and temporary-file helpers; made pagination tolerate missing request fields and photo timestamps independent of the server timezone.
+* Hardened direct PHP-file access and escaped storage error messages; corrected translation domains, placeholders and extractable preflight messages.
+* Sorted production ZIP entries and normalized archive timestamps for consistent packaging without changing migration or storage behavior.
+* Fixed third-party gallery blocks incorrectly failing with "changed after detection" by recording exact block positions and original markup, including repeated and nested blocks. Use Rescan Content once after updating to refresh older block findings.
+* Fixed the content migration dialog showing 100% completion after a failed replacement. Errors and partial results now appear inside the dialog without a success percentage.
+
 = 1.16 =
+* Fixed Robo Gallery migration warnings when older galleries have missing or incomplete settings, using safe defaults while preserving existing layout mappings.
+* Fixed gallery image loading after retry or saved history, and migrations staying at 0% when a gallery has no images.
+* Added one shared, accessible progress dialog across Galleries, Albums, Blocks / Shortcodes and Image Tags, with current-gallery image progress and safe stopping between batches.
 * Added WP Photo Album Plus migration for galleries, nested albums, locally stored images and metadata, plus supported numeric-album shortcodes and blocks; the source plugin can remain inactive, and migration form actions are now handled reliably.
+* Added optional database-table storage for larger single-site migrations, with verified storage switching, progress reset and removal of plugin-owned data and tables without deleting galleries or media.
+* Added simple Migration Storage controls alongside the other migration settings, with recommendations based on saved data size and detected gallery or image counts without loading source image lists.
+* Saved small gallery and image-entry totals after successful discovery for storage advice; existing collections gain totals on the next Refresh Galleries.
+* Added a Troubleshooting tab with plain-language help, visible Reset & cleanup actions, technical details and a collapsible support summary. Interrupted storage changes remain recoverable, and destructive actions still require confirmation.
+* Renamed user-facing FooGallery Template settings to Layout settings.
 
 = 1.15 =
 * Added stale-status detection for Blocks / Shortcodes when the migrated gallery map changes after a content scan.
@@ -135,7 +212,7 @@ Update now to get all the latest features, bug fixes and improvements!
 
 = 1.9 =
 * Added Override Gallery Settings and Override Album Settings options to inherit settings from existing FooGallery galleries and albums during migration.
-* Migrated albums can now inherit album template, settings, sort order and custom CSS from a selected source album while preserving the migrated child gallery list.
+* Migrated albums can now inherit album layout, settings, sort order and custom CSS from a selected source album while preserving the migrated child gallery list.
 * Migrated galleries can now inherit settings and custom CSS from a selected source gallery while preserving migrated attachments and source-plugin migration mappings.
 * Fixed migrated albums so edited album names entered in the migration form are used for the created FooGallery album.
 

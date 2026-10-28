@@ -51,7 +51,7 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
 
                 return (bool) $wpdb->get_var(
                     $wpdb->prepare(
-                        "SELECT 1 FROM {$wpdb->posts} WHERE post_type = %s LIMIT 1",
+                        "SELECT 1 AS present FROM {$wpdb->posts} WHERE post_type = %s LIMIT 1",
                         FM_MODULA_POST_TYPE
                     )
                 );
@@ -277,9 +277,10 @@ if ( ! class_exists( 'FooPlugins\FooGalleryMigrate\Plugins\Modula' ) ) {
          */
         private function get_modula_galleries() {
             global $wpdb;
-            $gallery_table = $wpdb->prefix . FM_MODULA_TABLE_GALLERY;
- 
-            return $wpdb->get_results( "select * from {$gallery_table} WHERE post_type = '" . FM_MODULA_POST_TYPE . "' AND post_status = 'publish'" );
+            return $wpdb->get_results( $wpdb->prepare(
+                "select * from $wpdb->posts WHERE post_type = %s AND post_status = %s",
+                FM_MODULA_POST_TYPE, 'publish'
+            ) );
         }
 
 
