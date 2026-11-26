@@ -2,7 +2,7 @@
 Contributors: fooplugins,bradvin,elviiso
 Tags: gallery, image gallery, photo gallery, wordpress gallery plugin, migrate
 Requires at least: 6.2
-Tested up to: 7.1
+Tested up to: 7.2
 Requires PHP: 5.4
 Stable tag: 1.16.4
 License: GPLv2 or later
